@@ -1,0 +1,14 @@
+from abc import ABC, abstractmethod
+
+from backend.domain.models import LibraryQuarantine
+
+
+class LibraryQuarantineRepository(ABC):
+    @abstractmethod
+    def create(self, entry: LibraryQuarantine) -> LibraryQuarantine: ...
+
+    @abstractmethod
+    def list_all(self) -> list[LibraryQuarantine]: ...
+
+    @abstractmethod
+    def get_by_path(self, file_path: str) -> LibraryQuarantine | None: ...
