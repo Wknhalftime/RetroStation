@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from backend.domain.enums import TaskStatus
 from backend.domain.models import ProgressTracking
 from backend.repositories.progress_tracking import ProgressTrackingRepository
@@ -19,7 +20,7 @@ class FakeProgressTrackingRepository(ProgressTrackingRepository):
         return [t for t in self._data.values() if t.status == TaskStatus.RUNNING]
 
     def mark_stale_as_failed(self, stale_threshold_minutes: int = 10) -> int:
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=stale_threshold_minutes)
+        cutoff = datetime.now(tz=UTC) - timedelta(minutes=stale_threshold_minutes)
         count = 0
         for task in self._data.values():
             if task.status == TaskStatus.RUNNING and task.updated_at < cutoff:

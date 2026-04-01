@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
-from fastapi import HTTPException, Header, status
+from fastapi import Header, HTTPException, status
 from psycopg import AsyncConnection
 
 from backend.config import get_settings
@@ -20,7 +20,7 @@ async def get_current_token(
     return x_airwave_token
 
 
-async def get_db_connection() -> AsyncGenerator[AsyncConnection[Any], None]:
+async def get_db_connection() -> AsyncGenerator[AsyncConnection[Any]]:
     pool = get_pool()
     async with pool.connection() as conn:
         yield conn

@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from backend.domain.models import LogEvent
 from backend.repositories.log_events import LogEventRepository
 

@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from backend.domain.models import Playlist
 from backend.repositories.playlists import PlaylistRepository
 

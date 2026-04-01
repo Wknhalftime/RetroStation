@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from backend.domain.enums import MatchStatus, MatchTier
 from backend.domain.models import LogIdentity
 from backend.repositories.log_identities import LogIdentityRepository

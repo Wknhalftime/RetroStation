@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class MatchStatus(str, Enum):
+class MatchStatus(StrEnum):
     PENDING       = "PENDING"
     AUTO_MATCHED  = "AUTO_MATCHED"
     NEEDS_REVIEW  = "NEEDS_REVIEW"
@@ -10,7 +10,7 @@ class MatchStatus(str, Enum):
     MAN_REJECTED  = "MAN_REJECTED"
 
 
-class MatchTier(str, Enum):
+class MatchTier(StrEnum):
     MBID_EXACT      = "MBID_EXACT"
     NORMALIZATION   = "NORMALIZATION"
     VECTOR          = "VECTOR"
@@ -19,14 +19,14 @@ class MatchTier(str, Enum):
     UNKNOWN         = "UNKNOWN"
 
 
-class TargetType(str, Enum):
+class TargetType(StrEnum):
     ARTIST       = "Artist"
     WORK         = "Work"
     RECORDING    = "Recording"
     LIBRARY_FILE = "LibraryFile"
 
 
-class VersionType(str, Enum):
+class VersionType(StrEnum):
     ORIGINAL   = "ORIGINAL"
     LIVE       = "LIVE"
     REMASTER   = "REMASTER"
@@ -37,7 +37,7 @@ class VersionType(str, Enum):
     OTHER      = "OTHER"
 
 
-class EnrichmentStatus(str, Enum):
+class EnrichmentStatus(StrEnum):
     PENDING     = "pending"
     CATEGORIZED = "categorized"
     ENRICHED    = "enriched"
@@ -45,7 +45,7 @@ class EnrichmentStatus(str, Enum):
     SKIPPED     = "skipped"
 
 
-class ReleaseType(str, Enum):
+class ReleaseType(StrEnum):
     ALBUM       = "album"
     SINGLE      = "single"
     EP          = "ep"
@@ -55,19 +55,19 @@ class ReleaseType(str, Enum):
     OTHER       = "other"
 
 
-class ReleaseStatus(str, Enum):
+class ReleaseStatus(StrEnum):
     OFFICIAL       = "official"
     PROMOTION      = "promotion"
     BOOTLEG        = "bootleg"
     PSEUDO_RELEASE = "pseudo-release"
 
 
-class SelectionMethod(str, Enum):
+class SelectionMethod(StrEnum):
     AUTO   = "auto"
     MANUAL = "manual"
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     SCAN        = "scan"
     ENRICHMENT  = "enrichment"
     INGESTION   = "ingestion"
@@ -76,7 +76,7 @@ class TaskType(str, Enum):
     M3U_EXPORT  = "m3u_export"
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     RUNNING   = "running"
     COMPLETED = "completed"
     FAILED    = "failed"

@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import UserSetting
-
 
 class SettingsRepository(ABC):
     @abstractmethod

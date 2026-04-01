@@ -1,6 +1,7 @@
 import os
-import pytest
+
 import psycopg
+import pytest
 
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",

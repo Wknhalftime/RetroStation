@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from backend.domain.models import GlobalMappingRule
 from backend.repositories.global_mapping_rules import GlobalMappingRuleRepository
 

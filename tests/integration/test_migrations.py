@@ -87,10 +87,12 @@ def test_migrations_idempotent(migrated_db: str) -> None:
 def test_xor_constraint_on_matches(migrated_db: str) -> None:
     """The XOR constraint on matches must reject rows with both FKs set."""
     import uuid
-    with psycopg.connect(migrated_db) as conn:
-        with pytest.raises(psycopg.errors.CheckViolation):
-            with conn.transaction():
-                conn.execute("""
-                    INSERT INTO matches (identity_id, artist_id, confidence_score, match_tier)
-                    VALUES (%s, %s, 0.9, 'MANUAL')
-                """, (uuid.uuid4(), uuid.uuid4()))
+    with (
+        psycopg.connect(migrated_db) as conn,
+        pytest.raises(psycopg.errors.CheckViolation),
+        conn.transaction(),
+    ):
+        conn.execute("""
+                INSERT INTO matches (identity_id, artist_id, confidence_score, match_tier)
+                VALUES (%s, %s, 0.9, 'MANUAL')
+            """, (uuid.uuid4(), uuid.uuid4()))

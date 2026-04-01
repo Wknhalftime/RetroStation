@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from backend.domain.enums import MatchStatus, MatchTier
 from backend.domain.models import LogArtist
 from backend.repositories.log_artists import LogArtistRepository
