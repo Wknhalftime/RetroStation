@@ -27,14 +27,22 @@ class TargetType(StrEnum):
 
 
 class VersionType(StrEnum):
-    ORIGINAL   = "ORIGINAL"
-    LIVE       = "LIVE"
-    REMASTER   = "REMASTER"
-    REMIX      = "REMIX"
-    RADIO_EDIT = "RADIO_EDIT"
-    DEMO       = "DEMO"
-    ACOUSTIC   = "ACOUSTIC"
-    OTHER      = "OTHER"
+    ORIGINAL     = "ORIGINAL"
+    LIVE         = "LIVE"
+    REMASTER     = "REMASTER"
+    REMIX        = "REMIX"
+    RADIO_EDIT   = "RADIO_EDIT"
+    DEMO         = "DEMO"
+    ACOUSTIC     = "ACOUSTIC"
+    EXTENDED     = "EXTENDED"
+    INSTRUMENTAL = "INSTRUMENTAL"
+    EXPLICIT     = "EXPLICIT"
+    COVER        = "COVER"
+    EDITION      = "EDITION"
+    ALTERNATE    = "ALTERNATE"
+    FORMAT       = "FORMAT"
+    UNKNOWN      = "UNKNOWN"
+    OTHER        = "OTHER"
 
 
 class EnrichmentStatus(StrEnum):
