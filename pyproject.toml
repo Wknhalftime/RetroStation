@@ -1,0 +1,43 @@
+[project]
+name = "retrostation"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.134",
+    "uvicorn[standard]",
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.1",
+    "huey>=2.6",
+    "mutagen>=1.47",
+    "sentence-transformers>=3.0",
+    "rapidfuzz>=3.0",
+    "httpx>=0.27",
+    "structlog",
+    "pydantic-settings",
+    "pgvector",
+    "chardet",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio",
+    "mypy>=1.11",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+ignore_missing_imports = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
