@@ -7,6 +7,7 @@ import structlog
 from psycopg.rows import dict_row
 
 from backend.config import get_settings
+from backend.services import master_selection_service
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.tasks.huey_app import huey
 
@@ -19,19 +20,32 @@ def identity_matching_task(playlist_id: str) -> None:
     settings = get_settings()
 
     with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+        from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
+        from backend.db.repositories.library_files import PgLibraryFileRepository
+        from backend.db.repositories.log_artists import PgLogArtistRepository
         from backend.db.repositories.log_identities import PgLogIdentityRepository
         from backend.db.repositories.matches import PgMatchRepository
+        from backend.db.repositories.recordings import PgRecordingRepository
+        from backend.db.repositories.song_masters import PgSongMasterRepository
 
-        # Import library_files repo — needed for future phases
-        # For now, identity matching short-circuits with no library data
-        from tests.fakes.library_files import FakeLibraryFileRepository
-
-        match_identities_for_playlist(
+        work_ids = match_identities_for_playlist(
             playlist_id=UUID(playlist_id),
             log_identity_repo=PgLogIdentityRepository(conn),
+            log_artist_repo=PgLogArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
-            library_file_repo=FakeLibraryFileRepository(),  # empty — no library in Phase 1
+            library_file_repo=PgLibraryFileRepository(conn),
+            rules_repo=PgGlobalMappingRuleRepository(conn),
         )
         conn.commit()
+
+        # Recalculate song masters for any newly matched work IDs
+        if work_ids:
+            master_selection_service.recalculate(
+                work_ids=work_ids,
+                song_master_repo=PgSongMasterRepository(conn),
+                recording_repo=PgRecordingRepository(conn),
+                library_file_repo=PgLibraryFileRepository(conn),
+            )
+            conn.commit()
 
     logger.info("identity_matching_task_complete", playlist_id=playlist_id)
