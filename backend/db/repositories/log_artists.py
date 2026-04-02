@@ -58,6 +58,16 @@ class PgLogArtistRepository(LogArtistRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
+    def get_all_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT la.* FROM log_artists la
+               JOIN log_identities li ON li.artist_id = la.id
+               JOIN log_events le ON le.identity_id = li.id
+               WHERE le.playlist_id = %s""",
+            (playlist_id,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def get_pending_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
         rows = self._conn.execute(
             """SELECT DISTINCT la.* FROM log_artists la

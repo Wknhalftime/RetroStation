@@ -18,6 +18,11 @@ class LogArtistRepository(ABC):
     def get_by_normalized_name(self, normalized_name: str) -> LogArtist | None: ...
 
     @abstractmethod
+    def get_all_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
+        """All artists linked to this playlist's events, regardless of match status."""
+        ...
+
+    @abstractmethod
     def get_pending_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
         """Artists linked to this playlist's events with match_status=PENDING."""
         ...

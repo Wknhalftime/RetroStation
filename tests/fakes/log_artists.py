@@ -30,6 +30,10 @@ class FakeLogArtistRepository(LogArtistRepository):
             (a for a in self._data.values() if a.normalized_name == normalized_name), None
         )
 
+    def get_all_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
+        ids = self._playlist_artists.get(playlist_id, set())
+        return [a for a in self._data.values() if a.id in ids]
+
     def get_pending_for_playlist(self, playlist_id: UUID) -> list[LogArtist]:
         ids = self._playlist_artists.get(playlist_id, set())
         return [
