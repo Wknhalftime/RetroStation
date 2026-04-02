@@ -7,7 +7,6 @@ import psycopg
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
-from backend.db.repositories.settings import PgSettingsRepository
 from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
@@ -19,6 +18,7 @@ from backend.db.repositories.mb_cache import PgMbCacheRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
 from backend.db.repositories.recordings import PgRecordingRepository
+from backend.db.repositories.settings import PgSettingsRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.stations import PgStationRepository
 from backend.db.repositories.works import PgWorkRepository
