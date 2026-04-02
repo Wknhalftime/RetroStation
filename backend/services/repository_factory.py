@@ -7,6 +7,7 @@ import psycopg
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
+from backend.db.repositories.settings import PgSettingsRepository
 from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
@@ -44,3 +45,4 @@ class RepositoryFactory:
         self.library_files = PgLibraryFileRepository(conn)
         self.library_quarantine = PgLibraryQuarantineRepository(conn)
         self.format_overrides = PgFormatOverrideRepository(conn)
+        self.settings = PgSettingsRepository(conn)
