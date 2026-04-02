@@ -19,3 +19,10 @@ class FakeRecordingRepository(RecordingRepository):
     def update_embedding(self, mbid: str, embedding: list[float]) -> None:
         if rec := self._data.get(mbid):
             rec.embedding = embedding
+
+    def list_needing_enhancement(self) -> list[Recording]:
+        return [r for r in self._data.values() if r.needs_enhancement]
+
+    def mark_enhanced(self, mbid: str) -> None:
+        if rec := self._data.get(mbid):
+            rec.needs_enhancement = False

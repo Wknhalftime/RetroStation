@@ -15,3 +15,9 @@ class RecordingRepository(ABC):
 
     @abstractmethod
     def update_embedding(self, mbid: str, embedding: list[float]) -> None: ...
+
+    @abstractmethod
+    def list_needing_enhancement(self) -> list[Recording]: ...
+
+    @abstractmethod
+    def mark_enhanced(self, mbid: str) -> None: ...

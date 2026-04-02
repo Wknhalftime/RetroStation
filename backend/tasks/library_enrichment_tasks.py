@@ -82,8 +82,9 @@ def library_enrichment_task() -> dict[str, int]:
         failed=total_failed,
     )
 
-    # Fire-and-forget: trigger MB enhancement pass (task not yet created)
-    # from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
-    # mb_enrichment_task()
+    # Fire-and-forget: trigger MB enhancement pass
+    from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+    mb_enrichment_task()
 
     return {"enriched": total_enriched, "failed": total_failed}
