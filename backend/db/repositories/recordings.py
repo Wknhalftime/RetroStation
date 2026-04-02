@@ -66,3 +66,15 @@ class PgRecordingRepository(RecordingRepository):
             "UPDATE recordings SET embedding = %s WHERE id = %s",
             ("[" + ",".join(str(v) for v in embedding) + "]", mbid),
         )
+
+    def list_needing_enhancement(self) -> list[Recording]:
+        rows = self._conn.execute(
+            "SELECT * FROM recordings WHERE needs_enhancement = TRUE"
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def mark_enhanced(self, mbid: str) -> None:
+        self._conn.execute(
+            "UPDATE recordings SET needs_enhancement = FALSE, enhanced_at = now() WHERE id = %s",
+            (mbid,),
+        )

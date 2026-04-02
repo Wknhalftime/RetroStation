@@ -103,8 +103,10 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         match_identities_for_playlist(
             playlist_id=playlist_id,
             log_identity_repo=PgLogIdentityRepository(conn),
+            log_artist_repo=PgLogArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=FakeLibraryFileRepository(),
+            rules_repo=PgGlobalMappingRuleRepository(conn),
         )
         conn.commit()
 

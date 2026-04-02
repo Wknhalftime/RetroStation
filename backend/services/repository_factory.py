@@ -7,6 +7,8 @@ import psycopg
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
 from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
+from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.log_artists import PgLogArtistRepository
 from backend.db.repositories.log_events import PgLogEventRepository
 from backend.db.repositories.log_identities import PgLogIdentityRepository
@@ -38,3 +40,5 @@ class RepositoryFactory:
         self.global_mapping_rules = PgGlobalMappingRuleRepository(conn)
         self.song_masters = PgSongMasterRepository(conn)
         self.progress_tracking = PgProgressTrackingRepository(conn)
+        self.library_files = PgLibraryFileRepository(conn)
+        self.library_quarantine = PgLibraryQuarantineRepository(conn)

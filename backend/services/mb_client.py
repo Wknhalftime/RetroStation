@@ -73,3 +73,71 @@ class RealMbClient:
         artists = data.get("artists", [])
         logger.info("mb_api_search", name=name, results=len(artists))
         return artists  # type: ignore[no-any-return]
+
+    def lookup_release(self, mbid: str) -> dict[str, Any] | None:
+        """Fetch a release by MBID, including recordings, artist-credits, and release-groups."""
+        cache_key = f"release:{mbid}"
+
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug("mb_cache_hit", cache_key=cache_key)
+            return cached.response_data
+
+        _rate_limit()
+        response = self._http.get(
+            f"{_MUSICBRAINZ_API}/release/{mbid}",
+            params={"fmt": "json", "inc": "recordings+artist-credits+release-groups"},
+        )
+        if response.status_code == 404:
+            logger.info("mb_release_not_found", mbid=mbid)
+            return None
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+
+        now = datetime.now(tz=UTC)
+        self._cache.set(MbCache(
+            id=uuid4(),
+            cache_key=cache_key,
+            entity_type="release",
+            entity_mbid=mbid,
+            response_data=data,
+            cached_at=now,
+            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
+        ))
+
+        logger.info("mb_api_lookup_release", mbid=mbid)
+        return data
+
+    def lookup_recording(self, mbid: str) -> dict[str, Any] | None:
+        """Fetch a recording by MBID, including artist-credits and work relations."""
+        cache_key = f"recording:{mbid}"
+
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug("mb_cache_hit", cache_key=cache_key)
+            return cached.response_data
+
+        _rate_limit()
+        response = self._http.get(
+            f"{_MUSICBRAINZ_API}/recording/{mbid}",
+            params={"fmt": "json", "inc": "artist-credits+work-rels"},
+        )
+        if response.status_code == 404:
+            logger.info("mb_recording_not_found", mbid=mbid)
+            return None
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+
+        now = datetime.now(tz=UTC)
+        self._cache.set(MbCache(
+            id=uuid4(),
+            cache_key=cache_key,
+            entity_type="recording",
+            entity_mbid=mbid,
+            response_data=data,
+            cached_at=now,
+            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
+        ))
+
+        logger.info("mb_api_lookup_recording", mbid=mbid)
+        return data
