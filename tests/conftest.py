@@ -23,9 +23,27 @@ def clean_db(db_url: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def migrated_db(clean_db: None, db_url: str) -> str:
+def _migrated_db_url(clean_db: None, db_url: str) -> str:
     from backend.db.migrations import run_migrations
     with psycopg.connect(db_url) as conn:
         run_migrations(conn)
         conn.commit()
     return db_url
+
+
+@pytest.fixture
+def migrated_db(_migrated_db_url: str) -> str:
+    """Per-test fixture: truncates all tables then returns the DB URL."""
+    with psycopg.connect(_migrated_db_url, autocommit=True) as conn:
+        conn.execute("""
+            TRUNCATE log_events, log_identities, log_artists,
+                     playlists, broadcast_days, stations,
+                     matches, global_mapping_rules,
+                     artists, works, recordings,
+                     library_files, library_quarantine,
+                     song_masters, format_overrides,
+                     mb_cache, progress_tracking, user_settings,
+                     system_logs
+            CASCADE
+        """)
+    return _migrated_db_url

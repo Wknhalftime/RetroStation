@@ -49,7 +49,7 @@ def embedding_task(playlist_id: str) -> None:
     logger.info("embedding_task_complete", playlist_id=playlist_id)
 
     # Fire-and-forget: enqueue artist matching
-    from backend.tasks.artist_matching_tasks import (  # type: ignore[import-untyped]
+    from backend.tasks.artist_matching_tasks import (
         artist_matching_task,
     )
     artist_matching_task(playlist_id)

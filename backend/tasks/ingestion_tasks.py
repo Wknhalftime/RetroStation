@@ -35,7 +35,7 @@ def ingestion_task(file_bytes: bytes, file_name: str, station_id: str) -> str:
 
     # Fire-and-forget: enqueue embedding task
     # NEVER call .get() on a task from within a task (deadlocks with -w 1)
-    from backend.tasks.embedding_tasks import embedding_task  # type: ignore[import-untyped]
+    from backend.tasks.embedding_tasks import embedding_task
     embedding_task(result.playlist_id)
 
     return result.playlist_id

@@ -8,6 +8,7 @@ from backend.config import get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
 from backend.logging_config import configure_logging
+from backend.routers.v1 import router as v1_router
 
 
 @asynccontextmanager
@@ -29,8 +30,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 app = FastAPI(title="RetroStation", lifespan=lifespan)
-
-from backend.routers.v1 import router as v1_router
 app.include_router(v1_router)
 
 
