@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import psycopg
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 from pydantic import BaseModel
 
+from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
+from backend.services.m3u_generator_service import generate_m3u
+from backend.services.repository_factory import RepositoryFactory
 
 router = APIRouter()
 
@@ -19,6 +25,12 @@ Token = Annotated[str, Depends(get_current_token)]
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
+
+class ExportM3uBody(BaseModel):
+    """Optional body for the M3U export endpoint."""
+
+    station_format: str | None = None
 
 
 class PlaylistSummary(BaseModel):
@@ -277,3 +289,93 @@ async def get_broadcast_days(
     )
     rows = await days_cur.fetchall()
     return [row["broadcast_date"].isoformat() for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# M3U export
+# ---------------------------------------------------------------------------
+
+
+def _generate_m3u_sync(
+    playlist_id_str: str,
+    database_url: str,
+    station_format: str | None,
+) -> str:
+    """Run M3U generation on a sync psycopg connection (for use with to_thread).
+
+    Args:
+        playlist_id_str: String representation of the playlist UUID.
+        database_url: PostgreSQL connection string.
+        station_format: Optional station format for format_override lookup.
+
+    Returns:
+        The M3U text.
+    """
+    pid = UUID(playlist_id_str)
+    with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
+        repos = RepositoryFactory(sync_conn)
+        return generate_m3u(
+            playlist_id=pid,
+            event_repo=repos.log_events,
+            identity_repo=repos.log_identities,
+            match_repo=repos.matches,
+            file_repo=repos.library_files,
+            recording_repo=repos.recordings,
+            work_repo=repos.works,
+            master_repo=repos.song_masters,
+            override_repo=repos.format_overrides,
+            settings_repo=repos.settings,
+            station_format=station_format,
+        )
+
+
+@router.post("/{playlist_id}/export-m3u")
+async def export_m3u(
+    playlist_id: UUID,
+    conn: DbConn,
+    _token: Token,
+    body: ExportM3uBody | None = None,
+) -> Response:
+    """Generate and return an M3U file for the given playlist.
+
+    Resolves the priority chain: format_override > song_master > direct match.
+    Only AUTO_MATCHED / MAN_MATCHED events are included.
+
+    Args:
+        playlist_id: UUID of the playlist to export.
+        conn: Async database connection (used for existence check).
+        _token: Bearer token (auth check only).
+        body: Optional request body containing station_format.
+
+    Returns:
+        An M3U file response with Content-Disposition attachment header.
+
+    Raises:
+        HTTPException: 404 if the playlist does not exist.
+    """
+    exists_cur = await conn.execute(
+        "SELECT id FROM playlists WHERE id = %s",
+        (playlist_id,),
+    )
+    if await exists_cur.fetchone() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Playlist {playlist_id} not found",
+        )
+
+    station_format = body.station_format if body is not None else None
+    database_url = get_settings().database_url
+
+    m3u_content = await asyncio.to_thread(
+        _generate_m3u_sync,
+        str(playlist_id),
+        database_url,
+        station_format,
+    )
+
+    filename = f"playlist-{playlist_id}.m3u"
+    return Response(
+        content=m3u_content,
+        media_type="audio/x-mpegurl",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -288,3 +288,26 @@ class TestBroadcastDays:
     def test_not_found(self, client):
         resp = client.get(f"/api/v1/playlists/{uuid4()}/broadcast-days")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# TestExportM3u
+# ---------------------------------------------------------------------------
+
+
+class TestExportM3u:
+    def test_export_empty_playlist(self, client, db_conn):
+        """A playlist with no events returns 200 with an #EXTM3U header."""
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station=station)
+
+        resp = client.post(f"/api/v1/playlists/{playlist.id}/export-m3u")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("audio/x-mpegurl")
+        assert "Content-Disposition" in resp.headers
+        assert resp.text.startswith("#EXTM3U")
+
+    def test_export_not_found(self, client):
+        """Non-existent playlist returns 404."""
+        resp = client.post(f"/api/v1/playlists/{uuid4()}/export-m3u")
+        assert resp.status_code == 404
