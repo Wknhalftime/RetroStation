@@ -30,6 +30,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title="RetroStation", lifespan=lifespan)
 
+from backend.routers.v1 import router as v1_router
+app.include_router(v1_router)
+
 
 @app.get("/health")
 async def health() -> dict[str, str]:
