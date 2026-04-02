@@ -2,13 +2,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import psycopg
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 
 from backend.config import get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
 from backend.logging_config import configure_logging
 from backend.routers.v1 import router as v1_router
+from backend.websocket import websocket_endpoint
 
 
 @asynccontextmanager
@@ -36,3 +37,9 @@ app.include_router(v1_router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.websocket("/ws")
+async def ws(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time task progress broadcast."""
+    await websocket_endpoint(websocket)
