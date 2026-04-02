@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import psycopg
+import structlog
+from psycopg.rows import dict_row
+
+from backend.config import get_settings
+from backend.db.repositories.log_artists import PgLogArtistRepository
+from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.services import embedding_service
+from backend.tasks.huey_app import huey
+
+logger = structlog.get_logger()
+
+
+@huey.task()  # type: ignore[untyped-decorator]
+def embedding_task(playlist_id: str) -> None:
+    """Generate embeddings for unembedded artists/identities linked to this playlist."""
+    settings = get_settings()
+    from uuid import UUID
+    pid = UUID(playlist_id)
+
+    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+        artist_repo = PgLogArtistRepository(conn)
+        identity_repo = PgLogIdentityRepository(conn)
+
+        # Embed artists
+        unembedded_artists = artist_repo.get_unembedded_for_playlist(pid)
+        if unembedded_artists:
+            texts = [a.normalized_name for a in unembedded_artists]
+            vectors = embedding_service.get_embeddings(texts)
+            for artist, vec in zip(unembedded_artists, vectors, strict=True):
+                artist_repo.update_embedding(artist.id, vec)
+            logger.info("artists_embedded", count=len(unembedded_artists))
+
+        # Embed identities
+        unembedded_identities = identity_repo.get_unembedded_for_playlist(pid)
+        if unembedded_identities:
+            texts = [
+                f"{i.normalized_title}" for i in unembedded_identities
+            ]
+            vectors = embedding_service.get_embeddings(texts)
+            for identity, vec in zip(unembedded_identities, vectors, strict=True):
+                identity_repo.update_embedding(identity.id, vec)
+            logger.info("identities_embedded", count=len(unembedded_identities))
+
+        conn.commit()
+
+    logger.info("embedding_task_complete", playlist_id=playlist_id)
+
+    # Fire-and-forget: enqueue artist matching
+    from backend.tasks.artist_matching_tasks import (  # type: ignore[import-untyped]
+        artist_matching_task,
+    )
+    artist_matching_task(playlist_id)
