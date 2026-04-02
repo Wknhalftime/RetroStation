@@ -24,3 +24,4 @@ async def get_db_connection() -> AsyncGenerator[AsyncConnection[Any]]:
     pool = get_pool()
     async with pool.connection() as conn:
         yield conn
+        await conn.commit()
