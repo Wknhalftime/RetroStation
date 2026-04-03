@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
 from backend.services.library_scan_service import scan_directory
+from tests.fakes.progress_tracking import FakeProgressTrackingRepository
 
 AUDIO_DIR = Path(__file__).parent.parent / "fixtures" / "audio"
 NO_TAGS_WAV = AUDIO_DIR / "no_tags.wav"
@@ -95,27 +99,28 @@ class TestScanDirectoryProgress:
         assert file_names == sorted(file_names)
 
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
-from tests.fakes.progress_tracking import FakeProgressTrackingRepository
-
-
 class TestLibraryScanTaskProgress:
     """Tests for library_scan_task progress tracking lifecycle."""
 
     @patch("backend.tasks.library_tasks.psycopg")
     @patch("backend.tasks.library_tasks.scan_directory")
-    def test_creates_running_record_before_scan(
+    def test_running_record_exists_before_scan_starts(
         self, mock_scan: MagicMock, mock_psycopg: MagicMock
     ) -> None:
+        """Verify RUNNING is written before scan_directory is called."""
         from backend.tasks.library_tasks import library_scan_task
 
         fake_progress = FakeProgressTrackingRepository()
-        mock_scan.return_value = ([], [])
+        status_at_scan_time: list[TaskStatus] = []
+
+        def capture_status_then_return_empty(*args: object, **kwargs: object) -> tuple[list[object], list[object]]:
+            # When scan_directory is called, capture current progress status
+            records = list(fake_progress._data.values())
+            if records:
+                status_at_scan_time.append(records[0].status)
+            return ([], [])
+
+        mock_scan.side_effect = capture_status_then_return_empty
 
         mock_autocommit_conn = MagicMock()
         mock_data_conn = MagicMock()
@@ -135,6 +140,11 @@ class TestLibraryScanTaskProgress:
         ):
             library_scan_task.call_local("/fake/path")
 
+        # RUNNING was visible when scan_directory was invoked
+        assert len(status_at_scan_time) == 1
+        assert status_at_scan_time[0] == TaskStatus.RUNNING
+
+        # Final state is COMPLETED
         records = list(fake_progress._data.values())
         assert len(records) == 1
         assert records[0].status == TaskStatus.COMPLETED
