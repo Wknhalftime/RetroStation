@@ -3,6 +3,7 @@ import { Database, AlertTriangle, Users } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useLibraryStatus } from "@/api/library";
+import { ScanLibraryButton } from "@/components/domain/library/ScanLibraryButton";
 
 export function LibraryStatus() {
   const { data, isLoading, isError } = useLibraryStatus();
@@ -42,13 +43,16 @@ export function LibraryStatus() {
         title="Library"
         description="Overview of your music library files and enrichment status."
         actions={
-          <Link
-            to="/library/artists"
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            <Users className="h-4 w-4" />
-            Browse Artists
-          </Link>
+          <>
+            <ScanLibraryButton />
+            <Link
+              to="/library/artists"
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              <Users className="h-4 w-4" />
+              Browse Artists
+            </Link>
+          </>
         }
       />
 
