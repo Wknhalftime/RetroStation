@@ -12,26 +12,9 @@ import { LibraryStatus } from "@/pages/library/LibraryStatus";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
+import { Settings } from "@/pages/settings/Settings";
+import { PathConfiguration } from "@/pages/settings/PathConfiguration";
 import "@/index.css";
-
-// ---------------------------------------------------------------------------
-// Temporary placeholder pages (replaced in T17)
-// ---------------------------------------------------------------------------
-
-function Placeholder({ name }: { name: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center text-gray-400">
-      <p className="text-lg font-medium">{name}</p>
-      <p className="text-sm mt-1">Coming soon</p>
-    </div>
-  );
-}
-function SettingsPage() {
-  return <Placeholder name="Settings" />;
-}
-function PathConfiguration() {
-  return <Placeholder name="Path Configuration" />;
-}
 
 // ---------------------------------------------------------------------------
 // Router
@@ -61,7 +44,7 @@ const router = createBrowserRouter([
       },
       { path: "matcher", element: <MatcherBrowser /> },
       { path: "matcher/scanner", element: <ScannerActions /> },
-      { path: "settings", element: <SettingsPage /> },
+      { path: "settings", element: <Settings /> },
       { path: "settings/paths", element: <PathConfiguration /> },
     ],
   },
