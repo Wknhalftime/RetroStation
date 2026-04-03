@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import date
 from uuid import UUID
 
 from backend.domain.models import LogEvent
@@ -15,3 +16,6 @@ class LogEventRepository(ABC):
 
     @abstractmethod
     def get_by_identity(self, identity_id: UUID) -> list[LogEvent]: ...
+
+    @abstractmethod
+    def get_by_station_date(self, station_id: UUID, broadcast_date: date) -> list[LogEvent]: ...

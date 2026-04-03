@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -50,5 +51,15 @@ class PgLogEventRepository(LogEventRepository):
         rows = self._conn.execute(
             "SELECT * FROM log_events WHERE identity_id = %s ORDER BY played_at",
             (identity_id,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_by_station_date(self, station_id: UUID, broadcast_date: date) -> list[LogEvent]:
+        rows = self._conn.execute(
+            """SELECT le.* FROM log_events le
+               JOIN playlists p ON p.id = le.playlist_id
+               WHERE p.station_id = %s AND le.played_at::date = %s
+               ORDER BY le.played_at""",
+            (station_id, broadcast_date),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
