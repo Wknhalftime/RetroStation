@@ -22,7 +22,6 @@ from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.settings import SettingsRepository
 from backend.repositories.song_masters import SongMasterRepository
-from backend.repositories.works import WorkRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
     {MatchStatus.AUTO_MATCHED, MatchStatus.MAN_MATCHED}
@@ -37,7 +36,6 @@ def generate_m3u(
     match_repo: MatchRepository,
     file_repo: LibraryFileRepository,
     recording_repo: RecordingRepository,
-    work_repo: WorkRepository,
     master_repo: SongMasterRepository,
     override_repo: FormatOverrideRepository,
     settings_repo: SettingsRepository,
@@ -52,7 +50,6 @@ def generate_m3u(
         match_repo: Repository for identity matches.
         file_repo: Repository for library files.
         recording_repo: Repository for MusicBrainz recordings.
-        work_repo: Repository for MusicBrainz works.  # noqa: F841 (kept for signature consistency)
         master_repo: Repository for song masters.
         override_repo: Repository for format overrides.
         settings_repo: Repository for user settings.

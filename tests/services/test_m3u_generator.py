@@ -29,8 +29,6 @@ from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.recordings import FakeRecordingRepository
 from tests.fakes.settings import FakeSettingsRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
-from tests.fakes.works import FakeWorkRepository
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,7 +92,6 @@ def _build_repos(
     FakeMatchRepository,
     FakeLibraryFileRepository,
     FakeRecordingRepository,
-    FakeWorkRepository,
     FakeSongMasterRepository,
     FakeFormatOverrideRepository,
     FakeSettingsRepository,
@@ -105,7 +102,6 @@ def _build_repos(
         FakeMatchRepository(),
         FakeLibraryFileRepository(),
         FakeRecordingRepository(),
-        FakeWorkRepository(),
         FakeSongMasterRepository(),
         FakeFormatOverrideRepository(),
         FakeSettingsRepository(initial=settings),
@@ -120,7 +116,6 @@ def _call_generate(
     match_repo: FakeMatchRepository,
     file_repo: FakeLibraryFileRepository,
     recording_repo: FakeRecordingRepository,
-    work_repo: FakeWorkRepository,
     master_repo: FakeSongMasterRepository,
     override_repo: FakeFormatOverrideRepository,
     settings_repo: FakeSettingsRepository,
@@ -134,7 +129,6 @@ def _call_generate(
         match_repo=match_repo,
         file_repo=file_repo,
         recording_repo=recording_repo,
-        work_repo=work_repo,
         master_repo=master_repo,
         override_repo=override_repo,
         settings_repo=settings_repo,
@@ -153,7 +147,7 @@ class TestBasicExport:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -176,7 +170,6 @@ class TestBasicExport:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -193,7 +186,7 @@ class TestNavidromePathMapping:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos(
             settings={
@@ -218,7 +211,6 @@ class TestNavidromePathMapping:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -237,7 +229,7 @@ class TestSongMasterOverride:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -279,7 +271,6 @@ class TestSongMasterOverride:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -295,7 +286,7 @@ class TestFormatOverrideWins:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -348,7 +339,6 @@ class TestFormatOverrideWins:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -375,7 +365,7 @@ class TestUnmatchedEventsSkipped:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -394,7 +384,6 @@ class TestUnmatchedEventsSkipped:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -408,7 +397,7 @@ class TestUnmatchedEventsSkipped:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -419,7 +408,6 @@ class TestUnmatchedEventsSkipped:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,
@@ -435,7 +423,7 @@ class TestDurationHandling:
         playlist_id = uuid4()
         (
             event_repo, identity_repo, match_repo,
-            file_repo, recording_repo, work_repo,
+            file_repo, recording_repo,
             master_repo, override_repo, settings_repo,
         ) = _build_repos()
 
@@ -453,7 +441,6 @@ class TestDurationHandling:
             match_repo=match_repo,
             file_repo=file_repo,
             recording_repo=recording_repo,
-            work_repo=work_repo,
             master_repo=master_repo,
             override_repo=override_repo,
             settings_repo=settings_repo,

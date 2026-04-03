@@ -12,20 +12,20 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import logging
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import mutagen
 import mutagen.id3
+import structlog
 from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
 
 from backend.domain.enums import EnrichmentStatus, ReleaseStatus, ReleaseType
 from backend.domain.models import LibraryFile, LibraryQuarantine
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
 # Constants

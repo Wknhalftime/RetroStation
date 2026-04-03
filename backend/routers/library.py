@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -170,8 +171,11 @@ class FormatOverrideResponse(BaseModel):
 
 
 @router.post("/scan", status_code=status.HTTP_202_ACCEPTED)
-async def scan_library(body: ScanRequest) -> dict[str, str]:
+async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
     """Enqueue a background library scan for the given directory."""
+    scan_path = Path(body.root_path)
+    if not scan_path.exists() or not scan_path.is_dir():
+        raise HTTPException(status_code=400, detail="Invalid directory path")
     library_scan_task(body.root_path)
     return {"status": "accepted", "message": f"Library scan queued for {body.root_path}"}
 
@@ -545,7 +549,8 @@ async def set_work_master(
         "SELECT * FROM song_masters WHERE work_id = %s", (work_id,)
     )
     row = await row_cur.fetchone()
-    assert row is not None
+    if row is None:
+        raise RuntimeError("Expected row after INSERT")
     return SongMasterResponse(
         id=row["id"],
         work_id=row["work_id"],
@@ -630,7 +635,8 @@ async def create_format_override(
         "SELECT * FROM format_overrides WHERE id = %s", (override_id,)
     )
     row = await row_cur.fetchone()
-    assert row is not None
+    if row is None:
+        raise RuntimeError("Expected row after INSERT")
     return FormatOverrideResponse(
         id=row["id"],
         work_id=row["work_id"],

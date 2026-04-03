@@ -36,9 +36,7 @@ def embedding_task(playlist_id: str) -> None:
         # Embed identities
         unembedded_identities = identity_repo.get_unembedded_for_playlist(pid)
         if unembedded_identities:
-            texts = [
-                f"{i.normalized_title}" for i in unembedded_identities
-            ]
+            texts = [i.normalized_title for i in unembedded_identities]
             vectors = embedding_service.get_embeddings(texts)
             for identity, vec in zip(unembedded_identities, vectors, strict=True):
                 identity_repo.update_embedding(identity.id, vec)

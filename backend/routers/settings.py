@@ -38,7 +38,7 @@ class SettingEntry(BaseModel):
 
 
 @router.get("", response_model=dict[str, str])
-async def get_settings(conn: DbConn, _token: Token) -> dict[str, str]:
+async def get_all_settings(conn: DbConn, _token: Token) -> dict[str, str]:
     """Return all user settings as a key/value mapping ordered by key.
 
     Args:

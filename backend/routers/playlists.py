@@ -321,7 +321,6 @@ def _generate_m3u_sync(
             match_repo=repos.matches,
             file_repo=repos.library_files,
             recording_repo=repos.recordings,
-            work_repo=repos.works,
             master_repo=repos.song_masters,
             override_repo=repos.format_overrides,
             settings_repo=repos.settings,

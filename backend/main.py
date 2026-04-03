@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import psycopg
+import structlog
 from fastapi import FastAPI, WebSocket
 
 from backend.config import get_settings
@@ -11,11 +12,19 @@ from backend.logging_config import configure_logging
 from backend.routers.v1 import router as v1_router
 from backend.websocket import websocket_endpoint
 
+logger = structlog.get_logger()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    if settings.airwave_token == "dev-token":
+        logger.warning(
+            "security_warning",
+            message="Using default dev-token. Set AIRWAVE_TOKEN in .env for production.",
+        )
 
     pool = init_pool(settings.database_url)
     await pool.open()

@@ -1,10 +1,10 @@
-import logging
 from pathlib import Path
 from typing import Any
 
 import psycopg
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import Any, cast
 
+import structlog
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
 from backend.config import get_settings
 from backend.db.pool import get_pool
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 POLL_INTERVAL_SECONDS = 0.5
 STALE_THRESHOLD_MINUTES = 10
