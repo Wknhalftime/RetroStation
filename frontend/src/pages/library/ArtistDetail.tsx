@@ -3,6 +3,7 @@ import { ArrowLeft, Crown, Music } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArtistDetail } from "@/api/artists";
+import { FeaturedReleasesSection } from "@/components/domain/library/FeaturedReleasesSection";
 
 export function ArtistDetail() {
   const { artist_id } = useParams<{ artist_id: string }>();
@@ -87,6 +88,8 @@ export function ArtistDetail() {
           </div>
         )}
       </section>
+
+      <FeaturedReleasesSection artistId={artist_id ?? ""} />
     </div>
   );
 }
