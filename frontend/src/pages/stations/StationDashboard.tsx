@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
 import { useStation, useUpdateStation } from "@/api/stations";
 import { useUploadPlaylist, useUploadPlaylists } from "@/api/ingestion";
+import { usePlaylists } from "@/api/playlists";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
 
@@ -38,6 +39,7 @@ export function StationDashboard() {
   const updateMutation = useUpdateStation(station_id ?? "");
   const uploadMutation = useUploadPlaylist();
   const batchUploadMutation = useUploadPlaylists();
+  const { data: playlists } = usePlaylists(station_id);
 
   // -------------------------------------------------------------------------
   // Edit handler
@@ -331,6 +333,30 @@ export function StationDashboard() {
           </div>
         )}
       </div>
+
+      {/* Uploaded playlists */}
+      {playlists && playlists.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold text-gray-900">
+            Uploaded Playlists
+          </h2>
+          <ul className="divide-y divide-gray-100">
+            {playlists.map((playlist) => (
+              <li
+                key={playlist.id}
+                className="flex items-center justify-between py-2.5"
+              >
+                <span className="text-sm text-gray-700 truncate">
+                  {playlist.name}
+                </span>
+                <span className="text-xs text-gray-400 shrink-0 ml-3">
+                  {playlist.event_count.toLocaleString()} events
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Edit modal */}
       <Modal
