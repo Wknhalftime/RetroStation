@@ -41,7 +41,8 @@ class PgGlobalMappingRuleRepository(GlobalMappingRuleRepository):
         row = self._conn.execute(
             "SELECT * FROM global_mapping_rules WHERE id = %s", (rule.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def delete(self, id: UUID) -> None:

@@ -33,7 +33,8 @@ class PgStationRepository(StationRepository):
         row = self._conn.execute(
             "SELECT * FROM stations WHERE id = %s", (station.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, id: UUID) -> Station | None:
@@ -65,7 +66,8 @@ class PgStationRepository(StationRepository):
         row = self._conn.execute(
             "SELECT * FROM stations WHERE id = %s", (station.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def delete(self, id: UUID) -> None:

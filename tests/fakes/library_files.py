@@ -45,7 +45,7 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         ]
 
     def update_recording_link(
-        self, id: UUID, recording_id: str, enrichment_status: EnrichmentStatus
+        self, id: UUID, recording_id: str | None, enrichment_status: EnrichmentStatus
     ) -> None:
         if f := self._data.get(id):
             f.recording_id = recording_id

@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import chardet
@@ -92,7 +92,7 @@ def ingest_csv(
             continue
 
         # Parse played_at
-        played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S")
+        played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
 
         # Normalize
         norm_artist = normalize_artist(raw_artist)
@@ -101,27 +101,30 @@ def ingest_csv(
 
         # Upsert artist
         if norm_artist not in seen_artists:
-            artist = log_artist_repo.upsert(LogArtist(
-                id=uuid4(),
+            input_id = uuid4()
+            stored = log_artist_repo.upsert(LogArtist(
+                id=input_id,
                 original_name=raw_artist,
                 normalized_name=norm_artist,
             ))
-            seen_artists[norm_artist] = artist
-            if artist.id == artist.id:  # always true, but tracks creation
+            seen_artists[norm_artist] = stored
+            if stored.id == input_id:
                 result.artists_created += 1
         artist = seen_artists[norm_artist]
 
         # Upsert identity
         if signature not in seen_signatures:
+            identity_input_id = uuid4()
             identity = log_identity_repo.upsert(LogIdentity(
-                id=uuid4(),
+                id=identity_input_id,
                 artist_id=artist.id,
                 original_title=raw_title,
                 normalized_title=norm_title,
                 normalized_signature=signature,
             ))
             seen_signatures[signature] = identity
-            result.identities_created += 1
+            if identity.id == identity_input_id:
+                result.identities_created += 1
         identity = seen_signatures[signature]
 
         # Broadcast day

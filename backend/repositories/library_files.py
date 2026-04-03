@@ -31,7 +31,7 @@ class LibraryFileRepository(ABC):
     def update_recording_link(
         self,
         id: UUID,
-        recording_id: str,
+        recording_id: str | None,
         enrichment_status: EnrichmentStatus,
     ) -> None: ...
 

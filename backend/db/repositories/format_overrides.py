@@ -51,7 +51,8 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
         row = self._conn.execute(
             "SELECT * FROM format_overrides WHERE id = %s", (override.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get(self, work_id: str, format_name: str) -> FormatOverride | None:

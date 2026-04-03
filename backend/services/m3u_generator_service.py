@@ -62,6 +62,9 @@ def generate_m3u(
     local_prefix: str = settings_repo.get("local_path_prefix") or ""
     navidrome_prefix: str = settings_repo.get("navidrome_path_prefix") or ""
 
+    # Per-event queries are acceptable here; expected playlist size is <500 events.
+    # A single JOIN query would be more efficient but harder to follow the priority
+    # chain logic (format_override → song_master → direct match).
     events = sorted(
         event_repo.get_by_playlist(playlist_id),
         key=lambda e: e.played_at,

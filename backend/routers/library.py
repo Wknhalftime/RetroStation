@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
+from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
 from backend.tasks.library_tasks import library_scan_task
 
@@ -173,7 +174,19 @@ class FormatOverrideResponse(BaseModel):
 @router.post("/scan", status_code=status.HTTP_202_ACCEPTED)
 async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
     """Enqueue a background library scan for the given directory."""
-    scan_path = Path(body.root_path)
+    scan_path = Path(body.root_path).resolve()
+
+    # Validate against configured allowlist
+    settings = get_settings()
+    allowed = [Path(p).resolve() for p in settings.library_scan_paths]
+    if allowed and not any(
+        scan_path == p or scan_path.is_relative_to(p) for p in allowed
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Path not in allowed scan paths",
+        )
+
     if not scan_path.exists() or not scan_path.is_dir():
         raise HTTPException(status_code=400, detail="Invalid directory path")
     library_scan_task(body.root_path)

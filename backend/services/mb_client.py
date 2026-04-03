@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,16 +19,18 @@ _USER_AGENT = "RetroStation/0.1.0 (https://github.com/retrostation)"
 _RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
 
+_rate_lock: threading.Lock = threading.Lock()
 _last_request_time: float = 0.0
 
 
 def _rate_limit() -> None:
-    """Enforce 1.1s between MusicBrainz API calls."""
+    """Enforce 1.1s between MusicBrainz API calls (thread-safe)."""
     global _last_request_time
-    elapsed = time.monotonic() - _last_request_time
-    if elapsed < _RATE_LIMIT_SECONDS:
-        time.sleep(_RATE_LIMIT_SECONDS - elapsed)
-    _last_request_time = time.monotonic()
+    with _rate_lock:
+        elapsed = time.monotonic() - _last_request_time
+        if elapsed < _RATE_LIMIT_SECONDS:
+            time.sleep(_RATE_LIMIT_SECONDS - elapsed)
+        _last_request_time = time.monotonic()
 
 
 class RealMbClient:

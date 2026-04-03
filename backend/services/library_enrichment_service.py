@@ -72,7 +72,7 @@ def enrich_by_release(
         logger.warning("mb_release_lookup_failed", release_mbid=release_mbid)
         for lf in pending_files:
             library_file_repo.update_recording_link(
-                lf.id, lf.recording_id or "", EnrichmentStatus.FAILED
+                lf.id, None, EnrichmentStatus.FAILED
             )
         return 0
 
@@ -101,7 +101,7 @@ def enrich_by_release(
         if not rec_mbid:
             logger.debug("library_file_no_recording_mbid", file_id=str(lf.id))
             library_file_repo.update_recording_link(
-                lf.id, "", EnrichmentStatus.FAILED
+                lf.id, None, EnrichmentStatus.FAILED
             )
             continue
 
@@ -113,7 +113,7 @@ def enrich_by_release(
                 release_mbid=release_mbid,
             )
             library_file_repo.update_recording_link(
-                lf.id, "", EnrichmentStatus.FAILED
+                lf.id, None, EnrichmentStatus.FAILED
             )
             continue
 
@@ -178,7 +178,7 @@ def enrich_by_recording(
         logger.warning("mb_recording_lookup_failed", recording_mbid=recording_mbid)
         for lf in pending_files:
             library_file_repo.update_recording_link(
-                lf.id, "", EnrichmentStatus.FAILED
+                lf.id, None, EnrichmentStatus.FAILED
             )
         return 0
 

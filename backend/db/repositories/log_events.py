@@ -35,7 +35,8 @@ class PgLogEventRepository(LogEventRepository):
                WHERE identity_id = %s AND playlist_id = %s AND played_at = %s""",
             (event.identity_id, event.playlist_id, event.played_at),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_playlist(self, playlist_id: UUID) -> list[LogEvent]:

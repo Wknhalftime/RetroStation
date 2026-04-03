@@ -43,7 +43,8 @@ class PgMatchRepository(MatchRepository):
         row = self._conn.execute(
             "SELECT * FROM matches WHERE id = %s", (match.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_identity(self, identity_id: UUID) -> Match | None:

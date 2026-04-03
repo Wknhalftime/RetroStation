@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -26,7 +26,7 @@ class Station:
     name: str | None = None
     city: str | None = None
     format_name: str | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -34,7 +34,7 @@ class Playlist:
     id: UUID
     name: str
     content_hash: str
-    ingested_at: datetime = field(default_factory=datetime.utcnow)
+    ingested_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     station_id: UUID | None = None
 
 
@@ -53,7 +53,7 @@ class LogArtist:
     match_status: MatchStatus = MatchStatus.PENDING
     artist_candidates: list[dict[str, Any]] | None = None
     error_message: str | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     embedding: list[float] | None = None
 
 
@@ -66,7 +66,7 @@ class LogIdentity:
     normalized_signature: str
     match_status: MatchStatus = MatchStatus.PENDING
     match_tier: MatchTier | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     embedding: list[float] | None = None
 
 
@@ -121,7 +121,7 @@ class LibraryFile:
     file_hash: str
     format: str
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
-    indexed_at: datetime = field(default_factory=datetime.utcnow)
+    indexed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     trace_id: str | None = None
     recording_id: str | None = None
     recording_mbid: str | None = None
@@ -146,7 +146,7 @@ class LibraryQuarantine:
     file_path: str
     error_message: str
     trace_id: str | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -160,7 +160,7 @@ class Match:
     target_id: str | None = None
     target_type: TargetType | None = None
     trace_id: str | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -170,7 +170,7 @@ class SongMaster:
     preferred_file_id: UUID
     selection_method: SelectionMethod = SelectionMethod.AUTO
     score: int | None = None
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -180,7 +180,7 @@ class FormatOverride:
     format_name: str
     preferred_file_id: UUID
     notes: str | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -190,7 +190,7 @@ class GlobalMappingRule:
     target_type: TargetType
     target_id: str
     priority: int = 0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -219,4 +219,4 @@ class ProgressTracking:
 class UserSetting:
     key: str
     value: str
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))

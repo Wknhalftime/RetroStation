@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import psycopg
 import structlog
 from psycopg.rows import dict_row
@@ -17,7 +19,6 @@ logger = structlog.get_logger()
 def embedding_task(playlist_id: str) -> None:
     """Generate embeddings for unembedded artists/identities linked to this playlist."""
     settings = get_settings()
-    from uuid import UUID
     pid = UUID(playlist_id)
 
     with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:

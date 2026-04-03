@@ -31,7 +31,8 @@ class PgLibraryQuarantineRepository(LibraryQuarantineRepository):
             "SELECT * FROM library_quarantine WHERE id = %s",
             (entry.id,),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def list_all(self) -> list[LibraryQuarantine]:

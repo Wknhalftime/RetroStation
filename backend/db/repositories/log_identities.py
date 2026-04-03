@@ -10,6 +10,20 @@ from backend.domain.models import LogIdentity
 from backend.repositories.log_identities import LogIdentityRepository
 
 
+def _parse_embedding(raw: Any) -> list[float] | None:
+    """Convert a pgvector embedding column value to a list of floats.
+
+    pgvector may return the value as a Python list (already parsed) or as a
+    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
+    gracefully; ``None`` is returned when the column is NULL.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return raw
+    return [float(x) for x in str(raw).strip("[]").split(",")]
+
+
 class PgLogIdentityRepository(LogIdentityRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
@@ -24,11 +38,7 @@ class PgLogIdentityRepository(LogIdentityRepository):
             match_status=MatchStatus(row["match_status"]),
             match_tier=MatchTier(row["match_tier"]) if row.get("match_tier") else None,
             created_at=row["created_at"],
-            embedding=(
-                [float(x) for x in row["embedding"].strip("[]").split(",")]
-                if row.get("embedding")
-                else None
-            ),
+            embedding=_parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, identity: LogIdentity) -> LogIdentity:
@@ -45,7 +55,8 @@ class PgLogIdentityRepository(LogIdentityRepository):
             "SELECT * FROM log_identities WHERE normalized_signature = %s",
             (identity.normalized_signature,),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, id: UUID) -> LogIdentity | None:

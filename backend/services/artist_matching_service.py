@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -14,6 +13,7 @@ from backend.repositories.global_mapping_rules import GlobalMappingRuleRepositor
 from backend.repositories.log_artists import LogArtistRepository
 from backend.repositories.log_identities import LogIdentityRepository
 from backend.repositories.matches import MatchRepository
+from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_artist
 
 logger = structlog.get_logger()
@@ -23,16 +23,6 @@ class MbClientProtocol(Protocol):
     def search_artist(self, name: str) -> list[dict[str, Any]]: ...
     def lookup_release(self, mbid: str) -> dict[str, Any] | None: ...
     def lookup_recording(self, mbid: str) -> dict[str, Any] | None: ...
-
-
-def _rule_matches(source_pattern: str, normalized_value: str) -> bool:
-    """Check if a global mapping rule matches a normalized value."""
-    if source_pattern == normalized_value:
-        return True
-    try:
-        return bool(re.fullmatch(source_pattern, normalized_value))
-    except re.error:
-        return False
 
 
 def match_artists_for_playlist(
@@ -49,6 +39,7 @@ def match_artists_for_playlist(
     """Run artist matching for all PENDING artists linked to this playlist."""
     pending = log_artist_repo.get_pending_for_playlist(playlist_id)
     rules = rules_repo.list_ordered()
+    all_canonical = artist_repo.list_all()
 
     for log_artist in pending:
         # Pre-check global mapping rules
@@ -74,9 +65,8 @@ def match_artists_for_playlist(
             continue
 
         # Tier 1: Exact normalized name match against canonical artists
-        all_artists = artist_repo.list_all()
         exact_match = None
-        for canonical in all_artists:
+        for canonical in all_canonical:
             if normalize_artist(canonical.name) == log_artist.normalized_name:
                 exact_match = canonical
                 break
@@ -96,9 +86,9 @@ def match_artists_for_playlist(
             continue
 
         # Tier 2: Fuzzy match via rapidfuzz
-        if all_artists:
+        if all_canonical:
             candidates: list[dict[str, Any]] = []
-            for canonical in all_artists:
+            for canonical in all_canonical:
                 score = fuzz.token_sort_ratio(
                     log_artist.normalized_name,
                     normalize_artist(canonical.name),
@@ -126,10 +116,6 @@ def match_artists_for_playlist(
                             confidence_score=top["score"],
                             match_tier=MatchTier.NORMALIZATION,
                         ))
-                    elif status == MatchStatus.NEEDS_REVIEW:
-                        log_artist_repo.update_match_status(
-                            log_artist.id, MatchStatus.NEEDS_REVIEW
-                        )
                     continue
 
         # Tier 3: MusicBrainz API search
@@ -161,8 +147,7 @@ def match_artists_for_playlist(
                         disambiguation=top_mb.get("disambiguation"),
                     ))
                     log_artist_repo.update_match_status(
-                        log_artist.id, mb_status,
-                        MatchTier.MUSICBRAINZ_API if mb_tier else None,
+                        log_artist.id, mb_status, MatchTier.MUSICBRAINZ_API
                     )
                     if mb_status == MatchStatus.AUTO_MATCHED:
                         match_repo.create(Match(

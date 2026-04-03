@@ -40,7 +40,8 @@ class PgSongMasterRepository(SongMasterRepository):
         row = self._conn.execute(
             "SELECT * FROM song_masters WHERE work_id = %s", (master.work_id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_work(self, work_id: str) -> SongMaster | None:

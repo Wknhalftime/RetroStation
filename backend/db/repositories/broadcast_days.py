@@ -36,7 +36,8 @@ class PgBroadcastDayRepository(BroadcastDayRepository):
         row = self._conn.execute(
             "SELECT * FROM broadcast_days WHERE id = %s", (new_id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_dates_for_station(self, station_id: UUID) -> list[date]:

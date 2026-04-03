@@ -36,7 +36,8 @@ class PgArtistRepository(ArtistRepository):
         row = self._conn.execute(
             "SELECT * FROM artists WHERE id = %s", (artist.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, mbid: str) -> Artist | None:

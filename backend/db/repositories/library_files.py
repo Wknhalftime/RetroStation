@@ -116,7 +116,8 @@ class PgLibraryFileRepository(LibraryFileRepository):
             "SELECT * FROM library_files WHERE file_path = %s",
             (file.file_path,),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, id: UUID) -> LibraryFile | None:
@@ -168,7 +169,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
     def update_recording_link(
         self,
         id: UUID,
-        recording_id: str,
+        recording_id: str | None,
         enrichment_status: EnrichmentStatus,
     ) -> None:
         self._conn.execute(

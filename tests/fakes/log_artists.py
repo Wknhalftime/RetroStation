@@ -51,7 +51,7 @@ class FakeLogArtistRepository(LogArtistRepository):
         if artist := self._data.get(id):
             artist.match_status = status
             if tier is not None:
-                pass  # log_artists has no match_tier column
+                artist.match_tier = tier
 
     def update_embedding(self, id: UUID, embedding: list[float]) -> None:
         if artist := self._data.get(id):

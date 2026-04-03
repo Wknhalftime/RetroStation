@@ -10,6 +10,20 @@ from backend.domain.models import LogArtist
 from backend.repositories.log_artists import LogArtistRepository
 
 
+def _parse_embedding(raw: Any) -> list[float] | None:
+    """Convert a pgvector embedding column value to a list of floats.
+
+    pgvector may return the value as a Python list (already parsed) or as a
+    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
+    gracefully; ``None`` is returned when the column is NULL.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return raw
+    return [float(x) for x in str(raw).strip("[]").split(",")]
+
+
 class PgLogArtistRepository(LogArtistRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
@@ -23,11 +37,7 @@ class PgLogArtistRepository(LogArtistRepository):
             artist_candidates=row.get("artist_candidates"),
             error_message=row.get("error_message"),
             created_at=row["created_at"],
-            embedding=(
-                [float(x) for x in row["embedding"].strip("[]").split(",")]
-                if row.get("embedding")
-                else None
-            ),
+            embedding=_parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, artist: LogArtist) -> LogArtist:
@@ -42,7 +52,8 @@ class PgLogArtistRepository(LogArtistRepository):
             "SELECT * FROM log_artists WHERE normalized_name = %s",
             (artist.normalized_name,),
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, id: UUID) -> LogArtist | None:
@@ -91,6 +102,8 @@ class PgLogArtistRepository(LogArtistRepository):
     def update_match_status(
         self, id: UUID, status: MatchStatus, tier: MatchTier | None = None
     ) -> None:
+        # log_artists has no match_tier column (only log_identities does).
+        # The tier parameter is accepted for ABC interface consistency but not stored.
         self._conn.execute(
             "UPDATE log_artists SET match_status = %s WHERE id = %s",
             (status.value, id),

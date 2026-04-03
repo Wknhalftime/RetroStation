@@ -129,7 +129,8 @@ async def create_station(
         "SELECT * FROM stations WHERE id = %s", (station_id,)
     )
     row = await cur.fetchone()
-    assert row is not None
+    if row is None:
+        raise RuntimeError("Expected row after INSERT")
     return _row_to_response(row)
 
 
@@ -182,7 +183,8 @@ async def update_station(
         "SELECT * FROM stations WHERE id = %s", (station_id,)
     )
     row = await cur.fetchone()
-    assert row is not None
+    if row is None:
+        raise RuntimeError("Expected row after INSERT")
     return _row_to_response(row)
 
 

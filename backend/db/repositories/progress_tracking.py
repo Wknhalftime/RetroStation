@@ -45,7 +45,8 @@ class PgProgressTrackingRepository(ProgressTrackingRepository):
         row = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE task_id = %s", (task.task_id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, task_id: str) -> ProgressTracking | None:

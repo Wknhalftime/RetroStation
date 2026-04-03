@@ -8,6 +8,20 @@ from backend.domain.models import Work
 from backend.repositories.works import WorkRepository
 
 
+def _parse_embedding(raw: Any) -> list[float] | None:
+    """Convert a pgvector embedding column value to a list of floats.
+
+    pgvector may return the value as a Python list (already parsed) or as a
+    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
+    gracefully; ``None`` is returned when the column is NULL.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return raw
+    return [float(x) for x in str(raw).strip("[]").split(",")]
+
+
 class PgWorkRepository(WorkRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
@@ -20,11 +34,7 @@ class PgWorkRepository(WorkRepository):
             needs_enhancement=row["needs_enhancement"],
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
-            embedding=(
-                [float(x) for x in row["embedding"].strip("[]").split(",")]
-                if row.get("embedding")
-                else None
-            ),
+            embedding=_parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, work: Work) -> Work:
@@ -38,7 +48,8 @@ class PgWorkRepository(WorkRepository):
         row = self._conn.execute(
             "SELECT * FROM works WHERE id = %s", (work.id,)
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, mbid: str) -> Work | None:

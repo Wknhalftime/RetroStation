@@ -1,4 +1,10 @@
-"""WebSocket endpoint for real-time progress broadcast."""
+"""WebSocket endpoint for real-time progress broadcast.
+
+Authenticates via ``?token=`` query parameter. The browser WebSocket API does
+not support custom headers on the initial HTTP upgrade handshake, so the token
+is passed as a query parameter instead of the ``X-Airwave-Token`` header used
+by the REST API.
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from uuid import UUID, uuid4
 
 import structlog
@@ -13,19 +12,10 @@ from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.log_artists import LogArtistRepository
 from backend.repositories.log_identities import LogIdentityRepository
 from backend.repositories.matches import MatchRepository
+from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
-
-
-def _rule_matches(source_pattern: str, normalized_value: str) -> bool:
-    """Check if a global mapping rule's source_pattern matches the normalized value."""
-    if source_pattern == normalized_value:
-        return True
-    try:
-        return bool(re.fullmatch(source_pattern, normalized_value))
-    except re.error:
-        return False
 
 
 def match_identities_for_playlist(
