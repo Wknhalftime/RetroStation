@@ -6,6 +6,7 @@ import App from "./App";
 import { StationList } from "@/pages/stations/StationList";
 import { StationDashboard } from "@/pages/stations/StationDashboard";
 import { PlaylistViewer } from "@/pages/stations/PlaylistViewer";
+import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -31,9 +32,6 @@ function ArtistDetail() {
 }
 function AssociatedWorks() {
   return <Placeholder name="Associated Works" />;
-}
-function MatcherBrowser() {
-  return <Placeholder name="Matcher Browser" />;
 }
 function ScannerActions() {
   return <Placeholder name="Scanner Actions" />;
