@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { StationList } from "@/pages/stations/StationList";
+import { StationDashboard } from "@/pages/stations/StationDashboard";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -19,9 +20,6 @@ function Placeholder({ name }: { name: string }) {
   );
 }
 
-function StationDashboard() {
-  return <Placeholder name="Station Dashboard" />;
-}
 function PlaylistViewer() {
   return <Placeholder name="Playlist Viewer" />;
 }
