@@ -93,3 +93,108 @@ class TestScanDirectoryProgress:
         files, _ = scan_directory(tmp_path)
         file_names = [Path(f.file_path).name for f in files]
         assert file_names == sorted(file_names)
+
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
+from tests.fakes.progress_tracking import FakeProgressTrackingRepository
+
+
+class TestLibraryScanTaskProgress:
+    """Tests for library_scan_task progress tracking lifecycle."""
+
+    @patch("backend.tasks.library_tasks.psycopg")
+    @patch("backend.tasks.library_tasks.scan_directory")
+    def test_creates_running_record_before_scan(
+        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+    ) -> None:
+        from backend.tasks.library_tasks import library_scan_task
+
+        fake_progress = FakeProgressTrackingRepository()
+        mock_scan.return_value = ([], [])
+
+        mock_autocommit_conn = MagicMock()
+        mock_data_conn = MagicMock()
+        mock_data_conn.__enter__ = MagicMock(return_value=mock_data_conn)
+        mock_data_conn.__exit__ = MagicMock(return_value=False)
+
+        def connect_side_effect(*args: object, **kwargs: object) -> object:
+            if kwargs.get("autocommit"):
+                return mock_autocommit_conn
+            return mock_data_conn
+
+        mock_psycopg.connect.side_effect = connect_side_effect
+
+        with patch(
+            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            return_value=fake_progress,
+        ):
+            library_scan_task.call_local("/fake/path")
+
+        records = list(fake_progress._data.values())
+        assert len(records) == 1
+        assert records[0].status == TaskStatus.COMPLETED
+        assert records[0].task_type == TaskType.SCAN
+
+    @patch("backend.tasks.library_tasks.psycopg")
+    @patch("backend.tasks.library_tasks.scan_directory")
+    def test_marks_failed_on_scan_exception(
+        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+    ) -> None:
+        from backend.tasks.library_tasks import library_scan_task
+
+        fake_progress = FakeProgressTrackingRepository()
+        mock_scan.side_effect = RuntimeError("disk error")
+
+        mock_autocommit_conn = MagicMock()
+        mock_psycopg.connect.return_value = mock_autocommit_conn
+
+        with (
+            patch(
+                "backend.tasks.library_tasks.PgProgressTrackingRepository",
+                return_value=fake_progress,
+            ),
+            pytest.raises(RuntimeError, match="disk error"),
+        ):
+            library_scan_task.call_local("/fake/path")
+
+        records = list(fake_progress._data.values())
+        assert len(records) == 1
+        assert records[0].status == TaskStatus.FAILED
+        assert "disk error" in records[0].progress_data.get("error", "")
+
+    @patch("backend.tasks.library_tasks.psycopg")
+    @patch("backend.tasks.library_tasks.scan_directory")
+    def test_progress_data_has_processed_and_total(
+        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+    ) -> None:
+        from backend.tasks.library_tasks import library_scan_task
+
+        fake_progress = FakeProgressTrackingRepository()
+        mock_scan.return_value = ([], [])
+
+        mock_autocommit_conn = MagicMock()
+        mock_data_conn = MagicMock()
+        mock_data_conn.__enter__ = MagicMock(return_value=mock_data_conn)
+        mock_data_conn.__exit__ = MagicMock(return_value=False)
+
+        def connect_side_effect(*args: object, **kwargs: object) -> object:
+            if kwargs.get("autocommit"):
+                return mock_autocommit_conn
+            return mock_data_conn
+
+        mock_psycopg.connect.side_effect = connect_side_effect
+
+        with patch(
+            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            return_value=fake_progress,
+        ):
+            library_scan_task.call_local("/fake/path")
+
+        records = list(fake_progress._data.values())
+        assert "processed" in records[0].progress_data
+        assert "total" in records[0].progress_data
