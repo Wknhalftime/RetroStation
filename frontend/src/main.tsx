@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { StationList } from "@/pages/stations/StationList";
 import { StationDashboard } from "@/pages/stations/StationDashboard";
+import { PlaylistViewer } from "@/pages/stations/PlaylistViewer";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -18,10 +19,6 @@ function Placeholder({ name }: { name: string }) {
       <p className="text-sm mt-1">Coming soon</p>
     </div>
   );
-}
-
-function PlaylistViewer() {
-  return <Placeholder name="Playlist Viewer" />;
 }
 function LibraryStatus() {
   return <Placeholder name="Library Status" />;
