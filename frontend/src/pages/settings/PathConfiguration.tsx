@@ -4,6 +4,7 @@ import { ArrowLeft, Save } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useSettings, useUpdateSetting } from "@/api/settings";
+import { ScanLibraryButton } from "@/components/domain/library/ScanLibraryButton";
 
 // ---------------------------------------------------------------------------
 // Constant keys
@@ -157,11 +158,12 @@ export function PathConfiguration() {
 
           {/* Save button */}
           <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-4 py-3">
-            {toast ? (
-              <InlineToast message={toast} onDismiss={() => setToast(null)} />
-            ) : (
-              <span />
-            )}
+            <div className="flex items-center gap-3">
+              <ScanLibraryButton />
+              {toast && (
+                <InlineToast message={toast} onDismiss={() => setToast(null)} />
+              )}
+            </div>
             <button
               type="button"
               onClick={() => void handleSave()}
