@@ -10,6 +10,7 @@ import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
 import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import { LibraryStatus } from "@/pages/library/LibraryStatus";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
+import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -23,9 +24,6 @@ function Placeholder({ name }: { name: string }) {
       <p className="text-sm mt-1">Coming soon</p>
     </div>
   );
-}
-function ArtistDetail() {
-  return <Placeholder name="Artist Detail" />;
 }
 function AssociatedWorks() {
   return <Placeholder name="Associated Works" />;
