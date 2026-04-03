@@ -7,3 +7,9 @@ __pycache__/
 dist/
 node_modules/
 frontend/dist/
+frontend/src/**/*.js
+frontend/tsconfig.tsbuildinfo
+huey.db
+huey.db-shm
+huey.db-wal
+mypy_out.txt
