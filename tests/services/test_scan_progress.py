@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
 from backend.services.library_scan_service import scan_directory
 from tests.fakes.progress_tracking import FakeProgressTrackingRepository
 
@@ -113,7 +112,9 @@ class TestLibraryScanTaskProgress:
         fake_progress = FakeProgressTrackingRepository()
         status_at_scan_time: list[TaskStatus] = []
 
-        def capture_status_then_return_empty(*args: object, **kwargs: object) -> tuple[list[object], list[object]]:
+        def capture_status_then_return_empty(
+            *args: object, **kwargs: object,
+        ) -> tuple[list[object], list[object]]:
             # When scan_directory is called, capture current progress status
             records = list(fake_progress._data.values())
             if records:
