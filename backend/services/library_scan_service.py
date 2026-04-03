@@ -3,7 +3,7 @@ Library scan service — tag extraction and directory walking.
 
 Public API:
   extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
-  scan_directory(root)     -> (list[LibraryFile], list[LibraryQuarantine])
+  scan_directory(root, on_progress=None)  -> (list[LibraryFile], list[LibraryQuarantine])
 
 Supported formats: .flac, .mp3, .m4a, .ogg, .wav
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -297,22 +298,29 @@ def extract_tags(path: Path) -> LibraryFile:
 
 def scan_directory(
     root: Path,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
 
     Returns ``(files, quarantine)`` where *quarantine* contains an entry for
     every file that raised a :exc:`mutagen.MutagenError`.
+
+    If *on_progress* is provided, it is called with ``(processed, total,
+    current_path)`` every 50 files and on the final file.  *current_path* is
+    the file just attempted, regardless of whether extraction succeeded or
+    the file was quarantined.
     """
+    candidates = sorted(
+        p for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+    )
+    total = len(candidates)
+
     files: list[LibraryFile] = []
     quarantine: list[LibraryQuarantine] = []
 
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-
+    for processed_idx, path in enumerate(candidates, start=1):
         try:
             lf = extract_tags(path)
             files.append(lf)
@@ -334,5 +342,10 @@ def scan_directory(
                     error_message=f"{type(exc).__name__}: {exc}",
                 )
             )
+
+        if on_progress is not None and (
+            processed_idx % 50 == 0 or processed_idx == total
+        ):
+            on_progress(processed_idx, total, str(path))
 
     return files, quarantine
