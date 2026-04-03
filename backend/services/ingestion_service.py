@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import posixpath
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -70,7 +71,7 @@ def ingest_csv(
     from uuid import UUID
     playlist = playlist_repo.create(Playlist(
         id=uuid4(),
-        name=file_name,
+        name=posixpath.basename(file_name),
         content_hash=content_hash,
         station_id=UUID(station_id) if station_id else None,
     ))

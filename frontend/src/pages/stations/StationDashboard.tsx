@@ -15,13 +15,13 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
 import { useStation, useUpdateStation } from "@/api/stations";
-import { useUploadPlaylist } from "@/api/ingestion";
+import { useUploadPlaylist, useUploadPlaylists } from "@/api/ingestion";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
 
 type UploadStatus =
   | { kind: "idle" }
-  | { kind: "pending" }
+  | { kind: "pending"; progress?: string }
   | { kind: "success"; message: string }
   | { kind: "error"; message: string };
 
@@ -32,10 +32,12 @@ export function StationDashboard() {
     kind: "idle",
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const { data: station, isLoading, isError } = useStation(station_id);
   const updateMutation = useUpdateStation(station_id ?? "");
   const uploadMutation = useUploadPlaylist();
+  const batchUploadMutation = useUploadPlaylists();
 
   // -------------------------------------------------------------------------
   // Edit handler
@@ -53,28 +55,105 @@ export function StationDashboard() {
   // -------------------------------------------------------------------------
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !station_id) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0 || !station_id) return;
 
-    setUploadStatus({ kind: "pending" });
+    const files = Array.from(fileList);
 
-    uploadMutation.mutate(
-      { file, stationId: station_id },
+    // Single file — use the simple mutation
+    if (files.length === 1) {
+      setUploadStatus({ kind: "pending" });
+      uploadMutation.mutate(
+        { file: files[0], stationId: station_id },
+        {
+          onSuccess: (result) => {
+            setUploadStatus({
+              kind: "success",
+              message: result.message ?? "Upload started successfully.",
+            });
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          },
+          onError: (err) => {
+            setUploadStatus({
+              kind: "error",
+              message: err.message ?? "Upload failed.",
+            });
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          },
+        },
+      );
+      return;
+    }
+
+    // Multiple files — batch upload
+    uploadBatch(files);
+  };
+
+  const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0 || !station_id) return;
+
+    // Filter to only .csv files from the folder tree
+    const csvFiles = Array.from(fileList).filter((f) =>
+      f.name.toLowerCase().endsWith(".csv"),
+    );
+
+    if (csvFiles.length === 0) {
+      setUploadStatus({
+        kind: "error",
+        message: "No .csv files found in the selected folder.",
+      });
+      if (folderInputRef.current) folderInputRef.current.value = "";
+      return;
+    }
+
+    uploadBatch(csvFiles);
+  };
+
+  const uploadBatch = (files: File[]) => {
+    if (!station_id) return;
+
+    setUploadStatus({
+      kind: "pending",
+      progress: `Uploading 0/${files.length} files…`,
+    });
+
+    batchUploadMutation.mutate(
+      {
+        files,
+        stationId: station_id,
+        onProgress: (completed, total, currentFile) => {
+          if (completed < total) {
+            setUploadStatus({
+              kind: "pending",
+              progress: `Uploading ${completed + 1}/${total}: ${currentFile}`,
+            });
+          }
+        },
+      },
       {
         onSuccess: (result) => {
+          const parts: string[] = [];
+          parts.push(`${result.succeeded}/${result.total} files uploaded.`);
+          if (result.failed > 0) {
+            parts.push(
+              `${result.failed} failed: ${result.errors.map((e) => e.filename).join(", ")}`,
+            );
+          }
           setUploadStatus({
-            kind: "success",
-            message: result.message ?? "Upload started successfully.",
+            kind: result.failed > 0 && result.succeeded === 0 ? "error" : "success",
+            message: parts.join(" "),
           });
-          // Reset file input so the same file can be re-uploaded
           if (fileInputRef.current) fileInputRef.current.value = "";
+          if (folderInputRef.current) folderInputRef.current.value = "";
         },
         onError: (err) => {
           setUploadStatus({
             kind: "error",
-            message: err.message ?? "Upload failed.",
+            message: err.message ?? "Batch upload failed.",
           });
           if (fileInputRef.current) fileInputRef.current.value = "";
+          if (folderInputRef.current) folderInputRef.current.value = "";
         },
       },
     );
@@ -189,32 +268,54 @@ export function StationDashboard() {
           Upload Playlist CSV
         </h2>
         <p className="mb-4 text-xs text-gray-500">
-          Select a CSV file exported from your broadcast system. Processing
-          begins immediately after upload.
+          Select one or more CSV files, or choose a folder to import all .csv
+          files (including subfolders). Processing begins immediately.
         </p>
 
-        <label
-          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          aria-label="Choose CSV file to upload"
-        >
-          <Upload className="h-4 w-4" />
-          {uploadStatus.kind === "pending" ? (
-            <>
-              <Spinner className="h-4 w-4" />
-              Uploading…
-            </>
-          ) : (
-            "Choose File"
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="sr-only"
-            onChange={handleFileChange}
-            disabled={uploadStatus.kind === "pending"}
-          />
-        </label>
+        <div className="flex flex-wrap gap-3">
+          {/* Multi-file picker */}
+          <label
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            aria-label="Choose one or more CSV files to upload"
+          >
+            <Upload className="h-4 w-4" />
+            Choose Files
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              multiple
+              className="sr-only"
+              onChange={handleFileChange}
+              disabled={uploadStatus.kind === "pending"}
+            />
+          </label>
+
+          {/* Folder picker */}
+          <label
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            aria-label="Choose a folder to import all CSV files"
+          >
+            <Upload className="h-4 w-4" />
+            Choose Folder
+            <input
+              ref={folderInputRef}
+              type="file"
+              className="sr-only"
+              onChange={handleFolderChange}
+              disabled={uploadStatus.kind === "pending"}
+              {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+            />
+          </label>
+        </div>
+
+        {/* Upload progress */}
+        {uploadStatus.kind === "pending" && (
+          <div className="mt-3 flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            <Spinner className="h-4 w-4 shrink-0" />
+            {uploadStatus.progress ?? "Uploading…"}
+          </div>
+        )}
 
         {/* Upload feedback */}
         {uploadStatus.kind === "success" && (
