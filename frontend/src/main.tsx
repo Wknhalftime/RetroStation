@@ -9,6 +9,7 @@ import { PlaylistViewer } from "@/pages/stations/PlaylistViewer";
 import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
 import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import { LibraryStatus } from "@/pages/library/LibraryStatus";
+import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -22,9 +23,6 @@ function Placeholder({ name }: { name: string }) {
       <p className="text-sm mt-1">Coming soon</p>
     </div>
   );
-}
-function ArtistBrowser() {
-  return <Placeholder name="Artist Browser" />;
 }
 function ArtistDetail() {
   return <Placeholder name="Artist Detail" />;
