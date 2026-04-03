@@ -16,8 +16,9 @@ export function useUploadPlaylist() {
     mutationFn: ({ file, stationId }) => {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("station_id", stationId);
       return apiUpload<UploadResult>(
-        `/api/v1/stations/${stationId}/playlists/upload`,
+        `/api/v1/ingestion/playlists`,
         formData,
       );
     },

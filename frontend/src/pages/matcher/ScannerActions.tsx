@@ -22,7 +22,7 @@ export function ScannerActions() {
     try {
       await apiFetch('/api/v1/library/scan', {
         method: 'POST',
-        body: JSON.stringify({ path: trimmed }),
+        body: JSON.stringify({ root_path: trimmed }),
       })
       setStatus('success')
       setMessage('Scan started successfully.')

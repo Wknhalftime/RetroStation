@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useProgressStore } from "@/store/progressStore";
 import type { TaskInfo } from "@/lib/schemas/tasks";
 
-const WS_URL = "ws://127.0.0.1:8000/ws/tasks";
+const WS_URL = "ws://127.0.0.1:8000/ws?token=dev-token";
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 30000;
 const JITTER_FACTOR = 0.2;
