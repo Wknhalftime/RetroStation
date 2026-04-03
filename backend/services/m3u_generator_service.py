@@ -14,9 +14,9 @@ from __future__ import annotations
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus
+from backend.domain.models import LogEvent
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
-from backend.repositories.log_events import LogEventRepository
 from backend.repositories.log_identities import LogIdentityRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
@@ -30,8 +30,7 @@ _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
 
 def generate_m3u(
     *,
-    playlist_id: UUID,
-    event_repo: LogEventRepository,
+    events: list[LogEvent],
     identity_repo: LogIdentityRepository,
     match_repo: MatchRepository,
     file_repo: LibraryFileRepository,
@@ -41,11 +40,10 @@ def generate_m3u(
     settings_repo: SettingsRepository,
     station_format: str | None = None,
 ) -> str:
-    """Generate an M3U playlist string for the given playlist.
+    """Generate an M3U playlist string for the given events.
 
     Args:
-        playlist_id: UUID of the playlist whose events are exported.
-        event_repo: Repository for log events.
+        events: Pre-fetched list of log events to export.
         identity_repo: Repository for log identities.
         match_repo: Repository for identity matches.
         file_repo: Repository for library files.
@@ -62,17 +60,11 @@ def generate_m3u(
     local_prefix: str = settings_repo.get("local_path_prefix") or ""
     navidrome_prefix: str = settings_repo.get("navidrome_path_prefix") or ""
 
-    # Per-event queries are acceptable here; expected playlist size is <500 events.
-    # A single JOIN query would be more efficient but harder to follow the priority
-    # chain logic (format_override → song_master → direct match).
-    events = sorted(
-        event_repo.get_by_playlist(playlist_id),
-        key=lambda e: e.played_at,
-    )
+    sorted_events = sorted(events, key=lambda e: e.played_at)
 
     lines: list[str] = ["#EXTM3U"]
 
-    for event in events:
+    for event in sorted_events:
         identity = identity_repo.get_by_id(event.identity_id)
         if identity is None or identity.match_status not in _MATCHED_STATUSES:
             continue

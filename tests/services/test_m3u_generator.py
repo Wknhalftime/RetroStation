@@ -122,9 +122,9 @@ def _call_generate(
     station_format: str | None = None,
 ) -> str:
     from uuid import UUID
+    events = event_repo.get_by_playlist(UUID(str(playlist_id)))
     return generate_m3u(
-        playlist_id=UUID(str(playlist_id)),
-        event_repo=event_repo,
+        events=events,
         identity_repo=identity_repo,
         match_repo=match_repo,
         file_repo=file_repo,
