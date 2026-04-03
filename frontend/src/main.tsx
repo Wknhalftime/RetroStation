@@ -7,6 +7,7 @@ import { StationList } from "@/pages/stations/StationList";
 import { StationDashboard } from "@/pages/stations/StationDashboard";
 import { PlaylistViewer } from "@/pages/stations/PlaylistViewer";
 import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
+import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -32,9 +33,6 @@ function ArtistDetail() {
 }
 function AssociatedWorks() {
   return <Placeholder name="Associated Works" />;
-}
-function ScannerActions() {
-  return <Placeholder name="Scanner Actions" />;
 }
 function SettingsPage() {
   return <Placeholder name="Settings" />;
