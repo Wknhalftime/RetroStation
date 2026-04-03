@@ -1,14 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/api/client";
+import { apiFetch, apiDownload } from "@/api/client";
 import type {
   StationList,
   StationResponse,
   StationCreate,
   StationUpdate,
+  StationPaginatedEvents,
 } from "@/lib/schemas/stations";
 
 const STATIONS_KEY = ["stations"] as const;
 const stationKey = (id: string) => ["stations", id] as const;
+const stationBroadcastDaysKey = (stationId: string) =>
+  ["stations", stationId, "broadcast-days"] as const;
+const stationEventsKey = (
+  stationId: string,
+  date: string,
+  limit: number,
+  offset: number,
+) => ["stations", stationId, "events", { date, limit, offset }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -26,6 +35,31 @@ export function useStation(id: string | undefined) {
     queryKey: stationKey(id ?? ""),
     queryFn: () => apiFetch<StationResponse>(`/api/v1/stations/${id}`),
     enabled: Boolean(id),
+  });
+}
+
+export function useStationBroadcastDays(stationId: string | undefined) {
+  return useQuery<string[]>({
+    queryKey: stationBroadcastDaysKey(stationId ?? ""),
+    queryFn: () =>
+      apiFetch<string[]>(`/api/v1/stations/${stationId}/broadcast-days`),
+    enabled: Boolean(stationId),
+  });
+}
+
+export function useStationEvents(
+  stationId: string | undefined,
+  date: string | undefined,
+  limit: number,
+  offset: number,
+) {
+  return useQuery<StationPaginatedEvents>({
+    queryKey: stationEventsKey(stationId ?? "", date ?? "", limit, offset),
+    queryFn: () =>
+      apiFetch<StationPaginatedEvents>(
+        `/api/v1/stations/${stationId}/events?date=${date}&limit=${limit}&offset=${offset}`,
+      ),
+    enabled: Boolean(stationId) && Boolean(date),
   });
 }
 
@@ -69,6 +103,31 @@ export function useDeleteStation() {
       apiFetch<void>(`/api/v1/stations/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: STATIONS_KEY });
+    },
+  });
+}
+
+interface ExportStationM3uVariables {
+  stationId: string;
+  date: string;
+  callLetters: string;
+}
+
+export function useExportStationM3u() {
+  return useMutation<void, Error, ExportStationM3uVariables>({
+    mutationFn: async ({ stationId, date, callLetters }) => {
+      const blob = await apiDownload(
+        `/api/v1/stations/${stationId}/export-m3u`,
+        { date },
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${callLetters}-${date}.m3u`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     },
   });
 }

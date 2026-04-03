@@ -41,3 +41,24 @@ export const StationUpdateSchema = z.object({
   format_name: z.string().nullable().optional(),
 });
 export type StationUpdate = z.infer<typeof StationUpdateSchema>;
+
+// ---------------------------------------------------------------------------
+// Station event shapes (calendar zoom feature)
+// ---------------------------------------------------------------------------
+
+export const StationEventItemSchema = z.object({
+  id: z.string().uuid(),
+  played_at: z.string(),
+  artist_name: z.string(),
+  title: z.string(),
+  match_status: z.string(),
+  match_tier: z.string().nullable(),
+  playlist_name: z.string(),
+});
+export type StationEventItem = z.infer<typeof StationEventItemSchema>;
+
+export const StationPaginatedEventsSchema = z.object({
+  items: z.array(StationEventItemSchema),
+  total: z.number(),
+});
+export type StationPaginatedEvents = z.infer<typeof StationPaginatedEventsSchema>;
