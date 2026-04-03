@@ -11,10 +11,11 @@ import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import { LibraryStatus } from "@/pages/library/LibraryStatus";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import { ArtistDetail } from "@/pages/library/ArtistDetail";
+import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
-// Placeholder page components
+// Temporary placeholder pages (replaced in T17)
 // ---------------------------------------------------------------------------
 
 function Placeholder({ name }: { name: string }) {
@@ -24,9 +25,6 @@ function Placeholder({ name }: { name: string }) {
       <p className="text-sm mt-1">Coming soon</p>
     </div>
   );
-}
-function AssociatedWorks() {
-  return <Placeholder name="Associated Works" />;
 }
 function SettingsPage() {
   return <Placeholder name="Settings" />;
