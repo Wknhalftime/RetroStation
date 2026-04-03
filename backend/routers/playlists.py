@@ -314,9 +314,9 @@ def _generate_m3u_sync(
     pid = UUID(playlist_id_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
+        events = repos.log_events.get_by_playlist(pid)
         return generate_m3u(
-            playlist_id=pid,
-            event_repo=repos.log_events,
+            events=events,
             identity_repo=repos.log_identities,
             match_repo=repos.matches,
             file_repo=repos.library_files,
