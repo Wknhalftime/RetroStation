@@ -30,11 +30,11 @@ def _run_scan(
     progress_repo: PgProgressTrackingRepository,
     task_id: str,
     chunk_size: int = COMMIT_CHUNK_SIZE,
-) -> tuple[int, int]:
+) -> tuple[int, int, dict[str, object]]:
     """Core scan logic — extracted from the Huey task so it is directly testable.
 
     Opens no connections itself; callers provide them.
-    Returns ``(files_written, quarantine_written)``.
+    Returns ``(files_written, quarantine_written, last_progress)``.
     """
     task_started_at = datetime.now(UTC)
     last_progress: dict[str, object] = {
@@ -97,7 +97,7 @@ def _run_scan(
     if pending_writes > 0:
         library_conn.commit()
 
-    return files_written, quarantine_written
+    return files_written, quarantine_written, last_progress
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -142,7 +142,7 @@ def library_scan_task(root_path: str) -> str:
         )
         repos = RepositoryFactory(library_conn)
 
-        files_written, quarantine_written = _run_scan(
+        files_written, quarantine_written, last_progress = _run_scan(
             root_path=root_path,
             library_conn=library_conn,
             repos=repos,

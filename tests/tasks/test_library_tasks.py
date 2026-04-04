@@ -5,8 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.models import LibraryFile, LibraryQuarantine
 
@@ -188,8 +186,8 @@ class TestRunScanChunkedCommits:
         assert mock_conn.commit.call_count == 1
 
     @patch("backend.tasks.library_tasks.scan_directory")
-    def test_returns_counts(self, mock_scan: MagicMock) -> None:
-        """_run_scan should return (files_written, quarantine_written)."""
+    def test_returns_counts_and_progress(self, mock_scan: MagicMock) -> None:
+        """_run_scan should return (files_written, quarantine_written, last_progress)."""
         from backend.tasks.library_tasks import _run_scan
 
         def fake_scan(root: Path, **kwargs):
@@ -202,7 +200,7 @@ class TestRunScanChunkedCommits:
 
         mock_scan.side_effect = fake_scan
 
-        result = _run_scan(
+        files_written, quarantine_written, last_progress = _run_scan(
             root_path="/tmp/music",
             library_conn=MagicMock(),
             repos=MagicMock(),
@@ -211,4 +209,6 @@ class TestRunScanChunkedCommits:
             chunk_size=100,
         )
 
-        assert result == (2, 1)
+        assert files_written == 2
+        assert quarantine_written == 1
+        assert isinstance(last_progress, dict)
