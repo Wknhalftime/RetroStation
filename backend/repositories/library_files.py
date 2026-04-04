@@ -10,6 +10,9 @@ class LibraryFileRepository(ABC):
     def upsert(self, file: LibraryFile) -> LibraryFile: ...
 
     @abstractmethod
+    def upsert_write_only(self, file: LibraryFile) -> None: ...
+
+    @abstractmethod
     def get_by_id(self, id: UUID) -> LibraryFile | None: ...
 
     @abstractmethod

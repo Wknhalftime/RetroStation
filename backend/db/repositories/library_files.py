@@ -120,6 +120,72 @@ class PgLibraryFileRepository(LibraryFileRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
+    def upsert_write_only(self, file: LibraryFile) -> None:
+        """INSERT or UPDATE a library file without reading back the row."""
+        self._conn.execute(
+            """
+            INSERT INTO library_files (
+                id, file_path, file_hash, format, enrichment_status,
+                trace_id, recording_id, recording_mbid, artist_mbid,
+                album_artist_mbid, release_mbid, release_title, release_type,
+                release_type_secondary, release_status, track_title,
+                track_number, disc_number, duration_ms, bitrate, raw_metadata,
+                indexed_at
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                NOW()
+            )
+            ON CONFLICT (file_path) DO UPDATE SET
+                file_hash              = EXCLUDED.file_hash,
+                format                 = EXCLUDED.format,
+                enrichment_status      = EXCLUDED.enrichment_status,
+                trace_id               = EXCLUDED.trace_id,
+                recording_id           = EXCLUDED.recording_id,
+                recording_mbid         = EXCLUDED.recording_mbid,
+                artist_mbid            = EXCLUDED.artist_mbid,
+                album_artist_mbid      = EXCLUDED.album_artist_mbid,
+                release_mbid           = EXCLUDED.release_mbid,
+                release_title          = EXCLUDED.release_title,
+                release_type           = EXCLUDED.release_type,
+                release_type_secondary = EXCLUDED.release_type_secondary,
+                release_status         = EXCLUDED.release_status,
+                track_title            = EXCLUDED.track_title,
+                track_number           = EXCLUDED.track_number,
+                disc_number            = EXCLUDED.disc_number,
+                duration_ms            = EXCLUDED.duration_ms,
+                bitrate                = EXCLUDED.bitrate,
+                raw_metadata           = EXCLUDED.raw_metadata,
+                indexed_at             = NOW()
+            """,
+            (
+                file.id,
+                file.file_path,
+                file.file_hash,
+                file.format,
+                file.enrichment_status.value,
+                file.trace_id,
+                file.recording_id,
+                file.recording_mbid,
+                file.artist_mbid,
+                file.album_artist_mbid,
+                file.release_mbid,
+                file.release_title,
+                file.release_type.value if file.release_type else None,
+                file.release_type_secondary,
+                file.release_status.value if file.release_status else None,
+                file.track_title,
+                file.track_number,
+                file.disc_number,
+                file.duration_ms,
+                file.bitrate,
+                json.dumps(file.raw_metadata) if file.raw_metadata is not None else None,
+            ),
+        )
+
     def get_by_id(self, id: UUID) -> LibraryFile | None:
         row = self._conn.execute(
             "SELECT * FROM library_files WHERE id = %s", (id,)

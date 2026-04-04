@@ -17,6 +17,9 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         self._data[file.id] = file
         return file
 
+    def upsert_write_only(self, file: LibraryFile) -> None:
+        self.upsert(file)
+
     def get_by_id(self, id: UUID) -> LibraryFile | None:
         return self._data.get(id)
 
