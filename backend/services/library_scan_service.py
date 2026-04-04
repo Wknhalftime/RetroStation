@@ -132,16 +132,25 @@ def _duration_and_bitrate(audio: MutagenFileType) -> tuple[int | None, int | Non
     return duration_ms, bitrate
 
 
+def _sanitise_tag_value(val: object) -> str:
+    """Convert a tag value to a string safe for PostgreSQL text/jsonb columns.
+
+    Strips null bytes (``\\x00``) which PostgreSQL cannot store in text.
+    """
+    try:
+        s = str(val)
+    except Exception:
+        s = repr(val)
+    return s.replace("\x00", "")
+
+
 def _raw_metadata(audio: MutagenFileType) -> dict[str, Any]:
     """Dump all tag frames to a plain-Python dict."""
     result: dict[str, Any] = {}
     if audio.tags is None:
         return result
     for key, val in audio.tags.items():
-        try:
-            result[key] = str(val)
-        except Exception:
-            result[key] = repr(val)
+        result[key] = _sanitise_tag_value(val)
     return result
 
 
@@ -299,6 +308,8 @@ def extract_tags(path: Path) -> LibraryFile:
 def scan_directory(
     root: Path,
     on_progress: Callable[[int, int, str], None] | None = None,
+    on_file: Callable[[LibraryFile], None] | None = None,
+    on_quarantine: Callable[[LibraryQuarantine], None] | None = None,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
@@ -306,10 +317,11 @@ def scan_directory(
     Returns ``(files, quarantine)`` where *quarantine* contains an entry for
     every file that raised a :exc:`mutagen.MutagenError`.
 
-    If *on_progress* is provided, it is called with ``(processed, total,
-    current_path)`` every 50 files and on the final file.  *current_path* is
-    the file just attempted, regardless of whether extraction succeeded or
-    the file was quarantined.
+    Optional callbacks:
+      *on_file* — called with each successfully extracted :class:`LibraryFile`.
+      *on_quarantine* — called with each :class:`LibraryQuarantine` entry.
+      *on_progress* — called with ``(processed, total, current_path)`` every
+        50 files and on the final file.
     """
     candidates = sorted(
         p for p in root.rglob("*")
@@ -324,24 +336,28 @@ def scan_directory(
         try:
             lf = extract_tags(path)
             files.append(lf)
+            if on_file is not None:
+                on_file(lf)
         except MutagenError as exc:
             logger.warning("Quarantining %s: %s", path, exc)
-            quarantine.append(
-                LibraryQuarantine(
-                    id=uuid4(),
-                    file_path=str(path),
-                    error_message=str(exc),
-                )
+            entry = LibraryQuarantine(
+                id=uuid4(),
+                file_path=str(path),
+                error_message=str(exc),
             )
+            quarantine.append(entry)
+            if on_quarantine is not None:
+                on_quarantine(entry)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Unexpected error scanning %s: %s", path, exc)
-            quarantine.append(
-                LibraryQuarantine(
-                    id=uuid4(),
-                    file_path=str(path),
-                    error_message=f"{type(exc).__name__}: {exc}",
-                )
+            entry = LibraryQuarantine(
+                id=uuid4(),
+                file_path=str(path),
+                error_message=f"{type(exc).__name__}: {exc}",
             )
+            quarantine.append(entry)
+            if on_quarantine is not None:
+                on_quarantine(entry)
 
         if on_progress is not None and (
             processed_idx % 50 == 0 or processed_idx == total

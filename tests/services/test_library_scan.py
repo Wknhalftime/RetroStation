@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 from mutagen._util import MutagenError
 
-from backend.services.library_scan_service import extract_tags, scan_directory
+from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.services.library_scan_service import (
+    _sanitise_tag_value,
+    extract_tags,
+    scan_directory,
+)
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -275,3 +280,52 @@ class TestScanDirectory:
             assert Path(lf.file_path).is_absolute()
         for q in quarantine:
             assert Path(q.file_path).is_absolute()
+
+    def test_on_file_callback_called_per_extracted_file(self) -> None:
+        if not AUDIO_DIR.exists():
+            pytest.skip("Audio fixtures directory not found")
+        received: list[LibraryFile] = []
+        files, _ = scan_directory(AUDIO_DIR, on_file=lambda lf: received.append(lf))
+        assert len(received) == len(files)
+        assert {lf.file_path for lf in received} == {lf.file_path for lf in files}
+
+    def test_on_quarantine_callback_called_per_quarantined_file(self) -> None:
+        if not AUDIO_DIR.exists():
+            pytest.skip("Audio fixtures directory not found")
+        received: list[LibraryQuarantine] = []
+        _, quarantine = scan_directory(
+            AUDIO_DIR, on_quarantine=lambda q: received.append(q)
+        )
+        assert len(received) == len(quarantine)
+
+
+# ---------------------------------------------------------------------------
+# _sanitise_tag_value — null byte / control char stripping
+# ---------------------------------------------------------------------------
+
+
+class TestSanitiseTagValue:
+    def test_strips_null_bytes(self) -> None:
+        assert _sanitise_tag_value("Rock\x00") == "Rock"
+
+    def test_strips_embedded_null_bytes(self) -> None:
+        assert _sanitise_tag_value("Ro\x00ck\x00") == "Rock"
+
+    def test_clean_string_unchanged(self) -> None:
+        assert _sanitise_tag_value("Jazz") == "Jazz"
+
+    def test_empty_string(self) -> None:
+        assert _sanitise_tag_value("") == ""
+
+    def test_non_string_converted(self) -> None:
+        assert _sanitise_tag_value(42) == "42"
+
+    def test_object_with_failing_str_uses_repr(self) -> None:
+        class BadStr:
+            def __str__(self) -> str:
+                raise ValueError("nope")
+
+            def __repr__(self) -> str:
+                return "<BadStr>"
+
+        assert _sanitise_tag_value(BadStr()) == "<BadStr>"
