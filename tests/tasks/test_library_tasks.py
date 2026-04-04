@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from backend.domain.enums import EnrichmentStatus
+from backend.domain.enums import EnrichmentStatus, TaskStatus
 from backend.domain.models import LibraryFile, LibraryQuarantine
 
 
@@ -212,3 +212,44 @@ class TestRunScanChunkedCommits:
         assert files_written == 2
         assert quarantine_written == 1
         assert isinstance(last_progress, dict)
+
+    @patch("backend.tasks.library_tasks.scan_directory")
+    def test_on_progress_updates_progress_repo(self, mock_scan: MagicMock) -> None:
+        """on_progress callback should upsert into progress_repo."""
+        from backend.tasks.library_tasks import _run_scan
+
+        def fake_scan(root: Path, **kwargs):
+            on_progress = kwargs["on_progress"]
+            on_progress(50, 100, "/music/track_50.mp3")
+            on_progress(100, 100, "/music/track_100.mp3")
+            return ([], [])
+
+        mock_scan.side_effect = fake_scan
+
+        mock_conn = MagicMock()
+        mock_repos = MagicMock()
+        mock_progress_repo = MagicMock()
+
+        files_written, quarantine_written, last_progress = _run_scan(
+            root_path="/music",
+            library_conn=mock_conn,
+            repos=mock_repos,
+            progress_repo=mock_progress_repo,
+            task_id="test-progress-task",
+            chunk_size=100,
+        )
+
+        # progress_repo.upsert called twice (once per on_progress call)
+        assert mock_progress_repo.upsert.call_count == 2
+
+        # Verify the last call's ProgressTracking shape
+        last_call_arg = mock_progress_repo.upsert.call_args_list[-1][0][0]
+        assert last_call_arg.task_id == "test-progress-task"
+        assert last_call_arg.status == TaskStatus.RUNNING
+        assert last_call_arg.progress_data["processed"] == 100
+        assert last_call_arg.progress_data["total"] == 100
+        assert last_call_arg.progress_data["current_path"] == "/music/track_100.mp3"
+
+        # last_progress return value should match
+        assert last_progress["processed"] == 100
+        assert last_progress["total"] == 100

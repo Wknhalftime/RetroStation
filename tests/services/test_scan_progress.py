@@ -38,6 +38,7 @@ class TestScanDirectoryProgress:
         assert total == 3
         assert processed == 3
 
+    @pytest.mark.slow
     def test_callback_fires_every_50_files(self, tmp_path: Path) -> None:
         """Callback fires at file 50 and at the end for 75 files."""
         wav = _require_wav()

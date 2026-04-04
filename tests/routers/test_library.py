@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import psycopg
@@ -606,3 +608,95 @@ class TestFormatOverrides:
         )
         assert resp.status_code == 201
         assert resp.json()["notes"] is None
+
+
+# ---------------------------------------------------------------------------
+# Scan endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestScanLibrary:
+    """POST /api/v1/library/scan endpoint tests."""
+
+    @patch("backend.routers.library.library_scan_task")
+    @patch("backend.routers.library.get_settings")
+    def test_scan_accepted(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """Happy path: valid directory in allowlist returns 202."""
+        scan_dir = tmp_path / "music"
+        scan_dir.mkdir()
+        mock_settings.return_value = MagicMock(library_scan_paths=[str(tmp_path)])
+
+        resp = client.post("/api/v1/library/scan", json={"root_path": str(scan_dir)})
+
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "accepted"
+        mock_task.assert_called_once_with(str(scan_dir))
+
+    @patch("backend.routers.library.library_scan_task")
+    @patch("backend.routers.library.get_settings")
+    def test_scan_invalid_directory(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """Non-existent path returns 400."""
+        mock_settings.return_value = MagicMock(library_scan_paths=[str(tmp_path)])
+
+        resp = client.post(
+            "/api/v1/library/scan",
+            json={"root_path": str(tmp_path / "nonexistent")},
+        )
+
+        assert resp.status_code == 400
+        assert "Invalid directory" in resp.json()["detail"]
+        mock_task.assert_not_called()
+
+    @patch("backend.routers.library.library_scan_task")
+    @patch("backend.routers.library.get_settings")
+    def test_scan_disallowed_path(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """Path outside allowlist returns 403."""
+        scan_dir = tmp_path / "music"
+        scan_dir.mkdir()
+        mock_settings.return_value = MagicMock(
+            library_scan_paths=[str(tmp_path / "other")]
+        )
+
+        resp = client.post("/api/v1/library/scan", json={"root_path": str(scan_dir)})
+
+        assert resp.status_code == 403
+        assert "not in allowed" in resp.json()["detail"]
+        mock_task.assert_not_called()
+
+    @patch("backend.routers.library.library_scan_task")
+    @patch("backend.routers.library.get_settings")
+    def test_scan_empty_allowlist_permits_any(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """When library_scan_paths is empty, any valid dir is allowed."""
+        scan_dir = tmp_path / "music"
+        scan_dir.mkdir()
+        mock_settings.return_value = MagicMock(library_scan_paths=[])
+
+        resp = client.post("/api/v1/library/scan", json={"root_path": str(scan_dir)})
+
+        assert resp.status_code == 202
+        mock_task.assert_called_once()

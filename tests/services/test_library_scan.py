@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from mutagen._util import MutagenError
@@ -329,3 +330,104 @@ class TestSanitiseTagValue:
                 return "<BadStr>"
 
         assert _sanitise_tag_value(BadStr()) == "<BadStr>"
+
+
+# ---------------------------------------------------------------------------
+# Supported extensions smoke test
+# ---------------------------------------------------------------------------
+
+
+class TestSupportedExtensions:
+    """Verify all documented extensions are in SUPPORTED_EXTENSIONS."""
+
+    @pytest.mark.parametrize("ext", [".flac", ".mp3", ".m4a", ".ogg", ".wav"])
+    def test_extension_in_supported(self, ext: str) -> None:
+        from backend.services.library_scan_service import SUPPORTED_EXTENSIONS
+
+        assert ext in SUPPORTED_EXTENSIONS
+
+
+# ---------------------------------------------------------------------------
+# Generic fallback branch in extract_tags
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTagsGenericFallback:
+    """Test the generic fallback when tag type is not ID3/Vorbis/WAV."""
+
+    @patch("backend.services.library_scan_service.mutagen.File")
+    @patch("backend.services.library_scan_service._sha256", return_value="a" * 64)
+    def test_generic_fallback_returns_library_file(
+        self, _mock_sha: MagicMock, mock_file: MagicMock, tmp_path: Path
+    ) -> None:
+        """Unknown tag type should hit the generic fallback path."""
+        fake_audio = MagicMock()
+        fake_audio.tags = MagicMock()
+        type(fake_audio.tags).__name__ = "UnknownTagType"
+        fake_audio.info.length = 120.5
+        fake_audio.info.bitrate = 128000
+        mock_file.return_value = fake_audio
+
+        path = tmp_path / "track.m4a"
+        path.write_bytes(b"\x00" * 100)
+
+        from backend.services.library_scan_service import extract_tags
+
+        result = extract_tags(path)
+
+        assert result.format == "aac"
+        assert result.file_hash == "a" * 64
+        assert result.duration_ms == 120500
+        assert result.track_title is None
+        assert result.recording_mbid is None
+
+
+# ---------------------------------------------------------------------------
+# Non-MutagenError exception path in scan_directory
+# ---------------------------------------------------------------------------
+
+
+class TestScanDirectoryNonMutagenError:
+    """Non-MutagenError exceptions during scan should create quarantine entries."""
+
+    def test_non_mutagen_error_quarantines_file(self, tmp_path: Path) -> None:
+        """A generic Exception during extract_tags produces a quarantine entry."""
+        audio_dir = tmp_path / "music"
+        audio_dir.mkdir()
+        bad_file = audio_dir / "problem.mp3"
+        bad_file.write_bytes(b"\x00" * 10)
+
+        with patch(
+            "backend.services.library_scan_service.extract_tags",
+            side_effect=PermissionError("Access denied"),
+        ):
+            from backend.services.library_scan_service import scan_directory
+
+            files, quarantine = scan_directory(audio_dir)
+
+        assert len(files) == 0
+        assert len(quarantine) == 1
+        assert quarantine[0].file_path == str(bad_file)
+        assert "PermissionError" in quarantine[0].error_message
+        assert "Access denied" in quarantine[0].error_message
+
+    def test_non_mutagen_error_calls_on_quarantine(self, tmp_path: Path) -> None:
+        """on_quarantine callback fires for non-MutagenError exceptions too."""
+        audio_dir = tmp_path / "music"
+        audio_dir.mkdir()
+        bad_file = audio_dir / "broken.ogg"
+        bad_file.write_bytes(b"\x00" * 10)
+
+        callback = MagicMock()
+
+        with patch(
+            "backend.services.library_scan_service.extract_tags",
+            side_effect=OSError("Disk read error"),
+        ):
+            from backend.services.library_scan_service import scan_directory
+
+            scan_directory(audio_dir, on_quarantine=callback)
+
+        callback.assert_called_once()
+        entry = callback.call_args[0][0]
+        assert "OSError" in entry.error_message

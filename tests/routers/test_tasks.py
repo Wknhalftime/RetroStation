@@ -21,6 +21,7 @@ def _make_task(
     task_type: TaskType = TaskType.SCAN,
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
+    started_at: datetime | None = None,
 ) -> ProgressTracking:
     now = datetime.now(tz=timezone.utc)
     return ProgressTracking(
@@ -28,7 +29,7 @@ def _make_task(
         task_type=task_type,
         status=status,
         progress_data=progress_data or {},
-        started_at=now,
+        started_at=started_at or now,
         updated_at=now,
         completed_at=None,
     )
@@ -40,9 +41,12 @@ def _seed_task(
     task_type: TaskType = TaskType.SCAN,
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
+    started_at: datetime | None = None,
 ) -> ProgressTracking:
     repo = PgProgressTrackingRepository(conn)
-    task = repo.upsert(_make_task(task_id, task_type, status, progress_data))
+    task = repo.upsert(
+        _make_task(task_id, task_type, status, progress_data, started_at)
+    )
     conn.commit()
     return task
 
@@ -105,11 +109,13 @@ class TestActiveTasks:
         self, client: TestClient, db_conn: psycopg.Connection[dict]
     ) -> None:
         """Newer tasks should appear first in the response."""
-        import time
+        from datetime import timedelta
 
-        _seed_task(db_conn, "task-older", status=TaskStatus.RUNNING)
-        time.sleep(0.05)  # ensure distinct timestamps
-        _seed_task(db_conn, "task-newer", status=TaskStatus.RUNNING)
+        older = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        newer = older + timedelta(hours=1)
+
+        _seed_task(db_conn, "task-older", status=TaskStatus.RUNNING, started_at=older)
+        _seed_task(db_conn, "task-newer", status=TaskStatus.RUNNING, started_at=newer)
 
         resp = client.get("/api/v1/tasks/active")
         assert resp.status_code == 200

@@ -236,3 +236,83 @@ def test_quarantine_create_and_list(migrated_db: str) -> None:
         assert repo.get_by_path("/does/not/exist.mp3") is None
 
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Write-only methods (incremental scan performance paths)
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_write_only_inserts_and_is_retrievable(migrated_db: str) -> None:
+    """upsert_write_only should insert a row retrievable by get_by_path."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+
+        lf = _make_file(file_path="/music/write_only.flac", format="flac")
+        repo.upsert_write_only(lf)
+        conn.commit()
+
+        result = repo.get_by_path("/music/write_only.flac")
+        assert result is not None
+        assert result.id == lf.id
+        assert result.file_hash == lf.file_hash
+        assert result.format == "flac"
+        assert result.track_title == "Test Track"
+
+
+def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
+    """upsert_write_only on same path should update, not duplicate."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+
+        lf1 = _make_file(file_path="/music/update_me.flac", format="flac")
+        repo.upsert_write_only(lf1)
+        conn.commit()
+
+        lf2 = _make_file(file_path="/music/update_me.flac", format="mp3")
+        lf2.file_hash = "updated_hash"
+        lf2.track_title = "Updated Title"
+        repo.upsert_write_only(lf2)
+        conn.commit()
+
+        result = repo.get_by_path("/music/update_me.flac")
+        assert result is not None
+        assert result.format == "mp3"
+        assert result.file_hash == "updated_hash"
+        assert result.track_title == "Updated Title"
+
+
+def test_create_write_only_inserts_quarantine(migrated_db: str) -> None:
+    """create_write_only should insert a retrievable quarantine entry."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryQuarantineRepository(conn)
+
+        entry = LibraryQuarantine(
+            id=uuid4(),
+            file_path="/music/bad_file.mp3",
+            error_message="Corrupt header",
+        )
+        repo.create_write_only(entry)
+        conn.commit()
+
+        result = repo.get_by_path("/music/bad_file.mp3")
+        assert result is not None
+        assert result.id == entry.id
+        assert result.error_message == "Corrupt header"
+
+
+def test_create_write_only_appears_in_list_all(migrated_db: str) -> None:
+    """Entries from create_write_only should appear in list_all."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryQuarantineRepository(conn)
+
+        entry = LibraryQuarantine(
+            id=uuid4(),
+            file_path="/music/bad2.mp3",
+            error_message="Truncated",
+        )
+        repo.create_write_only(entry)
+        conn.commit()
+
+        all_entries = repo.list_all()
+        assert any(e.file_path == "/music/bad2.mp3" for e in all_entries)

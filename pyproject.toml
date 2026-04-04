@@ -30,6 +30,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring a real PostgreSQL database",
+    "slow: tests that take >1s (large fixture sets, network, etc.)",
+]
 
 [tool.mypy]
 strict = true
