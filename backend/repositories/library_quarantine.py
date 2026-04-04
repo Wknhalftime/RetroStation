@@ -8,6 +8,9 @@ class LibraryQuarantineRepository(ABC):
     def create(self, entry: LibraryQuarantine) -> LibraryQuarantine: ...
 
     @abstractmethod
+    def create_write_only(self, entry: LibraryQuarantine) -> None: ...
+
+    @abstractmethod
     def list_all(self) -> list[LibraryQuarantine]: ...
 
     @abstractmethod

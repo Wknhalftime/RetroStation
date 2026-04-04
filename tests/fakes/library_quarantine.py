@@ -10,6 +10,9 @@ class FakeLibraryQuarantineRepository(LibraryQuarantineRepository):
         self._data.append(entry)
         return entry
 
+    def create_write_only(self, entry: LibraryQuarantine) -> None:
+        self.create(entry)
+
     def list_all(self) -> list[LibraryQuarantine]:
         return list(self._data)
 

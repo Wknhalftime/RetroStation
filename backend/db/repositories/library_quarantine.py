@@ -35,6 +35,14 @@ class PgLibraryQuarantineRepository(LibraryQuarantineRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
+    def create_write_only(self, entry: LibraryQuarantine) -> None:
+        """Insert a quarantine entry without reading back the row."""
+        self._conn.execute(
+            """INSERT INTO library_quarantine (id, file_path, error_message, trace_id)
+               VALUES (%s, %s, %s, %s)""",
+            (entry.id, entry.file_path, entry.error_message, entry.trace_id),
+        )
+
     def list_all(self) -> list[LibraryQuarantine]:
         rows = self._conn.execute(
             "SELECT * FROM library_quarantine ORDER BY created_at"
