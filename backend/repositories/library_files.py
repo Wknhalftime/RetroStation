@@ -43,3 +43,9 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def count_by_enrichment_status(self) -> dict[str, int]: ...
+
+    @abstractmethod
+    def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]: ...
+
+    @abstractmethod
+    def mark_missing(self, file_path: str) -> None: ...
