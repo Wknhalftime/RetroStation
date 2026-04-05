@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus
@@ -10,8 +11,12 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         self._data: dict[UUID, LibraryFile] = {}
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
+        from backend.domain.enums import FileStatus
         existing = self.get_by_path(file.file_path)
         if existing:
+            if existing.file_hash == file.file_hash:
+                file.enrichment_status = existing.enrichment_status
+            file.file_status = FileStatus.PRESENT
             self._data[existing.id] = file
             return file
         self._data[file.id] = file
@@ -66,3 +71,24 @@ class FakeLibraryFileRepository(LibraryFileRepository):
             key = f.enrichment_status.value
             counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]:
+        # Normalise to a Path so the separator check works on both POSIX and Windows.
+        folder = Path(folder_path)
+        result = []
+        for f in self._data.values():
+            try:
+                rel = Path(f.file_path).relative_to(folder)
+            except ValueError:
+                continue
+            # Only direct children (no sub-directory components)
+            if len(rel.parts) == 1:
+                result.append(f)
+        return result
+
+    def mark_missing(self, file_path: str) -> None:
+        from backend.domain.enums import FileStatus
+        for f in self._data.values():
+            if f.file_path == file_path:
+                f.file_status = FileStatus.MISSING
+                break

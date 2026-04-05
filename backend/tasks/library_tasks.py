@@ -170,6 +170,12 @@ def library_scan_task(root_path: str) -> str:
             quarantined=quarantine_written,
         )
 
+        # Fire-and-forget: chain into enrichment if any files were written
+        if files_written > 0:
+            from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
+            library_enrichment_task()
+
     except Exception as exc:
         if library_conn is not None:
             with contextlib.suppress(Exception):

@@ -6,7 +6,7 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.enums import EnrichmentStatus, ReleaseStatus, ReleaseType
+from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.models import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 
@@ -29,6 +29,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
             file_hash=row["file_hash"],
             format=row.get("format") or "unknown",
             enrichment_status=EnrichmentStatus(row["enrichment_status"]),
+            file_status=FileStatus(row.get("file_status", "PRESENT")),
             indexed_at=row["indexed_at"],
             trace_id=row.get("trace_id"),
             recording_id=row.get("recording_id"),
@@ -69,7 +70,12 @@ class PgLibraryFileRepository(LibraryFileRepository):
             ON CONFLICT (file_path) DO UPDATE SET
                 file_hash              = EXCLUDED.file_hash,
                 format                 = EXCLUDED.format,
-                enrichment_status      = EXCLUDED.enrichment_status,
+                enrichment_status      = CASE
+                    WHEN library_files.file_hash = EXCLUDED.file_hash
+                    THEN library_files.enrichment_status
+                    ELSE EXCLUDED.enrichment_status
+                END,
+                file_status            = 'PRESENT',
                 trace_id               = EXCLUDED.trace_id,
                 recording_id           = EXCLUDED.recording_id,
                 recording_mbid         = EXCLUDED.recording_mbid,
@@ -142,7 +148,12 @@ class PgLibraryFileRepository(LibraryFileRepository):
             ON CONFLICT (file_path) DO UPDATE SET
                 file_hash              = EXCLUDED.file_hash,
                 format                 = EXCLUDED.format,
-                enrichment_status      = EXCLUDED.enrichment_status,
+                enrichment_status      = CASE
+                    WHEN library_files.file_hash = EXCLUDED.file_hash
+                    THEN library_files.enrichment_status
+                    ELSE EXCLUDED.enrichment_status
+                END,
+                file_status            = 'PRESENT',
                 trace_id               = EXCLUDED.trace_id,
                 recording_id           = EXCLUDED.recording_id,
                 recording_mbid         = EXCLUDED.recording_mbid,
@@ -257,3 +268,26 @@ class PgLibraryFileRepository(LibraryFileRepository):
                FROM library_files GROUP BY enrichment_status"""
         ).fetchall()
         return {r["enrichment_status"]: r["cnt"] for r in rows}
+
+    def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]:
+        """Return all files directly in folder_path (not in subfolders).
+
+        Handles both ``/`` and ``\\`` separators so queries work on Windows
+        (where stored paths use backslashes) and POSIX alike.
+        """
+        stripped = folder_path.rstrip("/").rstrip("\\")
+        sep = "\\" if "\\" in stripped else "/"
+        prefix = stripped + sep
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE file_path LIKE %s
+                 AND file_path NOT LIKE %s""",
+            (prefix + "%", prefix + "%" + sep + "%"),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def mark_missing(self, file_path: str) -> None:
+        self._conn.execute(
+            "UPDATE library_files SET file_status = 'MISSING' WHERE file_path = %s",
+            (file_path,),
+        )

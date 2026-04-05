@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -23,8 +24,10 @@ import structlog
 from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
 
-from backend.domain.enums import EnrichmentStatus, ReleaseStatus, ReleaseType
+from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.library_quarantine import LibraryQuarantineRepository
 
 logger = structlog.get_logger()
 
@@ -365,3 +368,139 @@ def scan_directory(
             on_progress(processed_idx, total, str(path))
 
     return files, quarantine
+
+
+@dataclass
+class SmartScanResult:
+    """Result counts from a smart per-folder scan."""
+
+    files_written: int = 0
+    files_skipped: int = 0
+    files_missing: int = 0
+    files_reappeared: int = 0
+    quarantined: int = 0
+
+
+def scan_folder_smart(
+    *,
+    folder_path: Path,
+    file_repo: LibraryFileRepository,
+    quarantine_repo: LibraryQuarantineRepository,
+) -> SmartScanResult:
+    """Smart scan of a single folder — diffs disk vs DB, handles all 6 scenarios.
+
+    Only processes files directly in this folder (not recursive).
+
+    Scenarios:
+      1. Unchanged file (hash matches)    -> skip, no DB write
+      2. Modified file (hash differs)     -> re-extract tags, upsert (resets enrichment)
+      3. New file (not in DB)             -> extract tags, insert
+      4. Re-appeared file (MISSING in DB) -> restore PRESENT, keep enrichment if hash same
+      5. Missing file (in DB, not on disk)-> mark MISSING
+      6. Parse failure (Mutagen error)    -> quarantine
+    """
+    result = SmartScanResult()
+
+    # Get existing DB records for this folder (includes MISSING files)
+    existing_by_path: dict[str, LibraryFile] = {
+        f.file_path: f
+        for f in file_repo.get_by_folder_path(str(folder_path))
+    }
+
+    # Get audio files on disk in this folder (non-recursive)
+    disk_files: dict[str, Path] = {}
+    if folder_path.is_dir():
+        for entry in folder_path.iterdir():
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
+                disk_files[str(entry)] = entry
+
+    # Process files on disk
+    for file_path_str, path in disk_files.items():
+        existing = existing_by_path.pop(file_path_str, None)
+
+        if existing is not None:
+            # File exists in DB
+            if existing.file_status == FileStatus.MISSING:
+                # Scenario 4: Re-appeared file
+                try:
+                    current_hash = _sha256(path)
+                except OSError as exc:
+                    logger.warning("hash_failed", path=file_path_str, error=str(exc))
+                    result.quarantined += 1
+                    continue
+
+                if current_hash == existing.file_hash:
+                    # Same content — just restore status, keep enrichment
+                    existing.file_status = FileStatus.PRESENT
+                    file_repo.upsert(existing)
+                else:
+                    # Content changed — re-extract tags
+                    try:
+                        lf = extract_tags(path)
+                        file_repo.upsert(lf)
+                        result.files_written += 1
+                    except (MutagenError, Exception) as exc:  # noqa: BLE001
+                        logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
+                        quarantine_repo.create_write_only(
+                            LibraryQuarantine(
+                                id=uuid4(),
+                                file_path=file_path_str,
+                                error_message=str(exc),
+                            )
+                        )
+                        result.quarantined += 1
+                        continue
+                result.files_reappeared += 1
+            else:
+                # File is PRESENT in DB — check hash
+                try:
+                    current_hash = _sha256(path)
+                except OSError as exc:
+                    logger.warning("hash_failed", path=file_path_str, error=str(exc))
+                    result.quarantined += 1
+                    continue
+
+                if current_hash == existing.file_hash:
+                    # Scenario 1: Unchanged — skip
+                    result.files_skipped += 1
+                else:
+                    # Scenario 2: Modified — re-extract and upsert
+                    try:
+                        lf = extract_tags(path)
+                        file_repo.upsert(lf)
+                        result.files_written += 1
+                    except (MutagenError, Exception) as exc:  # noqa: BLE001
+                        logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
+                        quarantine_repo.create_write_only(
+                            LibraryQuarantine(
+                                id=uuid4(),
+                                file_path=file_path_str,
+                                error_message=str(exc),
+                            )
+                        )
+                        result.quarantined += 1
+        else:
+            # Scenario 3: New file — extract tags and insert
+            try:
+                lf = extract_tags(path)
+                file_repo.upsert(lf)
+                result.files_written += 1
+            except (MutagenError, Exception) as exc:  # noqa: BLE001
+                # Scenario 6: Parse failure — quarantine
+                logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
+                quarantine_repo.create_write_only(
+                    LibraryQuarantine(
+                        id=uuid4(),
+                        file_path=file_path_str,
+                        error_message=str(exc),
+                    )
+                )
+                result.quarantined += 1
+
+    # Scenario 5: Files in DB but not on disk -> mark MISSING
+    for file_path_str, existing in existing_by_path.items():
+        if existing.file_status == FileStatus.PRESENT:
+            file_repo.mark_missing(file_path_str)
+            result.files_missing += 1
+
+    return result

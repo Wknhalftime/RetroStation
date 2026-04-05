@@ -2,15 +2,15 @@ import psycopg
 import pytest
 
 
-def test_all_nine_migrations_applied(migrated_db: str) -> None:
+def test_all_migrations_applied(migrated_db: str) -> None:
     with psycopg.connect(migrated_db) as conn:
         rows = conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 9
+    assert len(versions) == 10
     assert versions[0].startswith("0001")
-    assert versions[8].startswith("0009")
+    assert versions[9].startswith("0010")
 
 
 def test_all_expected_tables_exist(migrated_db: str) -> None:
@@ -23,6 +23,7 @@ def test_all_expected_tables_exist(migrated_db: str) -> None:
         "stations", "broadcast_days",
         "song_masters", "format_overrides",
         "mb_cache",
+        "library_folders", "library_folder_staged_hashes",
     }
     with psycopg.connect(migrated_db) as conn:
         rows = conn.execute("""

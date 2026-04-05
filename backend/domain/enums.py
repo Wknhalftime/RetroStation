@@ -53,6 +53,12 @@ class EnrichmentStatus(StrEnum):
     SKIPPED     = "skipped"
 
 
+class FileStatus(StrEnum):
+    PRESENT = "PRESENT"
+    MISSING = "MISSING"
+    DELETED = "DELETED"
+
+
 class ReleaseType(StrEnum):
     ALBUM       = "album"
     SINGLE      = "single"
