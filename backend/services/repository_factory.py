@@ -9,6 +9,7 @@ from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.log_artists import PgLogArtistRepository
 from backend.db.repositories.log_events import PgLogEventRepository
@@ -43,6 +44,7 @@ class RepositoryFactory:
         self.song_masters = PgSongMasterRepository(conn)
         self.progress_tracking = PgProgressTrackingRepository(conn)
         self.library_files = PgLibraryFileRepository(conn)
+        self.library_folders = PgLibraryFolderRepository(conn)
         self.library_quarantine = PgLibraryQuarantineRepository(conn)
         self.format_overrides = PgFormatOverrideRepository(conn)
         self.settings = PgSettingsRepository(conn)

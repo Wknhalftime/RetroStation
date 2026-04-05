@@ -72,3 +72,7 @@ def test_progress_tracking_fake_is_concrete() -> None:
 def test_settings_fake_is_concrete() -> None:
     from tests.fakes.settings import FakeSettingsRepository
     assert FakeSettingsRepository() is not None
+
+def test_library_folder_fake_is_concrete() -> None:
+    from tests.fakes.library_folders import FakeLibraryFolderRepository
+    assert FakeLibraryFolderRepository() is not None
