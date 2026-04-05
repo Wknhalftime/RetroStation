@@ -84,7 +84,7 @@ def coalesce_paths(paths: list[str]) -> list[str]:
 def diff_tree(
     root_path: str,
     folder_repo: LibraryFolderRepository,
-) -> tuple[list[str], list[tuple[str, str]]]:
+) -> tuple[list[str], list[tuple["UUID", str]]]:
     """Walk the directory tree and find folders whose hash has changed.
 
     Args:
@@ -93,7 +93,7 @@ def diff_tree(
 
     Returns:
         A tuple of (changed_folder_paths, pending_hashes) where
-        pending_hashes is a list of (full_path, new_hash) for all walked folders.
+        pending_hashes is a list of (folder_id, new_hash) ready for staging.
     """
     root = Path(canonicalize_path(root_path))
     if not root.is_dir():
@@ -124,8 +124,10 @@ def diff_tree(
         f.full_path: f for f in folder_repo.get_all()
     }
 
-    # Create missing folder entries
-    for dir_path in all_dirs:
+    # Create missing folder entries — parents before children so parent_id
+    # references resolve correctly.  all_dirs is in bottom-up order (from
+    # os.walk topdown=False), so reverse it to get root-first.
+    for dir_path in reversed(all_dirs):
         if dir_path not in existing_folders:
             parent_path = canonicalize_path(str(Path(dir_path).parent))
             parent = existing_folders.get(parent_path)
@@ -147,14 +149,18 @@ def diff_tree(
         logger.info("diff_tree_first_run", folders=len(all_dirs))
         return [], []
 
-    # Diff: find folders where hash changed
+    # Diff: find folders where hash changed.  Return pending as (folder_id,
+    # new_hash) tuples so callers can stage directly without a second get_all().
     changed: list[str] = []
-    pending: list[tuple[str, str]] = []
+    pending: list[tuple["UUID", str]] = []
 
     for dir_path, new_hash in folder_hashes.items():
         folder = existing_folders.get(dir_path)
-        pending.append((dir_path, new_hash))
-        if folder is None or folder.folder_hash != new_hash:
+        if folder is not None:
+            pending.append((folder.id, new_hash))
+            if folder.folder_hash != new_hash:
+                changed.append(dir_path)
+        else:
             changed.append(dir_path)
 
     logger.info(

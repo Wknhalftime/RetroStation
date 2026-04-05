@@ -51,17 +51,10 @@ def library_watcher_poll() -> None:
 
         coalesced = coalesce_paths(changed)
 
-        # Stage pending hashes with a task ID
+        # Stage pending hashes with a task ID.  pending is already
+        # (folder_id, new_hash) tuples from diff_tree — no extra query.
         task_id = uuid.uuid4().hex
-        folder_id_map = {
-            f.full_path: f.id for f in repos.library_folders.get_all()
-        }
-        hashes_to_stage = [
-            (folder_id_map[path], new_hash)
-            for path, new_hash in pending
-            if path in folder_id_map
-        ]
-        repos.library_folders.stage_hashes(hashes_to_stage, task_id)
+        repos.library_folders.stage_hashes(pending, task_id)
         conn.commit()
 
         logger.info(
@@ -203,6 +196,11 @@ def library_scan_files_task(
         if library_conn is not None:
             with contextlib.suppress(Exception):
                 library_conn.rollback()
+
+            # Clean up staged hashes so the next poll re-detects changes
+            with contextlib.suppress(Exception):
+                RepositoryFactory(library_conn).library_folders.clear_staged_hashes(task_id)
+                library_conn.commit()
 
         if progress_conn is not None:
             with contextlib.suppress(Exception):

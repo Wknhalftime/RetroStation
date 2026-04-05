@@ -270,13 +270,19 @@ class PgLibraryFileRepository(LibraryFileRepository):
         return {r["enrichment_status"]: r["cnt"] for r in rows}
 
     def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]:
-        """Return all files directly in folder_path (not in subfolders)."""
-        prefix = folder_path.rstrip("/") + "/"
+        """Return all files directly in folder_path (not in subfolders).
+
+        Handles both ``/`` and ``\\`` separators so queries work on Windows
+        (where stored paths use backslashes) and POSIX alike.
+        """
+        stripped = folder_path.rstrip("/").rstrip("\\")
+        sep = "\\" if "\\" in stripped else "/"
+        prefix = stripped + sep
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE file_path LIKE %s
                  AND file_path NOT LIKE %s""",
-            (prefix + "%", prefix + "%/%"),
+            (prefix + "%", prefix + "%" + sep + "%"),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
