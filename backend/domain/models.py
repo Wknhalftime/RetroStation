@@ -7,6 +7,7 @@ from uuid import UUID
 
 from backend.domain.enums import (
     EnrichmentStatus,
+    FileStatus,
     MatchStatus,
     MatchTier,
     ReleaseStatus,
@@ -121,6 +122,7 @@ class LibraryFile:
     file_hash: str
     format: str
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
+    file_status: FileStatus = FileStatus.PRESENT
     indexed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     trace_id: str | None = None
     recording_id: str | None = None
@@ -147,6 +149,17 @@ class LibraryQuarantine:
     error_message: str
     trace_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class LibraryFolder:
+    id: UUID
+    name: str
+    full_path: str
+    parent_id: UUID | None = None
+    folder_hash: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
