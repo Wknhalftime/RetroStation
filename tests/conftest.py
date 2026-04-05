@@ -43,7 +43,8 @@ def migrated_db(_migrated_db_url: str) -> str:
                      library_files, library_quarantine,
                      song_masters, format_overrides,
                      mb_cache, progress_tracking, user_settings,
-                     system_logs
+                     system_logs,
+                     library_folder_staged_hashes, library_folders
             CASCADE
         """)
     return _migrated_db_url
