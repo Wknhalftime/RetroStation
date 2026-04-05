@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus
@@ -72,12 +73,18 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         return counts
 
     def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]:
-        prefix = folder_path.rstrip("/") + "/"
-        return [
-            f for f in self._data.values()
-            if f.file_path.startswith(prefix)
-            and "/" not in f.file_path[len(prefix):]
-        ]
+        # Normalise to a Path so the separator check works on both POSIX and Windows.
+        folder = Path(folder_path)
+        result = []
+        for f in self._data.values():
+            try:
+                rel = Path(f.file_path).relative_to(folder)
+            except ValueError:
+                continue
+            # Only direct children (no sub-directory components)
+            if len(rel.parts) == 1:
+                result.append(f)
+        return result
 
     def mark_missing(self, file_path: str) -> None:
         from backend.domain.enums import FileStatus
