@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "leann": {
+      "command": "D:/PythonStuff/leann/.venv/Scripts/python.exe",
+      "args": ["D:/PythonStuff/RetroStation/scripts/leann_mcp_server.py"],
+      "env": {
+        "LEANN_EMBEDDING_DEVICE": "cpu",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
