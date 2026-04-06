@@ -11,6 +11,8 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 def run_migrations(conn: psycopg.Connection[Any]) -> None:
     """Apply all pending numbered migrations in ascending order."""
+    _ensure_public_schema(conn)
+    conn.execute("SET search_path TO public, pg_catalog")
     _ensure_migrations_table(conn)
     applied = _get_applied_versions(conn)
 
@@ -40,6 +42,13 @@ def run_migrations(conn: psycopg.Connection[Any]) -> None:
             raise RuntimeError(f"Migration {version} failed: {exc}") from exc
 
     logger.info("All migrations applied successfully")
+
+
+def _ensure_public_schema(conn: psycopg.Connection[Any]) -> None:
+    """Recreate public if it was dropped; unqualified CREATE needs a valid search_path."""
+    conn.execute("CREATE SCHEMA IF NOT EXISTS public")
+    conn.execute("GRANT USAGE ON SCHEMA public TO PUBLIC")
+    conn.execute("GRANT CREATE ON SCHEMA public TO PUBLIC")
 
 
 def _ensure_migrations_table(conn: psycopg.Connection[Any]) -> None:

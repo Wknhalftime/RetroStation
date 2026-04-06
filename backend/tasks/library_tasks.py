@@ -10,9 +10,10 @@ import structlog
 
 from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
+from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
+from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking, SystemLog
 from backend.services.folder_hash_service import diff_tree
 from backend.services.library_scan_service import scan_directory
 from backend.services.repository_factory import RepositoryFactory
@@ -103,9 +104,10 @@ def _run_scan(
     # Build folder tree so library_folders is populated even on first scan
     diff_tree(root_path, repos.library_folders)
 
-    # Commit any remaining writes from the last partial chunk
-    if pending_writes > 0:
-        library_conn.commit()
+    # Commit unconditionally: diff_tree always writes folder rows to library_conn
+    # regardless of whether any audio files were scanned, so we must not guard
+    # this commit behind pending_writes > 0.
+    library_conn.commit()
 
     return files_written, quarantine_written, last_progress
 
@@ -125,14 +127,16 @@ def library_scan_task(root_path: str) -> str:
 
     progress_conn = None
     progress_repo: PgProgressTrackingRepository | None = None
+    sys_log_repo: PgSystemLogRepository | None = None
     library_conn = None
 
     try:
-        # Autocommit connection for progress tracking
+        # Autocommit connection for progress tracking and system logs
         progress_conn = connect_sync(
             settings.database_url, autocommit=True,
         )
         progress_repo = PgProgressTrackingRepository(progress_conn)
+        sys_log_repo = PgSystemLogRepository(progress_conn)
 
         # Initial progress record
         progress_repo.upsert(
@@ -145,6 +149,14 @@ def library_scan_task(root_path: str) -> str:
                 updated_at=task_started_at,
             )
         )
+
+        sys_log_repo.create(SystemLog(
+            category=LogCategory.SCAN,
+            level=LogLevel.INFO,
+            message="scan_started",
+            trace_id=task_id,
+            details={"root": root_path},
+        ))
 
         # Open library connection BEFORE scan so callbacks can write immediately
         library_conn = connect_sync(
@@ -177,6 +189,14 @@ def library_scan_task(root_path: str) -> str:
             )
         )
 
+        sys_log_repo.create(SystemLog(
+            category=LogCategory.SCAN,
+            level=LogLevel.INFO,
+            message="scan_completed",
+            trace_id=task_id,
+            details={"files_indexed": files_written, "quarantined": quarantine_written},
+        ))
+
         logger.info(
             "library_scan_task_complete",
             root=root_path,
@@ -208,6 +228,15 @@ def library_scan_task(root_path: str) -> str:
                         completed_at=datetime.now(UTC),
                     )
                 )
+        if progress_conn is not None and sys_log_repo is not None:
+            with contextlib.suppress(Exception):
+                sys_log_repo.create(SystemLog(
+                    category=LogCategory.SCAN,
+                    level=LogLevel.ERROR,
+                    message="scan_failed",
+                    trace_id=task_id,
+                    details={"error": str(exc)},
+                ))
         raise
 
     finally:

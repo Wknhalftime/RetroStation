@@ -95,3 +95,20 @@ class TaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED    = "failed"
     TIMEOUT   = "timeout"
+
+
+class LogLevel(StrEnum):
+    DEBUG   = "DEBUG"
+    INFO    = "INFO"
+    WARNING = "WARNING"
+    ERROR   = "ERROR"
+
+
+class LogCategory(StrEnum):
+    SCAN        = "scan"
+    ENRICHMENT  = "enrichment"
+    INGESTION   = "ingestion"
+    MATCHING    = "matching"
+    RULES_APPLY = "rules_apply"
+    M3U_EXPORT  = "m3u_export"
+    SYSTEM      = "system"

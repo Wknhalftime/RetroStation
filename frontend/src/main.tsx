@@ -14,6 +14,7 @@ import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
 import { Settings } from "@/pages/settings/Settings";
 import { PathConfiguration } from "@/pages/settings/PathConfiguration";
+import { SystemLogs } from "@/pages/settings/SystemLogs";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
       { path: "matcher/scanner", element: <ScannerActions /> },
       { path: "settings", element: <Settings /> },
       { path: "settings/paths", element: <PathConfiguration /> },
+      { path: "settings/system-logs", element: <SystemLogs /> },
     ],
   },
 ]);

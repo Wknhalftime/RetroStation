@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import contextlib
+
 import structlog
 
 from backend.config import get_settings
 from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
+from backend.domain.enums import LogCategory, LogLevel
+from backend.domain.models import SystemLog
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,
@@ -27,53 +32,87 @@ def library_enrichment_task() -> dict[str, int]:
     total_enriched = 0
     total_failed = 0
 
-    with connect_sync(settings.database_url) as conn:
-        repos = RepositoryFactory(conn)
-        cache_repo = PgMbCacheRepository(conn)
-        mb_client = RealMbClient(cache_repo)
+    # Separate autocommit connection for system logs — survives transaction rollbacks.
+    progress_conn = connect_sync(settings.database_url, autocommit=True)
+    sys_log_repo = PgSystemLogRepository(progress_conn)
 
-        # Phase 1: distinct release_mbids from pending files
-        rows = conn.execute("""
-            SELECT DISTINCT release_mbid
-            FROM library_files
-            WHERE enrichment_status = 'pending'
-              AND release_mbid IS NOT NULL
-        """).fetchall()
-        release_mbids: list[str] = [r["release_mbid"] for r in rows]
+    try:
+        with connect_sync(settings.database_url) as conn:
+            repos = RepositoryFactory(conn)
+            cache_repo = PgMbCacheRepository(conn)
+            mb_client = RealMbClient(cache_repo)
 
-        for release_mbid in release_mbids:
-            count = enrich_by_release(
-                release_mbid,
-                repos.library_files,
-                repos.recordings,
-                repos.works,
-                repos.artists,
-                mb_client,
-            )
-            total_enriched += count
+            # Pre-query both phases so counts are known for enrichment_started log.
+            release_rows = conn.execute("""
+                SELECT DISTINCT release_mbid
+                FROM library_files
+                WHERE enrichment_status = 'pending'
+                  AND release_mbid IS NOT NULL
+            """).fetchall()
+            release_mbids: list[str] = [r["release_mbid"] for r in release_rows]
 
-        # Phase 2: distinct recording_mbids from still-pending files with no release_mbid
-        rows2 = conn.execute("""
-            SELECT DISTINCT recording_mbid
-            FROM library_files
-            WHERE enrichment_status = 'pending'
-              AND release_mbid IS NULL
-              AND recording_mbid IS NOT NULL
-        """).fetchall()
-        recording_mbids: list[str] = [r["recording_mbid"] for r in rows2]
+            recording_rows = conn.execute("""
+                SELECT DISTINCT recording_mbid
+                FROM library_files
+                WHERE enrichment_status = 'pending'
+                  AND release_mbid IS NULL
+                  AND recording_mbid IS NOT NULL
+            """).fetchall()
+            recording_mbids: list[str] = [r["recording_mbid"] for r in recording_rows]
 
-        for recording_mbid in recording_mbids:
-            count = enrich_by_recording(
-                recording_mbid,
-                repos.library_files,
-                repos.recordings,
-                repos.works,
-                repos.artists,
-                mb_client,
-            )
-            total_enriched += count
+            sys_log_repo.create(SystemLog(
+                category=LogCategory.ENRICHMENT,
+                level=LogLevel.INFO,
+                message="enrichment_started",
+                details={
+                    "release_count": len(release_mbids),
+                    "recording_count": len(recording_mbids),
+                },
+            ))
 
-        conn.commit()
+            for release_mbid in release_mbids:
+                count = enrich_by_release(
+                    release_mbid,
+                    repos.library_files,
+                    repos.recordings,
+                    repos.works,
+                    repos.artists,
+                    mb_client,
+                )
+                total_enriched += count
+
+            for recording_mbid in recording_mbids:
+                count = enrich_by_recording(
+                    recording_mbid,
+                    repos.library_files,
+                    repos.recordings,
+                    repos.works,
+                    repos.artists,
+                    mb_client,
+                )
+                total_enriched += count
+
+            conn.commit()
+
+        sys_log_repo.create(SystemLog(
+            category=LogCategory.ENRICHMENT,
+            level=LogLevel.INFO,
+            message="enrichment_completed",
+            details={"enriched": total_enriched, "failed": total_failed},
+        ))
+
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            sys_log_repo.create(SystemLog(
+                category=LogCategory.ENRICHMENT,
+                level=LogLevel.ERROR,
+                message="enrichment_failed",
+                details={"error": str(exc)},
+            ))
+        raise
+
+    finally:
+        progress_conn.close()
 
     logger.info(
         "library_enrichment_task_complete",

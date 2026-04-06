@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from backend.domain.enums import (
     EnrichmentStatus,
     FileStatus,
+    LogCategory,
+    LogLevel,
     MatchStatus,
     MatchTier,
     ReleaseStatus,
@@ -233,3 +235,14 @@ class UserSetting:
     key: str
     value: str
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class SystemLog:
+    category: LogCategory
+    level: LogLevel
+    message: str
+    id: UUID = field(default_factory=uuid4)
+    trace_id: str | None = None
+    details: dict[str, Any] | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

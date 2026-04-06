@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { FolderCog } from "lucide-react";
+import { FolderCog, ScrollText } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -26,13 +26,25 @@ export function Settings() {
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <Link
             to="/settings/paths"
-            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <FolderCog className="h-5 w-5 shrink-0 text-indigo-500" />
             <div>
               <p className="text-sm font-medium text-gray-900">Path Configuration</p>
               <p className="text-xs text-gray-400">
                 Local library path and Navidrome path prefix mapping
+              </p>
+            </div>
+          </Link>
+          <Link
+            to="/settings/system-logs"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <ScrollText className="h-5 w-5 shrink-0 text-indigo-500" />
+            <div>
+              <p className="text-sm font-medium text-gray-900">System Logs</p>
+              <p className="text-xs text-gray-400">
+                Operational log of background task activity
               </p>
             </div>
           </Link>

@@ -22,6 +22,7 @@ from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.settings import PgSettingsRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.works import PgWorkRepository
 
 
@@ -48,3 +49,4 @@ class RepositoryFactory:
         self.library_quarantine = PgLibraryQuarantineRepository(conn)
         self.format_overrides = PgFormatOverrideRepository(conn)
         self.settings = PgSettingsRepository(conn)
+        self.system_logs = PgSystemLogRepository(conn)

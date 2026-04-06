@@ -76,3 +76,7 @@ def test_settings_fake_is_concrete() -> None:
 def test_library_folder_fake_is_concrete() -> None:
     from tests.fakes.library_folders import FakeLibraryFolderRepository
     assert FakeLibraryFolderRepository() is not None
+
+def test_system_log_fake_is_concrete() -> None:
+    from tests.fakes.system_logs import FakeSystemLogRepository
+    assert FakeSystemLogRepository() is not None
