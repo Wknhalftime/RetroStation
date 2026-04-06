@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -9,7 +8,6 @@ from fastapi.testclient import TestClient
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.models import ProgressTracking
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -22,15 +20,16 @@ def _make_task(
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
     started_at: datetime | None = None,
+    updated_at: datetime | None = None,
 ) -> ProgressTracking:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return ProgressTracking(
         task_id=task_id,
         task_type=task_type,
         status=status,
         progress_data=progress_data or {},
         started_at=started_at or now,
-        updated_at=now,
+        updated_at=updated_at or now,
         completed_at=None,
     )
 
@@ -42,10 +41,13 @@ def _seed_task(
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
     started_at: datetime | None = None,
+    updated_at: datetime | None = None,
 ) -> ProgressTracking:
     repo = PgProgressTrackingRepository(conn)
     task = repo.upsert(
-        _make_task(task_id, task_type, status, progress_data, started_at)
+        _make_task(
+            task_id, task_type, status, progress_data, started_at, updated_at
+        )
     )
     conn.commit()
     return task
@@ -62,13 +64,23 @@ class TestActiveTasks:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_returns_only_running_tasks(
+    def test_excludes_old_terminal_tasks(
         self, client: TestClient, db_conn: psycopg.Connection[dict]
     ) -> None:
+        """Terminal tasks updated >30s ago are excluded."""
+        from datetime import timedelta
+
+        old = datetime.now(tz=UTC) - timedelta(minutes=5)
         _seed_task(db_conn, "task-running-1", status=TaskStatus.RUNNING)
         _seed_task(db_conn, "task-running-2", status=TaskStatus.RUNNING)
-        _seed_task(db_conn, "task-completed", status=TaskStatus.COMPLETED)
-        _seed_task(db_conn, "task-failed", status=TaskStatus.FAILED)
+        _seed_task(
+            db_conn, "task-completed", status=TaskStatus.COMPLETED,
+            updated_at=old,
+        )
+        _seed_task(
+            db_conn, "task-failed", status=TaskStatus.FAILED,
+            updated_at=old,
+        )
 
         resp = client.get("/api/v1/tasks/active")
         assert resp.status_code == 200
@@ -79,6 +91,25 @@ class TestActiveTasks:
         assert "task-running-2" in task_ids
         assert "task-completed" not in task_ids
         assert "task-failed" not in task_ids
+
+    def test_returns_recent_failed_and_completed(
+        self, client: TestClient, db_conn: psycopg.Connection[dict]
+    ) -> None:
+        """Terminal tasks updated within 30s appear in the response."""
+        _seed_task(
+            db_conn, "task-recent-fail", status=TaskStatus.FAILED,
+        )
+        _seed_task(
+            db_conn, "task-recent-done", status=TaskStatus.COMPLETED,
+        )
+
+        resp = client.get("/api/v1/tasks/active")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        task_ids = {t["task_id"] for t in data}
+        assert "task-recent-fail" in task_ids
+        assert "task-recent-done" in task_ids
 
     def test_running_task_has_expected_fields(
         self, client: TestClient, db_conn: psycopg.Connection[dict]
@@ -111,7 +142,7 @@ class TestActiveTasks:
         """Newer tasks should appear first in the response."""
         from datetime import timedelta
 
-        older = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        older = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         newer = older + timedelta(hours=1)
 
         _seed_task(db_conn, "task-older", status=TaskStatus.RUNNING, started_at=older)
@@ -124,10 +155,16 @@ class TestActiveTasks:
         assert data[0]["task_id"] == "task-newer"
         assert data[1]["task_id"] == "task-older"
 
-    def test_no_running_tasks_returns_empty_list(
+    def test_no_running_tasks_old_completed_returns_empty(
         self, client: TestClient, db_conn: psycopg.Connection[dict]
     ) -> None:
-        _seed_task(db_conn, "task-done", status=TaskStatus.COMPLETED)
+        from datetime import timedelta
+
+        old = datetime.now(tz=UTC) - timedelta(minutes=5)
+        _seed_task(
+            db_conn, "task-done", status=TaskStatus.COMPLETED,
+            updated_at=old,
+        )
 
         resp = client.get("/api/v1/tasks/active")
         assert resp.status_code == 200

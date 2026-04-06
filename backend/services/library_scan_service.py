@@ -332,6 +332,9 @@ def scan_directory(
     )
     total = len(candidates)
 
+    if total == 0:
+        logger.warning("scan_directory_no_candidates", root=str(root))
+
     files: list[LibraryFile] = []
     quarantine: list[LibraryQuarantine] = []
 

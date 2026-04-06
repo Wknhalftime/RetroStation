@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
+from backend.db.sync_conn import connect_sync
 from backend.services import master_selection_service
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.tasks.huey_app import huey
@@ -19,7 +18,7 @@ def identity_matching_task(playlist_id: str) -> None:
     """Run identity matching — terminal task in the pipeline chain."""
     settings = get_settings()
 
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
         from backend.db.repositories.library_files import PgLibraryFileRepository
         from backend.db.repositories.log_artists import PgLogArtistRepository

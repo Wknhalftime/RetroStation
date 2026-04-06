@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
+from backend.db.sync_conn import connect_sync
 from backend.services.ingestion_service import ingest_csv
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -17,7 +16,7 @@ def ingestion_task(file_bytes: bytes, file_name: str, station_id: str) -> str:
     """Ingest a CSV file and enqueue embedding task on success."""
     settings = get_settings()
 
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         result = ingest_csv(
             file_bytes=file_bytes,

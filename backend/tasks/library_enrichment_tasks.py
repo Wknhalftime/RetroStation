@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.sync_conn import connect_sync
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,
@@ -28,7 +27,7 @@ def library_enrichment_task() -> dict[str, int]:
     total_enriched = 0
     total_failed = 0
 
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMbCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)

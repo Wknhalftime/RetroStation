@@ -40,10 +40,12 @@ class TaskInfo(BaseModel):
 
 @router.get("/active", response_model=list[TaskInfo])
 async def get_active_tasks(conn: DbConn, _token: Token) -> list[TaskInfo]:
-    """Return all currently running tasks, ordered by start time descending.
+    """Return active and recently-terminal tasks, ordered by start time desc.
 
-    Only rows where ``status = 'running'`` are returned.  The ``progress_data``
-    column is stored as JSONB but may arrive as a string in some driver
+    Returns rows where ``status = 'running'``, plus ``failed`` or
+    ``completed`` rows updated within the last 30 seconds so the frontend
+    can display terminal states briefly.  The ``progress_data`` column is
+    stored as JSONB but may arrive as a string in some driver
     configurations; this handler normalises both cases.
 
     Args:
@@ -54,7 +56,11 @@ async def get_active_tasks(conn: DbConn, _token: Token) -> list[TaskInfo]:
         List of :class:`TaskInfo` for every running task, newest first.
     """
     cur = await conn.execute(
-        "SELECT * FROM progress_tracking WHERE status = 'running' ORDER BY started_at DESC"
+        """SELECT * FROM progress_tracking
+           WHERE status = 'running'
+              OR (status IN ('failed', 'completed')
+                  AND updated_at > NOW() - INTERVAL '30 seconds')
+           ORDER BY started_at DESC"""
     )
     rows = await cur.fetchall()
 

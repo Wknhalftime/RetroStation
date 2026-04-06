@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.sync_conn import connect_sync
 from backend.services.mb_client import RealMbClient
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -28,7 +27,7 @@ def mb_enrichment_task() -> dict[str, int]:
     recordings_failed = 0
 
     # ------------------------------------------------------------------ artists
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMbCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)
@@ -63,7 +62,7 @@ def mb_enrichment_task() -> dict[str, int]:
         conn.commit()
 
     # ------------------------------------------------------------------ works
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
 
         pending_works = repos.works.list_needing_enhancement()
@@ -84,7 +83,7 @@ def mb_enrichment_task() -> dict[str, int]:
         conn.commit()
 
     # --------------------------------------------------------------- recordings
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMbCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)

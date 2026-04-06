@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.log_artists import PgLogArtistRepository
 from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.sync_conn import connect_sync
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.tasks.huey_app import huey
 
@@ -19,7 +18,7 @@ def artist_matching_task(playlist_id: str) -> None:
     settings = get_settings()
     from uuid import UUID
 
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         from backend.db.repositories.artists import (
             PgArtistRepository,
         )

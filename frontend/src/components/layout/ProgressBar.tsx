@@ -74,6 +74,25 @@ export function ProgressBar() {
         {status === "FAILED" && " — Failed"}
       </span>
 
+      {/* Error detail for failed tasks */}
+      {status === "FAILED" &&
+        activeTask?.progress_data?.error != null && (
+          <span
+            className="text-xs text-red-400 truncate max-w-md"
+            title={String(activeTask.progress_data.error)}
+          >
+            — {String(activeTask.progress_data.error)}
+          </span>
+        )}
+
+      {/* Warning for completed-with-no-files */}
+      {status === "COMPLETED" &&
+        activeTask?.progress_data?.warning != null && (
+          <span className="text-xs text-amber-500 ml-1">
+            — No audio files found
+          </span>
+        )}
+
       {/* Progress bar */}
       {status === "RUNNING" && percent !== null && (
         <div className="flex-1 max-w-xs">

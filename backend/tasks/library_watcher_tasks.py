@@ -12,13 +12,12 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-import psycopg
 import structlog
 from huey import crontab  # type: ignore[import-untyped]
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.sync_conn import connect_sync
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.models import ProgressTracking
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
@@ -29,13 +28,15 @@ from backend.tasks.huey_app import huey
 logger = structlog.get_logger()
 
 
+# NOTE: Periodic execution is suppressed by the -n flag in Procfile.
+# Decorator retained so the watcher can self-schedule if re-enabled.
 @huey.periodic_task(crontab(minute="*/4"))  # type: ignore[untyped-decorator]
 def library_watcher_poll() -> None:
     """Poll the library directory for changes every 4 minutes."""
     settings = get_settings()
 
-    with psycopg.connect(
-        settings.database_url, autocommit=False, row_factory=dict_row
+    with connect_sync(
+        settings.database_url, autocommit=False,
     ) as conn:
         repos = RepositoryFactory(conn)
 
@@ -82,14 +83,14 @@ def library_scan_files_task(
 
     try:
         # Autocommit connection for progress tracking
-        progress_conn = psycopg.connect(
-            settings.database_url, autocommit=True, row_factory=dict_row
+        progress_conn = connect_sync(
+            settings.database_url, autocommit=True,
         )
         progress_repo = PgProgressTrackingRepository(progress_conn)
 
         # Data connection
-        library_conn = psycopg.connect(
-            settings.database_url, autocommit=False, row_factory=dict_row
+        library_conn = connect_sync(
+            settings.database_url, autocommit=False,
         )
 
         # Advisory lock — prevent overlapping scans

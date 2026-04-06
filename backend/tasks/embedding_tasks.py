@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.log_artists import PgLogArtistRepository
 from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.sync_conn import connect_sync
 from backend.services import embedding_service
 from backend.tasks.huey_app import huey
 
@@ -21,7 +20,7 @@ def embedding_task(playlist_id: str) -> None:
     settings = get_settings()
     pid = UUID(playlist_id)
 
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
+    with connect_sync(settings.database_url) as conn:
         artist_repo = PgLogArtistRepository(conn)
         identity_repo = PgLogIdentityRepository(conn)
 

@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 
 class TestWatcherPollNoPath:
-    @patch("backend.tasks.library_watcher_tasks.psycopg")
-    def test_noop_when_no_path(self, mock_psycopg: MagicMock) -> None:
+    @patch("backend.tasks.library_watcher_tasks.connect_sync")
+    def test_noop_when_no_path(self, mock_connect: MagicMock) -> None:
         mock_conn = MagicMock()
-        mock_psycopg.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
-        mock_psycopg.connect.return_value.__exit__ = MagicMock(return_value=False)
+        mock_connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_connect.return_value.__exit__ = MagicMock(return_value=False)
 
         mock_settings = MagicMock()
         mock_settings.get.return_value = None
@@ -23,11 +23,11 @@ class TestWatcherPollNoPath:
 
 
 class TestWatcherPollNoChanges:
-    @patch("backend.tasks.library_watcher_tasks.psycopg")
-    def test_no_scan_when_no_changes(self, mock_psycopg: MagicMock) -> None:
+    @patch("backend.tasks.library_watcher_tasks.connect_sync")
+    def test_no_scan_when_no_changes(self, mock_connect: MagicMock) -> None:
         mock_conn = MagicMock()
-        mock_psycopg.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
-        mock_psycopg.connect.return_value.__exit__ = MagicMock(return_value=False)
+        mock_connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_connect.return_value.__exit__ = MagicMock(return_value=False)
 
         mock_settings = MagicMock()
         mock_settings.get.return_value = "/music"

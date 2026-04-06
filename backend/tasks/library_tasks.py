@@ -7,12 +7,13 @@ from pathlib import Path
 
 import psycopg
 import structlog
-from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.sync_conn import connect_sync
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
+from backend.services.folder_hash_service import diff_tree
 from backend.services.library_scan_service import scan_directory
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -44,10 +45,17 @@ def _run_scan(
     }
 
     files_written = 0
+    files_committed = 0
     quarantine_written = 0
     pending_writes = 0
 
     # --- Callbacks ---
+
+    def _flush_chunk() -> None:
+        nonlocal pending_writes, files_committed
+        library_conn.commit()
+        files_committed += pending_writes
+        pending_writes = 0
 
     def on_file(lf: LibraryFile) -> None:
         nonlocal pending_writes, files_written
@@ -55,8 +63,7 @@ def _run_scan(
         files_written += 1
         pending_writes += 1
         if pending_writes >= chunk_size:
-            library_conn.commit()
-            pending_writes = 0
+            _flush_chunk()
 
     def on_quarantine(entry: LibraryQuarantine) -> None:
         nonlocal pending_writes, quarantine_written
@@ -64,8 +71,7 @@ def _run_scan(
         quarantine_written += 1
         pending_writes += 1
         if pending_writes >= chunk_size:
-            library_conn.commit()
-            pending_writes = 0
+            _flush_chunk()
 
     def on_progress(processed: int, total: int, current_path: str) -> None:
         nonlocal last_progress
@@ -73,6 +79,7 @@ def _run_scan(
             "processed": processed,
             "total": total,
             "current_path": current_path,
+            "files_committed": files_committed,
         }
         progress_repo.upsert(
             ProgressTracking(
@@ -92,6 +99,9 @@ def _run_scan(
         on_file=on_file,
         on_quarantine=on_quarantine,
     )
+
+    # Build folder tree so library_folders is populated even on first scan
+    diff_tree(root_path, repos.library_folders)
 
     # Commit any remaining writes from the last partial chunk
     if pending_writes > 0:
@@ -119,8 +129,8 @@ def library_scan_task(root_path: str) -> str:
 
     try:
         # Autocommit connection for progress tracking
-        progress_conn = psycopg.connect(
-            settings.database_url, autocommit=True, row_factory=dict_row
+        progress_conn = connect_sync(
+            settings.database_url, autocommit=True,
         )
         progress_repo = PgProgressTrackingRepository(progress_conn)
 
@@ -137,8 +147,8 @@ def library_scan_task(root_path: str) -> str:
         )
 
         # Open library connection BEFORE scan so callbacks can write immediately
-        library_conn = psycopg.connect(
-            settings.database_url, autocommit=False, row_factory=dict_row
+        library_conn = connect_sync(
+            settings.database_url, autocommit=False,
         )
         repos = RepositoryFactory(library_conn)
 
@@ -149,6 +159,10 @@ def library_scan_task(root_path: str) -> str:
             progress_repo=progress_repo,
             task_id=task_id,
         )
+
+        if files_written == 0:
+            last_progress["warning"] = "no_audio_files_found"
+            logger.warning("library_scan_zero_files", root=root_path)
 
         # Mark completed AFTER library data commit succeeds
         progress_repo.upsert(
