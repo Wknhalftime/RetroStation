@@ -60,9 +60,13 @@ class TestRunScanChunkedCommits:
         # commit at file 3 (chunk boundary) + commit for remaining 2 at end = 2 commits
         assert mock_conn.commit.call_count == 2
 
+    @patch("backend.tasks.library_tasks.diff_tree")
     @patch("backend.tasks.library_tasks.scan_directory")
-    def test_commit_fires_once_when_exact_chunk(self, mock_scan: MagicMock) -> None:
-        """With chunk_size=3 and exactly 3 files, commit at boundary + no trailing = 1 commit."""
+    def test_commit_fires_twice_when_exact_chunk(
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
+    ) -> None:
+        """With chunk_size=3 and exactly 3 files, expect 2 commits:
+        one at the chunk boundary and one unconditional commit after diff_tree."""
         from backend.tasks.library_tasks import _run_scan
 
         files = [_make_lf(i) for i in range(3)]
@@ -74,6 +78,7 @@ class TestRunScanChunkedCommits:
             return files, []
 
         mock_scan.side_effect = fake_scan
+        mock_diff_tree.return_value = ([], [])
 
         mock_conn = MagicMock()
         mock_repos = MagicMock()
@@ -87,9 +92,10 @@ class TestRunScanChunkedCommits:
             chunk_size=3,
         )
 
-        # Exactly at boundary: commit fires at 3, pending_writes resets to 0,
-        # trailing commit is skipped because pending_writes == 0
-        assert mock_conn.commit.call_count == 1
+        # Chunk boundary fires at file 3 (pending_writes resets to 0).
+        # Then diff_tree is called, followed by an unconditional commit.
+        # Total: 2 commits.
+        assert mock_conn.commit.call_count == 2
 
     @patch("backend.tasks.library_tasks.scan_directory")
     def test_upsert_write_only_called_for_each_file(self, mock_scan: MagicMock) -> None:
@@ -152,9 +158,10 @@ class TestRunScanChunkedCommits:
         assert mock_repos.library_quarantine.create_write_only.call_count == 2
         mock_repos.library_quarantine.create.assert_not_called()
 
+    @patch("backend.tasks.library_tasks.diff_tree")
     @patch("backend.tasks.library_tasks.scan_directory")
     def test_mixed_files_and_quarantine_share_chunk_counter(
-        self, mock_scan: MagicMock
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
     ) -> None:
         """Files and quarantine entries both count toward the chunk boundary."""
         from backend.tasks.library_tasks import _run_scan
@@ -169,6 +176,7 @@ class TestRunScanChunkedCommits:
             return [_make_lf(0), _make_lf(1)], [_make_q(0)]
 
         mock_scan.side_effect = fake_scan
+        mock_diff_tree.return_value = ([], [])
 
         mock_conn = MagicMock()
         mock_repos = MagicMock()
@@ -182,8 +190,9 @@ class TestRunScanChunkedCommits:
             chunk_size=3,
         )
 
-        # Exactly at boundary, so 1 commit (no trailing)
-        assert mock_conn.commit.call_count == 1
+        # Chunk boundary fires (pending_writes resets to 0), then unconditional
+        # commit after diff_tree.  Total: 2 commits.
+        assert mock_conn.commit.call_count == 2
 
     @patch("backend.tasks.library_tasks.scan_directory")
     def test_returns_counts_and_progress(self, mock_scan: MagicMock) -> None:
