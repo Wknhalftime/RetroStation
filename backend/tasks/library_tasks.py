@@ -15,6 +15,7 @@ from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking, SystemLog
 from backend.services.folder_hash_service import diff_tree
+from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_directory
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -49,6 +50,7 @@ def _run_scan(
     files_committed = 0
     quarantine_written = 0
     pending_writes = 0
+    written_files: list[LibraryFile] = []
 
     # --- Callbacks ---
 
@@ -63,6 +65,7 @@ def _run_scan(
         repos.library_files.upsert_write_only(lf)
         files_written += 1
         pending_writes += 1
+        written_files.append(lf)
         if pending_writes >= chunk_size:
             _flush_chunk()
 
@@ -108,6 +111,29 @@ def _run_scan(
     # regardless of whether any audio files were scanned, so we must not guard
     # this commit behind pending_writes > 0.
     library_conn.commit()
+
+    # --- Grouping pass: assign work_id to newly written files ---
+    grouped = 0
+    for lf in written_files:
+        if lf.work_id is not None:
+            continue
+        try:
+            work_id = assign_work(
+                lf,
+                artist_repo=repos.artists,
+                work_repo=repos.works,
+                library_file_repo=repos.library_files,
+                recording_repo=repos.recordings,
+                song_master_repo=repos.song_masters,
+            )
+            if work_id:
+                repos.library_files.update_work_id(lf.id, work_id)
+                grouped += 1
+        except Exception:  # noqa: BLE001
+            logger.warning("grouping_failed", file_id=str(lf.id), exc_info=True)
+    if grouped > 0:
+        library_conn.commit()
+        logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
 
     return files_written, quarantine_written, last_progress
 

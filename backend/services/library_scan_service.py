@@ -28,6 +28,7 @@ from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, Re
 from backend.domain.models import LibraryFile, LibraryQuarantine
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
+from backend.services.normalization import normalize_artist, normalize_title
 
 logger = structlog.get_logger()
 
@@ -172,6 +173,7 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     release_type = _to_release_type(_txxx(tags, _TXXX_RELEASE_TYPE))
     release_status = _to_release_status(_txxx(tags, _TXXX_RELEASE_STATUS))
 
+    artist_name = _first(tags, "TPE1")
     track_title = _first(tags, "TIT2")
     release_title = _first(tags, "TALB")
     track_number = _parse_slash_int(_first(tags, "TRCK"))
@@ -198,6 +200,13 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
         duration_ms=duration_ms,
         bitrate=bitrate,
         raw_metadata=_raw_metadata(audio),
+        artist_name=artist_name,
+        normalized_artist_name=(
+            normalize_artist(artist_name) if artist_name else None
+        ),
+        normalized_title=(
+            normalize_title(track_title) if track_title else None
+        ),
     )
 
 
@@ -216,6 +225,7 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     release_type = _to_release_type(_first(tags, "releasetype"))
     release_status = _to_release_status(_first(tags, "releasestatus"))
 
+    artist_name = _first(tags, "artist")
     track_title = _first(tags, "title")
     release_title = _first(tags, "album")
     track_number = _parse_slash_int(_first(tags, "tracknumber"))
@@ -242,6 +252,13 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
         duration_ms=duration_ms,
         bitrate=bitrate,
         raw_metadata=_raw_metadata(audio),
+        artist_name=artist_name,
+        normalized_artist_name=(
+            normalize_artist(artist_name) if artist_name else None
+        ),
+        normalized_title=(
+            normalize_title(track_title) if track_title else None
+        ),
     )
 
 
