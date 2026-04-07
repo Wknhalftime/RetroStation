@@ -346,33 +346,65 @@ async def get_artist_detail(
             detail=f"Artist {artist_id} not found",
         )
 
+    # Try works table first (populated by grouping service)
     works_cur = await conn.execute(
         """
         SELECT
             w.id,
             w.title,
-            COUNT(DISTINCT r.id)  AS recording_count,
+            w.mbid,
+            w.origin,
+            COUNT(DISTINCT lf.id) AS recording_count,
             COUNT(DISTINCT sm.id) AS master_count
         FROM works w
-        LEFT JOIN recordings r  ON r.work_id = w.id
+        LEFT JOIN library_files lf ON lf.work_id = w.id
         LEFT JOIN song_masters sm ON sm.work_id = w.id
         WHERE w.artist_id = %s
-        GROUP BY w.id, w.title
+        GROUP BY w.id, w.title, w.mbid, w.origin
         ORDER BY w.title
         """,
         (artist_id,),
     )
     work_rows = await works_cur.fetchall()
 
-    works = [
-        WorkSummary(
-            id=row["id"],
-            title=row["title"],
-            recording_count=row["recording_count"],
-            has_master=row["master_count"] > 0,
+    # Fallback: if no works rows, derive from library_files directly
+    # (handles pre-grouping state where files have artist_mbid but no work_id)
+    if not work_rows:
+        works_cur = await conn.execute(
+            """
+            SELECT
+                lf.track_title AS title,
+                COUNT(*) AS recording_count
+            FROM library_files lf
+            WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
+              AND lf.track_title IS NOT NULL
+            GROUP BY lf.track_title
+            ORDER BY lf.track_title
+            """,
+            (artist_id, artist_id),
         )
-        for row in work_rows
-    ]
+        work_rows = await works_cur.fetchall()
+        works = [
+            WorkSummary(
+                id=artist_id + ":" + (row["title"] or "unknown"),
+                title=row["title"] or "Unknown",
+                recording_count=row["recording_count"],
+                has_master=False,
+            )
+            for row in work_rows
+        ]
+    else:
+        works = [
+            WorkSummary(
+                id=row["id"],
+                title=row["title"],
+                recording_count=row["recording_count"],
+                has_master=row["master_count"] > 0,
+                mbid=row.get("mbid"),
+                origin=row.get("origin", "local"),
+            )
+            for row in work_rows
+        ]
 
     return ArtistDetail(
         id=artist_row["id"],
