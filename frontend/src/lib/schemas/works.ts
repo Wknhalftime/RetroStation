@@ -70,6 +70,8 @@ export const WorkDetailSchema = z.object({
   recordings: z.array(RecordingDetailSchema),
   song_master: SongMasterInfoSchema.nullable(),
   format_overrides: z.array(FormatOverrideInfoSchema),
+  mbid: z.string().nullable().default(null),
+  origin: z.enum(["local", "musicbrainz"]).default("local"),
 });
 
 export type WorkDetail = z.infer<typeof WorkDetailSchema>;
