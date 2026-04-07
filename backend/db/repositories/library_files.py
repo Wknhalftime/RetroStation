@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +10,8 @@ import psycopg
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.models import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
+
+logger = logging.getLogger(__name__)
 
 
 class PgLibraryFileRepository(LibraryFileRepository):
@@ -47,6 +50,10 @@ class PgLibraryFileRepository(LibraryFileRepository):
             duration_ms=row.get("duration_ms"),
             bitrate=row.get("bitrate"),
             raw_metadata=raw,
+            artist_name=row.get("artist_name"),
+            normalized_artist_name=row.get("normalized_artist_name"),
+            normalized_title=row.get("normalized_title"),
+            work_id=row.get("work_id"),
         )
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
@@ -58,6 +65,8 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 album_artist_mbid, release_mbid, release_title, release_type,
                 release_type_secondary, release_status, track_title,
                 track_number, disc_number, duration_ms, bitrate, raw_metadata,
+                artist_name, normalized_artist_name, normalized_title,
+                work_id,
                 indexed_at
             ) VALUES (
                 %s, %s, %s, %s, %s,
@@ -65,6 +74,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
                 NOW()
             )
             ON CONFLICT (file_path) DO UPDATE SET
@@ -92,6 +102,20 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 duration_ms            = EXCLUDED.duration_ms,
                 bitrate                = EXCLUDED.bitrate,
                 raw_metadata           = EXCLUDED.raw_metadata,
+                work_id                = CASE
+                    WHEN library_files.file_hash = EXCLUDED.file_hash
+                    THEN library_files.work_id
+                    ELSE NULL
+                END,
+                normalized_artist_name = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.normalized_artist_name), ''),
+                    library_files.normalized_artist_name),
+                normalized_title       = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.normalized_title), ''),
+                    library_files.normalized_title),
+                artist_name            = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.artist_name), ''),
+                    library_files.artist_name),
                 indexed_at             = NOW()
             """,
             (
@@ -115,7 +139,12 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 file.disc_number,
                 file.duration_ms,
                 file.bitrate,
-                json.dumps(file.raw_metadata) if file.raw_metadata is not None else None,
+                json.dumps(file.raw_metadata)
+                if file.raw_metadata is not None else None,
+                file.artist_name,
+                file.normalized_artist_name,
+                file.normalized_title,
+                file.work_id,
             ),
         )
         row = self._conn.execute(
@@ -136,6 +165,8 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 album_artist_mbid, release_mbid, release_title, release_type,
                 release_type_secondary, release_status, track_title,
                 track_number, disc_number, duration_ms, bitrate, raw_metadata,
+                artist_name, normalized_artist_name, normalized_title,
+                work_id,
                 indexed_at
             ) VALUES (
                 %s, %s, %s, %s, %s,
@@ -143,6 +174,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
                 NOW()
             )
             ON CONFLICT (file_path) DO UPDATE SET
@@ -170,6 +202,20 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 duration_ms            = EXCLUDED.duration_ms,
                 bitrate                = EXCLUDED.bitrate,
                 raw_metadata           = EXCLUDED.raw_metadata,
+                work_id                = CASE
+                    WHEN library_files.file_hash = EXCLUDED.file_hash
+                    THEN library_files.work_id
+                    ELSE NULL
+                END,
+                normalized_artist_name = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.normalized_artist_name), ''),
+                    library_files.normalized_artist_name),
+                normalized_title       = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.normalized_title), ''),
+                    library_files.normalized_title),
+                artist_name            = COALESCE(
+                    NULLIF(TRIM(EXCLUDED.artist_name), ''),
+                    library_files.artist_name),
                 indexed_at             = NOW()
             """,
             (
@@ -193,7 +239,12 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 file.disc_number,
                 file.duration_ms,
                 file.bitrate,
-                json.dumps(file.raw_metadata) if file.raw_metadata is not None else None,
+                json.dumps(file.raw_metadata)
+                if file.raw_metadata is not None else None,
+                file.artist_name,
+                file.normalized_artist_name,
+                file.normalized_title,
+                file.work_id,
             ),
         )
 
@@ -288,6 +339,44 @@ class PgLibraryFileRepository(LibraryFileRepository):
 
     def mark_missing(self, file_path: str) -> None:
         self._conn.execute(
-            "UPDATE library_files SET file_status = 'MISSING' WHERE file_path = %s",
+            "UPDATE library_files SET file_status = 'MISSING'"
+            " WHERE file_path = %s",
             (file_path,),
         )
+
+    def get_candidates_by_artist(
+        self, normalized_artist_name: str, limit: int = 100,
+    ) -> list[tuple[str, str]]:
+        rows = self._conn.execute(
+            """SELECT work_id, MIN(normalized_title) AS sample_title
+               FROM library_files
+               WHERE normalized_artist_name = %s
+                 AND work_id IS NOT NULL
+                 AND normalized_title IS NOT NULL
+                 AND normalized_title != ''
+               GROUP BY work_id
+               ORDER BY work_id
+               LIMIT %s""",
+            (normalized_artist_name, limit),
+        ).fetchall()
+        if len(rows) >= limit:
+            logger.warning(
+                "Candidate cap hit for artist %s (limit=%d)",
+                normalized_artist_name, limit,
+            )
+        return [(r["work_id"], r["sample_title"]) for r in rows]
+
+    def update_work_id(
+        self, file_id: UUID, work_id: str | None,
+    ) -> None:
+        self._conn.execute(
+            "UPDATE library_files SET work_id = %s WHERE id = %s",
+            (work_id, str(file_id)),
+        )
+
+    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE file_hash = %s",
+            (file_hash,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]

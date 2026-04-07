@@ -81,6 +81,11 @@ class SelectionMethod(StrEnum):
     MANUAL = "manual"
 
 
+class Origin(StrEnum):
+    LOCAL        = "local"
+    MUSICBRAINZ  = "musicbrainz"
+
+
 class TaskType(StrEnum):
     SCAN        = "scan"
     ENRICHMENT  = "enrichment"

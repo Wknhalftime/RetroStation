@@ -21,6 +21,7 @@ from backend.db.sync_conn import connect_sync
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.models import ProgressTracking
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
+from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_smart
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -130,6 +131,35 @@ def library_scan_files_task(
             )
             total_written += result.files_written
             library_conn.commit()
+
+            # Grouping pass for files in this folder without a work_id
+            if result.files_written > 0:
+                folder_files = repos.library_files.get_by_folder_path(
+                    folder_path,
+                )
+                for lf in folder_files:
+                    if lf.work_id is not None:
+                        continue
+                    try:
+                        work_id = assign_work(
+                            lf,
+                            artist_repo=repos.artists,
+                            work_repo=repos.works,
+                            library_file_repo=repos.library_files,
+                            recording_repo=repos.recordings,
+                            song_master_repo=repos.song_masters,
+                        )
+                        if work_id:
+                            repos.library_files.update_work_id(
+                                lf.id, work_id,
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "watcher_grouping_failed",
+                            file_id=str(lf.id),
+                            exc_info=True,
+                        )
+                library_conn.commit()
 
             progress_repo.upsert(
                 ProgressTracking(

@@ -21,3 +21,21 @@ class WorkRepository(ABC):
 
     @abstractmethod
     def update_embedding(self, mbid: str, embedding: list[float]) -> None: ...
+
+    @abstractmethod
+    def create_local(self, title: str, artist_id: str) -> str:
+        """Create a local-origin work. Returns work id."""
+        ...
+
+    @abstractmethod
+    def upsert_from_mb(self, mbid: str, title: str, artist_id: str) -> str:
+        """Collision check with FOR UPDATE. Merge or create. Returns work id."""
+        ...
+
+    @abstractmethod
+    def get_by_mbid(self, mbid: str) -> Work | None: ...
+
+    @abstractmethod
+    def delete_if_empty(self, work_id: str) -> bool:
+        """Delete work if no library_files reference it. Returns True if deleted."""
+        ...

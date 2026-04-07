@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 
+from backend.domain.enums import Origin
 from backend.domain.models import Artist
 from backend.repositories.artists import ArtistRepository
 
@@ -21,6 +23,13 @@ class PgArtistRepository(ArtistRepository):
             needs_enhancement=row["needs_enhancement"],
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
+            mbid=row.get("mbid"),
+            origin=(
+                Origin(row["origin"])
+                if row.get("origin")
+                else Origin.LOCAL
+            ),
+            normalized_name=row.get("normalized_name"),
         )
 
     def upsert(self, artist: Artist) -> Artist:
@@ -69,3 +78,70 @@ class PgArtistRepository(ArtistRepository):
             "UPDATE artists SET enhancement_error = %s WHERE id = %s",
             (error, mbid),
         )
+
+    def upsert_local(self, name: str, normalized_name: str) -> str:
+        row = self._conn.execute(
+            """INSERT INTO artists
+                   (id, name, sort_name, normalized_name,
+                    origin, needs_enhancement)
+               VALUES (%s, %s, %s, %s, 'local', FALSE)
+               ON CONFLICT (normalized_name) DO NOTHING
+               RETURNING id""",
+            (str(uuid4()), name, name, normalized_name),
+        ).fetchone()
+        if row is not None:
+            return row["id"]
+        row = self._conn.execute(
+            "SELECT id FROM artists WHERE normalized_name = %s",
+            (normalized_name,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"Artist not found after ON CONFLICT: {normalized_name}"
+            )
+        return row["id"]
+
+    def upsert_from_mb(
+        self,
+        mbid: str,
+        name: str,
+        sort_name: str,
+        disambiguation: str | None = None,
+    ) -> str:
+        row = self._conn.execute(
+            "SELECT id FROM artists WHERE mbid = %s",
+            (mbid,),
+        ).fetchone()
+        if row is not None:
+            return row["id"]
+        from backend.services.normalization import normalize_artist
+        norm = normalize_artist(name)
+        row = self._conn.execute(
+            """INSERT INTO artists
+                   (id, name, sort_name, normalized_name, mbid,
+                    origin, needs_enhancement, disambiguation)
+               VALUES (%s, %s, %s, %s, %s, 'musicbrainz', TRUE, %s)
+               ON CONFLICT (normalized_name) DO UPDATE SET
+                 mbid = EXCLUDED.mbid,
+                 origin = 'musicbrainz',
+                 name = EXCLUDED.name,
+                 sort_name = EXCLUDED.sort_name,
+                 disambiguation = EXCLUDED.disambiguation,
+                 needs_enhancement = TRUE
+               RETURNING id""",
+            (str(uuid4()), name, sort_name, norm, mbid, disambiguation),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"Artist upsert_from_mb failed: {mbid}"
+            )
+        return row["id"]
+
+    def get_by_normalized_name(
+        self, normalized_name: str,
+    ) -> Artist | None:
+        row = self._conn.execute(
+            "SELECT * FROM artists WHERE normalized_name = %s",
+            (normalized_name,),
+        ).fetchone()
+        return self._row_to_model(row) if row else None

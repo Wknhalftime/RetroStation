@@ -5,7 +5,7 @@ from typing import Any, Protocol
 import structlog
 
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import Artist, Recording, Work
+from backend.domain.models import Recording
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
@@ -79,13 +79,14 @@ def enrich_by_release(
     # Extract artist from release-level credits
     artist_credits: list[dict[str, Any]] = release_data.get("artist-credit", [])
     artist_info = _extract_artist_from_credits(artist_credits)
+    artist_id: str | None = None
     if artist_info:
         artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_repo.upsert(Artist(
-            id=artist_mbid,
+        artist_id = artist_repo.upsert_from_mb(
+            mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
-        ))
+        )
 
     # Build recording map: recording_mbid -> recording dict from media tracks
     recording_map: dict[str, dict[str, Any]] = {}
@@ -121,14 +122,13 @@ def enrich_by_release(
         relations: list[dict[str, Any]] = rec_data.get("relations", [])
         work_info = _extract_work_from_relations(relations)
         work_id: str | None = None
-        if work_info and artist_info:
+        if work_info and artist_id is not None:
             work_mbid, work_title = work_info
-            work_repo.upsert(Work(
-                id=work_mbid,
+            work_id = work_repo.upsert_from_mb(
+                mbid=work_mbid,
                 title=work_title,
-                artist_id=artist_info[0],
-            ))
-            work_id = work_mbid
+                artist_id=artist_id,
+            )
 
         # Upsert recording
         recording_repo.upsert(Recording(
@@ -141,6 +141,11 @@ def enrich_by_release(
         library_file_repo.update_recording_link(
             lf.id, rec_mbid, EnrichmentStatus.ENRICHED
         )
+
+        # Sync work_id to library_file
+        if work_id is not None:
+            library_file_repo.update_work_id(lf.id, work_id)
+
         enriched_count += 1
         logger.debug(
             "library_file_enriched",
@@ -185,26 +190,26 @@ def enrich_by_recording(
     # Extract artist from recording-level credits
     artist_credits: list[dict[str, Any]] = rec_data.get("artist-credit", [])
     artist_info = _extract_artist_from_credits(artist_credits)
+    artist_id: str | None = None
     if artist_info:
         artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_repo.upsert(Artist(
-            id=artist_mbid,
+        artist_id = artist_repo.upsert_from_mb(
+            mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
-        ))
+        )
 
     # Extract work from relations
     relations: list[dict[str, Any]] = rec_data.get("relations", [])
     work_info = _extract_work_from_relations(relations)
     work_id: str | None = None
-    if work_info and artist_info:
+    if work_info and artist_id is not None:
         work_mbid, work_title = work_info
-        work_repo.upsert(Work(
-            id=work_mbid,
+        work_id = work_repo.upsert_from_mb(
+            mbid=work_mbid,
             title=work_title,
-            artist_id=artist_info[0],
-        ))
-        work_id = work_mbid
+            artist_id=artist_id,
+        )
 
     # Upsert recording
     recording_repo.upsert(Recording(
@@ -219,8 +224,15 @@ def enrich_by_recording(
         library_file_repo.update_recording_link(
             lf.id, recording_mbid, EnrichmentStatus.ENRICHED
         )
+        # Sync work_id to library_file
+        if work_id is not None:
+            library_file_repo.update_work_id(lf.id, work_id)
         enriched_count += 1
-        logger.debug("library_file_enriched", file_id=str(lf.id), recording_mbid=recording_mbid)
+        logger.debug(
+            "library_file_enriched",
+            file_id=str(lf.id),
+            recording_mbid=recording_mbid,
+        )
 
     logger.info(
         "enrich_by_recording_complete",

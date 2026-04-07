@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
+from backend.domain.enums import Origin
 from backend.tasks.library_tasks import library_scan_task
 
 router = APIRouter()
@@ -52,6 +53,8 @@ class ArtistSummary(BaseModel):
     disambiguation: str | None
     work_count: int
     file_count: int
+    mbid: str | None = None
+    origin: str = "local"
 
 
 class PaginatedArtists(BaseModel):
@@ -69,6 +72,8 @@ class WorkSummary(BaseModel):
     title: str
     recording_count: int
     has_master: bool
+    mbid: str | None = None
+    origin: str = "local"
 
 
 class ArtistDetail(BaseModel):
@@ -688,3 +693,490 @@ async def delete_format_override(
             detail=f"Format override {override_id} not found for work {work_id}",
         )
     await conn.execute("DELETE FROM format_overrides WHERE id = %s", (override_id,))
+
+
+# ---------------------------------------------------------------------------
+# Schemas — merge / split / reassign
+# ---------------------------------------------------------------------------
+
+
+class MergeRequest(BaseModel):
+    source_work_ids: list[str]
+
+
+class MergeResponse(BaseModel):
+    merged_file_count: int
+    deleted_work_count: int
+    dropped_override_count: int
+
+
+class SplitRequest(BaseModel):
+    file_id: UUID
+
+
+class SplitResponse(BaseModel):
+    new_work_id: str
+    old_work_deleted: bool
+
+
+class ReassignRequest(BaseModel):
+    work_id: str
+
+
+class ReassignResponse(BaseModel):
+    old_work_id: str | None
+    old_work_deleted: bool
+
+
+# ---------------------------------------------------------------------------
+# Routes — merge / split / reassign
+# ---------------------------------------------------------------------------
+
+
+async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> None:
+    """Recalculate the auto song master for a work using async SQL.
+
+    Skips recalculation if a manual master already exists for the work.
+    Upserts the best-scored file as the new auto master.
+    """
+    # Skip if a manual selection exists
+    sm_cur = await conn.execute(
+        "SELECT selection_method FROM song_masters WHERE work_id = %s",
+        (work_id,),
+    )
+    sm_row = await sm_cur.fetchone()
+    if sm_row is not None and sm_row["selection_method"] == "manual":
+        return
+
+    # Gather all files for this work via recording chain
+    files_cur = await conn.execute(
+        """
+        SELECT
+            lf.id,
+            lf.release_status,
+            lf.release_type,
+            lf.format,
+            lf.bitrate,
+            lf.duration_ms
+        FROM library_files lf
+        JOIN recordings r ON lf.recording_id = r.id
+        WHERE r.work_id = %s
+        """,
+        (work_id,),
+    )
+    file_rows = await files_cur.fetchall()
+    if not file_rows:
+        return
+
+    # Scoring constants matching master_selection_service
+    release_status_score: dict[str, int] = {"promotion": 100, "official": 0}
+    release_type_score: dict[str, int] = {
+        "album": 80, "ep": 70, "single": 60,
+        "compilation": 40, "live": 30, "other": 20,
+    }
+    format_bonus: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
+
+    def _score(row: dict[str, Any]) -> tuple[int, int, int]:
+        score = 0
+        rs = row.get("release_status")
+        if rs:
+            score += release_status_score.get(rs, 0)
+        rt = row.get("release_type")
+        if rt:
+            score += release_type_score.get(rt, release_type_score["other"])
+        fmt = (row.get("format") or "").lower()
+        score += format_bonus.get(fmt, 1)
+        return score, row.get("bitrate") or 0, row.get("duration_ms") or 0
+
+    best = max(file_rows, key=_score)
+    score_val, _, _ = _score(best)
+
+    existing_id: UUID | None = None
+    if sm_row is not None:
+        id_cur = await conn.execute(
+            "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
+        )
+        id_row = await id_cur.fetchone()
+        if id_row:
+            existing_id = id_row["id"]
+
+    master_id = existing_id if existing_id is not None else uuid4()
+    await conn.execute(
+        """
+        INSERT INTO song_masters
+            (id, work_id, preferred_file_id, selection_method, score, updated_at)
+        VALUES (%s, %s, %s, 'auto', %s, now())
+        ON CONFLICT (work_id) DO UPDATE SET
+            preferred_file_id = EXCLUDED.preferred_file_id,
+            selection_method  = 'auto',
+            score             = EXCLUDED.score,
+            updated_at        = now()
+        """,
+        (master_id, work_id, best["id"], score_val),
+    )
+
+
+@router.post("/works/{target_id}/merge", response_model=MergeResponse)
+async def merge_works(
+    target_id: str, body: MergeRequest, conn: DbConn, _token: Token
+) -> MergeResponse:
+    """Merge one or more source works into a target work.
+
+    Moves all files, format overrides, and recordings from source works into
+    the target work, then deletes the now-empty source works. Recalculates
+    the song master for the target work afterward.
+
+    Args:
+        target_id: The work to merge into.
+        body: Contains ``source_work_ids`` list.
+        conn: Async database connection.
+        _token: Auth token.
+
+    Returns:
+        :class:`MergeResponse` with counts of moved files, deleted works, and dropped overrides.
+
+    Raises:
+        HTTPException: 404 if the target work does not exist.
+        HTTPException: 422 if target_id appears in source_work_ids.
+    """
+    # Verify target exists
+    target_cur = await conn.execute(
+        "SELECT id, artist_id FROM works WHERE id = %s", (target_id,)
+    )
+    target_row = await target_cur.fetchone()
+    if target_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Work {target_id} not found",
+        )
+
+    # Validate target not in sources
+    if target_id in body.source_work_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Target work ID must not appear in source_work_ids",
+        )
+
+    if not body.source_work_ids:
+        return MergeResponse(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
+
+    # Filter to existing sources (idempotency — missing sources are no-op)
+    placeholders = ", ".join("%s" for _ in body.source_work_ids)
+    exist_cur = await conn.execute(
+        f"SELECT id, artist_id FROM works WHERE id IN ({placeholders})",
+        body.source_work_ids,
+    )
+    existing_source_rows = await exist_cur.fetchall()
+    existing_source_ids = [r["id"] for r in existing_source_rows]
+
+    if not existing_source_ids:
+        return MergeResponse(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
+
+    merged_file_count = 0
+    dropped_override_count = 0
+
+    src_placeholders = ", ".join("%s" for _ in existing_source_ids)
+
+    # Move library_files (work_id column)
+    files_cur = await conn.execute(
+        f"UPDATE library_files SET work_id = %s WHERE work_id IN ({src_placeholders})",
+        [target_id, *existing_source_ids],
+    )
+    merged_file_count = files_cur.rowcount if files_cur.rowcount is not None else 0
+
+    # Move format_overrides — drop conflicts first (unique constraint on work_id, format_name)
+    conflict_cur = await conn.execute(
+        f"""
+        SELECT fo_src.id AS src_id
+        FROM format_overrides fo_src
+        JOIN format_overrides fo_tgt
+          ON fo_tgt.work_id = %s AND fo_tgt.format_name = fo_src.format_name
+        WHERE fo_src.work_id IN ({src_placeholders})
+        """,
+        [target_id, *existing_source_ids],
+    )
+    conflict_rows = await conflict_cur.fetchall()
+    dropped_override_count = len(conflict_rows)
+
+    if conflict_rows:
+        conflict_ids = [r["src_id"] for r in conflict_rows]
+        conf_placeholders = ", ".join("%s" for _ in conflict_ids)
+        await conn.execute(
+            f"DELETE FROM format_overrides WHERE id IN ({conf_placeholders})",
+            conflict_ids,
+        )
+
+    # Move non-conflicting overrides to target
+    await conn.execute(
+        f"UPDATE format_overrides SET work_id = %s WHERE work_id IN ({src_placeholders})",
+        [target_id, *existing_source_ids],
+    )
+
+    # Move recordings to target work
+    await conn.execute(
+        f"UPDATE recordings SET work_id = %s WHERE work_id IN ({src_placeholders})",
+        [target_id, *existing_source_ids],
+    )
+
+    # Re-link matches scoped to WORK target type
+    await conn.execute(
+        f"""
+        UPDATE matches
+        SET target_id = %s
+        WHERE target_type = 'Work' AND target_id IN ({src_placeholders})
+        """,
+        [target_id, *existing_source_ids],
+    )
+
+    # Delete song_masters for source works, then delete source works
+    await conn.execute(
+        f"DELETE FROM song_masters WHERE work_id IN ({src_placeholders})",
+        existing_source_ids,
+    )
+    deleted_cur = await conn.execute(
+        f"DELETE FROM works WHERE id IN ({src_placeholders}) RETURNING id",
+        existing_source_ids,
+    )
+    deleted_rows = await deleted_cur.fetchall()
+    deleted_work_count = len(deleted_rows)
+
+    # Recalculate song master for target
+    await _recalculate_song_master(conn, target_id)
+
+    # Orphan cleanup: delete local artists with no remaining works
+    source_artist_ids = list({r["artist_id"] for r in existing_source_rows})
+    for artist_id in source_artist_ids:
+        if artist_id == target_row["artist_id"]:
+            continue
+        artist_cur = await conn.execute(
+            "SELECT origin FROM artists WHERE id = %s", (artist_id,)
+        )
+        artist_row = await artist_cur.fetchone()
+        if artist_row is None:
+            continue
+        if artist_row["origin"] != Origin.LOCAL:
+            continue
+        works_cur = await conn.execute(
+            "SELECT id FROM works WHERE artist_id = %s LIMIT 1", (artist_id,)
+        )
+        if await works_cur.fetchone() is None:
+            await conn.execute("DELETE FROM artists WHERE id = %s", (artist_id,))
+
+    return MergeResponse(
+        merged_file_count=merged_file_count,
+        deleted_work_count=deleted_work_count,
+        dropped_override_count=dropped_override_count,
+    )
+
+
+@router.post(
+    "/works/{work_id}/split",
+    response_model=SplitResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def split_work(
+    work_id: str, body: SplitRequest, conn: DbConn, _token: Token
+) -> SplitResponse:
+    """Split a single file out of a work into its own new work.
+
+    Creates a new local work (same artist and title), moves the file's recording
+    to the new work, creates a song master for the new work, and deletes the old
+    work if it becomes empty.
+
+    Args:
+        work_id: The source work containing the file.
+        body: Contains ``file_id`` to split out.
+        conn: Async database connection.
+        _token: Auth token.
+
+    Returns:
+        :class:`SplitResponse` with new work ID and whether the old work was deleted.
+
+    Raises:
+        HTTPException: 404 if the work does not exist.
+        HTTPException: 422 if the file does not belong to this work.
+    """
+    # Verify work exists
+    work_cur = await conn.execute(
+        "SELECT id, title, artist_id FROM works WHERE id = %s", (work_id,)
+    )
+    work_row = await work_cur.fetchone()
+    if work_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Work {work_id} not found",
+        )
+
+    # Verify file exists and belongs to this work (via recording chain)
+    file_cur = await conn.execute(
+        """
+        SELECT lf.id, lf.recording_id
+        FROM library_files lf
+        JOIN recordings r ON lf.recording_id = r.id
+        WHERE lf.id = %s AND r.work_id = %s
+        """,
+        (body.file_id, work_id),
+    )
+    file_row = await file_cur.fetchone()
+    if file_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File {body.file_id} does not belong to work {work_id}",
+        )
+
+    recording_id = file_row["recording_id"]
+
+    # Create new local work
+    new_work_id = str(uuid4())
+    await conn.execute(
+        """
+        INSERT INTO works (id, title, artist_id, origin, needs_enhancement)
+        VALUES (%s, %s, %s, 'local', FALSE)
+        """,
+        (new_work_id, work_row["title"], work_row["artist_id"]),
+    )
+
+    # Move the recording to the new work
+    await conn.execute(
+        "UPDATE recordings SET work_id = %s WHERE id = %s",
+        (new_work_id, recording_id),
+    )
+
+    # Update work_id on the file itself (denormalised column)
+    await conn.execute(
+        "UPDATE library_files SET work_id = %s WHERE id = %s",
+        (new_work_id, body.file_id),
+    )
+
+    # Create song master for new work
+    new_master_id = uuid4()
+    await conn.execute(
+        """
+        INSERT INTO song_masters
+            (id, work_id, preferred_file_id, selection_method, score, updated_at)
+        VALUES (%s, %s, %s, 'auto', NULL, now())
+        """,
+        (new_master_id, new_work_id, body.file_id),
+    )
+
+    # Delete old work if now empty (no files remaining)
+    count_cur = await conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM library_files lf
+        JOIN recordings r ON lf.recording_id = r.id
+        WHERE r.work_id = %s
+        """,
+        (work_id,),
+    )
+    count_row = await count_cur.fetchone()
+    old_work_deleted = False
+    if count_row and count_row["cnt"] == 0:
+        await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
+        await conn.execute("DELETE FROM works WHERE id = %s", (work_id,))
+        old_work_deleted = True
+    else:
+        # Recalculate master for the old work (it lost a file)
+        await _recalculate_song_master(conn, work_id)
+
+    return SplitResponse(new_work_id=new_work_id, old_work_deleted=old_work_deleted)
+
+
+@router.patch("/files/{file_id}/work", response_model=ReassignResponse)
+async def reassign_file_work(
+    file_id: UUID, body: ReassignRequest, conn: DbConn, _token: Token
+) -> ReassignResponse:
+    """Reassign a library file to a different work.
+
+    Moves the file (and its recording) to the target work, then cleans up the
+    old work if it becomes empty.
+
+    Args:
+        file_id: The UUID of the file to reassign.
+        body: Contains ``work_id`` of the target work.
+        conn: Async database connection.
+        _token: Auth token.
+
+    Returns:
+        :class:`ReassignResponse` with the old work ID and whether it was deleted.
+
+    Raises:
+        HTTPException: 404 if the file or target work does not exist.
+        HTTPException: 422 if the file is already assigned to the target work.
+    """
+    # Verify file exists and get current work
+    file_cur = await conn.execute(
+        """
+        SELECT lf.id, lf.recording_id, r.work_id AS current_work_id
+        FROM library_files lf
+        LEFT JOIN recordings r ON lf.recording_id = r.id
+        WHERE lf.id = %s
+        """,
+        (file_id,),
+    )
+    file_row = await file_cur.fetchone()
+    if file_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File {file_id} not found",
+        )
+
+    current_work_id: str | None = file_row["current_work_id"]
+    recording_id: str | None = file_row["recording_id"]
+
+    # Verify target work exists
+    target_cur = await conn.execute(
+        "SELECT id FROM works WHERE id = %s", (body.work_id,)
+    )
+    if await target_cur.fetchone() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Work {body.work_id} not found",
+        )
+
+    # Verify file not already in target work
+    if current_work_id == body.work_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File {file_id} is already assigned to work {body.work_id}",
+        )
+
+    # Move recording to target work
+    if recording_id is not None:
+        await conn.execute(
+            "UPDATE recordings SET work_id = %s WHERE id = %s",
+            (body.work_id, recording_id),
+        )
+
+    # Update denormalised work_id on the file
+    await conn.execute(
+        "UPDATE library_files SET work_id = %s WHERE id = %s",
+        (body.work_id, file_id),
+    )
+
+    # Recalculate master for the target work
+    await _recalculate_song_master(conn, body.work_id)
+
+    # Handle old work cleanup
+    old_work_deleted = False
+    if current_work_id is not None:
+        count_cur = await conn.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM library_files lf
+            JOIN recordings r ON lf.recording_id = r.id
+            WHERE r.work_id = %s
+            """,
+            (current_work_id,),
+        )
+        count_row = await count_cur.fetchone()
+        if count_row and count_row["cnt"] == 0:
+            await conn.execute(
+                "DELETE FROM song_masters WHERE work_id = %s", (current_work_id,)
+            )
+            await conn.execute("DELETE FROM works WHERE id = %s", (current_work_id,))
+            old_work_deleted = True
+        else:
+            await _recalculate_song_master(conn, current_work_id)
+
+    return ReassignResponse(old_work_id=current_work_id, old_work_deleted=old_work_deleted)

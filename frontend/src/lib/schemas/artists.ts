@@ -7,6 +7,8 @@ export const ArtistSummarySchema = z.object({
   disambiguation: z.string().nullable(),
   work_count: z.number(),
   file_count: z.number(),
+  mbid: z.string().nullable().default(null),
+  origin: z.enum(["local", "musicbrainz"]).default("local"),
 })
 
 export const PaginatedArtistsSchema = z.object({
@@ -27,6 +29,8 @@ export const ArtistDetailSchema = z.object({
   sort_name: z.string(),
   disambiguation: z.string().nullable(),
   works: z.array(WorkSummarySchema),
+  mbid: z.string().nullable().default(null),
+  origin: z.enum(["local", "musicbrainz"]).default("local"),
 })
 
 export type ArtistSummary = z.infer<typeof ArtistSummarySchema>

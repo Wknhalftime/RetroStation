@@ -12,6 +12,7 @@ from backend.domain.enums import (
     LogLevel,
     MatchStatus,
     MatchTier,
+    Origin,
     ReleaseStatus,
     ReleaseType,
     SelectionMethod,
@@ -91,6 +92,9 @@ class Artist:
     needs_enhancement: bool = True
     enhanced_at: datetime | None = None
     enhancement_error: str | None = None
+    mbid: str | None = None
+    origin: Origin = Origin.LOCAL
+    normalized_name: str | None = None
 
 
 @dataclass
@@ -102,6 +106,8 @@ class Work:
     enhanced_at: datetime | None = None
     enhancement_error: str | None = None
     embedding: list[float] | None = None
+    mbid: str | None = None
+    origin: Origin = Origin.LOCAL
 
 
 @dataclass
@@ -142,6 +148,10 @@ class LibraryFile:
     duration_ms: int | None = None
     bitrate: int | None = None
     raw_metadata: dict[str, Any] | None = None
+    artist_name: str | None = None
+    normalized_artist_name: str | None = None
+    normalized_title: str | None = None
+    work_id: str | None = None
 
 
 @dataclass

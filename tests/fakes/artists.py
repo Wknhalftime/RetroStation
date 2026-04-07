@@ -1,5 +1,9 @@
+from uuid import uuid4
+
+from backend.domain.enums import Origin
 from backend.domain.models import Artist
 from backend.repositories.artists import ArtistRepository
+from backend.services.normalization import normalize_artist
 
 
 class FakeArtistRepository(ArtistRepository):
@@ -26,3 +30,60 @@ class FakeArtistRepository(ArtistRepository):
     def mark_enhancement_failed(self, mbid: str, error: str) -> None:
         if artist := self._data.get(mbid):
             artist.enhancement_error = error
+
+    def upsert_local(self, name: str, normalized_name: str) -> str:
+        for artist in self._data.values():
+            if artist.normalized_name == normalized_name:
+                return artist.id
+        artist_id = str(uuid4())
+        self._data[artist_id] = Artist(
+            id=artist_id,
+            name=name,
+            sort_name=name,
+            normalized_name=normalized_name,
+            origin=Origin.LOCAL,
+            needs_enhancement=False,
+        )
+        return artist_id
+
+    def upsert_from_mb(
+        self,
+        mbid: str,
+        name: str,
+        sort_name: str,
+        disambiguation: str | None = None,
+    ) -> str:
+        # Check by mbid first
+        for artist in self._data.values():
+            if artist.mbid == mbid:
+                return artist.id
+        # Check by normalized_name (promote local)
+        norm = normalize_artist(name)
+        for artist in self._data.values():
+            if artist.normalized_name == norm:
+                artist.mbid = mbid
+                artist.origin = Origin.MUSICBRAINZ
+                artist.name = name
+                artist.sort_name = sort_name
+                artist.disambiguation = disambiguation
+                artist.needs_enhancement = True
+                return artist.id
+        # Create new MB artist
+        artist_id = str(uuid4())
+        self._data[artist_id] = Artist(
+            id=artist_id,
+            name=name,
+            sort_name=sort_name,
+            disambiguation=disambiguation,
+            normalized_name=norm,
+            mbid=mbid,
+            origin=Origin.MUSICBRAINZ,
+            needs_enhancement=True,
+        )
+        return artist_id
+
+    def get_by_normalized_name(self, normalized_name: str) -> Artist | None:
+        for artist in self._data.values():
+            if artist.normalized_name == normalized_name:
+                return artist
+        return None
