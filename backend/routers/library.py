@@ -437,109 +437,170 @@ async def get_work_detail(
     Raises:
         HTTPException: 404 if the work does not exist.
     """
-    work_cur = await conn.execute(
-        "SELECT id, title, artist_id FROM works WHERE id = %s", (work_id,)
-    )
-    work_row = await work_cur.fetchone()
-    if work_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
+    # Check if this is a synthetic ID (artist_id:track_title) from the
+    # fallback path in get_artist_detail, or a real works table ID.
+    is_synthetic = ":" in work_id
+    work_row: dict[str, Any] | None = None
+    recordings: list[RecordingDetail] = []
+    song_master: SongMasterInfo | None = None
+    format_overrides: list[FormatOverrideInfo] = []
+
+    if not is_synthetic:
+        work_cur = await conn.execute(
+            "SELECT id, title, artist_id FROM works WHERE id = %s",
+            (work_id,),
         )
+        work_row = await work_cur.fetchone()
 
-    # Recordings + their files (single JOIN query)
-    rec_cur = await conn.execute(
-        """
-        SELECT
-            r.id            AS rec_id,
-            r.title         AS rec_title,
-            r.version_type  AS rec_version_type,
-            r.duration_ms   AS rec_duration_ms,
-            lf.id           AS file_id,
-            lf.file_path,
-            lf.format,
-            lf.bitrate,
-            lf.duration_ms  AS file_duration_ms,
-            lf.track_title,
-            lf.release_title,
-            lf.enrichment_status
-        FROM recordings r
-        LEFT JOIN library_files lf ON lf.recording_id = r.id
-        WHERE r.work_id = %s
-        ORDER BY r.id, lf.file_path
-        """,
-        (work_id,),
-    )
-    rec_rows = await rec_cur.fetchall()
+    if work_row is not None:
+        # --- Real work from works table ---
+        rec_cur = await conn.execute(
+            """
+            SELECT
+                r.id            AS rec_id,
+                r.title         AS rec_title,
+                r.version_type  AS rec_version_type,
+                r.duration_ms   AS rec_duration_ms,
+                lf.id           AS file_id,
+                lf.file_path,
+                lf.format,
+                lf.bitrate,
+                lf.duration_ms  AS file_duration_ms,
+                lf.track_title,
+                lf.release_title,
+                lf.enrichment_status
+            FROM recordings r
+            LEFT JOIN library_files lf ON lf.recording_id = r.id
+            WHERE r.work_id = %s
+            ORDER BY r.id, lf.file_path
+            """,
+            (work_id,),
+        )
+        rec_rows = await rec_cur.fetchall()
 
-    # Group by recording
-    recordings_map: dict[str, dict[str, Any]] = {}
-    for row in rec_rows:
-        rid = row["rec_id"]
-        if rid not in recordings_map:
-            recordings_map[rid] = {
-                "id": rid,
-                "title": row["rec_title"],
-                "version_type": row["rec_version_type"] or "ORIGINAL",
-                "duration_ms": row["rec_duration_ms"],
-                "files": [],
-            }
-        if row["file_id"] is not None:
-            recordings_map[rid]["files"].append(
-                FileInfo(
-                    id=row["file_id"],
-                    file_path=row["file_path"],
-                    format=row["format"],
-                    bitrate=row.get("bitrate"),
-                    duration_ms=row.get("file_duration_ms"),
-                    track_title=row.get("track_title"),
-                    release_title=row.get("release_title"),
-                    enrichment_status=row["enrichment_status"],
+        recordings_map: dict[str, dict[str, Any]] = {}
+        for row in rec_rows:
+            rid = row["rec_id"]
+            if rid not in recordings_map:
+                recordings_map[rid] = {
+                    "id": rid,
+                    "title": row["rec_title"],
+                    "version_type": row["rec_version_type"] or "ORIGINAL",
+                    "duration_ms": row["rec_duration_ms"],
+                    "files": [],
+                }
+            if row["file_id"] is not None:
+                recordings_map[rid]["files"].append(
+                    FileInfo(
+                        id=row["file_id"],
+                        file_path=row["file_path"],
+                        format=row["format"],
+                        bitrate=row.get("bitrate"),
+                        duration_ms=row.get("file_duration_ms"),
+                        track_title=row.get("track_title"),
+                        release_title=row.get("release_title"),
+                        enrichment_status=row["enrichment_status"],
+                    )
                 )
+
+        recordings = [
+            RecordingDetail(
+                id=rec["id"],
+                title=rec["title"],
+                version_type=rec["version_type"],
+                duration_ms=rec["duration_ms"],
+                files=rec["files"],
+            )
+            for rec in recordings_map.values()
+        ]
+
+        sm_cur = await conn.execute(
+            "SELECT * FROM song_masters WHERE work_id = %s", (work_id,),
+        )
+        sm_row = await sm_cur.fetchone()
+        if sm_row is not None:
+            song_master = SongMasterInfo(
+                id=sm_row["id"],
+                preferred_file_id=sm_row["preferred_file_id"],
+                selection_method=sm_row["selection_method"],
+                score=sm_row.get("score"),
+                updated_at=sm_row["updated_at"],
             )
 
-    recordings = [
-        RecordingDetail(
-            id=rec["id"],
-            title=rec["title"],
-            version_type=rec["version_type"],
-            duration_ms=rec["duration_ms"],
-            files=rec["files"],
+        fo_cur = await conn.execute(
+            "SELECT * FROM format_overrides WHERE work_id = %s "
+            "ORDER BY format_name",
+            (work_id,),
         )
-        for rec in recordings_map.values()
-    ]
+        fo_rows = await fo_cur.fetchall()
+        format_overrides = [
+            FormatOverrideInfo(
+                id=row["id"],
+                format_name=row["format_name"],
+                preferred_file_id=row["preferred_file_id"],
+                notes=row.get("notes"),
+                created_at=row["created_at"],
+            )
+            for row in fo_rows
+        ]
+    else:
+        # --- Synthetic work: derive from library_files ---
+        # Synthetic ID format: "{artist_id}:{track_title}"
+        colon_idx = work_id.index(":")
+        artist_id = work_id[:colon_idx]
+        track_title = work_id[colon_idx + 1:]
 
-    # Song master
-    sm_cur = await conn.execute(
-        "SELECT * FROM song_masters WHERE work_id = %s", (work_id,)
-    )
-    sm_row = await sm_cur.fetchone()
-    song_master: SongMasterInfo | None = None
-    if sm_row is not None:
-        song_master = SongMasterInfo(
-            id=sm_row["id"],
-            preferred_file_id=sm_row["preferred_file_id"],
-            selection_method=sm_row["selection_method"],
-            score=sm_row.get("score"),
-            updated_at=sm_row["updated_at"],
+        file_cur = await conn.execute(
+            """
+            SELECT
+                lf.id AS file_id, lf.file_path, lf.format, lf.bitrate,
+                lf.duration_ms, lf.track_title, lf.release_title,
+                lf.enrichment_status, lf.recording_id
+            FROM library_files lf
+            WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
+              AND lf.track_title = %s
+            ORDER BY lf.file_path
+            """,
+            (artist_id, artist_id, track_title),
         )
+        file_rows = await file_cur.fetchall()
 
-    # Format overrides
-    fo_cur = await conn.execute(
-        "SELECT * FROM format_overrides WHERE work_id = %s ORDER BY format_name",
-        (work_id,),
-    )
-    fo_rows = await fo_cur.fetchall()
-    format_overrides = [
-        FormatOverrideInfo(
-            id=row["id"],
-            format_name=row["format_name"],
-            preferred_file_id=row["preferred_file_id"],
-            notes=row.get("notes"),
-            created_at=row["created_at"],
-        )
-        for row in fo_rows
-    ]
+        if not file_rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Work {work_id} not found",
+            )
+
+        files = [
+            FileInfo(
+                id=row["file_id"],
+                file_path=row["file_path"],
+                format=row["format"],
+                bitrate=row.get("bitrate"),
+                duration_ms=row.get("duration_ms"),
+                track_title=row.get("track_title"),
+                release_title=row.get("release_title"),
+                enrichment_status=row["enrichment_status"],
+            )
+            for row in file_rows
+        ]
+
+        # Present as a single recording-like entry with all files
+        recordings = [
+            RecordingDetail(
+                id=work_id,
+                title=track_title,
+                version_type="ORIGINAL",
+                duration_ms=file_rows[0].get("duration_ms") if file_rows else None,
+                files=files,
+            )
+        ]
+
+        work_row = {
+            "id": work_id,
+            "title": track_title,
+            "artist_id": artist_id,
+        }
 
     return WorkDetail(
         id=work_row["id"],
