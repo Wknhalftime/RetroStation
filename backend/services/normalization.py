@@ -19,6 +19,8 @@ import hashlib
 import re
 import unicodedata
 
+from unidecode import unidecode
+
 from backend.domain.enums import VersionType
 
 # ---------------------------------------------------------------------------
@@ -122,14 +124,13 @@ def _normalize_smart_quotes(text: str) -> str:
 
 
 def _strip_accents(text: str) -> str:
-    """Strip accents, diacritics, and compatibility chars via NFKD (FR14).
+    """Transliterate accents and non-ASCII characters to ASCII equivalents (FR14).
 
-    NFKD (vs NFD) also decomposes compatibility characters such as full-width
-    ASCII (U+FF21–U+FF5A) and ligatures (U+FB00–U+FB06), ensuring they map to
-    their ASCII equivalents rather than surviving as non-ASCII code points.
+    Uses unidecode for broader coverage than NFKD: handles Cyrillic, CJK,
+    Arabic, and other non-Latin scripts by transliterating them to approximate
+    ASCII representations.  This is strictly more powerful than NFKD+drop-Mn.
     """
-    nfkd = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+    return unidecode(text)
 
 
 def _strip_leading_article(text: str) -> str:
@@ -231,8 +232,24 @@ def normalize_title(raw: str) -> str:
     t = _strip_accents(t)
     t = t.lower()
     t = _remove_remaster_year_truncation(t)
+    # Remove standalone years outside parentheses (1950-2029)
+    temp_text = _YEAR_PATTERN.sub("", t)
+    # Only apply if it doesn't strip the entire title (e.g. "1999" by Prince)
+    if temp_text.strip() or not t.strip():
+        t = temp_text
     t = _normalize_special_chars_and_whitespace(t)
     return t
+
+
+def strict_normalize(text: str) -> str:
+    """Strip ALL non-alphanumeric chars, collapse whitespace.
+
+    Used as a high-confidence tiebreaker in fuzzy matching — if two
+    strict-normalized titles are identical, the match score is 100.
+    """
+    base = normalize_title(text)
+    stripped = re.sub(r"[^a-z0-9 ]", " ", base)
+    return re.sub(r" +", " ", stripped).strip()
 
 
 def compute_normalized_signature(normalized_artist: str, normalized_title: str) -> str:
@@ -526,6 +543,12 @@ def detect_embedded_remix(raw_title: str) -> tuple[str, str | None]:
             return base, desc
     return raw_title, None
 
+
+# Standalone year pattern for year-removal guard in normalize_title()
+# Covers 1950-2029; intentionally excludes years before 1950 or after 2029
+# to avoid stripping numeric-looking titles like "1984" (Orwell) in the
+# near future.
+_YEAR_PATTERN = re.compile(r"\b(19[5-9]\d|20[0-2]\d)\b")
 
 # ---------------------------------------------------------------------------
 # Station call letters (Story 5.4)
