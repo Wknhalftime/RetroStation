@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 
+from backend.domain.enums import Origin
 from backend.domain.models import Work
 from backend.repositories.works import WorkRepository
 
@@ -35,6 +37,12 @@ class PgWorkRepository(WorkRepository):
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
             embedding=_parse_embedding(row.get("embedding")),
+            mbid=row.get("mbid"),
+            origin=(
+                Origin(row["origin"])
+                if row.get("origin")
+                else Origin.LOCAL
+            ),
         )
 
     def upsert(self, work: Work) -> Work:
@@ -81,3 +89,56 @@ class PgWorkRepository(WorkRepository):
             "UPDATE works SET embedding = %s WHERE id = %s",
             ("[" + ",".join(str(v) for v in embedding) + "]", mbid),
         )
+
+    def create_local(self, title: str, artist_id: str) -> str:
+        work_id = str(uuid4())
+        self._conn.execute(
+            """INSERT INTO works
+                   (id, title, artist_id, origin, needs_enhancement)
+               VALUES (%s, %s, %s, 'local', FALSE)""",
+            (work_id, title, artist_id),
+        )
+        return work_id
+
+    def upsert_from_mb(
+        self, mbid: str, title: str, artist_id: str,
+    ) -> str:
+        row = self._conn.execute(
+            "SELECT id FROM works WHERE mbid = %s FOR UPDATE",
+            (mbid,),
+        ).fetchone()
+        if row is not None:
+            return row["id"]
+        work_id = str(uuid4())
+        self._conn.execute(
+            """INSERT INTO works
+                   (id, title, artist_id, mbid, origin,
+                    needs_enhancement)
+               VALUES (%s, %s, %s, %s, 'musicbrainz', TRUE)""",
+            (work_id, title, artist_id, mbid),
+        )
+        return work_id
+
+    def get_by_mbid(self, mbid: str) -> Work | None:
+        row = self._conn.execute(
+            "SELECT * FROM works WHERE mbid = %s", (mbid,),
+        ).fetchone()
+        return self._row_to_model(row) if row else None
+
+    def delete_if_empty(self, work_id: str) -> bool:
+        count = self._conn.execute(
+            "SELECT count(*) AS cnt FROM library_files"
+            " WHERE work_id = %s",
+            (work_id,),
+        ).fetchone()
+        if count and count["cnt"] > 0:
+            return False
+        self._conn.execute(
+            "DELETE FROM song_masters WHERE work_id = %s",
+            (work_id,),
+        )
+        self._conn.execute(
+            "DELETE FROM works WHERE id = %s",
+            (work_id,),
+        )
+        return True
