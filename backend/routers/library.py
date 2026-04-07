@@ -280,11 +280,10 @@ async def list_artists(
             a.disambiguation,
             a.mbid,
             a.origin,
-            COUNT(DISTINCT w.id)  AS work_count,
-            COUNT(DISTINCT lf.id) AS file_count
+            COUNT(DISTINCT lf.track_title) AS work_count,
+            COUNT(lf.id)                   AS file_count
         FROM artists a
-        LEFT JOIN works      w  ON w.artist_id  = a.id
-        LEFT JOIN library_files lf ON lf.work_id = w.id
+        LEFT JOIN library_files lf ON lf.album_artist_mbid = a.id
         {where_clause}
         GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
                  a.mbid, a.origin
