@@ -278,14 +278,16 @@ async def list_artists(
             a.name,
             a.sort_name,
             a.disambiguation,
+            a.mbid,
+            a.origin,
             COUNT(DISTINCT w.id)  AS work_count,
             COUNT(DISTINCT lf.id) AS file_count
         FROM artists a
         LEFT JOIN works      w  ON w.artist_id  = a.id
-        LEFT JOIN recordings r  ON r.work_id    = w.id
-        LEFT JOIN library_files lf ON lf.recording_id = r.id
+        LEFT JOIN library_files lf ON lf.work_id = w.id
         {where_clause}
-        GROUP BY a.id, a.name, a.sort_name, a.disambiguation
+        GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
+                 a.mbid, a.origin
         ORDER BY a.sort_name
         LIMIT %s OFFSET %s
     """
@@ -304,6 +306,8 @@ async def list_artists(
             disambiguation=row.get("disambiguation"),
             work_count=row["work_count"],
             file_count=row["file_count"],
+            mbid=row.get("mbid"),
+            origin=row.get("origin", "local"),
         )
         for row in rows
     ]
