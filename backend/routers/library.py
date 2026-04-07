@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -13,6 +14,26 @@ from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
 from backend.domain.enums import Origin
 from backend.tasks.library_tasks import library_scan_task
+
+
+def _encode_synthetic_work_id(artist_id: str, track_title: str) -> str:
+    """Create a URL-safe synthetic work ID from artist_id + track_title."""
+    raw = f"{artist_id}:{track_title}"
+    return "syn_" + base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_synthetic_work_id(work_id: str) -> tuple[str, str] | None:
+    """Decode a synthetic work ID. Returns (artist_id, track_title) or None."""
+    if not work_id.startswith("syn_"):
+        return None
+    encoded = work_id[4:]
+    # Re-add padding
+    padding = 4 - len(encoded) % 4
+    if padding != 4:
+        encoded += "=" * padding
+    raw = base64.urlsafe_b64decode(encoded).decode()
+    colon_idx = raw.index(":")
+    return raw[:colon_idx], raw[colon_idx + 1:]
 
 router = APIRouter()
 
@@ -386,7 +407,7 @@ async def get_artist_detail(
         work_rows = await works_cur.fetchall()
         works = [
             WorkSummary(
-                id=artist_id + ":" + (row["title"] or "unknown"),
+                id=_encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
                 title=row["title"] or "Unknown",
                 recording_count=row["recording_count"],
                 has_master=False,
@@ -437,15 +458,15 @@ async def get_work_detail(
     Raises:
         HTTPException: 404 if the work does not exist.
     """
-    # Check if this is a synthetic ID (artist_id:track_title) from the
-    # fallback path in get_artist_detail, or a real works table ID.
-    is_synthetic = ":" in work_id
+    # Check if this is a synthetic ID (base64-encoded artist_id:track_title)
+    # from the fallback path in get_artist_detail, or a real works table ID.
+    synthetic = _decode_synthetic_work_id(work_id)
     work_row: dict[str, Any] | None = None
     recordings: list[RecordingDetail] = []
     song_master: SongMasterInfo | None = None
     format_overrides: list[FormatOverrideInfo] = []
 
-    if not is_synthetic:
+    if synthetic is None:
         work_cur = await conn.execute(
             "SELECT id, title, artist_id FROM works WHERE id = %s",
             (work_id,),
@@ -545,10 +566,8 @@ async def get_work_detail(
         ]
     else:
         # --- Synthetic work: derive from library_files ---
-        # Synthetic ID format: "{artist_id}:{track_title}"
-        colon_idx = work_id.index(":")
-        artist_id = work_id[:colon_idx]
-        track_title = work_id[colon_idx + 1:]
+        assert synthetic is not None
+        artist_id, track_title = synthetic
 
         file_cur = await conn.execute(
             """
