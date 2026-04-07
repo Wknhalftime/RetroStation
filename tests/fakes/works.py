@@ -1,3 +1,6 @@
+from uuid import uuid4
+
+from backend.domain.enums import Origin
 from backend.domain.models import Work
 from backend.repositories.works import WorkRepository
 
@@ -26,3 +29,41 @@ class FakeWorkRepository(WorkRepository):
     def update_embedding(self, mbid: str, embedding: list[float]) -> None:
         if work := self._data.get(mbid):
             work.embedding = embedding
+
+    def create_local(self, title: str, artist_id: str) -> str:
+        work_id = str(uuid4())
+        self._data[work_id] = Work(
+            id=work_id,
+            title=title,
+            artist_id=artist_id,
+            origin=Origin.LOCAL,
+            needs_enhancement=False,
+        )
+        return work_id
+
+    def upsert_from_mb(self, mbid: str, title: str, artist_id: str) -> str:
+        for work in self._data.values():
+            if work.mbid == mbid:
+                return work.id
+        work_id = str(uuid4())
+        self._data[work_id] = Work(
+            id=work_id,
+            title=title,
+            artist_id=artist_id,
+            mbid=mbid,
+            origin=Origin.MUSICBRAINZ,
+            needs_enhancement=True,
+        )
+        return work_id
+
+    def get_by_mbid(self, mbid: str) -> Work | None:
+        for work in self._data.values():
+            if work.mbid == mbid:
+                return work
+        return None
+
+    def delete_if_empty(self, work_id: str) -> bool:
+        if work_id in self._data:
+            del self._data[work_id]
+            return True
+        return False

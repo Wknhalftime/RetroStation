@@ -1,3 +1,4 @@
+import dataclasses
 from pathlib import Path
 from uuid import UUID
 
@@ -92,3 +93,31 @@ class FakeLibraryFileRepository(LibraryFileRepository):
             if f.file_path == file_path:
                 f.file_status = FileStatus.MISSING
                 break
+
+    def get_candidates_by_artist(
+        self, normalized_artist_name: str, limit: int = 100,
+    ) -> list[tuple[str, str]]:
+        seen_works: dict[str, str] = {}
+        for f in self._data.values():
+            if (
+                f.normalized_artist_name == normalized_artist_name
+                and f.work_id is not None
+                and f.normalized_title
+            ):
+                if f.work_id not in seen_works:
+                    seen_works[f.work_id] = f.normalized_title
+                else:
+                    existing = seen_works[f.work_id]
+                    if f.normalized_title < existing:
+                        seen_works[f.work_id] = f.normalized_title
+        result = sorted(seen_works.items(), key=lambda x: x[0])
+        return result[:limit]
+
+    def update_work_id(self, file_id: UUID, work_id: str | None) -> None:
+        if file_id in self._data:
+            self._data[file_id] = dataclasses.replace(
+                self._data[file_id], work_id=work_id,
+            )
+
+    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
+        return [f for f in self._data.values() if f.file_hash == file_hash]
