@@ -62,7 +62,16 @@ def _run_scan(
 
     def on_file(lf: LibraryFile) -> None:
         nonlocal pending_writes, files_written
-        repos.library_files.upsert_write_only(lf)
+        try:
+            repos.library_files.upsert_write_only(lf)
+        except psycopg.Error:
+            # DB error (e.g. null bytes in JSONB) — rollback so the
+            # connection is usable for the quarantine fallback.
+            # The rollback also discards any uncommitted writes in
+            # the current chunk, so reset the pending counter.
+            library_conn.rollback()
+            pending_writes = 0
+            raise
         files_written += 1
         pending_writes += 1
         written_files.append(lf)
@@ -96,6 +105,12 @@ def _run_scan(
             )
         )
 
+    # Build folder tree FIRST so library_folders is populated immediately at scan
+    # start, before any files are indexed.  Committing here makes the rows visible
+    # to other connections right away (e.g. the UI at 10% progress).
+    diff_tree(root_path, repos.library_folders)
+    library_conn.commit()
+
     # --- Run scan with callbacks ---
     scan_directory(
         Path(root_path),
@@ -104,13 +119,9 @@ def _run_scan(
         on_quarantine=on_quarantine,
     )
 
-    # Build folder tree so library_folders is populated even on first scan
-    diff_tree(root_path, repos.library_folders)
-
-    # Commit unconditionally: diff_tree always writes folder rows to library_conn
-    # regardless of whether any audio files were scanned, so we must not guard
-    # this commit behind pending_writes > 0.
-    library_conn.commit()
+    # Commit any remaining file/quarantine writes not yet flushed by chunk commits.
+    if pending_writes > 0:
+        library_conn.commit()
 
     # --- Grouping pass: assign work_id to newly written files ---
     grouped = 0

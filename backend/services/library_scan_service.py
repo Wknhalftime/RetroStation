@@ -154,7 +154,8 @@ def _raw_metadata(audio: MutagenFileType) -> dict[str, Any]:
     if audio.tags is None:
         return result
     for key, val in audio.tags.items():
-        result[key] = _sanitise_tag_value(val)
+        safe_key = key.replace("\x00", "") if isinstance(key, str) else key
+        result[safe_key] = _sanitise_tag_value(val)
     return result
 
 
