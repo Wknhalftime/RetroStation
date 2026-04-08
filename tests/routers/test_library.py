@@ -51,6 +51,7 @@ def _make_file(
     format: str = "flac",
     recording_id: str | None = None,
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING,
+    work_id: str | None = None,
 ) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
@@ -59,6 +60,7 @@ def _make_file(
         format=format,
         enrichment_status=enrichment_status,
         recording_id=recording_id,
+        work_id=work_id,
         track_title="Track Title",
         release_title="Album Title",
         bitrate=320,
@@ -87,7 +89,10 @@ def _seed_canonical_chain(
         _make_recording(recording_mbid, "Test Recording", work_id=work_mbid)
     )
     lf = PgLibraryFileRepository(conn).upsert(
-        _make_file(file_path, format=format, recording_id=recording_mbid)
+        _make_file(
+            file_path, format=format,
+            recording_id=recording_mbid, work_id=work_mbid,
+        )
     )
     conn.commit()
     return artist, work, recording, lf

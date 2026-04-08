@@ -344,28 +344,6 @@ class PgLibraryFileRepository(LibraryFileRepository):
             (file_path,),
         )
 
-    def get_candidates_by_artist(
-        self, normalized_artist_name: str, limit: int = 100,
-    ) -> list[tuple[str, str]]:
-        rows = self._conn.execute(
-            """SELECT work_id, MIN(normalized_title) AS sample_title
-               FROM library_files
-               WHERE normalized_artist_name = %s
-                 AND work_id IS NOT NULL
-                 AND normalized_title IS NOT NULL
-                 AND normalized_title != ''
-               GROUP BY work_id
-               ORDER BY work_id
-               LIMIT %s""",
-            (normalized_artist_name, limit),
-        ).fetchall()
-        if len(rows) >= limit:
-            logger.warning(
-                "Candidate cap hit for artist %s (limit=%d)",
-                normalized_artist_name, limit,
-            )
-        return [(r["work_id"], r["sample_title"]) for r in rows]
-
     def update_work_id(
         self, file_id: UUID, work_id: str | None,
     ) -> None:

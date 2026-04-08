@@ -21,6 +21,7 @@ export const WorkSummarySchema = z.object({
   title: z.string(),
   recording_count: z.number(),
   has_master: z.boolean(),
+  version_types: z.array(z.string()).default([]),
 })
 
 export const ArtistDetailSchema = z.object({

@@ -95,6 +95,7 @@ class WorkSummary(BaseModel):
     has_master: bool
     mbid: str | None = None
     origin: str = "local"
+    version_types: list[str] = []
 
 
 class ArtistDetail(BaseModel):
@@ -301,10 +302,11 @@ async def list_artists(
             a.disambiguation,
             a.mbid,
             a.origin,
-            COUNT(DISTINCT lf.track_title) AS work_count,
-            COUNT(lf.id)                   AS file_count
+            COUNT(DISTINCT w.id)  AS work_count,
+            COUNT(DISTINCT lf.id) AS file_count
         FROM artists a
-        LEFT JOIN library_files lf ON lf.album_artist_mbid = a.id
+        LEFT JOIN works w ON w.artist_id = a.id
+        LEFT JOIN library_files lf ON lf.work_id = w.id
         {where_clause}
         GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
                  a.mbid, a.origin
@@ -376,10 +378,14 @@ async def get_artist_detail(
             w.mbid,
             w.origin,
             COUNT(DISTINCT lf.id) AS recording_count,
-            COUNT(DISTINCT sm.id) AS master_count
+            COUNT(DISTINCT sm.id) AS master_count,
+            array_agg(DISTINCT r.version_type)
+                FILTER (WHERE r.version_type IS NOT NULL)
+                AS version_types
         FROM works w
         LEFT JOIN library_files lf ON lf.work_id = w.id
         LEFT JOIN song_masters sm ON sm.work_id = w.id
+        LEFT JOIN recordings r ON r.work_id = w.id
         WHERE w.artist_id = %s
         GROUP BY w.id, w.title, w.mbid, w.origin
         ORDER BY w.title
@@ -423,6 +429,7 @@ async def get_artist_detail(
                 has_master=row["master_count"] > 0,
                 mbid=row.get("mbid"),
                 origin=row.get("origin", "local"),
+                version_types=row.get("version_types") or [],
             )
             for row in work_rows
         ]
@@ -931,6 +938,59 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
     )
 
 
+async def _consolidate_recordings(
+    conn: AsyncConnection[Any],
+    source_work_ids: list[str],
+    target_work_id: str,
+) -> None:
+    """Move recordings from source works to target, merging duplicates.
+
+    When a source recording has the same version_type as an existing target
+    recording, reassign files from the source recording to the target one
+    and delete the duplicate source recording.  Non-conflicting recordings
+    are simply moved to the target work.
+    """
+    if not source_work_ids:
+        return
+
+    src_ph = ", ".join("%s" for _ in source_work_ids)
+
+    # Get all source recordings
+    src_cur = await conn.execute(
+        f"SELECT id, version_type FROM recordings"
+        f" WHERE work_id IN ({src_ph})",
+        source_work_ids,
+    )
+    src_recs = await src_cur.fetchall()
+
+    for src_rec in src_recs:
+        # Check if target already has this version_type
+        tgt_cur = await conn.execute(
+            "SELECT id FROM recordings"
+            " WHERE work_id = %s AND version_type = %s",
+            (target_work_id, src_rec["version_type"]),
+        )
+        tgt_row = await tgt_cur.fetchone()
+
+        if tgt_row:
+            # Conflict: reassign files to target recording, delete source
+            await conn.execute(
+                "UPDATE library_files SET recording_id = %s"
+                " WHERE recording_id = %s",
+                (tgt_row["id"], src_rec["id"]),
+            )
+            await conn.execute(
+                "DELETE FROM recordings WHERE id = %s",
+                (src_rec["id"],),
+            )
+        else:
+            # No conflict: move recording to target work
+            await conn.execute(
+                "UPDATE recordings SET work_id = %s WHERE id = %s",
+                (target_work_id, src_rec["id"]),
+            )
+
+
 @router.post("/works/{target_id}/merge", response_model=MergeResponse)
 async def merge_works(
     target_id: str, body: MergeRequest, conn: DbConn, _token: Token
@@ -1027,11 +1087,8 @@ async def merge_works(
         [target_id, *existing_source_ids],
     )
 
-    # Move recordings to target work
-    await conn.execute(
-        f"UPDATE recordings SET work_id = %s WHERE work_id IN ({src_placeholders})",
-        [target_id, *existing_source_ids],
-    )
+    # Consolidate recordings: handle duplicate (work_id, version_type) pairs
+    await _consolidate_recordings(conn, existing_source_ids, target_id)
 
     # Re-link matches scoped to WORK target type
     await conn.execute(
@@ -1151,11 +1208,35 @@ async def split_work(
         (new_work_id, work_row["title"], work_row["artist_id"]),
     )
 
-    # Move the recording to the new work
-    await conn.execute(
-        "UPDATE recordings SET work_id = %s WHERE id = %s",
-        (new_work_id, recording_id),
-    )
+    # Create a new recording for the split file (clone from the original)
+    # instead of moving the shared recording which would affect other files.
+    if recording_id is not None:
+        rec_cur = await conn.execute(
+            "SELECT title, version_type, duration_ms"
+            " FROM recordings WHERE id = %s",
+            (recording_id,),
+        )
+        rec_row = await rec_cur.fetchone()
+        new_rec_id = str(uuid4())
+        await conn.execute(
+            """INSERT INTO recordings
+                   (id, title, work_id, version_type, duration_ms,
+                    needs_enhancement)
+               VALUES (%s, %s, %s, %s, %s, FALSE)""",
+            (
+                new_rec_id,
+                rec_row["title"] if rec_row else work_row["title"],
+                new_work_id,
+                rec_row["version_type"] if rec_row else "ORIGINAL",
+                rec_row["duration_ms"] if rec_row else None,
+            ),
+        )
+        # Update the split file to point to the new recording
+        await conn.execute(
+            "UPDATE library_files SET recording_id = %s"
+            " WHERE id = %s",
+            (new_rec_id, body.file_id),
+        )
 
     # Update work_id on the file itself (denormalised column)
     await conn.execute(
@@ -1256,12 +1337,68 @@ async def reassign_file_work(
             detail=f"File {file_id} is already assigned to work {body.work_id}",
         )
 
-    # Move recording to target work
+    # Handle recording: if shared, create new; if not, move or merge
     if recording_id is not None:
-        await conn.execute(
-            "UPDATE recordings SET work_id = %s WHERE id = %s",
-            (body.work_id, recording_id),
+        # Check if other files share this recording
+        share_cur = await conn.execute(
+            "SELECT COUNT(*) AS cnt FROM library_files"
+            " WHERE recording_id = %s AND id != %s",
+            (recording_id, str(file_id)),
         )
+        share_row = await share_cur.fetchone()
+        is_shared = share_row is not None and share_row["cnt"] > 0
+
+        # Get the recording's version_type
+        rec_cur = await conn.execute(
+            "SELECT title, version_type, duration_ms"
+            " FROM recordings WHERE id = %s",
+            (recording_id,),
+        )
+        rec_row = await rec_cur.fetchone()
+        rec_version = rec_row["version_type"] if rec_row else "ORIGINAL"
+
+        # Check if target already has this version_type
+        tgt_cur = await conn.execute(
+            "SELECT id FROM recordings"
+            " WHERE work_id = %s AND version_type = %s",
+            (body.work_id, rec_version),
+        )
+        tgt_rec = await tgt_cur.fetchone()
+
+        if tgt_rec:
+            # Target has same version: point file at existing recording
+            await conn.execute(
+                "UPDATE library_files SET recording_id = %s"
+                " WHERE id = %s",
+                (tgt_rec["id"], str(file_id)),
+            )
+        elif is_shared:
+            # Recording is shared: clone for this file on target work
+            new_rec_id = str(uuid4())
+            await conn.execute(
+                """INSERT INTO recordings
+                       (id, title, work_id, version_type, duration_ms,
+                        needs_enhancement)
+                   VALUES (%s, %s, %s, %s, %s, FALSE)""",
+                (
+                    new_rec_id,
+                    rec_row["title"] if rec_row else "",
+                    body.work_id,
+                    rec_version,
+                    rec_row["duration_ms"] if rec_row else None,
+                ),
+            )
+            await conn.execute(
+                "UPDATE library_files SET recording_id = %s"
+                " WHERE id = %s",
+                (new_rec_id, str(file_id)),
+            )
+        else:
+            # Recording not shared: just move it
+            await conn.execute(
+                "UPDATE recordings SET work_id = %s WHERE id = %s",
+                (body.work_id, recording_id),
+            )
 
     # Update denormalised work_id on the file
     await conn.execute(

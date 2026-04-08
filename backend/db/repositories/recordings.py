@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 
@@ -86,6 +87,34 @@ class PgRecordingRepository(RecordingRepository):
 
     def mark_enhanced(self, mbid: str) -> None:
         self._conn.execute(
-            "UPDATE recordings SET needs_enhancement = FALSE, enhanced_at = now() WHERE id = %s",
+            "UPDATE recordings SET needs_enhancement = FALSE, enhanced_at = now()"
+            " WHERE id = %s",
             (mbid,),
         )
+
+    def get_or_create_local(
+        self, work_id: str, version_type: str, title: str,
+    ) -> str:
+        recording_id = str(uuid4())
+        cur = self._conn.execute(
+            """INSERT INTO recordings
+                   (id, title, work_id, version_type, needs_enhancement)
+               VALUES (%s, %s, %s, %s, FALSE)
+               ON CONFLICT (work_id, version_type) DO NOTHING
+               RETURNING id""",
+            (recording_id, title, work_id, version_type),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            return row["id"]
+        # Row already existed — fetch the winner
+        existing = self._conn.execute(
+            "SELECT id FROM recordings"
+            " WHERE work_id = %s AND version_type = %s",
+            (work_id, version_type),
+        ).fetchone()
+        if existing is None:
+            raise RuntimeError(
+                "Recording not found after ON CONFLICT DO NOTHING"
+            )
+        return existing["id"]

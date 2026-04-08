@@ -67,7 +67,7 @@ class TestGroupingE2E:
             conn.commit()
 
             # Group each file
-            w1 = assign_work(
+            r1 = assign_work(
                 f1,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -75,10 +75,10 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, w1)
+            file_repo.update_work_id(f1.id, r1.work_id)
             conn.commit()
 
-            w2 = assign_work(
+            r2 = assign_work(
                 f2,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -86,10 +86,10 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f2.id, w2)
+            file_repo.update_work_id(f2.id, r2.work_id)
             conn.commit()
 
-            w3 = assign_work(
+            r3 = assign_work(
                 f3,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -97,14 +97,18 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f3.id, w3)
+            file_repo.update_work_id(f3.id, r3.work_id)
             conn.commit()
 
-            assert w1 is not None
-            assert w2 is not None
-            assert w3 is not None
-            assert w1 == w2, "Same song (remastered) should share a work"
-            assert w1 != w3, "Different songs should have different works"
+            assert r1 is not None
+            assert r2 is not None
+            assert r3 is not None
+            assert r1.work_id == r2.work_id, (
+                "Same song (remastered) should share a work"
+            )
+            assert r1.work_id != r3.work_id, (
+                "Different songs should have different works"
+            )
 
             assert_grouping_invariants(conn)
 
@@ -118,12 +122,13 @@ class TestGroupingE2E:
             sm_repo = PgSongMasterRepository(conn)
 
             f1 = _make_file(
-                "/music/original.mp3", "same_hash", "Beatles", "Come Together",
+                "/music/original.mp3", "same_hash",
+                "Beatles", "Come Together",
             )
             file_repo.upsert(f1)
             conn.commit()
 
-            w1 = assign_work(
+            r1 = assign_work(
                 f1,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -131,17 +136,18 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, w1)
+            file_repo.update_work_id(f1.id, r1.work_id)
             conn.commit()
 
             # Second file with identical hash but different path
             f2 = _make_file(
-                "/music/copy.mp3", "same_hash", "Beatles", "Come Together",
+                "/music/copy.mp3", "same_hash",
+                "Beatles", "Come Together",
             )
             file_repo.upsert(f2)
             conn.commit()
 
-            w2 = assign_work(
+            r2 = assign_work(
                 f2,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -150,11 +156,14 @@ class TestGroupingE2E:
                 song_master_repo=sm_repo,
             )
 
-            assert w1 is not None
-            assert w2 == w1, "Hash shortcut should reuse the existing work_id"
+            assert r1 is not None
+            assert r2 is not None
+            assert r2.work_id == r1.work_id, (
+                "Hash shortcut should reuse the existing work_id"
+            )
 
     def test_rescan_preserves_work_ids(self, migrated_db: str) -> None:
-        """Re-upserting the same file (same path, same hash) keeps its work_id."""
+        """Re-upserting the same file (same path, same hash) keeps work_id."""
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             artist_repo = PgArtistRepository(conn)
             work_repo = PgWorkRepository(conn)
@@ -163,12 +172,13 @@ class TestGroupingE2E:
             sm_repo = PgSongMasterRepository(conn)
 
             f1 = _make_file(
-                "/music/stable.mp3", "stable_hash", "Beatles", "Yesterday",
+                "/music/stable.mp3", "stable_hash",
+                "Beatles", "Yesterday",
             )
             file_repo.upsert(f1)
             conn.commit()
 
-            w1 = assign_work(
+            r1 = assign_work(
                 f1,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -176,24 +186,25 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, w1)
+            file_repo.update_work_id(f1.id, r1.work_id)
             conn.commit()
 
             # Simulate rescan: upsert same path/hash again
             f1_rescan = _make_file(
-                "/music/stable.mp3", "stable_hash", "Beatles", "Yesterday",
+                "/music/stable.mp3", "stable_hash",
+                "Beatles", "Yesterday",
             )
             f1_rescan.id = uuid4()  # scanner would generate new UUID
             result = file_repo.upsert(f1_rescan)
             conn.commit()
 
             # ON CONFLICT keeps work_id when hash matches
-            assert result.work_id == w1, (
+            assert result.work_id == r1.work_id, (
                 "Rescan with same hash should preserve work_id"
             )
 
     def test_merge_works_via_repo(self, migrated_db: str) -> None:
-        """Merge two local works: files move, source work deleted, invariants hold."""
+        """Merge two local works: files move, source work deleted."""
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             artist_repo = PgArtistRepository(conn)
             work_repo = PgWorkRepository(conn)
@@ -203,17 +214,19 @@ class TestGroupingE2E:
 
             # Create two separate works via grouping
             f_a = _make_file(
-                "/music/song_a.mp3", "hash_a", "Stones", "Paint It Black",
+                "/music/song_a.mp3", "hash_a",
+                "Stones", "Paint It Black",
             )
             f_b = _make_file(
-                "/music/song_b.mp3", "hash_b", "Stones", "Paint It Blk",
+                "/music/song_b.mp3", "hash_b",
+                "Stones", "Paint It Blk",
             )
 
             file_repo.upsert(f_a)
             file_repo.upsert(f_b)
             conn.commit()
 
-            w_a = assign_work(
+            r_a = assign_work(
                 f_a,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -221,10 +234,10 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f_a.id, w_a)
+            file_repo.update_work_id(f_a.id, r_a.work_id)
             conn.commit()
 
-            w_b = assign_work(
+            r_b = assign_work(
                 f_b,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -232,13 +245,15 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f_b.id, w_b)
+            file_repo.update_work_id(f_b.id, r_b.work_id)
             conn.commit()
 
-            # They may or may not get the same work depending on fuzzy score.
-            # If they already matched, create a forced second work for the test.
+            w_a = r_a.work_id
+            w_b = r_b.work_id
+
+            # They may or may not get the same work depending on fuzzy
+            # score. If they already matched, create a forced second work.
             if w_a == w_b:
-                # Force a distinct second work so we can test merge
                 artist_id = artist_repo.upsert_local(
                     "Stones", normalize_artist("Stones"),
                 )
@@ -256,16 +271,24 @@ class TestGroupingE2E:
             assert w_b is not None
             assert w_a != w_b
 
-            # Merge w_b -> w_a  (move files, delete source work)
+            # Merge w_b -> w_a
             conn.execute(
-                "UPDATE library_files SET work_id = %s WHERE work_id = %s",
+                "UPDATE library_files SET work_id = %s"
+                " WHERE work_id = %s",
                 (w_a, w_b),
             )
             conn.execute(
-                "DELETE FROM song_masters WHERE work_id = %s", (w_b,),
+                "DELETE FROM song_masters WHERE work_id = %s",
+                (w_b,),
             )
             conn.execute(
-                "DELETE FROM format_overrides WHERE work_id = %s", (w_b,),
+                "DELETE FROM format_overrides WHERE work_id = %s",
+                (w_b,),
+            )
+            conn.execute(
+                "UPDATE recordings SET work_id = %s"
+                " WHERE work_id = %s",
+                (w_a, w_b),
             )
             conn.execute(
                 "DELETE FROM works WHERE id = %s", (w_b,),
@@ -305,7 +328,7 @@ class TestGroupingE2E:
             file_repo.upsert(f2)
             conn.commit()
 
-            w1 = assign_work(
+            r1 = assign_work(
                 f1,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -313,10 +336,10 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, w1)
+            file_repo.update_work_id(f1.id, r1.work_id)
             conn.commit()
 
-            w2 = assign_work(
+            r2 = assign_work(
                 f2,
                 artist_repo=artist_repo,
                 work_repo=work_repo,
@@ -324,12 +347,12 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f2.id, w2)
+            file_repo.update_work_id(f2.id, r2.work_id)
             conn.commit()
 
             # Both should land in the same work (identical title)
-            assert w1 == w2
-            original_work_id = w1
+            assert r1.work_id == r2.work_id
+            original_work_id = r1.work_id
             assert original_work_id is not None
 
             # Split f2 into a new work

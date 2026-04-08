@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -8,6 +9,8 @@ import psycopg
 from backend.domain.enums import Origin
 from backend.domain.models import Work
 from backend.repositories.works import WorkRepository
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_embedding(raw: Any) -> list[float] | None:
@@ -142,3 +145,22 @@ class PgWorkRepository(WorkRepository):
             (work_id,),
         )
         return True
+
+    def get_candidates_by_normalized_artist(
+        self, normalized_artist_name: str, limit: int = 100,
+    ) -> list[tuple[str, str]]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT w.id, w.title
+               FROM works w
+               JOIN library_files lf ON lf.work_id = w.id
+               WHERE lf.normalized_artist_name = %s
+               ORDER BY w.title
+               LIMIT %s""",
+            (normalized_artist_name, limit),
+        ).fetchall()
+        if len(rows) >= limit:
+            logger.warning(
+                "Candidate cap hit for artist %s (limit=%d)",
+                normalized_artist_name, limit,
+            )
+        return [(r["id"], r["title"]) for r in rows]

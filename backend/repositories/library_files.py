@@ -51,13 +51,6 @@ class LibraryFileRepository(ABC):
     def mark_missing(self, file_path: str) -> None: ...
 
     @abstractmethod
-    def get_candidates_by_artist(
-        self, normalized_artist_name: str, limit: int = 100,
-    ) -> list[tuple[str, str]]:
-        """Return (work_id, sample_normalized_title) grouped by work_id."""
-        ...
-
-    @abstractmethod
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None: ...
 
     @abstractmethod

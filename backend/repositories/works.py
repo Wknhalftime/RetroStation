@@ -39,3 +39,14 @@ class WorkRepository(ABC):
     def delete_if_empty(self, work_id: str) -> bool:
         """Delete work if no library_files reference it. Returns True if deleted."""
         ...
+
+    @abstractmethod
+    def get_candidates_by_normalized_artist(
+        self, normalized_artist_name: str, limit: int = 100,
+    ) -> list[tuple[str, str]]:
+        """Return (work_id, work_title) pairs for fuzzy matching.
+
+        Deduplicates by work_id so each work appears at most once.
+        Ordered by work title for stable results.
+        """
+        ...

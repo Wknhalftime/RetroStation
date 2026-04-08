@@ -1,3 +1,6 @@
+from uuid import uuid4
+
+from backend.domain.enums import VersionType
 from backend.domain.models import Recording
 from backend.repositories.recordings import RecordingRepository
 
@@ -26,3 +29,22 @@ class FakeRecordingRepository(RecordingRepository):
     def mark_enhanced(self, mbid: str) -> None:
         if rec := self._data.get(mbid):
             rec.needs_enhancement = False
+
+    def get_or_create_local(
+        self, work_id: str, version_type: str, title: str,
+    ) -> str:
+        for rec in self._data.values():
+            if (
+                rec.work_id == work_id
+                and rec.version_type == VersionType(version_type)
+            ):
+                return rec.id
+        recording_id = str(uuid4())
+        self._data[recording_id] = Recording(
+            id=recording_id,
+            title=title,
+            work_id=work_id,
+            version_type=VersionType(version_type),
+            needs_enhancement=False,
+        )
+        return recording_id
