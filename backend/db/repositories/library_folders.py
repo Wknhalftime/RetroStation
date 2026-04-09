@@ -95,6 +95,13 @@ class PgLibraryFolderRepository(LibraryFolderRepository):
             (task_id,),
         )
 
+    def get_folders_with_staged_hashes(self) -> set[UUID]:
+        """Return folder IDs that have uncommitted staged hashes."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT folder_id FROM library_folder_staged_hashes"
+        ).fetchall()
+        return {row["folder_id"] for row in rows}
+
     def has_any(self) -> bool:
         row = self._conn.execute(
             "SELECT EXISTS(SELECT 1 FROM library_folders) AS has_rows"

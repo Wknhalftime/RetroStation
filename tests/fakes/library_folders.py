@@ -43,5 +43,13 @@ class FakeLibraryFolderRepository(LibraryFolderRepository):
     def clear_staged_hashes(self, task_id: str) -> None:
         self._staged.pop(task_id, None)
 
+    def get_folders_with_staged_hashes(self) -> set[UUID]:
+        """Return folder IDs that have uncommitted staged hashes."""
+        result: set[UUID] = set()
+        for staged_list in self._staged.values():
+            for folder_id, _ in staged_list:
+                result.add(folder_id)
+        return result
+
     def has_any(self) -> bool:
         return len(self._data) > 0

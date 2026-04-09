@@ -98,6 +98,29 @@ def test_staged_hashes_isolated_by_task_id(migrated_db: str) -> None:
         assert repo.get_by_path("/y").folder_hash is None
 
 
+def test_get_folders_with_staged_hashes(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFolderRepository(conn)
+        f1 = LibraryFolder(id=uuid4(), name="a", full_path="/staged/a")
+        f2 = LibraryFolder(id=uuid4(), name="b", full_path="/staged/b")
+        repo.upsert(f1)
+        repo.upsert(f2)
+        conn.commit()
+
+        # No staged hashes yet
+        assert repo.get_folders_with_staged_hashes() == set()
+
+        # Stage hashes for folder A only
+        repo.stage_hashes([(f1.id, "hash_a")], "task-x")
+        conn.commit()
+        assert repo.get_folders_with_staged_hashes() == {f1.id}
+
+        # After clearing, set should be empty again
+        repo.clear_staged_hashes("task-x")
+        conn.commit()
+        assert repo.get_folders_with_staged_hashes() == set()
+
+
 def test_has_any(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFolderRepository(conn)

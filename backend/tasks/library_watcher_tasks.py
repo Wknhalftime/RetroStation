@@ -29,8 +29,6 @@ from backend.tasks.huey_app import huey
 logger = structlog.get_logger()
 
 
-# NOTE: Periodic execution is suppressed by the -n flag in Procfile.
-# Decorator retained so the watcher can self-schedule if re-enabled.
 @huey.periodic_task(crontab(minute="*/4"))  # type: ignore[untyped-decorator]
 def library_watcher_poll() -> None:
     """Poll the library directory for changes every 4 minutes."""
@@ -94,6 +92,8 @@ def library_scan_files_task(
             settings.database_url, autocommit=False,
         )
 
+        repos = RepositoryFactory(library_conn)
+
         # Advisory lock — prevent overlapping scans
         lock_key = folder_paths[0] if folder_paths else "watcher"
         lock_row = library_conn.execute(
@@ -102,9 +102,11 @@ def library_scan_files_task(
         ).fetchone()
         if not lock_row or not lock_row["acquired"]:
             logger.warning("scan_lock_held", paths=folder_paths)
+            # Clear staged hashes so the next poll re-detects these folders
+            # instead of skipping them via the in-flight overlap guard.
+            repos.library_folders.clear_staged_hashes(task_id)
+            library_conn.commit()
             return
-
-        repos = RepositoryFactory(library_conn)
 
         # Initial progress
         progress_repo.upsert(

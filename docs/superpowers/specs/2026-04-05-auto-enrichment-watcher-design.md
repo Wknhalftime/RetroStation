@@ -264,9 +264,7 @@ The project uses `SqliteHuey` with `-w 1` (single worker). Key constraints:
 
 ### Huey Result Store Accumulation
 
-`SqliteHuey` is initialized with `results=True`. Every completed task writes its return value to `huey.db`. Since watcher tasks are fire-and-forget (nobody calls `.get()` to consume results), result rows accumulate indefinitely. With a 4-minute poll cycle, this adds ~360 result rows/day.
-
-**Mitigation:** The new watcher and scan tasks should return `None` to minimize stored result size. At ~360 rows/day, `huey.db` stays small for years in a single-user tool, so this is a low-priority concern. If it ever matters, switching to `SqliteHuey(filename="huey.db", results=False)` globally is the cleanest fix (Huey 2.x does not support per-task result disabling).
+`SqliteHuey` is now initialized with `results=False`. No task calls `.get()` on Huey results (all chaining is fire-and-forget), so the result store was disabled to eliminate unnecessary row accumulation in `huey.db`.
 
 ### Path Canonicalization
 

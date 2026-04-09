@@ -130,3 +130,42 @@ class TestDiffTree:
         changes, pending = diff_tree("/nonexistent/path", repo)
         assert changes == []
         assert pending == []
+
+    def test_skips_folders_with_in_flight_staged_hashes(
+        self, tmp_path: Path,
+    ) -> None:
+        """Folders with uncommitted staged hashes are excluded from both
+        ``changed`` and ``pending`` to prevent duplicate staging across
+        overlapping poll cycles.
+        """
+        sub = tmp_path / "jazz"
+        sub.mkdir()
+        (sub / "track.flac").write_bytes(b"\x00" * 100)
+
+        repo = FakeLibraryFolderRepository()
+        # First run seeds the DB
+        diff_tree(str(tmp_path), repo)
+
+        # Simulate an in-flight scan by staging hashes for the jazz folder
+        jazz_folder = repo.get_by_path(
+            str(sub).replace("\\", "\\\\") if "\\" in str(sub) else str(sub),
+        )
+        # Find the folder via get_all since path normalization may differ
+        if jazz_folder is None:
+            all_folders = repo.get_all()
+            jazz_folder = next(
+                f for f in all_folders if f.name == "jazz"
+            )
+        repo.stage_hashes(
+            [(jazz_folder.id, "fake_in_flight_hash")], "in_flight_task",
+        )
+
+        # Now add a new file to the jazz directory
+        (sub / "track2.flac").write_bytes(b"\x00" * 200)
+
+        # The jazz folder should be skipped because it has staged hashes
+        changes, pending = diff_tree(str(tmp_path), repo)
+
+        # jazz folder should NOT appear in changed or pending
+        assert jazz_folder.id not in {fid for fid, _ in pending}
+        assert not any("jazz" in p for p in changes)

@@ -30,7 +30,7 @@ Three processes managed by `honcho` reading a `Procfile`. PostgreSQL 16 is an ex
 ```
 # Procfile
 api:    uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000
-worker: uv run python -m huey.bin.huey_consumer backend.tasks.huey_app.huey -w 1 -n
+worker: uv run python -m huey.bin.huey_consumer backend.tasks.huey_app.huey -w 1
 web:    cd frontend && npm run dev
 ```
 
@@ -697,7 +697,7 @@ backend/
 │   └── repositories/               # PostgreSQL implementations (mirrors repositories/)
 │
 ├── tasks/
-│   ├── huey_app.py                  # SqliteHuey(filename='huey.db', results=True)
+│   ├── huey_app.py                  # SqliteHuey(filename='huey.db', results=False)
 │   ├── ingestion_tasks.py           # → enqueues embedding_task on completion
 │   ├── embedding_tasks.py           # playlist-scoped; → enqueues artist_matching_task
 │   ├── artist_matching_tasks.py     # → enqueues identity_matching_task

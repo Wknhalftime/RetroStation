@@ -1065,7 +1065,7 @@ Ingests KAZR CSV: 3166 events, ~120 artists, ~343 identities, 13 broadcast days.
 ```python
 from huey import SqliteHuey
 
-huey = SqliteHuey(filename="huey.db", results=True)
+huey = SqliteHuey(filename="huey.db", results=False)
 ```
 
 - [ ] **Step 3: Create `backend/services/repository_factory.py`**

@@ -9,7 +9,7 @@ import hashlib
 import os
 import unicodedata
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -84,7 +84,7 @@ def coalesce_paths(paths: list[str]) -> list[str]:
 def diff_tree(
     root_path: str,
     folder_repo: LibraryFolderRepository,
-) -> tuple[list[str], list[tuple["UUID", str]]]:
+) -> tuple[list[str], list[tuple[UUID, str]]]:
     """Walk the directory tree and find folders whose hash has changed.
 
     Args:
@@ -150,18 +150,33 @@ def diff_tree(
         return [], []
 
     # Diff: find folders where hash changed.  Return pending as (folder_id,
-    # new_hash) tuples so callers can stage directly without a second get_all().
+    # new_hash) tuples so callers can stage directly without a second
+    # get_all().
+    #
+    # Folders with uncommitted staged hashes (in-flight scans) are excluded
+    # from both ``changed`` and ``pending`` to prevent duplicate staging
+    # across overlapping poll cycles.
+    in_flight_ids = folder_repo.get_folders_with_staged_hashes()
+
     changed: list[str] = []
-    pending: list[tuple["UUID", str]] = []
+    pending: list[tuple[UUID, str]] = []
 
     for dir_path, new_hash in folder_hashes.items():
         folder = existing_folders.get(dir_path)
         if folder is not None:
+            if folder.id in in_flight_ids:
+                continue
             pending.append((folder.id, new_hash))
             if folder.folder_hash != new_hash:
                 changed.append(dir_path)
         else:
             changed.append(dir_path)
+
+    if in_flight_ids:
+        logger.info(
+            "watcher_poll_skipped_in_flight",
+            skipped=len(in_flight_ids),
+        )
 
     logger.info(
         "diff_tree_complete",
