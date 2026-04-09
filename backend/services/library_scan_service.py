@@ -149,12 +149,16 @@ def _sanitise_tag_value(val: object) -> str:
 
 
 def _raw_metadata(audio: MutagenFileType) -> dict[str, Any]:
-    """Dump all tag frames to a plain-Python dict."""
+    """Dump all tag frames to a plain-Python dict.
+
+    Both keys and values are sanitised to remove null bytes (``\\x00``)
+    which PostgreSQL cannot store in text/jsonb columns.
+    """
     result: dict[str, Any] = {}
     if audio.tags is None:
         return result
     for key, val in audio.tags.items():
-        safe_key = key.replace("\x00", "") if isinstance(key, str) else key
+        safe_key = str(key).replace("\x00", "")
         result[safe_key] = _sanitise_tag_value(val)
     return result
 

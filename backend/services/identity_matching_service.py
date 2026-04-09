@@ -75,9 +75,8 @@ def match_identities_for_playlist(
             log_identity_repo.update_match_status(
                 identity.id, MatchStatus.AUTO_MATCHED, MatchTier.MBID_EXACT
             )
-            if lib_file.recording_id:
-                # recording_id may be a work_id indirectly; collect file id for clarity
-                pass  # work_ids collected via recording path below
+            if lib_file.work_id:
+                work_ids.append(lib_file.work_id)
             tier0_matched = True
             auto_matched += 1
             logger.debug(
@@ -138,9 +137,8 @@ def match_identities_for_playlist(
 
                     if status == MatchStatus.AUTO_MATCHED:
                         auto_matched += 1
-                        # Collect work_id if we can reach one via recording
-                        if best_file.recording_id:
-                            work_ids.append(best_file.recording_id)
+                        if best_file.work_id:
+                            work_ids.append(best_file.work_id)
                         logger.debug(
                             "identity_tier2_matched",
                             identity_id=str(identity.id),

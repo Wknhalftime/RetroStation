@@ -18,7 +18,7 @@ from huey import crontab  # type: ignore[import-untyped]
 from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
 from backend.domain.models import ProgressTracking
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
 from backend.services.grouping_service import assign_work
@@ -141,7 +141,7 @@ def library_scan_files_task(
                     if lf.work_id is not None:
                         continue
                     try:
-                        work_id = assign_work(
+                        result = assign_work(
                             lf,
                             artist_repo=repos.artists,
                             work_repo=repos.works,
@@ -149,10 +149,16 @@ def library_scan_files_task(
                             recording_repo=repos.recordings,
                             song_master_repo=repos.song_masters,
                         )
-                        if work_id:
+                        if result:
                             repos.library_files.update_work_id(
-                                lf.id, work_id,
+                                lf.id, result.work_id,
                             )
+                            if result.recording_id:
+                                repos.library_files.update_recording_link(
+                                    lf.id,
+                                    result.recording_id,
+                                    EnrichmentStatus.PENDING,
+                                )
                     except Exception:  # noqa: BLE001
                         logger.warning(
                             "watcher_grouping_failed",

@@ -67,3 +67,28 @@ class FakeWorkRepository(WorkRepository):
             del self._data[work_id]
             return True
         return False
+
+    def get_candidates_by_normalized_artist(
+        self, normalized_artist_name: str, limit: int = 100,
+    ) -> list[tuple[str, str]]:
+        # Need access to library files to filter by artist — use stored ref
+        if not hasattr(self, "_library_file_repo"):
+            return []
+        artist_work_ids: set[str] = set()
+        for f in self._library_file_repo._data.values():
+            if (
+                f.normalized_artist_name == normalized_artist_name
+                and f.work_id is not None
+            ):
+                artist_work_ids.add(f.work_id)
+        result = [
+            (w.id, w.title)
+            for w in self._data.values()
+            if w.id in artist_work_ids
+        ]
+        result.sort(key=lambda x: x[1])
+        return result[:limit]
+
+    def set_library_file_repo(self, repo: object) -> None:
+        """Inject library file repo reference for candidate lookup."""
+        self._library_file_repo = repo  # type: ignore[assignment]

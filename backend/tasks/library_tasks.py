@@ -12,7 +12,13 @@ from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
+from backend.domain.enums import (
+    EnrichmentStatus,
+    LogCategory,
+    LogLevel,
+    TaskStatus,
+    TaskType,
+)
 from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking, SystemLog
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
@@ -65,13 +71,23 @@ def _run_scan(
         try:
             repos.library_files.upsert_write_only(lf)
         except psycopg.Error:
-            # DB error (e.g. null bytes in JSONB) — rollback so the
-            # connection is usable for the quarantine fallback.
-            # The rollback also discards any uncommitted writes in
-            # the current chunk, so reset the pending counter.
+            # Bad metadata (e.g. null bytes) can poison the transaction.
+            # Rollback discards uncommitted chunk rows — they will be
+            # re-inserted on the next scan since the upsert is idempotent.
             library_conn.rollback()
-            pending_writes = 0
-            raise
+            logger.warning(
+                "file_insert_failed_quarantined",
+                file_path=lf.file_path, exc_info=True,
+            )
+            repos.library_quarantine.create_write_only(
+                LibraryQuarantine(
+                    id=lf.id,
+                    file_path=lf.file_path,
+                    error_message="metadata contains invalid characters",
+                )
+            )
+            pending_writes = 1  # quarantine row is only uncommitted write
+            return
         files_written += 1
         pending_writes += 1
         written_files.append(lf)
@@ -105,12 +121,6 @@ def _run_scan(
             )
         )
 
-    # Build folder tree FIRST so library_folders is populated immediately at scan
-    # start, before any files are indexed.  Committing here makes the rows visible
-    # to other connections right away (e.g. the UI at 10% progress).
-    diff_tree(root_path, repos.library_folders)
-    library_conn.commit()
-
     # --- Run scan with callbacks ---
     scan_directory(
         Path(root_path),
@@ -119,17 +129,22 @@ def _run_scan(
         on_quarantine=on_quarantine,
     )
 
-    # Commit any remaining file/quarantine writes not yet flushed by chunk commits.
-    if pending_writes > 0:
-        library_conn.commit()
+    # Build folder tree so library_folders is populated even on first scan
+    diff_tree(root_path, repos.library_folders)
+
+    # Commit unconditionally: diff_tree always writes folder rows to library_conn
+    # regardless of whether any audio files were scanned, so we must not guard
+    # this commit behind pending_writes > 0.
+    library_conn.commit()
 
     # --- Grouping pass: assign work_id to newly written files ---
     grouped = 0
+    grouping_pending = 0
     for lf in written_files:
         if lf.work_id is not None:
             continue
         try:
-            work_id = assign_work(
+            result = assign_work(
                 lf,
                 artist_repo=repos.artists,
                 work_repo=repos.works,
@@ -137,13 +152,33 @@ def _run_scan(
                 recording_repo=repos.recordings,
                 song_master_repo=repos.song_masters,
             )
-            if work_id:
-                repos.library_files.update_work_id(lf.id, work_id)
+            if result:
+                repos.library_files.update_work_id(lf.id, result.work_id)
+                if result.recording_id:
+                    repos.library_files.update_recording_link(
+                        lf.id,
+                        result.recording_id,
+                        EnrichmentStatus.PENDING,
+                    )
                 grouped += 1
-        except Exception:  # noqa: BLE001
-            logger.warning("grouping_failed", file_id=str(lf.id), exc_info=True)
-    if grouped > 0:
+                grouping_pending += 1
+                if grouping_pending >= chunk_size:
+                    library_conn.commit()
+                    grouping_pending = 0
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "grouping_failed",
+                file_id=str(lf.id),
+                error=str(exc),
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
+            if isinstance(exc, psycopg.Error):
+                library_conn.rollback()
+                grouping_pending = 0
+    if grouping_pending > 0:
         library_conn.commit()
+    if grouped > 0:
         logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
 
     return files_written, quarantine_written, last_progress

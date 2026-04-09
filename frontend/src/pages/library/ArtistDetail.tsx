@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArtistDetail } from "@/api/artists";
 import { FeaturedReleasesSection } from "@/components/domain/library/FeaturedReleasesSection";
+import { VersionBadges } from "@/components/domain/works/VersionBadges";
 
 export function ArtistDetail() {
   const { artist_id } = useParams<{ artist_id: string }>();
@@ -78,6 +79,7 @@ export function ArtistDetail() {
                   <span className="truncate text-sm font-medium text-gray-900">
                     {work.title}
                   </span>
+                  <VersionBadges versionTypes={work.version_types} />
                 </div>
                 <span className="ml-4 shrink-0 text-xs text-gray-400">
                   {work.recording_count}{" "}

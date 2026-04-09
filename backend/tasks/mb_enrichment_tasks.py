@@ -115,6 +115,26 @@ def mb_enrichment_task() -> dict[str, int]:
                 )
                 recordings_failed += 1
 
+        # Clean up orphaned local recordings (not referenced by any file,
+        # created by grouping but superseded by MB enrichment).
+        orphan_cur = conn.execute(
+            """DELETE FROM recordings r
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM library_files lf
+                   WHERE lf.recording_id = r.id
+               )
+               AND r.needs_enhancement = FALSE
+               AND r.enhanced_at IS NULL""",
+        )
+        orphans_deleted = (
+            orphan_cur.rowcount if orphan_cur.rowcount else 0
+        )
+        if orphans_deleted > 0:
+            logger.info(
+                "orphaned_recordings_cleaned",
+                count=orphans_deleted,
+            )
+
         conn.commit()
 
     logger.info(
