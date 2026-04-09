@@ -14,6 +14,9 @@ from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.normalization import (
+    detect_embedded_remix,
+    extract_dash_version,
+    extract_version_tags,
     normalize_artist,
     normalize_title,
     strict_normalize,
@@ -61,16 +64,27 @@ def assign_work(
             return recording.work_id
 
     norm_artist = normalize_artist(raw_artist)
-    norm_title = normalize_title(raw_title)
+
+    # Spec 1a: strip version tags before fuzzy matching so that
+    # "You Oughta Know [The Jimmy The Saint Blend Clean Version]" and
+    # "You Oughta Know" converge on the same work.
+    base_title, tags = extract_version_tags(raw_title)
+    if not tags:
+        base_title, dash_tag = extract_dash_version(raw_title)
+        tags = [dash_tag] if dash_tag else []
+    if not tags:
+        base_title, embed_tag = detect_embedded_remix(raw_title)
+
+    norm_base = normalize_title(base_title)
 
     # Step 3: Artist-first fuzzy match
-    if norm_title:
+    if norm_base:
         work_candidates = library_file_repo.get_candidates_by_artist(
             norm_artist, limit=100,
         )
         if work_candidates:
-            threshold = _dynamic_threshold(len(norm_title))
-            strict_input = strict_normalize(norm_title)
+            threshold = _dynamic_threshold(len(norm_base))
+            strict_input = strict_normalize(norm_base)
 
             best_work_id: str | None = None
             best_score = -1.0
@@ -79,8 +93,8 @@ def assign_work(
                 if strict_input == strict_normalize(sample_title):
                     score = 100.0
                 else:
-                    full = fuzz.ratio(norm_title, sample_title)
-                    partial = fuzz.partial_ratio(norm_title, sample_title)
+                    full = fuzz.ratio(norm_base, sample_title)
+                    partial = fuzz.partial_ratio(norm_base, sample_title)
                     score = 0.7 * full + 0.3 * partial
 
                 if score > best_score or (
@@ -93,9 +107,11 @@ def assign_work(
             if best_score >= threshold and best_work_id is not None:
                 return best_work_id
 
-    # Step 4: Create local work
+    # Step 4: Create local work with the canonical base title (not the raw
+    # versioned title) so that works always represent the composition, not a
+    # specific version.
     artist_id = artist_repo.upsert_local(raw_artist, norm_artist)
-    work_id = work_repo.create_local(raw_title, artist_id)
+    work_id = work_repo.create_local(base_title, artist_id)
 
     song_master_repo.upsert(
         SongMaster(

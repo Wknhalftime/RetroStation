@@ -436,17 +436,18 @@ def test_extract_version_tags_part_number_ignored() -> None:
 
 
 def test_extract_version_tags_subtitle_kept() -> None:
-    """Parenthetical with 4+ words treated as subtitle and kept (FR23)."""
-    base, tags = extract_version_tags("Yesterday (Because I Told You So)")
-    assert "Because I Told You So" in base
+    """Parenthetical with 8+ words treated as subtitle and kept (FR23)."""
+    base, tags = extract_version_tags("Yesterday (Because I Really Truly Told You So Today)")
+    assert "Because I Really Truly Told You So Today" in base
     assert tags == []
 
 
 def test_extract_version_tags_four_word_unknown_kept() -> None:
-    """Exactly 4-word UNKNOWN parenthetical is kept — tests the boundary value.
+    """4-word UNKNOWN parenthetical is kept because classify returns UNKNOWN.
 
-    _SUBTITLE_WORD_THRESHOLD = 4; a 4-word group satisfies word_count >= 4
-    so it is kept regardless of classification result.
+    _SUBTITLE_WORD_THRESHOLD = 8; a 4-word group (4 < 8) is NOT blocked by
+    the word-count guard.  It is kept because classify_version_descriptor
+    returns UNKNOWN — no known version keyword is present.
     """
     base, tags = extract_version_tags("Song (One Two Three Four)")
     assert "One Two Three Four" in base
@@ -454,9 +455,9 @@ def test_extract_version_tags_four_word_unknown_kept() -> None:
 
 
 def test_extract_version_tags_bracket_subtitle_kept() -> None:
-    """Bracket-style subtitle with 4+ words is kept, not extracted (L6)."""
-    base, tags = extract_version_tags("Song [Because I Told You So]")
-    assert "Because I Told You So" in base
+    """Bracket-style subtitle with 8+ words is kept, not extracted (L6)."""
+    base, tags = extract_version_tags("Song [Because I Really Truly Told You So Today]")
+    assert "Because I Really Truly Told You So Today" in base
     assert tags == []
 
 

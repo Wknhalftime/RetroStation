@@ -68,8 +68,11 @@ _PART_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Subtitle word threshold: parentheticals with this many words are kept
-_SUBTITLE_WORD_THRESHOLD = 4
+# Subtitle word threshold: parentheticals with this many words are kept as
+# subtitle (not extracted as a version tag).  Set to 8 to accommodate
+# long DJ-style descriptors such as "The Jimmy The Saint Blend Clean Version"
+# (7 words) while still protecting genuine subtitle clauses.
+_SUBTITLE_WORD_THRESHOLD = 8
 
 # Embedded-remix trailing patterns (ordered longest-first to avoid partial matches)
 _EMBEDDED_REMIX_PATTERNS: list[re.Pattern[str]] = [
