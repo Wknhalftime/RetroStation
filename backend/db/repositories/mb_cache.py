@@ -5,19 +5,19 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 
-class PgMbCacheRepository(MbCacheRepository):
+class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> MbCache:
+    def _row_to_model(self, row: dict[str, Any]) -> MusicBrainzCache:
         response_data = row["response_data"]
         if isinstance(response_data, str):
             response_data = json.loads(response_data)
-        return MbCache(
+        return MusicBrainzCache(
             id=row["id"],
             cache_key=row["cache_key"],
             entity_type=row["entity_type"],
@@ -27,14 +27,14 @@ class PgMbCacheRepository(MbCacheRepository):
             expires_at=row["expires_at"],
         )
 
-    def get(self, cache_key: str) -> MbCache | None:
+    def get(self, cache_key: str) -> MusicBrainzCache | None:
         row = self._conn.execute(
             "SELECT * FROM mb_cache WHERE cache_key = %s AND expires_at > now()",
             (cache_key,),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def set(self, cache: MbCache) -> None:
+    def set(self, cache: MusicBrainzCache) -> None:
         self._conn.execute(
             """INSERT INTO mb_cache (id, cache_key, entity_type, entity_mbid,
                response_data, cached_at, expires_at)

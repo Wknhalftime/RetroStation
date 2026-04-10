@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 import psycopg
 from fastapi.testclient import TestClient
 
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,9 +21,9 @@ def _make_task(
     progress_data: dict | None = None,
     started_at: datetime | None = None,
     updated_at: datetime | None = None,
-) -> ProgressTracking:
+) -> TaskProgress:
     now = datetime.now(tz=UTC)
-    return ProgressTracking(
+    return TaskProgress(
         task_id=task_id,
         task_type=task_type,
         status=status,
@@ -42,8 +42,8 @@ def _seed_task(
     progress_data: dict | None = None,
     started_at: datetime | None = None,
     updated_at: datetime | None = None,
-) -> ProgressTracking:
-    repo = PgProgressTrackingRepository(conn)
+) -> TaskProgress:
+    repo = PgTaskProgressRepository(conn)
     task = repo.upsert(
         _make_task(
             task_id, task_type, status, progress_data, started_at, updated_at

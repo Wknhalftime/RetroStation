@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 
 
-class ProgressTrackingRepository(ABC):
+class TaskProgressRepository(ABC):
     @abstractmethod
-    def upsert(self, task: ProgressTracking) -> ProgressTracking: ...
-
-    @abstractmethod
-    def get_by_id(self, task_id: str) -> ProgressTracking | None: ...
+    def upsert(self, task: TaskProgress) -> TaskProgress: ...
 
     @abstractmethod
-    def list_running(self) -> list[ProgressTracking]: ...
+    def get_by_id(self, task_id: str) -> TaskProgress | None: ...
+
+    @abstractmethod
+    def list_running(self) -> list[TaskProgress]: ...
 
     @abstractmethod
     def mark_stale_as_failed(self, stale_threshold_minutes: int = 10) -> int:

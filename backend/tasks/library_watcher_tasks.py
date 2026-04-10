@@ -16,10 +16,10 @@ import structlog
 from huey import crontab  # type: ignore[import-untyped]
 
 from backend.config import get_settings
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_smart
@@ -85,7 +85,7 @@ def library_scan_files_task(
         progress_conn = connect_sync(
             settings.database_url, autocommit=True,
         )
-        progress_repo = PgProgressTrackingRepository(progress_conn)
+        progress_repo = PgTaskProgressRepository(progress_conn)
 
         # Data connection
         library_conn = connect_sync(
@@ -110,7 +110,7 @@ def library_scan_files_task(
 
         # Initial progress
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=scan_task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -170,7 +170,7 @@ def library_scan_files_task(
                 library_conn.commit()
 
             progress_repo.upsert(
-                ProgressTracking(
+                TaskProgress(
                     task_id=scan_task_id,
                     task_type=TaskType.SCAN,
                     status=TaskStatus.RUNNING,
@@ -202,7 +202,7 @@ def library_scan_files_task(
 
         # Mark completed
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=scan_task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.COMPLETED,
@@ -243,8 +243,8 @@ def library_scan_files_task(
 
         if progress_conn is not None:
             with contextlib.suppress(Exception):
-                PgProgressTrackingRepository(progress_conn).upsert(
-                    ProgressTracking(
+                PgTaskProgressRepository(progress_conn).upsert(
+                    TaskProgress(
                         task_id=scan_task_id,
                         task_type=TaskType.SCAN,
                         status=TaskStatus.FAILED,

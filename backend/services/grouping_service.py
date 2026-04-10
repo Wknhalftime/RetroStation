@@ -87,8 +87,8 @@ def assign_work(
     Returns GroupingResult with work_id and recording_id, or None if the
     file lacks artist/title metadata.
     """
-    raw_artist = file.artist_name or ""
-    raw_title = file.track_title or ""
+    raw_artist = file.audio.artist_name or ""
+    raw_title = file.audio.track_title or ""
     if not raw_artist.strip() or not raw_title.strip():
         return None
 
@@ -102,8 +102,8 @@ def assign_work(
             )
 
     # Step 2: MBID shortcut
-    if file.recording_mbid:
-        recording = recording_repo.get_by_id(file.recording_mbid)
+    if file.audio.recording_mbid:
+        recording = recording_repo.get_by_id(file.audio.recording_mbid)
         if recording and recording.work_id:
             return GroupingResult(
                 work_id=recording.work_id,

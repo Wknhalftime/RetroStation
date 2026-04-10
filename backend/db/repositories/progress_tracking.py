@@ -6,19 +6,19 @@ from typing import Any
 import psycopg
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
-from backend.repositories.progress_tracking import ProgressTrackingRepository
+from backend.domain.models import TaskProgress
+from backend.repositories.progress_tracking import TaskProgressRepository
 
 
-class PgProgressTrackingRepository(ProgressTrackingRepository):
+class PgTaskProgressRepository(TaskProgressRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> ProgressTracking:
+    def _row_to_model(self, row: dict[str, Any]) -> TaskProgress:
         progress_data = row["progress_data"]
         if isinstance(progress_data, str):
             progress_data = json.loads(progress_data)
-        return ProgressTracking(
+        return TaskProgress(
             task_id=row["task_id"],
             task_type=TaskType(row["task_type"]),
             status=TaskStatus(row["status"]),
@@ -28,7 +28,7 @@ class PgProgressTrackingRepository(ProgressTrackingRepository):
             completed_at=row.get("completed_at"),
         )
 
-    def upsert(self, task: ProgressTracking) -> ProgressTracking:
+    def upsert(self, task: TaskProgress) -> TaskProgress:
         self._conn.execute(
             """INSERT INTO progress_tracking
                (task_id, task_type, status, progress_data, started_at, updated_at, completed_at)
@@ -49,13 +49,13 @@ class PgProgressTrackingRepository(ProgressTrackingRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, task_id: str) -> ProgressTracking | None:
+    def get_by_id(self, task_id: str) -> TaskProgress | None:
         row = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE task_id = %s", (task_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def list_running(self) -> list[ProgressTracking]:
+    def list_running(self) -> list[TaskProgress]:
         rows = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE status = 'running' ORDER BY started_at DESC"
         ).fetchall()

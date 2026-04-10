@@ -199,9 +199,9 @@ This means the first poll is a pure setup operation. Subsequent polls are lightw
 
 ### Progress Tracking for Targeted Scans
 
-The existing `library_scan_task` reports progress via `PgProgressTrackingRepository` (drives the scan progress UI). The new `library_scan_files_task` will use the same mechanism:
+The existing `library_scan_task` reports progress via `PgTaskProgressRepository` (drives the scan progress UI). The new `library_scan_files_task` will use the same mechanism:
 
-- Creates a `ProgressTracking` record with `task_type=TaskType.SCAN`
+- Creates a `TaskProgress` record with `task_type=TaskType.SCAN`
 - Reports `{processed, total, current_path}` as it processes folders
 - The frontend progress UI works unchanged — it queries by `task_type`, not by which task created the record
 

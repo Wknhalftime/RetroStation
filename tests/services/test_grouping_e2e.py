@@ -13,7 +13,7 @@ from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.domain.enums import SelectionMethod
-from backend.domain.models import LibraryFile, SongMaster
+from backend.domain.models import AudioMetadata, LibraryFile, SongMaster
 from backend.services.grouping_service import assign_work
 from backend.services.normalization import normalize_artist, normalize_title
 from tests.helpers import assert_grouping_invariants
@@ -31,10 +31,12 @@ def _make_file(
         file_path=path,
         file_hash=file_hash,
         format="mp3",
-        artist_name=artist,
-        track_title=title,
-        normalized_artist_name=normalize_artist(artist),
-        normalized_title=normalize_title(title),
+        audio=AudioMetadata(
+            artist_name=artist,
+            track_title=title,
+            normalized_artist_name=normalize_artist(artist),
+            normalized_title=normalize_title(title),
+        ),
     )
 
 

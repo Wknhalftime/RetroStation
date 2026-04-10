@@ -5,7 +5,7 @@ import contextlib
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, LogLevel
@@ -39,7 +39,7 @@ def library_enrichment_task() -> dict[str, int]:
     try:
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
-            cache_repo = PgMbCacheRepository(conn)
+            cache_repo = PgMusicBrainzCacheRepository(conn)
             mb_client = RealMbClient(cache_repo)
 
             # Pre-query both phases so counts are known for enrichment_started log.

@@ -88,7 +88,7 @@ class PgLogIdentityRepository(LogIdentityRepository):
                  AND li.match_status = %s
                  AND la.match_status IN (%s, %s)""",
             (playlist_id, MatchStatus.PENDING.value,
-             MatchStatus.AUTO_MATCHED.value, MatchStatus.MAN_MATCHED.value),
+             MatchStatus.AUTO_MATCHED.value, MatchStatus.MANUAL_MATCHED.value),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

@@ -260,7 +260,7 @@ class TestRunScanChunkedCommits:
         # progress_repo.upsert called twice (once per on_progress call)
         assert mock_progress_repo.upsert.call_count == 2
 
-        # Verify the last call's ProgressTracking shape
+        # Verify the last call's TaskProgress shape
         last_call_arg = mock_progress_repo.upsert.call_args_list[-1][0][0]
         assert last_call_arg.task_id == "test-progress-task"
         assert last_call_arg.status == TaskStatus.RUNNING

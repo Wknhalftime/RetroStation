@@ -1799,18 +1799,18 @@ class TestResolveArtist:
         resp = client.post(
             f"/api/v1/matching/artists/{la.id}/resolve",
             json={
-                "match_status": "MAN_MATCHED",
+                "match_status": "MANUAL_MATCHED",
                 "target_artist_id": canonical.id,
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["match_status"] == "MAN_MATCHED"
+        assert resp.json()["match_status"] == "MANUAL_MATCHED"
 
     def test_manual_reject_cascades(self, client, db_conn):
         la, li, *_ = _seed_review_data(db_conn)
         resp = client.post(
             f"/api/v1/matching/artists/{la.id}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 200
         # Verify child identity was cascaded to AUTO_REJECTED
@@ -1826,7 +1826,7 @@ class TestResolveArtist:
     def test_not_found(self, client):
         resp = client.post(
             f"/api/v1/matching/artists/{uuid4()}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 404
 
@@ -1837,17 +1837,17 @@ class TestResolveIdentity:
         # First resolve artist so identity is eligible
         client.post(
             f"/api/v1/matching/artists/{la.id}/resolve",
-            json={"match_status": "MAN_MATCHED", "target_artist_id": "art-001"},
+            json={"match_status": "MANUAL_MATCHED", "target_artist_id": "art-001"},
         )
         resp = client.post(
             f"/api/v1/matching/identities/{li.id}/resolve",
             json={
-                "match_status": "MAN_MATCHED",
+                "match_status": "MANUAL_MATCHED",
                 "library_file_id": str(lf.id),
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["match_status"] == "MAN_MATCHED"
+        assert resp.json()["match_status"] == "MANUAL_MATCHED"
 
 
 class TestMatchingRun:
@@ -1911,12 +1911,12 @@ class MatchingQueue(BaseModel):
 
 
 class ArtistResolution(BaseModel):
-    match_status: str  # MAN_MATCHED or MAN_REJECTED
+    match_status: str  # MANUAL_MATCHED or MANUAL_REJECTED
     target_artist_id: str | None = None
 
 
 class IdentityResolution(BaseModel):
-    match_status: str  # MAN_MATCHED or MAN_REJECTED
+    match_status: str  # MANUAL_MATCHED or MANUAL_REJECTED
     library_file_id: UUID | None = None
 
 
@@ -2011,11 +2011,11 @@ async def resolve_artist(
 
     new_status = MatchStatus(body.match_status)
 
-    if new_status == MatchStatus.MAN_MATCHED:
+    if new_status == MatchStatus.MANUAL_MATCHED:
         if body.target_artist_id is None:
             raise HTTPException(
                 status_code=422,
-                detail="target_artist_id required for MAN_MATCHED",
+                detail="target_artist_id required for MANUAL_MATCHED",
             )
         # Update artist match status
         await conn.execute(
@@ -2032,7 +2032,7 @@ async def resolve_artist(
              TargetType.ARTIST.value, 1.0, MatchTier.MANUAL.value, None),
         )
 
-    elif new_status == MatchStatus.MAN_REJECTED:
+    elif new_status == MatchStatus.MANUAL_REJECTED:
         # Update artist
         await conn.execute(
             "UPDATE log_artists SET match_status = %s WHERE id = %s",
@@ -2042,13 +2042,13 @@ async def resolve_artist(
         await conn.execute(
             """UPDATE log_identities
                SET match_status = 'AUTO_REJECTED'
-               WHERE artist_id = %s AND match_status NOT IN ('MAN_MATCHED', 'MAN_REJECTED')""",
+               WHERE artist_id = %s AND match_status NOT IN ('MANUAL_MATCHED', 'MANUAL_REJECTED')""",
             (artist_id,),
         )
     else:
         raise HTTPException(
             status_code=422,
-            detail="match_status must be MAN_MATCHED or MAN_REJECTED",
+            detail="match_status must be MANUAL_MATCHED or MANUAL_REJECTED",
         )
 
     return ResolveResult(id=artist_id, match_status=new_status.value)
@@ -2067,11 +2067,11 @@ async def resolve_identity(
 
     new_status = MatchStatus(body.match_status)
 
-    if new_status == MatchStatus.MAN_MATCHED:
+    if new_status == MatchStatus.MANUAL_MATCHED:
         if body.library_file_id is None:
             raise HTTPException(
                 status_code=422,
-                detail="library_file_id required for MAN_MATCHED",
+                detail="library_file_id required for MANUAL_MATCHED",
             )
         # Update identity match status
         await conn.execute(
@@ -2093,7 +2093,7 @@ async def resolve_identity(
              1.0, MatchTier.MANUAL.value, None),
         )
 
-    elif new_status == MatchStatus.MAN_REJECTED:
+    elif new_status == MatchStatus.MANUAL_REJECTED:
         await conn.execute(
             "UPDATE log_identities SET match_status = %s, match_tier = %s WHERE id = %s",
             (new_status.value, MatchTier.MANUAL.value, identity_id),
@@ -2105,7 +2105,7 @@ async def resolve_identity(
     else:
         raise HTTPException(
             status_code=422,
-            detail="match_status must be MAN_MATCHED or MAN_REJECTED",
+            detail="match_status must be MANUAL_MATCHED or MANUAL_REJECTED",
         )
 
     return ResolveResult(id=identity_id, match_status=new_status.value)
@@ -3089,7 +3089,7 @@ from backend.repositories.works import WorkRepository
 
 logger = structlog.get_logger()
 
-MATCHED_STATUSES = {MatchStatus.AUTO_MATCHED, MatchStatus.MAN_MATCHED}
+MATCHED_STATUSES = {MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED}
 
 
 def generate_m3u(

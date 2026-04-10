@@ -9,8 +9,8 @@ from uuid import uuid4
 import httpx
 import structlog
 
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 logger = structlog.get_logger()
 
@@ -36,7 +36,7 @@ def _rate_limit() -> None:
 class RealMbClient:
     """MusicBrainz API client with caching and rate limiting."""
 
-    def __init__(self, cache_repo: MbCacheRepository) -> None:
+    def __init__(self, cache_repo: MusicBrainzCacheRepository) -> None:
         self._cache = cache_repo
         self._http = httpx.Client(
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
@@ -63,7 +63,7 @@ class RealMbClient:
 
         # Cache response
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="artist-search",
@@ -98,7 +98,7 @@ class RealMbClient:
         data: dict[str, Any] = response.json()
 
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="release",
@@ -132,7 +132,7 @@ class RealMbClient:
         data: dict[str, Any] = response.json()
 
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="recording",

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 class TestScanEnrichmentChain:
     @patch("backend.tasks.library_tasks.psycopg")
-    @patch("backend.tasks.library_tasks.PgProgressTrackingRepository")
+    @patch("backend.tasks.library_tasks.PgTaskProgressRepository")
     def test_chains_enrichment_when_files_written(
         self,
         mock_progress_repo_cls: MagicMock,
@@ -27,7 +27,7 @@ class TestScanEnrichmentChain:
                 mock_enrich.assert_called_once()
 
     @patch("backend.tasks.library_tasks.psycopg")
-    @patch("backend.tasks.library_tasks.PgProgressTrackingRepository")
+    @patch("backend.tasks.library_tasks.PgTaskProgressRepository")
     def test_no_enrichment_when_zero_files(
         self,
         mock_progress_repo_cls: MagicMock,

@@ -30,15 +30,15 @@ def _score_file(lib_file: object) -> tuple[int, int, int]:
     f: LibraryFile = lib_file  # type: ignore[assignment]
 
     score = 0
-    if f.release_status is not None:
-        score += RELEASE_STATUS_SCORE.get(f.release_status.value, 0)
-    if f.release_type is not None:
-        score += RELEASE_TYPE_SCORE.get(f.release_type.value, RELEASE_TYPE_SCORE["other"])
+    if f.audio.release_status is not None:
+        score += RELEASE_STATUS_SCORE.get(f.audio.release_status.value, 0)
+    if f.audio.release_type is not None:
+        score += RELEASE_TYPE_SCORE.get(f.audio.release_type.value, RELEASE_TYPE_SCORE["other"])
     fmt = (f.format or "").lower()
     score += FORMAT_BONUS.get(fmt, 1)
 
-    bitrate = f.bitrate or 0
-    duration = f.duration_ms or 0
+    bitrate = f.audio.bitrate or 0
+    duration = f.audio.duration_ms or 0
     return score, bitrate, duration
 
 

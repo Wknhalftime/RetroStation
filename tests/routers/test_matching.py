@@ -222,19 +222,19 @@ class TestResolveArtist:
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MAN_MATCHED", "target_artist_id": target_mbid},
+            json={"match_status": "MANUAL_MATCHED", "target_artist_id": target_mbid},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(artist.id)
-        assert data["match_status"] == "MAN_MATCHED"
+        assert data["match_status"] == "MANUAL_MATCHED"
 
         # Verify DB state: log_artists updated
         row = db_conn.execute(
             "SELECT match_status FROM log_artists WHERE id = %s", (artist.id,)
         ).fetchone()
         assert row is not None
-        assert row["match_status"] == "MAN_MATCHED"
+        assert row["match_status"] == "MANUAL_MATCHED"
 
         # Verify match row created
         match_row = db_conn.execute(
@@ -251,17 +251,17 @@ class TestResolveArtist:
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 200
-        assert resp.json()["match_status"] == "MAN_REJECTED"
+        assert resp.json()["match_status"] == "MANUAL_REJECTED"
 
         # Artist updated
         artist_row = db_conn.execute(
             "SELECT match_status FROM log_artists WHERE id = %s", (artist.id,)
         ).fetchone()
         assert artist_row is not None
-        assert artist_row["match_status"] == "MAN_REJECTED"
+        assert artist_row["match_status"] == "MANUAL_REJECTED"
 
         # Child identity cascaded to AUTO_REJECTED
         identity_row = db_conn.execute(
@@ -271,28 +271,29 @@ class TestResolveArtist:
         assert identity_row["match_status"] == "AUTO_REJECTED"
 
     def test_manual_reject_does_not_cascade_protected(self, client, db_conn):
-        """MAN_MATCHED/MAN_REJECTED child identities must not be overwritten."""
+        """MANUAL_MATCHED/MANUAL_REJECTED child identities must not be overwritten."""
         _, _, artist, _, _ = _seed_review_chain(db_conn)
-        # Add a second identity that is already MAN_MATCHED
+        # Add a second identity that is already MANUAL_MATCHED
         protected = _insert_identity(
-            db_conn, artist, original_title="Protected Song", match_status=MatchStatus.MAN_MATCHED
+            db_conn, artist, original_title="Protected Song",
+            match_status=MatchStatus.MANUAL_MATCHED,
         )
 
         client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
 
         protected_row = db_conn.execute(
             "SELECT match_status FROM log_identities WHERE id = %s", (protected.id,)
         ).fetchone()
         assert protected_row is not None
-        assert protected_row["match_status"] == "MAN_MATCHED"
+        assert protected_row["match_status"] == "MANUAL_MATCHED"
 
     def test_not_found(self, client):
         resp = client.post(
             f"/api/v1/matching/artists/{uuid4()}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 404
 
@@ -305,12 +306,12 @@ class TestResolveArtist:
         )
         assert resp.status_code == 422
 
-    def test_man_matched_requires_target(self, client, db_conn):
+    def test_manual_matched_requires_target(self, client, db_conn):
         _, _, artist, _, _ = _seed_review_chain(db_conn)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MAN_MATCHED"},
+            json={"match_status": "MANUAL_MATCHED"},
         )
         assert resp.status_code == 422
 
@@ -327,12 +328,12 @@ class TestResolveIdentity:
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MAN_MATCHED", "library_file_id": str(lib_file.id)},
+            json={"match_status": "MANUAL_MATCHED", "library_file_id": str(lib_file.id)},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(identity.id)
-        assert data["match_status"] == "MAN_MATCHED"
+        assert data["match_status"] == "MANUAL_MATCHED"
 
         # Verify log_identity updated with MANUAL tier
         id_row = db_conn.execute(
@@ -340,7 +341,7 @@ class TestResolveIdentity:
             (identity.id,),
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "MAN_MATCHED"
+        assert id_row["match_status"] == "MANUAL_MATCHED"
         assert id_row["match_tier"] == "MANUAL"
 
         # Verify match row created
@@ -358,17 +359,17 @@ class TestResolveIdentity:
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["match_status"] == "MAN_REJECTED"
+        assert data["match_status"] == "MANUAL_REJECTED"
 
         id_row = db_conn.execute(
             "SELECT match_status FROM log_identities WHERE id = %s", (identity.id,)
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "MAN_REJECTED"
+        assert id_row["match_status"] == "MANUAL_REJECTED"
 
     def test_manual_match_replaces_existing_match(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
@@ -394,7 +395,7 @@ class TestResolveIdentity:
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MAN_MATCHED", "library_file_id": str(lib_file_new.id)},
+            json={"match_status": "MANUAL_MATCHED", "library_file_id": str(lib_file_new.id)},
         )
         assert resp.status_code == 200
 
@@ -409,7 +410,7 @@ class TestResolveIdentity:
     def test_not_found(self, client):
         resp = client.post(
             f"/api/v1/matching/identities/{uuid4()}/resolve",
-            json={"match_status": "MAN_REJECTED"},
+            json={"match_status": "MANUAL_REJECTED"},
         )
         assert resp.status_code == 404
 

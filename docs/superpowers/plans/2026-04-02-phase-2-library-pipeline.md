@@ -1146,7 +1146,7 @@ Add these two methods to the `RealMbClient` class:
         data = response.json()
 
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="release",
@@ -1182,7 +1182,7 @@ Add these two methods to the `RealMbClient` class:
         data = response.json()
 
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="recording",
@@ -1463,7 +1463,7 @@ from psycopg.rows import dict_row
 from backend.config import get_settings
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.services.library_enrichment_service import (
@@ -1490,7 +1490,7 @@ def library_enrichment_task() -> dict[str, int]:
         recording_repo = PgRecordingRepository(conn)
         work_repo = PgWorkRepository(conn)
         artist_repo = PgArtistRepository(conn)
-        mb_client = RealMbClient(PgMbCacheRepository(conn))
+        mb_client = RealMbClient(PgMusicBrainzCacheRepository(conn))
 
         # Phase 1: batch by release_mbid
         release_mbids = conn.execute(
@@ -1703,7 +1703,7 @@ from psycopg.rows import dict_row
 
 from backend.config import get_settings
 from backend.db.repositories.artists import PgArtistRepository
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.services.mb_client import RealMbClient
@@ -1725,7 +1725,7 @@ def mb_enrichment_task() -> dict[str, int]:
         artist_repo = PgArtistRepository(conn)
         work_repo = PgWorkRepository(conn)
         recording_repo = PgRecordingRepository(conn)
-        mb_client = RealMbClient(PgMbCacheRepository(conn))
+        mb_client = RealMbClient(PgMusicBrainzCacheRepository(conn))
 
         # Enhance artists
         for artist in artist_repo.list_needing_enhancement():

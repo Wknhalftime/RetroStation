@@ -16,6 +16,7 @@ from backend.db.repositories.works import PgWorkRepository
 from backend.domain.enums import EnrichmentStatus, SelectionMethod
 from backend.domain.models import (
     Artist,
+    AudioMetadata,
     FormatOverride,
     LibraryFile,
     LibraryQuarantine,
@@ -61,10 +62,12 @@ def _make_file(
         enrichment_status=enrichment_status,
         recording_id=recording_id,
         work_id=work_id,
-        track_title="Track Title",
-        release_title="Album Title",
-        bitrate=320,
-        duration_ms=210_000,
+        audio=AudioMetadata(
+            track_title="Track Title",
+            release_title="Album Title",
+            bitrate=320,
+            duration_ms=210_000,
+        ),
     )
 
 

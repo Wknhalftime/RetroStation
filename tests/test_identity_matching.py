@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
-from backend.domain.models import LibraryFile, LogArtist, LogIdentity, Match
+from backend.domain.models import AudioMetadata, LibraryFile, LogArtist, LogIdentity, Match
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.normalization import (
     compute_normalized_signature,
@@ -111,9 +111,11 @@ def test_tier2_mbid_graph_exact_match() -> None:
         file_hash="abc123",
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
-        artist_mbid=canonical_mbid,
-        track_title=track_title,
         recording_id="rec-enter-sandman",
+        audio=AudioMetadata(
+            artist_mbid=canonical_mbid,
+            track_title=track_title,
+        ),
     )
     library_file_repo.upsert(lib_file)
 

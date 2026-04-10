@@ -5,7 +5,7 @@ defined in the design spec (Section 3.4):
 
     format_override > song_master > direct match (match.library_file_id)
 
-Only events whose identity has a match_status of AUTO_MATCHED or MAN_MATCHED
+Only events whose identity has a match_status of AUTO_MATCHED or MANUAL_MATCHED
 are emitted; all others are silently skipped.
 """
 
@@ -24,7 +24,7 @@ from backend.repositories.settings import SettingsRepository
 from backend.repositories.song_masters import SongMasterRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
-    {MatchStatus.AUTO_MATCHED, MatchStatus.MAN_MATCHED}
+    {MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED}
 )
 
 
@@ -102,8 +102,8 @@ def generate_m3u(
             file_path = navidrome_prefix + file_path[len(local_prefix):]
 
         duration_secs: int = (
-            resolved_file.duration_ms // 1000
-            if resolved_file.duration_ms is not None
+            resolved_file.audio.duration_ms // 1000
+            if resolved_file.audio.duration_ms is not None
             else -1
         )
         title: str = identity.original_title

@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.domain.enums import EnrichmentStatus, ReleaseStatus, ReleaseType
-from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.domain.models import AudioMetadata, LibraryFile, LibraryQuarantine
 
 
 def _make_file(
@@ -27,19 +27,21 @@ def _make_file(
         file_hash="abc123",
         format=format,
         enrichment_status=enrichment_status,
-        artist_mbid=artist_mbid,
-        album_artist_mbid=album_artist_mbid,
-        recording_mbid=recording_mbid,
-        release_mbid=release_mbid,
-        release_title="Test Album",
-        release_type=ReleaseType.ALBUM,
-        release_status=ReleaseStatus.OFFICIAL,
-        track_title="Test Track",
-        track_number=1,
-        disc_number=1,
-        duration_ms=240000,
-        bitrate=320,
-        raw_metadata={"title": "Test Track"},
+        audio=AudioMetadata(
+            artist_mbid=artist_mbid,
+            album_artist_mbid=album_artist_mbid,
+            recording_mbid=recording_mbid,
+            release_mbid=release_mbid,
+            release_title="Test Album",
+            release_type=ReleaseType.ALBUM,
+            release_status=ReleaseStatus.OFFICIAL,
+            track_title="Test Track",
+            track_number=1,
+            disc_number=1,
+            duration_ms=240000,
+            bitrate=320,
+            raw_metadata={"title": "Test Track"},
+        ),
     )
 
 
@@ -53,17 +55,17 @@ def test_library_file_upsert_and_get(migrated_db: str) -> None:
         assert created.file_path == "/music/song.flac"
         assert created.format == "flac"
         assert created.enrichment_status == EnrichmentStatus.PENDING
-        assert created.release_type == ReleaseType.ALBUM
-        assert created.release_status == ReleaseStatus.OFFICIAL
-        assert created.raw_metadata == {"title": "Test Track"}
-        assert created.bitrate == 320
-        assert created.duration_ms == 240000
+        assert created.audio.release_type == ReleaseType.ALBUM
+        assert created.audio.release_status == ReleaseStatus.OFFICIAL
+        assert created.audio.raw_metadata == {"title": "Test Track"}
+        assert created.audio.bitrate == 320
+        assert created.audio.duration_ms == 240000
 
         # get_by_id
         fetched = repo.get_by_id(created.id)
         assert fetched is not None
         assert fetched.id == created.id
-        assert fetched.track_title == "Test Track"
+        assert fetched.audio.track_title == "Test Track"
 
         # get_by_path
         by_path = repo.get_by_path("/music/song.flac")
@@ -77,14 +79,16 @@ def test_library_file_upsert_and_get(migrated_db: str) -> None:
             file_hash="newhashabc",
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
-            track_title="Updated Title",
-            bitrate=256,
+            audio=AudioMetadata(
+                track_title="Updated Title",
+                bitrate=256,
+            ),
         )
         updated = repo.upsert(lf2)
         assert updated.id == created.id  # same row
         assert updated.file_hash == "newhashabc"
-        assert updated.track_title == "Updated Title"
-        assert updated.bitrate == 256
+        assert updated.audio.track_title == "Updated Title"
+        assert updated.audio.bitrate == 256
 
         conn.commit()
 
@@ -257,7 +261,7 @@ def test_upsert_write_only_inserts_and_is_retrievable(migrated_db: str) -> None:
         assert result.id == lf.id
         assert result.file_hash == lf.file_hash
         assert result.format == "flac"
-        assert result.track_title == "Test Track"
+        assert result.audio.track_title == "Test Track"
 
 
 def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
@@ -271,7 +275,7 @@ def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
 
         lf2 = _make_file(file_path="/music/update_me.flac", format="mp3")
         lf2.file_hash = "updated_hash"
-        lf2.track_title = "Updated Title"
+        lf2.audio.track_title = "Updated Title"
         repo.upsert_write_only(lf2)
         conn.commit()
 
@@ -279,7 +283,7 @@ def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
         assert result is not None
         assert result.format == "mp3"
         assert result.file_hash == "updated_hash"
-        assert result.track_title == "Updated Title"
+        assert result.audio.track_title == "Updated Title"
 
 
 def test_create_write_only_inserts_quarantine(migrated_db: str) -> None:

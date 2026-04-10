@@ -3,14 +3,14 @@ from __future__ import annotations
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.services.mb_client import RealMbClient
 
 
 def test_mb_search_artist_real_api(migrated_db: str) -> None:
     """Integration test: real MusicBrainz API call for a known artist."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        cache_repo = PgMbCacheRepository(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
         client = RealMbClient(cache_repo)
 
         # First call: hits API

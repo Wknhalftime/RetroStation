@@ -26,7 +26,7 @@ from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.stations import PgStationRepository
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import LibraryFile, Recording, Station
+from backend.domain.models import AudioMetadata, LibraryFile, Recording, Station
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
@@ -130,9 +130,11 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             file_hash="deadbeef" + uuid4().hex[:24],
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
-            artist_mbid="mbid-metallica-lib",
-            track_title=target_title,
             recording_id=recording_mbid,
+            audio=AudioMetadata(
+                artist_mbid="mbid-metallica-lib",
+                track_title=target_title,
+            ),
         )
         PgLibraryFileRepository(conn).upsert(lib_file)
         conn.commit()

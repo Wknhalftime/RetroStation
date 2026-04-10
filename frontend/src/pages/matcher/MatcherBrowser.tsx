@@ -45,7 +45,7 @@ export function MatcherBrowser() {
     if (!activeIdentityId) return
     resolveIdentity.mutate({
       id: activeIdentityId,
-      resolution: { match_status: 'MAN_MATCHED', library_file_id: file.id },
+      resolution: { match_status: 'MANUAL_MATCHED', library_file_id: file.id },
     })
     setActiveIdentityId(null)
   }

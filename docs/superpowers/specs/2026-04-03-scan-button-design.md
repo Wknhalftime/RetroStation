@@ -56,13 +56,13 @@ def library_scan_task(root_path: str) -> str:
     # Intentional layer skip past RepositoryFactory — progress writes must be
     # visible immediately (not held in the library data transaction).
     progress_conn = None
-    progress_repo: PgProgressTrackingRepository | None = None
+    progress_repo: PgTaskProgressRepository | None = None
     try:
         progress_conn = psycopg.connect(settings.database_url, autocommit=True, row_factory=dict_row)
-        progress_repo = PgProgressTrackingRepository(progress_conn)
+        progress_repo = PgTaskProgressRepository(progress_conn)
 
         # Initial record
-        progress_repo.upsert(ProgressTracking(
+        progress_repo.upsert(TaskProgress(
             task_id=task_id,
             task_type=TaskType.SCAN,
             status=TaskStatus.RUNNING,
@@ -75,7 +75,7 @@ def library_scan_task(root_path: str) -> str:
         def on_progress(processed: int, total: int, current_path: str) -> None:
             nonlocal last_progress
             last_progress = {"processed": processed, "total": total, "current_path": current_path}
-            progress_repo.upsert(ProgressTracking(
+            progress_repo.upsert(TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -96,7 +96,7 @@ def library_scan_task(root_path: str) -> str:
             conn.commit()
 
         # Mark completed AFTER library data commit succeeds
-        progress_repo.upsert(ProgressTracking(
+        progress_repo.upsert(TaskProgress(
             task_id=task_id,
             task_type=TaskType.SCAN,
             status=TaskStatus.COMPLETED,
@@ -109,7 +109,7 @@ def library_scan_task(root_path: str) -> str:
     except Exception as exc:
         if progress_conn is not None and progress_repo is not None:
             try:
-                progress_repo.upsert(ProgressTracking(
+                progress_repo.upsert(TaskProgress(
                     task_id=task_id,
                     task_type=TaskType.SCAN,
                     status=TaskStatus.FAILED,

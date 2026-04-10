@@ -5,7 +5,7 @@ import dataclasses
 from uuid import uuid4
 
 from backend.domain.enums import VersionType
-from backend.domain.models import LibraryFile, Recording
+from backend.domain.models import AudioMetadata, LibraryFile, Recording
 from backend.services.grouping_service import (
     GroupingResult,
     _dynamic_threshold,
@@ -45,9 +45,11 @@ def _make_file(
         file_path=f"/music/{track_title}.mp3",
         file_hash=file_hash or str(uuid4()),
         format="mp3",
-        artist_name=artist_name,
-        track_title=track_title,
-        recording_mbid=recording_mbid,
+        audio=AudioMetadata(
+            artist_name=artist_name,
+            track_title=track_title,
+            recording_mbid=recording_mbid,
+        ),
     )
 
 
@@ -68,8 +70,11 @@ def _seed_file_in_work(
     f = dataclasses.replace(
         f,
         work_id=work_id,
-        normalized_artist_name=normalize_artist(artist_name),
-        normalized_title=normalize_title(track_title),
+        audio=dataclasses.replace(
+            f.audio,
+            normalized_artist_name=normalize_artist(artist_name),
+            normalized_title=normalize_title(track_title),
+        ),
     )
     repos["library_file_repo"].upsert(f)
     return f, work_id
@@ -278,8 +283,11 @@ def test_two_versions_share_work_separate_recordings() -> None:
     f1 = dataclasses.replace(
         f1,
         work_id=r1.work_id,
-        normalized_artist_name=normalize_artist("Alanis"),
-        normalized_title=normalize_title("You Oughta Know"),
+        audio=dataclasses.replace(
+            f1.audio,
+            normalized_artist_name=normalize_artist("Alanis"),
+            normalized_title=normalize_title("You Oughta Know"),
+        ),
     )
     repos["library_file_repo"].upsert(f1)
 

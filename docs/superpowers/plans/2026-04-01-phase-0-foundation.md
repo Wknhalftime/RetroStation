@@ -884,9 +884,9 @@ class MatchStatus(str, Enum):
     PENDING       = "PENDING"
     AUTO_MATCHED  = "AUTO_MATCHED"
     NEEDS_REVIEW  = "NEEDS_REVIEW"
-    MAN_MATCHED   = "MAN_MATCHED"
+    MANUAL_MATCHED   = "MANUAL_MATCHED"
     AUTO_REJECTED = "AUTO_REJECTED"
-    MAN_REJECTED  = "MAN_REJECTED"
+    MANUAL_REJECTED  = "MANUAL_REJECTED"
 
 
 class MatchTier(str, Enum):
@@ -1161,7 +1161,7 @@ class GlobalMappingRule:
 
 
 @dataclass
-class MbCache:
+class MusicBrainzCache:
     id: UUID
     cache_key: str
     entity_type: str
@@ -1172,7 +1172,7 @@ class MbCache:
 
 
 @dataclass
-class ProgressTracking:
+class TaskProgress:
     task_id: str
     task_type: TaskType
     status: TaskStatus
@@ -1817,15 +1817,15 @@ class GlobalMappingRuleRepository(ABC):
 ```python
 from abc import ABC, abstractmethod
 
-from backend.domain.models import MbCache
+from backend.domain.models import MusicBrainzCache
 
 
-class MbCacheRepository(ABC):
+class MusicBrainzCacheRepository(ABC):
     @abstractmethod
-    def get(self, cache_key: str) -> MbCache | None: ...
+    def get(self, cache_key: str) -> MusicBrainzCache | None: ...
 
     @abstractmethod
-    def set(self, cache: MbCache) -> None: ...
+    def set(self, cache: MusicBrainzCache) -> None: ...
 
     @abstractmethod
     def delete_expired(self) -> int:
@@ -1838,18 +1838,18 @@ class MbCacheRepository(ABC):
 ```python
 from abc import ABC, abstractmethod
 
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 
 
-class ProgressTrackingRepository(ABC):
+class TaskProgressRepository(ABC):
     @abstractmethod
-    def upsert(self, task: ProgressTracking) -> ProgressTracking: ...
-
-    @abstractmethod
-    def get_by_id(self, task_id: str) -> ProgressTracking | None: ...
+    def upsert(self, task: TaskProgress) -> TaskProgress: ...
 
     @abstractmethod
-    def list_running(self) -> list[ProgressTracking]: ...
+    def get_by_id(self, task_id: str) -> TaskProgress | None: ...
+
+    @abstractmethod
+    def list_running(self) -> list[TaskProgress]: ...
 
     @abstractmethod
     def mark_stale_as_failed(self, stale_threshold_minutes: int = 10) -> int:
@@ -2441,21 +2441,21 @@ class FakeGlobalMappingRuleRepository(GlobalMappingRuleRepository):
 
 ```python
 from datetime import datetime, timezone
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 
-class FakeMbCacheRepository(MbCacheRepository):
+class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self) -> None:
-        self._data: dict[str, MbCache] = {}
+        self._data: dict[str, MusicBrainzCache] = {}
 
-    def get(self, cache_key: str) -> MbCache | None:
+    def get(self, cache_key: str) -> MusicBrainzCache | None:
         entry = self._data.get(cache_key)
         if entry and entry.expires_at > datetime.now(tz=timezone.utc):
             return entry
         return None
 
-    def set(self, cache: MbCache) -> None:
+    def set(self, cache: MusicBrainzCache) -> None:
         self._data[cache.cache_key] = cache
 
     def delete_expired(self) -> int:
@@ -2471,22 +2471,22 @@ class FakeMbCacheRepository(MbCacheRepository):
 ```python
 from datetime import datetime, timedelta, timezone
 from backend.domain.enums import TaskStatus
-from backend.domain.models import ProgressTracking
-from backend.repositories.progress_tracking import ProgressTrackingRepository
+from backend.domain.models import TaskProgress
+from backend.repositories.progress_tracking import TaskProgressRepository
 
 
-class FakeProgressTrackingRepository(ProgressTrackingRepository):
+class FakeTaskProgressRepository(TaskProgressRepository):
     def __init__(self) -> None:
-        self._data: dict[str, ProgressTracking] = {}
+        self._data: dict[str, TaskProgress] = {}
 
-    def upsert(self, task: ProgressTracking) -> ProgressTracking:
+    def upsert(self, task: TaskProgress) -> TaskProgress:
         self._data[task.task_id] = task
         return task
 
-    def get_by_id(self, task_id: str) -> ProgressTracking | None:
+    def get_by_id(self, task_id: str) -> TaskProgress | None:
         return self._data.get(task_id)
 
-    def list_running(self) -> list[ProgressTracking]:
+    def list_running(self) -> list[TaskProgress]:
         return [t for t in self._data.values() if t.status == TaskStatus.RUNNING]
 
     def mark_stale_as_failed(self, stale_threshold_minutes: int = 10) -> int:
@@ -2590,12 +2590,12 @@ def test_global_mapping_rule_fake_is_concrete() -> None:
     assert FakeGlobalMappingRuleRepository() is not None
 
 def test_mb_cache_fake_is_concrete() -> None:
-    from tests.fakes.mb_cache import FakeMbCacheRepository
-    assert FakeMbCacheRepository() is not None
+    from tests.fakes.mb_cache import FakeMusicBrainzCacheRepository
+    assert FakeMusicBrainzCacheRepository() is not None
 
 def test_progress_tracking_fake_is_concrete() -> None:
-    from tests.fakes.progress_tracking import FakeProgressTrackingRepository
-    assert FakeProgressTrackingRepository() is not None
+    from tests.fakes.progress_tracking import FakeTaskProgressRepository
+    assert FakeTaskProgressRepository() is not None
 
 def test_settings_fake_is_concrete() -> None:
     from tests.fakes.settings import FakeSettingsRepository

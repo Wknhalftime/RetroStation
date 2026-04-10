@@ -63,13 +63,14 @@ def _make_event(*, identity: LogIdentity, playlist_id: object) -> LogEvent:
 
 
 def _make_file(*, file_path: str = "/music/track.flac", duration_ms: int | None = 301_000) -> LibraryFile:
+    from backend.domain.models import AudioMetadata
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
         file_hash=uuid4().hex,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
-        duration_ms=duration_ms,
+        audio=AudioMetadata(duration_ms=duration_ms),
     )
 
 
@@ -357,7 +358,7 @@ class TestUnmatchedEventsSkipped:
             MatchStatus.PENDING,
             MatchStatus.NEEDS_REVIEW,
             MatchStatus.AUTO_REJECTED,
-            MatchStatus.MAN_REJECTED,
+            MatchStatus.MANUAL_REJECTED,
         ],
     )
     def test_unmatched_events_skipped(self, match_status: MatchStatus) -> None:

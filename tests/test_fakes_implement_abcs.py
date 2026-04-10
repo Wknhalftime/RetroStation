@@ -62,12 +62,12 @@ def test_global_mapping_rule_fake_is_concrete() -> None:
     assert FakeGlobalMappingRuleRepository() is not None
 
 def test_mb_cache_fake_is_concrete() -> None:
-    from tests.fakes.mb_cache import FakeMbCacheRepository
-    assert FakeMbCacheRepository() is not None
+    from tests.fakes.mb_cache import FakeMusicBrainzCacheRepository
+    assert FakeMusicBrainzCacheRepository() is not None
 
 def test_progress_tracking_fake_is_concrete() -> None:
-    from tests.fakes.progress_tracking import FakeProgressTrackingRepository
-    assert FakeProgressTrackingRepository() is not None
+    from tests.fakes.progress_tracking import FakeTaskProgressRepository
+    assert FakeTaskProgressRepository() is not None
 
 def test_settings_fake_is_concrete() -> None:
     from tests.fakes.settings import FakeSettingsRepository

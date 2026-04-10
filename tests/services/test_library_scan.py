@@ -50,35 +50,35 @@ def _require(path: Path) -> Path:
 class TestWellTaggedMp3:
     def test_recording_mbid(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.recording_mbid == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        assert lf.audio.recording_mbid == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
     def test_artist_mbid(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.artist_mbid == "11111111-2222-3333-4444-555555555555"
+        assert lf.audio.artist_mbid == "11111111-2222-3333-4444-555555555555"
 
     def test_album_artist_mbid(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.album_artist_mbid == "66666666-7777-8888-9999-aaaaaaaaaaaa"
+        assert lf.audio.album_artist_mbid == "66666666-7777-8888-9999-aaaaaaaaaaaa"
 
     def test_release_mbid(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.release_mbid == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        assert lf.audio.release_mbid == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
 
     def test_track_title(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.track_title == "Test Track One"
+        assert lf.audio.track_title == "Test Track One"
 
     def test_release_title(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.release_title == "Test Album"
+        assert lf.audio.release_title == "Test Album"
 
     def test_track_number_parsed_from_slash_notation(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.track_number == 3
+        assert lf.audio.track_number == 3
 
     def test_disc_number_parsed_from_slash_notation(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.disc_number == 1
+        assert lf.audio.disc_number == 1
 
     def test_format_is_mp3(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
@@ -87,17 +87,17 @@ class TestWellTaggedMp3:
     def test_release_type_album(self) -> None:
         from backend.domain.enums import ReleaseType
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.release_type == ReleaseType.ALBUM
+        assert lf.audio.release_type == ReleaseType.ALBUM
 
     def test_release_status_official(self) -> None:
         from backend.domain.enums import ReleaseStatus
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.release_status == ReleaseStatus.OFFICIAL
+        assert lf.audio.release_status == ReleaseStatus.OFFICIAL
 
     def test_duration_ms_positive(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.duration_ms is not None
-        assert lf.duration_ms > 0
+        assert lf.audio.duration_ms is not None
+        assert lf.audio.duration_ms > 0
 
     def test_file_hash_is_64_char_hex(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
@@ -105,8 +105,8 @@ class TestWellTaggedMp3:
 
     def test_raw_metadata_present(self) -> None:
         lf = extract_tags(_require(WELL_TAGGED))
-        assert lf.raw_metadata is not None
-        assert len(lf.raw_metadata) > 0
+        assert lf.audio.raw_metadata is not None
+        assert len(lf.audio.raw_metadata) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -117,23 +117,23 @@ class TestWellTaggedMp3:
 class TestPartialTagsMp3:
     def test_track_title_present(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
-        assert lf.track_title == "Partial Track"
+        assert lf.audio.track_title == "Partial Track"
 
     def test_no_recording_mbid(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
-        assert lf.recording_mbid is None
+        assert lf.audio.recording_mbid is None
 
     def test_no_artist_mbid(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
-        assert lf.artist_mbid is None
+        assert lf.audio.artist_mbid is None
 
     def test_no_release_mbid(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
-        assert lf.release_mbid is None
+        assert lf.audio.release_mbid is None
 
     def test_track_number_without_slash(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
-        assert lf.track_number == 5
+        assert lf.audio.track_number == 5
 
     def test_format_is_mp3(self) -> None:
         lf = extract_tags(_require(PARTIAL_TAGS))
@@ -152,13 +152,13 @@ class TestPartialTagsMp3:
 class TestMinimalOgg:
     def test_track_title_present(self) -> None:
         lf = extract_tags(_require(MINIMAL_OGG))
-        assert lf.track_title == "Minimal Track"
+        assert lf.audio.track_title == "Minimal Track"
 
     def test_no_mbids(self) -> None:
         lf = extract_tags(_require(MINIMAL_OGG))
-        assert lf.recording_mbid is None
-        assert lf.artist_mbid is None
-        assert lf.release_mbid is None
+        assert lf.audio.recording_mbid is None
+        assert lf.audio.artist_mbid is None
+        assert lf.audio.release_mbid is None
 
     def test_format_is_ogg(self) -> None:
         lf = extract_tags(_require(MINIMAL_OGG))
@@ -166,8 +166,8 @@ class TestMinimalOgg:
 
     def test_duration_ms_positive(self) -> None:
         lf = extract_tags(_require(MINIMAL_OGG))
-        assert lf.duration_ms is not None
-        assert lf.duration_ms > 0
+        assert lf.audio.duration_ms is not None
+        assert lf.audio.duration_ms > 0
 
     def test_file_hash_is_64_char_hex(self) -> None:
         lf = extract_tags(_require(MINIMAL_OGG))
@@ -186,17 +186,17 @@ class TestNoTagsWav:
 
     def test_no_track_title(self) -> None:
         lf = extract_tags(_require(NO_TAGS_WAV))
-        assert lf.track_title is None
+        assert lf.audio.track_title is None
 
     def test_no_mbids(self) -> None:
         lf = extract_tags(_require(NO_TAGS_WAV))
-        assert lf.recording_mbid is None
-        assert lf.artist_mbid is None
+        assert lf.audio.recording_mbid is None
+        assert lf.audio.artist_mbid is None
 
     def test_duration_ms_positive(self) -> None:
         lf = extract_tags(_require(NO_TAGS_WAV))
-        assert lf.duration_ms is not None
-        assert lf.duration_ms > 0
+        assert lf.audio.duration_ms is not None
+        assert lf.audio.duration_ms > 0
 
     def test_file_hash_is_64_char_hex(self) -> None:
         lf = extract_tags(_require(NO_TAGS_WAV))
@@ -377,9 +377,9 @@ class TestExtractTagsGenericFallback:
 
         assert result.format == "aac"
         assert result.file_hash == "a" * 64
-        assert result.duration_ms == 120500
-        assert result.track_title is None
-        assert result.recording_mbid is None
+        assert result.audio.duration_ms == 120500
+        assert result.audio.track_title is None
+        assert result.audio.recording_mbid is None
 
 
 # ---------------------------------------------------------------------------

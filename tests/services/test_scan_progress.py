@@ -10,7 +10,7 @@ import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
 from backend.services.library_scan_service import scan_directory
-from tests.fakes.progress_tracking import FakeProgressTrackingRepository
+from tests.fakes.progress_tracking import FakeTaskProgressRepository
 
 AUDIO_DIR = Path(__file__).parent.parent / "fixtures" / "audio"
 NO_TAGS_WAV = AUDIO_DIR / "no_tags.wav"
@@ -110,7 +110,7 @@ class TestLibraryScanTaskProgress:
         """Verify RUNNING is written before scan_directory is called."""
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         status_at_scan_time: list[TaskStatus] = []
 
         def capture_status_then_return_empty(
@@ -137,7 +137,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            "backend.tasks.library_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task.call_local("/fake/path")
@@ -159,7 +159,7 @@ class TestLibraryScanTaskProgress:
     ) -> None:
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         mock_scan.side_effect = RuntimeError("disk error")
 
         mock_autocommit_conn = MagicMock()
@@ -167,7 +167,7 @@ class TestLibraryScanTaskProgress:
 
         with (
             patch(
-                "backend.tasks.library_tasks.PgProgressTrackingRepository",
+                "backend.tasks.library_tasks.PgTaskProgressRepository",
                 return_value=fake_progress,
             ),
             pytest.raises(RuntimeError, match="disk error"),
@@ -186,7 +186,7 @@ class TestLibraryScanTaskProgress:
     ) -> None:
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         mock_scan.return_value = ([], [])
 
         mock_autocommit_conn = MagicMock()
@@ -202,7 +202,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            "backend.tasks.library_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task.call_local("/fake/path")

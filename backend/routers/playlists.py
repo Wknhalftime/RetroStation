@@ -338,7 +338,7 @@ async def export_m3u(
     """Generate and return an M3U file for the given playlist.
 
     Resolves the priority chain: format_override > song_master > direct match.
-    Only AUTO_MATCHED / MAN_MATCHED events are included.
+    Only AUTO_MATCHED / MANUAL_MATCHED events are included.
 
     Args:
         playlist_id: UUID of the playlist to export.
