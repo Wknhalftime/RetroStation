@@ -8,9 +8,9 @@ def test_all_migrations_applied(migrated_db: str) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 10
+    assert len(versions) == 12
     assert versions[0].startswith("0001")
-    assert versions[9].startswith("0010")
+    assert versions[11].startswith("0012")
 
 
 def test_all_expected_tables_exist(migrated_db: str) -> None:

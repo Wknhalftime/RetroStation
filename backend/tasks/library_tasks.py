@@ -129,6 +129,10 @@ def _run_scan(
         on_quarantine=on_quarantine,
     )
 
+    # Flush any remaining scan writes before folder-tree pass
+    if pending_writes > 0:
+        _flush_chunk()
+
     # Build folder tree so library_folders is populated even on first scan
     diff_tree(root_path, repos.library_folders)
 

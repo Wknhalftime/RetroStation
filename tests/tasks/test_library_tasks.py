@@ -30,8 +30,11 @@ def _make_q(idx: int) -> LibraryQuarantine:
 class TestRunScanChunkedCommits:
     """Test that _run_scan commits at COMMIT_CHUNK_SIZE boundaries."""
 
+    @patch("backend.tasks.library_tasks.diff_tree")
     @patch("backend.tasks.library_tasks.scan_directory")
-    def test_commit_fires_at_chunk_boundary(self, mock_scan: MagicMock) -> None:
+    def test_commit_fires_at_chunk_boundary(
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
+    ) -> None:
         """With chunk_size=3 and 5 files, commit should fire at file 3 and at end."""
         from backend.tasks.library_tasks import _run_scan
 
@@ -44,6 +47,7 @@ class TestRunScanChunkedCommits:
             return files, []
 
         mock_scan.side_effect = fake_scan
+        mock_diff_tree.return_value = ([], [])
 
         mock_conn = MagicMock()
         mock_repos = MagicMock()
@@ -57,8 +61,10 @@ class TestRunScanChunkedCommits:
             chunk_size=3,
         )
 
-        # commit at file 3 (chunk boundary) + commit for remaining 2 at end = 2 commits
-        assert mock_conn.commit.call_count == 2
+        # 1) chunk boundary commit at file 3
+        # 2) trailing commit for remaining 2 files (pending_writes > 0)
+        # 3) folder commit (diff_tree always writes folder rows)
+        assert mock_conn.commit.call_count == 3
 
     @patch("backend.tasks.library_tasks.diff_tree")
     @patch("backend.tasks.library_tasks.scan_directory")
@@ -92,8 +98,9 @@ class TestRunScanChunkedCommits:
             chunk_size=3,
         )
 
-        # Chunk boundary fires at file 3 (pending_writes resets to 0).
-        # Then diff_tree is called, followed by an unconditional commit.
+        # 1) chunk boundary fires at file 3 (pending_writes resets to 0)
+        # 2) folder commit (diff_tree always writes folder rows)
+        # No trailing commit — pending_writes is 0 after the chunk flush.
         # Total: 2 commits.
         assert mock_conn.commit.call_count == 2
 
@@ -190,8 +197,10 @@ class TestRunScanChunkedCommits:
             chunk_size=3,
         )
 
-        # Chunk boundary fires (pending_writes resets to 0), then unconditional
-        # commit after diff_tree.  Total: 2 commits.
+        # 1) chunk boundary fires at write #3 (pending_writes resets to 0)
+        # 2) folder commit (diff_tree always writes folder rows)
+        # No trailing commit — pending_writes is 0 after the chunk flush.
+        # Total: 2 commits.
         assert mock_conn.commit.call_count == 2
 
     @patch("backend.tasks.library_tasks.scan_directory")

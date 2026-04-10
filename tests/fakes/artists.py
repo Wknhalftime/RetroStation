@@ -69,7 +69,7 @@ class FakeArtistRepository(ArtistRepository):
                 artist.needs_enhancement = True
                 return artist.id
         # Create new MB artist
-        artist_id = str(uuid4())
+        artist_id = mbid
         self._data[artist_id] = Artist(
             id=artist_id,
             name=name,

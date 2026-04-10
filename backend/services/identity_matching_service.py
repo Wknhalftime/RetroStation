@@ -77,6 +77,8 @@ def match_identities_for_playlist(
             )
             if lib_file.work_id:
                 work_ids.append(lib_file.work_id)
+            elif lib_file.recording_id:
+                work_ids.append(lib_file.recording_id)
             tier0_matched = True
             auto_matched += 1
             logger.debug(
@@ -139,6 +141,8 @@ def match_identities_for_playlist(
                         auto_matched += 1
                         if best_file.work_id:
                             work_ids.append(best_file.work_id)
+                        elif best_file.recording_id:
+                            work_ids.append(best_file.recording_id)
                         logger.debug(
                             "identity_tier2_matched",
                             identity_id=str(identity.id),

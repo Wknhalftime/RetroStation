@@ -479,6 +479,11 @@ async def get_work_detail(
             (work_id,),
         )
         work_row = await work_cur.fetchone()
+        if work_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Work {work_id} not found",
+            )
 
     if work_row is not None:
         # --- Real work from works table ---
@@ -499,10 +504,15 @@ async def get_work_detail(
                 lf.enrichment_status
             FROM recordings r
             LEFT JOIN library_files lf ON lf.recording_id = r.id
-            WHERE r.work_id = %s
+            WHERE r.id IN (
+                SELECT id FROM recordings WHERE work_id = %s
+                UNION
+                SELECT recording_id FROM library_files
+                WHERE work_id = %s AND recording_id IS NOT NULL
+            )
             ORDER BY r.id, lf.file_path
             """,
-            (work_id,),
+            (work_id, work_id),
         )
         rec_rows = await rec_cur.fetchall()
 

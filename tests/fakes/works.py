@@ -45,7 +45,7 @@ class FakeWorkRepository(WorkRepository):
         for work in self._data.values():
             if work.mbid == mbid:
                 return work.id
-        work_id = str(uuid4())
+        work_id = mbid
         self._data[work_id] = Work(
             id=work_id,
             title=title,
