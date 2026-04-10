@@ -20,8 +20,11 @@ Token = Annotated[str, Depends(get_current_token)]
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
 
-# Statuses that remain when cascading a MAN_REJECTED artist
-_PROTECTED_STATUSES: list[str] = [MatchStatus.MAN_MATCHED.value, MatchStatus.MAN_REJECTED.value]
+# Statuses that remain when cascading a MANUAL_REJECTED artist
+_PROTECTED_STATUSES: list[str] = [
+    MatchStatus.MANUAL_MATCHED.value,
+    MatchStatus.MANUAL_REJECTED.value,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -202,19 +205,22 @@ async def resolve_artist(
     Raises:
         HTTPException: 404 if the artist does not exist.
         HTTPException: 422 if match_status is invalid or target_artist_id is
-            missing for MAN_MATCHED.
+            missing for MANUAL_MATCHED.
     """
     # Validate match_status
-    if body.match_status not in (MatchStatus.MAN_MATCHED, MatchStatus.MAN_REJECTED):
+    if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"match_status must be MAN_MATCHED or MAN_REJECTED, got {body.match_status!r}",
+            detail=(
+                "match_status must be MANUAL_MATCHED or"
+                f" MANUAL_REJECTED, got {body.match_status!r}"
+            ),
         )
 
-    if body.match_status == MatchStatus.MAN_MATCHED and not body.target_artist_id:
+    if body.match_status == MatchStatus.MANUAL_MATCHED and not body.target_artist_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="target_artist_id is required for MAN_MATCHED",
+            detail="target_artist_id is required for MANUAL_MATCHED",
         )
 
     # Fetch artist
@@ -230,7 +236,7 @@ async def resolve_artist(
 
     new_status = MatchStatus(body.match_status)
 
-    if new_status == MatchStatus.MAN_MATCHED:
+    if new_status == MatchStatus.MANUAL_MATCHED:
         # Update status
         await conn.execute(
             "UPDATE log_artists SET match_status = %s WHERE id = %s",
@@ -258,7 +264,7 @@ async def resolve_artist(
             ),
         )
     else:
-        # MAN_REJECTED: update artist, cascade child identities
+        # MANUAL_REJECTED: update artist, cascade child identities
         await conn.execute(
             "UPDATE log_artists SET match_status = %s WHERE id = %s",
             (new_status.value, artist_id),
@@ -311,10 +317,13 @@ async def resolve_identity(
         HTTPException: 404 if the identity does not exist.
         HTTPException: 422 if match_status is invalid.
     """
-    if body.match_status not in (MatchStatus.MAN_MATCHED, MatchStatus.MAN_REJECTED):
+    if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"match_status must be MAN_MATCHED or MAN_REJECTED, got {body.match_status!r}",
+            detail=(
+                "match_status must be MANUAL_MATCHED or"
+                f" MANUAL_REJECTED, got {body.match_status!r}"
+            ),
         )
 
     identity_cur = await conn.execute(
@@ -329,7 +338,7 @@ async def resolve_identity(
 
     new_status = MatchStatus(body.match_status)
 
-    if new_status == MatchStatus.MAN_MATCHED:
+    if new_status == MatchStatus.MANUAL_MATCHED:
         # Update log_identity with status and MANUAL tier
         await conn.execute(
             "UPDATE log_identities SET match_status = %s, match_tier = %s WHERE id = %s",
@@ -358,7 +367,7 @@ async def resolve_identity(
             ),
         )
     else:
-        # MAN_REJECTED: update status, delete existing match
+        # MANUAL_REJECTED: update status, delete existing match
         await conn.execute(
             "UPDATE log_identities SET match_status = %s, match_tier = %s WHERE id = %s",
             (new_status.value, MatchTier.MANUAL.value, identity_id),

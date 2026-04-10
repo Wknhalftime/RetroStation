@@ -14,7 +14,7 @@ export function ArtistPanel({ artist }: ArtistPanelProps) {
     resolveArtist.mutate({
       id: artist.id,
       resolution: {
-        match_status: 'MAN_MATCHED',
+        match_status: 'MANUAL_MATCHED',
         target_artist_id: candidate.mbid,
       },
     })
@@ -23,7 +23,7 @@ export function ArtistPanel({ artist }: ArtistPanelProps) {
   function handleReject() {
     resolveArtist.mutate({
       id: artist.id,
-      resolution: { match_status: 'MAN_REJECTED', target_artist_id: null },
+      resolution: { match_status: 'MANUAL_REJECTED', target_artist_id: null },
     })
   }
 

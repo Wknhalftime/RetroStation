@@ -107,8 +107,8 @@ def match_identities_for_playlist(
                 best_score = 0.0
                 best_file = None
                 for lib_file in candidate_files:
-                    if lib_file.track_title:
-                        norm_lib_title = normalize_title(lib_file.track_title)
+                    if lib_file.audio.track_title:
+                        norm_lib_title = normalize_title(lib_file.audio.track_title)
                     else:
                         continue
                     score = fuzz.ratio(norm_identity_title, norm_lib_title)

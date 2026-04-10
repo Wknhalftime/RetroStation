@@ -232,7 +232,7 @@ git commit -m "test: add PG integration tests for upsert_write_only and create_w
 **Files:**
 - Modify: `tests/tasks/test_library_tasks.py` (add test to existing class)
 
-This test verifies that when `scan_directory` calls the `on_progress` callback, `_run_scan` forwards it to `progress_repo.upsert` with correct `ProgressTracking` fields.
+This test verifies that when `scan_directory` calls the `on_progress` callback, `_run_scan` forwards it to `progress_repo.upsert` with correct `TaskProgress` fields.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -269,7 +269,7 @@ Add to `TestRunScanChunkedCommits` class in `tests/tasks/test_library_tasks.py`:
         # progress_repo.upsert should have been called twice (once per on_progress call)
         assert mock_progress_repo.upsert.call_count == 2
 
-        # Verify the last call's ProgressTracking shape
+        # Verify the last call's TaskProgress shape
         last_call_arg = mock_progress_repo.upsert.call_args_list[-1][0][0]
         assert last_call_arg.task_id == "test-progress-task"
         assert last_call_arg.status == TaskStatus.RUNNING
@@ -540,9 +540,9 @@ def _make_task(
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
     started_at: datetime | None = None,
-) -> ProgressTracking:
+) -> TaskProgress:
     now = datetime.now(tz=timezone.utc)
-    return ProgressTracking(
+    return TaskProgress(
         task_id=task_id,
         task_type=task_type,
         status=status,
@@ -560,8 +560,8 @@ def _seed_task(
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
     started_at: datetime | None = None,
-) -> ProgressTracking:
-    repo = PgProgressTrackingRepository(conn)
+) -> TaskProgress:
+    repo = PgTaskProgressRepository(conn)
     task = repo.upsert(
         _make_task(task_id, task_type, status, progress_data, started_at)
     )

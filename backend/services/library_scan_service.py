@@ -25,7 +25,7 @@ from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.domain.models import AudioMetadata, LibraryFile, LibraryQuarantine
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
 from backend.services.normalization import normalize_artist, normalize_title
@@ -192,25 +192,27 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
         file_hash=_sha256(path),
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
-        recording_mbid=recording_mbid,
-        artist_mbid=artist_mbid,
-        album_artist_mbid=album_artist_mbid,
-        release_mbid=release_mbid,
-        release_title=release_title,
-        release_type=release_type,
-        release_status=release_status,
-        track_title=track_title,
-        track_number=track_number,
-        disc_number=disc_number,
-        duration_ms=duration_ms,
-        bitrate=bitrate,
-        raw_metadata=_raw_metadata(audio),
-        artist_name=artist_name,
-        normalized_artist_name=(
-            normalize_artist(artist_name) if artist_name else None
-        ),
-        normalized_title=(
-            normalize_title(track_title) if track_title else None
+        audio=AudioMetadata(
+            recording_mbid=recording_mbid,
+            artist_mbid=artist_mbid,
+            album_artist_mbid=album_artist_mbid,
+            release_mbid=release_mbid,
+            release_title=release_title,
+            release_type=release_type,
+            release_status=release_status,
+            track_title=track_title,
+            track_number=track_number,
+            disc_number=disc_number,
+            duration_ms=duration_ms,
+            bitrate=bitrate,
+            raw_metadata=_raw_metadata(audio),
+            artist_name=artist_name,
+            normalized_artist_name=(
+                normalize_artist(artist_name) if artist_name else None
+            ),
+            normalized_title=(
+                normalize_title(track_title) if track_title else None
+            ),
         ),
     )
 
@@ -244,25 +246,27 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
         file_hash=_sha256(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
-        recording_mbid=recording_mbid,
-        artist_mbid=artist_mbid,
-        album_artist_mbid=album_artist_mbid,
-        release_mbid=release_mbid,
-        release_title=release_title,
-        release_type=release_type,
-        release_status=release_status,
-        track_title=track_title,
-        track_number=track_number,
-        disc_number=disc_number,
-        duration_ms=duration_ms,
-        bitrate=bitrate,
-        raw_metadata=_raw_metadata(audio),
-        artist_name=artist_name,
-        normalized_artist_name=(
-            normalize_artist(artist_name) if artist_name else None
-        ),
-        normalized_title=(
-            normalize_title(track_title) if track_title else None
+        audio=AudioMetadata(
+            recording_mbid=recording_mbid,
+            artist_mbid=artist_mbid,
+            album_artist_mbid=album_artist_mbid,
+            release_mbid=release_mbid,
+            release_title=release_title,
+            release_type=release_type,
+            release_status=release_status,
+            track_title=track_title,
+            track_number=track_number,
+            disc_number=disc_number,
+            duration_ms=duration_ms,
+            bitrate=bitrate,
+            raw_metadata=_raw_metadata(audio),
+            artist_name=artist_name,
+            normalized_artist_name=(
+                normalize_artist(artist_name) if artist_name else None
+            ),
+            normalized_title=(
+                normalize_title(track_title) if track_title else None
+            ),
         ),
     )
 
@@ -281,8 +285,10 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
         file_hash=_sha256(path),
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
-        duration_ms=duration_ms,
-        raw_metadata=_raw_metadata(audio),
+        audio=AudioMetadata(
+            duration_ms=duration_ms,
+            raw_metadata=_raw_metadata(audio),
+        ),
     )
 
 
@@ -325,8 +331,10 @@ def extract_tags(path: Path) -> LibraryFile:
         file_hash=_sha256(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
-        duration_ms=duration_ms,
-        raw_metadata=_raw_metadata(audio),
+        audio=AudioMetadata(
+            duration_ms=duration_ms,
+            raw_metadata=_raw_metadata(audio),
+        ),
     )
 
 

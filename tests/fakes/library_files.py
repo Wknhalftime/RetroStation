@@ -36,20 +36,20 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         return [f for f in self._data.values() if f.recording_id == recording_id]
 
     def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]:
-        return [f for f in self._data.values() if f.artist_mbid == artist_mbid]
+        return [f for f in self._data.values() if f.audio.artist_mbid == artist_mbid]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         return [
             f for f in self._data.values()
-            if f.release_mbid == release_mbid
+            if f.audio.release_mbid == release_mbid
             and f.enrichment_status == EnrichmentStatus.PENDING
         ]
 
     def get_pending_enrichment_by_recording(self, recording_mbid: str) -> list[LibraryFile]:
         return [
             f for f in self._data.values()
-            if f.recording_mbid == recording_mbid
-            and f.release_mbid is None
+            if f.audio.recording_mbid == recording_mbid
+            and f.audio.release_mbid is None
             and f.enrichment_status == EnrichmentStatus.PENDING
         ]
 

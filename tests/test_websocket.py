@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 
 # psycopg async requires SelectorEventLoop on Windows (not ProactorEventLoop)
 if sys.platform == "win32":
@@ -71,9 +71,9 @@ def _seed_task(
     task_id: str,
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
-) -> ProgressTracking:
+) -> TaskProgress:
     now = datetime.now(tz=timezone.utc)
-    task = ProgressTracking(
+    task = TaskProgress(
         task_id=task_id,
         task_type=TaskType.SCAN,
         status=status,

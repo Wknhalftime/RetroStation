@@ -98,7 +98,7 @@ def enrich_by_release(
 
     enriched_count = 0
     for lf in pending_files:
-        rec_mbid = lf.recording_mbid
+        rec_mbid = lf.audio.recording_mbid
         if not rec_mbid:
             logger.debug("library_file_no_recording_mbid", file_id=str(lf.id))
             library_file_repo.update_recording_link(

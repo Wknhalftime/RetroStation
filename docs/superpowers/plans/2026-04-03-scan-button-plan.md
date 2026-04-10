@@ -264,8 +264,8 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
-from tests.fakes.progress_tracking import FakeProgressTrackingRepository
+from backend.domain.models import LibraryFile, LibraryQuarantine, TaskProgress
+from tests.fakes.progress_tracking import FakeTaskProgressRepository
 
 
 class TestLibraryScanTaskProgress:
@@ -288,7 +288,7 @@ class TestLibraryScanTaskProgress:
     ) -> None:
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         mock_scan.return_value = ([], [])
 
         # Mock the autocommit connection to use our fake repo
@@ -308,7 +308,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            "backend.tasks.library_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task("/fake/path")
@@ -326,7 +326,7 @@ class TestLibraryScanTaskProgress:
     ) -> None:
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         mock_scan.side_effect = RuntimeError("disk error")
 
         mock_autocommit_conn = MagicMock()
@@ -334,7 +334,7 @@ class TestLibraryScanTaskProgress:
 
         with (
             patch(
-                "backend.tasks.library_tasks.PgProgressTrackingRepository",
+                "backend.tasks.library_tasks.PgTaskProgressRepository",
                 return_value=fake_progress,
             ),
             pytest.raises(RuntimeError, match="disk error"),
@@ -353,7 +353,7 @@ class TestLibraryScanTaskProgress:
     ) -> None:
         from backend.tasks.library_tasks import library_scan_task
 
-        fake_progress = FakeProgressTrackingRepository()
+        fake_progress = FakeTaskProgressRepository()
         mock_scan.return_value = ([], [])
 
         mock_autocommit_conn = MagicMock()
@@ -369,7 +369,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgProgressTrackingRepository",
+            "backend.tasks.library_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task("/fake/path")
@@ -383,7 +383,7 @@ class TestLibraryScanTaskProgress:
 
 Run: `cd D:/PythonStuff/RetroStation && python -m pytest tests/services/test_scan_progress.py::TestLibraryScanTaskProgress -v`
 
-Expected: FAIL — `library_scan_task` does not import/use `PgProgressTrackingRepository`.
+Expected: FAIL — `library_scan_task` does not import/use `PgTaskProgressRepository`.
 
 - [ ] **Step 2c: Implement progress tracking in `library_scan_task()`**
 
@@ -401,9 +401,9 @@ import structlog
 from psycopg.rows import dict_row
 
 from backend.config import get_settings
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
+from backend.domain.models import TaskProgress
 from backend.services.library_scan_service import scan_directory
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -427,16 +427,16 @@ def library_scan_task(root_path: str) -> str:
     # Intentional layer skip past RepositoryFactory — progress writes must be
     # visible immediately (not held in the library data transaction).
     progress_conn = None
-    progress_repo: PgProgressTrackingRepository | None = None
+    progress_repo: PgTaskProgressRepository | None = None
     try:
         progress_conn = psycopg.connect(
             settings.database_url, autocommit=True, row_factory=dict_row
         )
-        progress_repo = PgProgressTrackingRepository(progress_conn)
+        progress_repo = PgTaskProgressRepository(progress_conn)
 
         # Initial record
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -457,7 +457,7 @@ def library_scan_task(root_path: str) -> str:
             }
             assert progress_repo is not None  # for mypy — always true here
             progress_repo.upsert(
-                ProgressTracking(
+                TaskProgress(
                     task_id=task_id,
                     task_type=TaskType.SCAN,
                     status=TaskStatus.RUNNING,
@@ -480,7 +480,7 @@ def library_scan_task(root_path: str) -> str:
 
         # Mark completed AFTER library data commit succeeds
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.COMPLETED,
@@ -502,7 +502,7 @@ def library_scan_task(root_path: str) -> str:
         if progress_conn is not None and progress_repo is not None:
             try:
                 progress_repo.upsert(
-                    ProgressTracking(
+                    TaskProgress(
                         task_id=task_id,
                         task_type=TaskType.SCAN,
                         status=TaskStatus.FAILED,

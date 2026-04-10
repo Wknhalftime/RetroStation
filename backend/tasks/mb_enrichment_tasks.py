@@ -3,7 +3,7 @@ from __future__ import annotations
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.mb_client import RealMbClient
 from backend.services.repository_factory import RepositoryFactory
@@ -29,7 +29,7 @@ def mb_enrichment_task() -> dict[str, int]:
     # ------------------------------------------------------------------ artists
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
-        cache_repo = PgMbCacheRepository(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)
 
         pending_artists = repos.artists.list_needing_enhancement()
@@ -85,7 +85,7 @@ def mb_enrichment_task() -> dict[str, int]:
     # --------------------------------------------------------------- recordings
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
-        cache_repo = PgMbCacheRepository(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)
 
         pending_recordings = repos.recordings.list_needing_enhancement()

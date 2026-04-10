@@ -1,20 +1,20 @@
 from datetime import UTC, datetime
 
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 
-class FakeMbCacheRepository(MbCacheRepository):
+class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self) -> None:
-        self._data: dict[str, MbCache] = {}
+        self._data: dict[str, MusicBrainzCache] = {}
 
-    def get(self, cache_key: str) -> MbCache | None:
+    def get(self, cache_key: str) -> MusicBrainzCache | None:
         entry = self._data.get(cache_key)
         if entry and entry.expires_at > datetime.now(tz=UTC):
             return entry
         return None
 
-    def set(self, cache: MbCache) -> None:
+    def set(self, cache: MusicBrainzCache) -> None:
         self._data[cache.cache_key] = cache
 
     def delete_expired(self) -> int:

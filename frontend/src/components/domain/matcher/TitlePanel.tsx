@@ -12,7 +12,7 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
 
   const artistResolved =
     artist !== null &&
-    (artist.match_status === 'MAN_MATCHED' || artist.match_status === 'MATCHED')
+    (artist.match_status === 'MANUAL_MATCHED' || artist.match_status === 'MATCHED')
 
   if (!artist) {
     return (
@@ -37,7 +37,7 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   function handleReject(identity: QueueIdentity) {
     resolveIdentity.mutate({
       id: identity.id,
-      resolution: { match_status: 'MAN_REJECTED', library_file_id: null },
+      resolution: { match_status: 'MANUAL_REJECTED', library_file_id: null },
     })
   }
 

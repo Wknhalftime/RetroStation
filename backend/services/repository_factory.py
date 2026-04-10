@@ -15,9 +15,9 @@ from backend.db.repositories.log_artists import PgLogArtistRepository
 from backend.db.repositories.log_events import PgLogEventRepository
 from backend.db.repositories.log_identities import PgLogIdentityRepository
 from backend.db.repositories.matches import PgMatchRepository
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.settings import PgSettingsRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
@@ -36,14 +36,14 @@ class RepositoryFactory:
         self.log_identities = PgLogIdentityRepository(conn)
         self.log_events = PgLogEventRepository(conn)
         self.broadcast_days = PgBroadcastDayRepository(conn)
-        self.mb_cache = PgMbCacheRepository(conn)
+        self.mb_cache = PgMusicBrainzCacheRepository(conn)
         self.artists = PgArtistRepository(conn)
         self.works = PgWorkRepository(conn)
         self.recordings = PgRecordingRepository(conn)
         self.matches = PgMatchRepository(conn)
         self.global_mapping_rules = PgGlobalMappingRuleRepository(conn)
         self.song_masters = PgSongMasterRepository(conn)
-        self.progress_tracking = PgProgressTrackingRepository(conn)
+        self.progress_tracking = PgTaskProgressRepository(conn)
         self.library_files = PgLibraryFileRepository(conn)
         self.library_folders = PgLibraryFolderRepository(conn)
         self.library_quarantine = PgLibraryQuarantineRepository(conn)

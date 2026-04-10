@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import LibraryFile
+from backend.domain.models import AudioMetadata, LibraryFile
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,
@@ -66,8 +66,10 @@ def _pending_file(
         file_hash="abc123",
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
-        release_mbid=release_mbid,
-        recording_mbid=recording_mbid,
+        audio=AudioMetadata(
+            release_mbid=release_mbid,
+            recording_mbid=recording_mbid,
+        ),
     )
 
 

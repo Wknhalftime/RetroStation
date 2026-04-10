@@ -933,11 +933,11 @@ export function Badge({
 
 const STATUS_VARIANTS: Record<string, Variant> = {
   AUTO_MATCHED: "success",
-  MAN_MATCHED: "success",
+  MANUAL_MATCHED: "success",
   NEEDS_REVIEW: "warning",
   PENDING: "info",
   AUTO_REJECTED: "danger",
-  MAN_REJECTED: "danger",
+  MANUAL_REJECTED: "danger",
 };
 
 export function MatchStatusBadge({ status }: { status: string }) {
@@ -2064,13 +2064,13 @@ export const MatchingQueueSchema = z.object({
 export type MatchingQueue = z.infer<typeof MatchingQueueSchema>;
 
 export const ArtistResolutionSchema = z.object({
-  match_status: z.enum(["MAN_MATCHED", "MAN_REJECTED"]),
+  match_status: z.enum(["MANUAL_MATCHED", "MANUAL_REJECTED"]),
   target_artist_id: z.string().nullable().optional(),
 });
 export type ArtistResolution = z.infer<typeof ArtistResolutionSchema>;
 
 export const IdentityResolutionSchema = z.object({
-  match_status: z.enum(["MAN_MATCHED", "MAN_REJECTED"]),
+  match_status: z.enum(["MANUAL_MATCHED", "MANUAL_REJECTED"]),
   library_file_id: z.string().uuid().nullable().optional(),
 });
 export type IdentityResolution = z.infer<typeof IdentityResolutionSchema>;
@@ -2210,7 +2210,7 @@ export function ArtistPanel({ artist, onResolved }: ArtistPanelProps) {
     resolveArtist.mutate(
       {
         artistId: artist.id,
-        resolution: { match_status: "MAN_MATCHED", target_artist_id: mbid },
+        resolution: { match_status: "MANUAL_MATCHED", target_artist_id: mbid },
       },
       { onSuccess: onResolved },
     );
@@ -2220,7 +2220,7 @@ export function ArtistPanel({ artist, onResolved }: ArtistPanelProps) {
     resolveArtist.mutate(
       {
         artistId: artist.id,
-        resolution: { match_status: "MAN_REJECTED" },
+        resolution: { match_status: "MANUAL_REJECTED" },
       },
       { onSuccess: onResolved },
     );
@@ -2326,7 +2326,7 @@ export function TitlePanel({
   function handleReject(identityId: string) {
     resolveIdentity.mutate({
       identityId,
-      resolution: { match_status: "MAN_REJECTED" },
+      resolution: { match_status: "MANUAL_REJECTED" },
     });
   }
 
@@ -2637,7 +2637,7 @@ export default function MatcherBrowser() {
     resolveIdentity.mutate(
       {
         identityId: searchIdentityId,
-        resolution: { match_status: "MAN_MATCHED", library_file_id: fileId },
+        resolution: { match_status: "MANUAL_MATCHED", library_file_id: fileId },
       },
       {
         onSuccess: () => {
@@ -2659,7 +2659,7 @@ export default function MatcherBrowser() {
 
   const artists = data?.items ?? [];
   const isArtistResolved = selectedArtist
-    ? ["MAN_MATCHED", "AUTO_MATCHED"].includes(selectedArtist.match_status)
+    ? ["MANUAL_MATCHED", "AUTO_MATCHED"].includes(selectedArtist.match_status)
     : false;
 
   return (

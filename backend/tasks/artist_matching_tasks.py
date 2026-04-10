@@ -29,7 +29,7 @@ def artist_matching_task(playlist_id: str) -> None:
             PgMatchRepository,
         )
         from backend.db.repositories.mb_cache import (
-            PgMbCacheRepository,
+            PgMusicBrainzCacheRepository,
         )
         from backend.services.mb_client import RealMbClient
 
@@ -40,7 +40,7 @@ def artist_matching_task(playlist_id: str) -> None:
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             rules_repo=PgGlobalMappingRuleRepository(conn),
-            mb_client=RealMbClient(PgMbCacheRepository(conn)),
+            mb_client=RealMbClient(PgMusicBrainzCacheRepository(conn)),
             mb_auto_link_score=settings.mb_auto_link_score,
             mb_score_gap=settings.mb_score_gap,
         )

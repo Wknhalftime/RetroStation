@@ -551,9 +551,9 @@ class MatchStatus(str, Enum):
     PENDING        = "PENDING"
     AUTO_MATCHED   = "AUTO_MATCHED"
     NEEDS_REVIEW   = "NEEDS_REVIEW"
-    MAN_MATCHED    = "MAN_MATCHED"
+    MANUAL_MATCHED    = "MANUAL_MATCHED"
     AUTO_REJECTED  = "AUTO_REJECTED"
-    MAN_REJECTED   = "MAN_REJECTED"
+    MANUAL_REJECTED   = "MANUAL_REJECTED"
 
 class MatchTier(str, Enum):
     MBID_EXACT      = "MBID_EXACT"
@@ -766,7 +766,7 @@ artist_matching_task
   On completion: enqueue identity_matching_task(playlist_id)
 
 identity_matching_task
-  For each log_identity WHERE log_artist.match_status IN (AUTO_MATCHED, MAN_MATCHED):
+  For each log_identity WHERE log_artist.match_status IN (AUTO_MATCHED, MANUAL_MATCHED):
     0. global_mapping_rules pre-check
     Tier 1 (MBID exact): skip for standard CSV input (future-proofing)
     Tier 2 (MBID graph): artist MBID confirmed → candidate library_files →

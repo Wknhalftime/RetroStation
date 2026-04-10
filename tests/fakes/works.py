@@ -77,7 +77,7 @@ class FakeWorkRepository(WorkRepository):
         artist_work_ids: set[str] = set()
         for f in self._library_file_repo._data.values():
             if (
-                f.normalized_artist_name == normalized_artist_name
+                f.audio.normalized_artist_name == normalized_artist_name
                 and f.work_id is not None
             ):
                 artist_work_ids.add(f.work_id)

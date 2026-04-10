@@ -350,7 +350,7 @@ class PgLogIdentityRepository(LogIdentityRepository):
                  AND li.match_status = %s
                  AND la.match_status IN (%s, %s)""",
             (playlist_id, MatchStatus.PENDING.value,
-             MatchStatus.AUTO_MATCHED.value, MatchStatus.MAN_MATCHED.value),
+             MatchStatus.AUTO_MATCHED.value, MatchStatus.MANUAL_MATCHED.value),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
@@ -1584,7 +1584,7 @@ def artist_matching_task(playlist_id: str) -> None:
         from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
         from backend.db.repositories.matches import PgMatchRepository
         from backend.services.mb_client import RealMbClient
-        from backend.db.repositories.mb_cache import PgMbCacheRepository
+        from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 
         match_artists_for_playlist(
             playlist_id=UUID(playlist_id),
@@ -1593,7 +1593,7 @@ def artist_matching_task(playlist_id: str) -> None:
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             rules_repo=PgGlobalMappingRuleRepository(conn),
-            mb_client=RealMbClient(PgMbCacheRepository(conn)),
+            mb_client=RealMbClient(PgMusicBrainzCacheRepository(conn)),
             mb_auto_link_score=settings.mb_auto_link_score,
             mb_score_gap=settings.mb_score_gap,
         )
@@ -1830,8 +1830,8 @@ from uuid import uuid4
 import httpx
 import structlog
 
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 logger = structlog.get_logger()
 
@@ -1855,7 +1855,7 @@ def _rate_limit() -> None:
 class RealMbClient:
     """MusicBrainz API client with caching and rate limiting."""
 
-    def __init__(self, cache_repo: MbCacheRepository) -> None:
+    def __init__(self, cache_repo: MusicBrainzCacheRepository) -> None:
         self._cache = cache_repo
         self._http = httpx.Client(
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
@@ -1882,7 +1882,7 @@ class RealMbClient:
 
         # Cache response
         now = datetime.now(tz=UTC)
-        self._cache.set(MbCache(
+        self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="artist-search",
@@ -1906,21 +1906,21 @@ import json
 from typing import Any
 from uuid import UUID
 
-from backend.domain.models import MbCache
-from backend.repositories.mb_cache import MbCacheRepository
+from backend.domain.models import MusicBrainzCache
+from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 import psycopg
 
 
-class PgMbCacheRepository(MbCacheRepository):
+class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> MbCache:
+    def _row_to_model(self, row: dict[str, Any]) -> MusicBrainzCache:
         response_data = row["response_data"]
         if isinstance(response_data, str):
             response_data = json.loads(response_data)
-        return MbCache(
+        return MusicBrainzCache(
             id=row["id"],
             cache_key=row["cache_key"],
             entity_type=row["entity_type"],
@@ -1930,14 +1930,14 @@ class PgMbCacheRepository(MbCacheRepository):
             expires_at=row["expires_at"],
         )
 
-    def get(self, cache_key: str) -> MbCache | None:
+    def get(self, cache_key: str) -> MusicBrainzCache | None:
         row = self._conn.execute(
             "SELECT * FROM mb_cache WHERE cache_key = %s AND expires_at > now()",
             (cache_key,),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def set(self, cache: MbCache) -> None:
+    def set(self, cache: MusicBrainzCache) -> None:
         self._conn.execute(
             """INSERT INTO mb_cache (id, cache_key, entity_type, entity_mbid,
                response_data, cached_at, expires_at)
@@ -1985,14 +1985,14 @@ from __future__ import annotations
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.services.mb_client import RealMbClient
 
 
 def test_mb_search_artist_real_api(migrated_db: str) -> None:
     """Integration test: real MusicBrainz API call for a known artist."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        cache_repo = PgMbCacheRepository(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
         client = RealMbClient(cache_repo)
 
         # First call: hits API
@@ -2014,13 +2014,13 @@ def test_mb_search_artist_real_api(migrated_db: str) -> None:
 Add the mb_cache repo:
 
 ```python
-from backend.db.repositories.mb_cache import PgMbCacheRepository
+from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 ```
 
 And in `__init__`:
 
 ```python
-        self.mb_cache = PgMbCacheRepository(conn)
+        self.mb_cache = PgMusicBrainzCacheRepository(conn)
 ```
 
 - [ ] **Step 6: Run integration test**
@@ -2459,21 +2459,21 @@ import json
 from typing import Any
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import ProgressTracking
-from backend.repositories.progress_tracking import ProgressTrackingRepository
+from backend.domain.models import TaskProgress
+from backend.repositories.progress_tracking import TaskProgressRepository
 
 import psycopg
 
 
-class PgProgressTrackingRepository(ProgressTrackingRepository):
+class PgTaskProgressRepository(TaskProgressRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> ProgressTracking:
+    def _row_to_model(self, row: dict[str, Any]) -> TaskProgress:
         progress_data = row["progress_data"]
         if isinstance(progress_data, str):
             progress_data = json.loads(progress_data)
-        return ProgressTracking(
+        return TaskProgress(
             task_id=row["task_id"],
             task_type=TaskType(row["task_type"]),
             status=TaskStatus(row["status"]),
@@ -2483,7 +2483,7 @@ class PgProgressTrackingRepository(ProgressTrackingRepository):
             completed_at=row.get("completed_at"),
         )
 
-    def upsert(self, task: ProgressTracking) -> ProgressTracking:
+    def upsert(self, task: TaskProgress) -> TaskProgress:
         self._conn.execute(
             """INSERT INTO progress_tracking (task_id, task_type, status, progress_data, started_at, updated_at)
                VALUES (%s, %s, %s, %s, %s, %s)
@@ -2495,13 +2495,13 @@ class PgProgressTrackingRepository(ProgressTrackingRepository):
         )
         return task
 
-    def get_by_id(self, task_id: str) -> ProgressTracking | None:
+    def get_by_id(self, task_id: str) -> TaskProgress | None:
         row = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE task_id = %s", (task_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def list_running(self) -> list[ProgressTracking]:
+    def list_running(self) -> list[TaskProgress]:
         rows = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE status = %s ORDER BY started_at DESC",
             (TaskStatus.RUNNING.value,),
@@ -2655,7 +2655,7 @@ Add all remaining repos:
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.works import PgWorkRepository
@@ -2670,7 +2670,7 @@ And in `__init__`:
         self.matches = PgMatchRepository(conn)
         self.global_mapping_rules = PgGlobalMappingRuleRepository(conn)
         self.song_masters = PgSongMasterRepository(conn)
-        self.progress_tracking = PgProgressTrackingRepository(conn)
+        self.progress_tracking = PgTaskProgressRepository(conn)
 ```
 
 - [ ] **Step 6: Create `tests/integration/test_end_to_end.py`**

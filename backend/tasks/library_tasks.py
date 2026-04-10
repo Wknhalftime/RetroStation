@@ -9,7 +9,7 @@ import psycopg
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import (
@@ -19,7 +19,7 @@ from backend.domain.enums import (
     TaskStatus,
     TaskType,
 )
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking, SystemLog
+from backend.domain.models import LibraryFile, LibraryQuarantine, SystemLog, TaskProgress
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_directory
@@ -36,7 +36,7 @@ def _run_scan(
     root_path: str,
     library_conn: psycopg.Connection,
     repos: RepositoryFactory,
-    progress_repo: PgProgressTrackingRepository,
+    progress_repo: PgTaskProgressRepository,
     task_id: str,
     chunk_size: int = COMMIT_CHUNK_SIZE,
 ) -> tuple[int, int, dict[str, object]]:
@@ -111,7 +111,7 @@ def _run_scan(
             "files_committed": files_committed,
         }
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -202,7 +202,7 @@ def library_scan_task(root_path: str) -> str:
     }
 
     progress_conn = None
-    progress_repo: PgProgressTrackingRepository | None = None
+    progress_repo: PgTaskProgressRepository | None = None
     sys_log_repo: PgSystemLogRepository | None = None
     library_conn = None
 
@@ -211,12 +211,12 @@ def library_scan_task(root_path: str) -> str:
         progress_conn = connect_sync(
             settings.database_url, autocommit=True,
         )
-        progress_repo = PgProgressTrackingRepository(progress_conn)
+        progress_repo = PgTaskProgressRepository(progress_conn)
         sys_log_repo = PgSystemLogRepository(progress_conn)
 
         # Initial progress record
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -254,7 +254,7 @@ def library_scan_task(root_path: str) -> str:
 
         # Mark completed AFTER library data commit succeeds
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.COMPLETED,
@@ -294,7 +294,7 @@ def library_scan_task(root_path: str) -> str:
         if progress_conn is not None and progress_repo is not None:
             with contextlib.suppress(Exception):
                 progress_repo.upsert(
-                    ProgressTracking(
+                    TaskProgress(
                         task_id=task_id,
                         task_type=TaskType.SCAN,
                         status=TaskStatus.FAILED,

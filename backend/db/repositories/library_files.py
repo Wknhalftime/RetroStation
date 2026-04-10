@@ -8,7 +8,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.models import LibraryFile
+from backend.domain.models import AudioMetadata, LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 
 logger = logging.getLogger(__name__)
@@ -26,16 +26,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
         release_type_val = row.get("release_type")
         release_status_val = row.get("release_status")
 
-        return LibraryFile(
-            id=row["id"],
-            file_path=row["file_path"],
-            file_hash=row["file_hash"],
-            format=row.get("format") or "unknown",
-            enrichment_status=EnrichmentStatus(row["enrichment_status"]),
-            file_status=FileStatus(row.get("file_status", "PRESENT")),
-            indexed_at=row["indexed_at"],
-            trace_id=row.get("trace_id"),
-            recording_id=row.get("recording_id"),
+        audio = AudioMetadata(
             recording_mbid=row.get("recording_mbid"),
             artist_mbid=row.get("artist_mbid"),
             album_artist_mbid=row.get("album_artist_mbid"),
@@ -53,7 +44,20 @@ class PgLibraryFileRepository(LibraryFileRepository):
             artist_name=row.get("artist_name"),
             normalized_artist_name=row.get("normalized_artist_name"),
             normalized_title=row.get("normalized_title"),
+        )
+
+        return LibraryFile(
+            id=row["id"],
+            file_path=row["file_path"],
+            file_hash=row["file_hash"],
+            format=row.get("format") or "unknown",
+            enrichment_status=EnrichmentStatus(row["enrichment_status"]),
+            file_status=FileStatus(row.get("file_status", "PRESENT")),
+            indexed_at=row["indexed_at"],
+            trace_id=row.get("trace_id"),
+            recording_id=row.get("recording_id"),
             work_id=row.get("work_id"),
+            audio=audio,
         )
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
@@ -126,24 +130,24 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 file.enrichment_status.value,
                 file.trace_id,
                 file.recording_id,
-                file.recording_mbid,
-                file.artist_mbid,
-                file.album_artist_mbid,
-                file.release_mbid,
-                file.release_title,
-                file.release_type.value if file.release_type else None,
-                file.release_type_secondary,
-                file.release_status.value if file.release_status else None,
-                file.track_title,
-                file.track_number,
-                file.disc_number,
-                file.duration_ms,
-                file.bitrate,
-                json.dumps(file.raw_metadata)
-                if file.raw_metadata is not None else None,
-                file.artist_name,
-                file.normalized_artist_name,
-                file.normalized_title,
+                file.audio.recording_mbid,
+                file.audio.artist_mbid,
+                file.audio.album_artist_mbid,
+                file.audio.release_mbid,
+                file.audio.release_title,
+                file.audio.release_type.value if file.audio.release_type else None,
+                file.audio.release_type_secondary,
+                file.audio.release_status.value if file.audio.release_status else None,
+                file.audio.track_title,
+                file.audio.track_number,
+                file.audio.disc_number,
+                file.audio.duration_ms,
+                file.audio.bitrate,
+                json.dumps(file.audio.raw_metadata)
+                if file.audio.raw_metadata is not None else None,
+                file.audio.artist_name,
+                file.audio.normalized_artist_name,
+                file.audio.normalized_title,
                 file.work_id,
             ),
         )
@@ -226,24 +230,24 @@ class PgLibraryFileRepository(LibraryFileRepository):
                 file.enrichment_status.value,
                 file.trace_id,
                 file.recording_id,
-                file.recording_mbid,
-                file.artist_mbid,
-                file.album_artist_mbid,
-                file.release_mbid,
-                file.release_title,
-                file.release_type.value if file.release_type else None,
-                file.release_type_secondary,
-                file.release_status.value if file.release_status else None,
-                file.track_title,
-                file.track_number,
-                file.disc_number,
-                file.duration_ms,
-                file.bitrate,
-                json.dumps(file.raw_metadata)
-                if file.raw_metadata is not None else None,
-                file.artist_name,
-                file.normalized_artist_name,
-                file.normalized_title,
+                file.audio.recording_mbid,
+                file.audio.artist_mbid,
+                file.audio.album_artist_mbid,
+                file.audio.release_mbid,
+                file.audio.release_title,
+                file.audio.release_type.value if file.audio.release_type else None,
+                file.audio.release_type_secondary,
+                file.audio.release_status.value if file.audio.release_status else None,
+                file.audio.track_title,
+                file.audio.track_number,
+                file.audio.disc_number,
+                file.audio.duration_ms,
+                file.audio.bitrate,
+                json.dumps(file.audio.raw_metadata)
+                if file.audio.raw_metadata is not None else None,
+                file.audio.artist_name,
+                file.audio.normalized_artist_name,
+                file.audio.normalized_title,
                 file.work_id,
             ),
         )

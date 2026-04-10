@@ -45,7 +45,7 @@ export type MatchingQueue = z.infer<typeof MatchingQueueSchema>
 // ---------------------------------------------------------------------------
 
 export const ArtistResolutionSchema = z.object({
-  match_status: z.enum(['MAN_MATCHED', 'MAN_REJECTED']),
+  match_status: z.enum(['MANUAL_MATCHED', 'MANUAL_REJECTED']),
   target_artist_id: z.string().nullable().optional(),
 })
 
@@ -56,7 +56,7 @@ export type ArtistResolution = z.infer<typeof ArtistResolutionSchema>
 // ---------------------------------------------------------------------------
 
 export const IdentityResolutionSchema = z.object({
-  match_status: z.enum(['MAN_MATCHED', 'MAN_REJECTED']),
+  match_status: z.enum(['MANUAL_MATCHED', 'MANUAL_REJECTED']),
   library_file_id: z.string().uuid().nullable().optional(),
 })
 

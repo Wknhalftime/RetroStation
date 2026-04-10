@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import MbCache
+from backend.domain.models import MusicBrainzCache
 
 
-class MbCacheRepository(ABC):
+class MusicBrainzCacheRepository(ABC):
     @abstractmethod
-    def get(self, cache_key: str) -> MbCache | None: ...
+    def get(self, cache_key: str) -> MusicBrainzCache | None: ...
 
     @abstractmethod
-    def set(self, cache: MbCache) -> None: ...
+    def set(self, cache: MusicBrainzCache) -> None: ...
 
     @abstractmethod
     def delete_expired(self) -> int:

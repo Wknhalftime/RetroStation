@@ -124,16 +124,9 @@ class Recording:
 
 
 @dataclass
-class LibraryFile:
-    id: UUID
-    file_path: str
-    file_hash: str
-    format: str
-    enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
-    file_status: FileStatus = FileStatus.PRESENT
-    indexed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    trace_id: str | None = None
-    recording_id: str | None = None
+class AudioMetadata:
+    """Metadata extracted from audio file tags."""
+
     recording_mbid: str | None = None
     artist_mbid: str | None = None
     album_artist_mbid: str | None = None
@@ -147,11 +140,25 @@ class LibraryFile:
     disc_number: int | None = None
     duration_ms: int | None = None
     bitrate: int | None = None
-    raw_metadata: dict[str, Any] | None = None
     artist_name: str | None = None
     normalized_artist_name: str | None = None
     normalized_title: str | None = None
+    raw_metadata: dict[str, Any] | None = None
+
+
+@dataclass
+class LibraryFile:
+    id: UUID
+    file_path: str
+    file_hash: str
+    format: str
+    enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
+    file_status: FileStatus = FileStatus.PRESENT
+    indexed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    trace_id: str | None = None
+    recording_id: str | None = None
     work_id: str | None = None
+    audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 
 @dataclass
@@ -219,7 +226,7 @@ class GlobalMappingRule:
 
 
 @dataclass
-class MbCache:
+class MusicBrainzCache:
     id: UUID
     cache_key: str
     entity_type: str
@@ -230,7 +237,7 @@ class MbCache:
 
 
 @dataclass
-class ProgressTracking:
+class TaskProgress:
     task_id: str
     task_type: TaskType
     status: TaskStatus

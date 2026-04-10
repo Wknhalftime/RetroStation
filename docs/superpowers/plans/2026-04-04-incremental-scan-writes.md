@@ -578,9 +578,9 @@ import structlog
 from psycopg.rows import dict_row
 
 from backend.config import get_settings
-from backend.db.repositories.progress_tracking import PgProgressTrackingRepository
+from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import LibraryFile, LibraryQuarantine, ProgressTracking
+from backend.domain.models import LibraryFile, LibraryQuarantine, TaskProgress
 from backend.services.library_scan_service import scan_directory
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -595,7 +595,7 @@ def _run_scan(
     root_path: str,
     library_conn: psycopg.Connection,
     repos: RepositoryFactory,
-    progress_repo: PgProgressTrackingRepository,
+    progress_repo: PgTaskProgressRepository,
     task_id: str,
     chunk_size: int = COMMIT_CHUNK_SIZE,
 ) -> tuple[int, int]:
@@ -645,7 +645,7 @@ def _run_scan(
             "current_path": current_path,
         }
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -684,7 +684,7 @@ def library_scan_task(root_path: str) -> str:
     }
 
     progress_conn = None
-    progress_repo: PgProgressTrackingRepository | None = None
+    progress_repo: PgTaskProgressRepository | None = None
     library_conn = None
 
     try:
@@ -692,11 +692,11 @@ def library_scan_task(root_path: str) -> str:
         progress_conn = psycopg.connect(
             settings.database_url, autocommit=True, row_factory=dict_row
         )
-        progress_repo = PgProgressTrackingRepository(progress_conn)
+        progress_repo = PgTaskProgressRepository(progress_conn)
 
         # Initial progress record
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.RUNNING,
@@ -722,7 +722,7 @@ def library_scan_task(root_path: str) -> str:
 
         # Mark completed AFTER library data commit succeeds
         progress_repo.upsert(
-            ProgressTracking(
+            TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.SCAN,
                 status=TaskStatus.COMPLETED,
@@ -748,7 +748,7 @@ def library_scan_task(root_path: str) -> str:
         if progress_conn is not None and progress_repo is not None:
             with contextlib.suppress(Exception):
                 progress_repo.upsert(
-                    ProgressTracking(
+                    TaskProgress(
                         task_id=task_id,
                         task_type=TaskType.SCAN,
                         status=TaskStatus.FAILED,
