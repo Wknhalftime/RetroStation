@@ -19,7 +19,8 @@ from backend.domain.enums import (
     TaskStatus,
     TaskType,
 )
-from backend.domain.models import LibraryFile, LibraryQuarantine, SystemLog, TaskProgress
+from backend.domain.library import LibraryFile, LibraryQuarantine
+from backend.domain.system import SystemLog, TaskProgress
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_directory

@@ -6,7 +6,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.enums import MatchTier, TargetType
-from backend.domain.models import Match
+from backend.domain.matching import Match
 from backend.repositories.matches import MatchRepository
 
 

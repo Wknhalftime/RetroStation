@@ -36,9 +36,9 @@ def migrated_db(_migrated_db_url: str) -> str:
     """Per-test fixture: truncates all tables then returns the DB URL."""
     with psycopg.connect(_migrated_db_url, autocommit=True) as conn:
         conn.execute("""
-            TRUNCATE log_events, log_identities, log_artists,
+            TRUNCATE play_events, track_identities, broadcast_artists,
                      playlists, broadcast_days, stations,
-                     matches, global_mapping_rules,
+                     matches, mapping_rules,
                      artists, works, recordings,
                      library_files, library_quarantine,
                      song_masters, format_overrides,

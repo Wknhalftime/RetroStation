@@ -5,7 +5,7 @@ from typing import Any, Protocol
 import structlog
 
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import Recording
+from backend.domain.catalog import Recording
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository

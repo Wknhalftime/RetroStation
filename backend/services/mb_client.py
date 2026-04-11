@@ -9,7 +9,7 @@ from uuid import uuid4
 import httpx
 import structlog
 
-from backend.domain.models import MusicBrainzCache
+from backend.domain.system import MusicBrainzCache
 from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 logger = structlog.get_logger()

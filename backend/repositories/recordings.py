@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import Recording
+from backend.domain.catalog import Recording
 
 
 class RecordingRepository(ABC):

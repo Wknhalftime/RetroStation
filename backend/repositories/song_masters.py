@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import SongMaster
+from backend.domain.curation import SongMaster
 
 
 class SongMasterRepository(ABC):

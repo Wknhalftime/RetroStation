@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import LibraryFile
+from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 
 

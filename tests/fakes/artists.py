@@ -1,7 +1,7 @@
 from uuid import uuid4
 
-from backend.domain.enums import Origin
-from backend.domain.models import Artist
+from backend.domain.enums import CatalogSource
+from backend.domain.catalog import Artist
 from backend.repositories.artists import ArtistRepository
 from backend.services.normalization import normalize_artist
 
@@ -41,7 +41,7 @@ class FakeArtistRepository(ArtistRepository):
             name=name,
             sort_name=name,
             normalized_name=normalized_name,
-            origin=Origin.LOCAL,
+            origin=CatalogSource.LOCAL,
             needs_enhancement=False,
         )
         return artist_id
@@ -62,7 +62,7 @@ class FakeArtistRepository(ArtistRepository):
         for artist in self._data.values():
             if artist.normalized_name == norm:
                 artist.mbid = mbid
-                artist.origin = Origin.MUSICBRAINZ
+                artist.origin = CatalogSource.MUSICBRAINZ
                 artist.name = name
                 artist.sort_name = sort_name
                 artist.disambiguation = disambiguation
@@ -77,7 +77,7 @@ class FakeArtistRepository(ArtistRepository):
             disambiguation=disambiguation,
             normalized_name=norm,
             mbid=mbid,
-            origin=Origin.MUSICBRAINZ,
+            origin=CatalogSource.MUSICBRAINZ,
             needs_enhancement=True,
         )
         return artist_id

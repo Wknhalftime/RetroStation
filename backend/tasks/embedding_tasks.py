@@ -5,8 +5,8 @@ from uuid import UUID
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.db.sync_conn import connect_sync
 from backend.services import embedding_service
 from backend.tasks.huey_app import huey
@@ -21,8 +21,8 @@ def embedding_task(playlist_id: str) -> None:
     pid = UUID(playlist_id)
 
     with connect_sync(settings.database_url) as conn:
-        artist_repo = PgLogArtistRepository(conn)
-        identity_repo = PgLogIdentityRepository(conn)
+        artist_repo = PgBroadcastArtistRepository(conn)
+        identity_repo = PgTrackIdentityRepository(conn)
 
         # Embed artists
         unembedded_artists = artist_repo.get_unembedded_for_playlist(pid)

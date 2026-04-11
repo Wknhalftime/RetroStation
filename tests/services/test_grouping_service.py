@@ -5,7 +5,8 @@ import dataclasses
 from uuid import uuid4
 
 from backend.domain.enums import VersionType
-from backend.domain.models import AudioMetadata, LibraryFile, Recording
+from backend.domain.catalog import Recording
+from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.grouping_service import (
     GroupingResult,
     _dynamic_threshold,

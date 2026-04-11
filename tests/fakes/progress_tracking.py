@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from backend.domain.enums import TaskStatus
-from backend.domain.models import TaskProgress
+from backend.domain.system import TaskProgress
 from backend.repositories.progress_tracking import TaskProgressRepository
 
 

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.models import FormatOverride
+from backend.domain.curation import FormatOverride
 
 
 class FormatOverrideRepository(ABC):

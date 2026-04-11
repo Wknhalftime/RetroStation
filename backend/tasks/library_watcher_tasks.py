@@ -19,7 +19,7 @@ from backend.config import get_settings
 from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
-from backend.domain.models import TaskProgress
+from backend.domain.system import TaskProgress
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_smart

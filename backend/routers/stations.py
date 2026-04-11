@@ -289,7 +289,7 @@ async def get_station_events_by_date(
     count_cur = await conn.execute(
         """
         SELECT COUNT(*) AS total
-        FROM log_events le
+        FROM play_events le
         JOIN playlists p ON p.id = le.playlist_id
         WHERE p.station_id = %s AND le.played_at::date = %s
         """,
@@ -309,9 +309,9 @@ async def get_station_events_by_date(
             li.match_status,
             li.match_tier,
             p.name AS playlist_name
-        FROM log_events le
-        JOIN log_identities li ON li.id = le.identity_id
-        JOIN log_artists la ON la.id = li.artist_id
+        FROM play_events le
+        JOIN track_identities li ON li.id = le.identity_id
+        JOIN broadcast_artists la ON la.id = li.broadcast_artist_id
         JOIN playlists p ON p.id = le.playlist_id
         WHERE p.station_id = %s AND le.played_at::date = %s
         ORDER BY le.played_at
@@ -347,10 +347,10 @@ def _generate_station_m3u_sync(
     d = date_type.fromisoformat(date_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
-        events = repos.log_events.get_by_station_date(sid, d)
+        events = repos.play_events.get_by_station_date(sid, d)
         return generate_m3u(
             events=events,
-            identity_repo=repos.log_identities,
+            identity_repo=repos.track_identities,
             match_repo=repos.matches,
             file_repo=repos.library_files,
             recording_repo=repos.recordings,

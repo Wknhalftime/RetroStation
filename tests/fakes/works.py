@@ -1,7 +1,7 @@
 from uuid import uuid4
 
-from backend.domain.enums import Origin
-from backend.domain.models import Work
+from backend.domain.enums import CatalogSource
+from backend.domain.catalog import Work
 from backend.repositories.works import WorkRepository
 
 
@@ -36,7 +36,7 @@ class FakeWorkRepository(WorkRepository):
             id=work_id,
             title=title,
             artist_id=artist_id,
-            origin=Origin.LOCAL,
+            origin=CatalogSource.LOCAL,
             needs_enhancement=False,
         )
         return work_id
@@ -51,7 +51,7 @@ class FakeWorkRepository(WorkRepository):
             title=title,
             artist_id=artist_id,
             mbid=mbid,
-            origin=Origin.MUSICBRAINZ,
+            origin=CatalogSource.MUSICBRAINZ,
             needs_enhancement=True,
         )
         return work_id

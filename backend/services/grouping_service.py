@@ -8,7 +8,8 @@ from uuid import uuid4
 from rapidfuzz import fuzz
 
 from backend.domain.enums import SelectionMethod, VersionType
-from backend.domain.models import LibraryFile, SongMaster
+from backend.domain.library import LibraryFile
+from backend.domain.curation import SongMaster
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository

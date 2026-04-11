@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import Artist
+from backend.domain.catalog import Artist
 
 
 class ArtistRepository(ABC):

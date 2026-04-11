@@ -10,7 +10,7 @@ CREATE TABLE matches (
     target_id        TEXT,
     target_type      TEXT,
     confidence_score REAL        NOT NULL DEFAULT 0.0,
-    match_tier       TEXT        NOT NULL DEFAULT 'UNKNOWN',
+    match_tier       TEXT        NOT NULL DEFAULT 'unclassified',
     trace_id         TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT xor_match_target CHECK (

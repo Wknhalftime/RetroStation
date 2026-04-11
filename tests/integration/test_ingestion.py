@@ -6,13 +6,13 @@ from uuid import uuid4
 import psycopg
 from psycopg.rows import dict_row
 
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.stations import PgStationRepository
-from backend.domain.models import Station
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
+from backend.domain.broadcast import Station
 from backend.services.ingestion_service import ingest_csv
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
@@ -31,9 +31,9 @@ def test_ingest_kazr_csv(migrated_db: str) -> None:
             file_name="KAZR-FakeData.csv",
             station_id=str(station.id),
             playlist_repo=PgPlaylistRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_event_repo=PgLogEventRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            play_event_repo=PgPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
 
@@ -67,9 +67,9 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
             file_name="dup-test.csv",
             station_id=str(station.id),
             playlist_repo=PgPlaylistRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_event_repo=PgLogEventRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            play_event_repo=PgPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
 
@@ -79,9 +79,9 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
                 file_name="dup-test.csv",
                 station_id=str(station.id),
                 playlist_repo=PgPlaylistRepository(conn),
-                log_artist_repo=PgLogArtistRepository(conn),
-                log_identity_repo=PgLogIdentityRepository(conn),
-                log_event_repo=PgLogEventRepository(conn),
+                broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+                track_identity_repo=PgTrackIdentityRepository(conn),
+                play_event_repo=PgPlayEventRepository(conn),
                 broadcast_day_repo=PgBroadcastDayRepository(conn),
             )
         conn.commit()

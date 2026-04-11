@@ -21,8 +21,8 @@ CREATE TABLE library_folder_staged_hashes (
 );
 
 ALTER TABLE library_files
-    ADD COLUMN file_status TEXT NOT NULL DEFAULT 'PRESENT';
+    ADD COLUMN file_status TEXT NOT NULL DEFAULT 'present';
 
 CREATE INDEX idx_library_files_file_status
     ON library_files(file_status)
-    WHERE file_status != 'PRESENT';
+    WHERE file_status != 'present';

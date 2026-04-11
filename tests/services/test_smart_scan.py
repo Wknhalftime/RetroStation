@@ -6,8 +6,8 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.models import LibraryFile
-from backend.services.library_scan_service import SmartScanResult, scan_folder_smart
+from backend.domain.library import LibraryFile
+from backend.services.library_scan_service import scan_folder_smart
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.library_quarantine import FakeLibraryQuarantineRepository
 

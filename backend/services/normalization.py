@@ -1,7 +1,7 @@
 """Normalization pipeline for artist and title strings (FR12–FR25).
 
 Pure functions: no DB imports, no I/O.  Used by ingestion to produce
-normalized_name and normalized_signature for LogArtist/LogIdentity
+normalized_name and normalized_signature for BroadcastArtist/TrackIdentity
 deduplication, and by the matching engine (Epic 3) for version and
 artist-split analysis.
 
@@ -17,7 +17,6 @@ Pipeline order for normalize_artist():
 
 import hashlib
 import re
-import unicodedata
 
 from unidecode import unidecode
 
@@ -256,7 +255,7 @@ def strict_normalize(text: str) -> str:
 
 
 def compute_normalized_signature(normalized_artist: str, normalized_title: str) -> str:
-    """Compute deterministic 32-char hex signature for LogIdentity (FR18).
+    """Compute deterministic 32-char hex signature for TrackIdentity (FR18).
 
     MD5 of (normalized_artist + '||' + normalized_title).
 
@@ -291,7 +290,7 @@ def split_artist_string(raw: str) -> list[str]:
     article stripping), then the list is deduplicated and sorted.
 
     This function is a standalone utility for the matching engine.  Ingestion
-    still creates one LogArtist per original compound string.
+    still creates one BroadcastArtist per original compound string.
 
     Args:
         raw: Raw artist string, possibly containing multiple artist names.

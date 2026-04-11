@@ -6,7 +6,7 @@ from uuid import uuid4
 import psycopg
 
 from backend.domain.enums import VersionType
-from backend.domain.models import Recording
+from backend.domain.catalog import Recording
 from backend.repositories.recordings import RecordingRepository
 
 

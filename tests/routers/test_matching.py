@@ -1,27 +1,25 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import psycopg
 
 from backend.db.repositories.library_files import PgLibraryFileRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.domain.enums import EnrichmentStatus, MatchStatus
-from backend.domain.models import (
-    LibraryFile,
-    LogArtist,
-    LogEvent,
-    LogIdentity,
+from backend.domain.broadcast import (
+    BroadcastArtist,
+    PlayEvent,
     Playlist,
     Station,
+    TrackIdentity,
 )
-
+from backend.domain.library import LibraryFile
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -56,8 +54,8 @@ def _insert_artist(
     original_name: str = "Test Artist",
     match_status: MatchStatus = MatchStatus.NEEDS_REVIEW,
     with_candidates: bool = False,
-) -> LogArtist:
-    artist = LogArtist(
+) -> BroadcastArtist:
+    artist = BroadcastArtist(
         id=uuid4(),
         original_name=original_name,
         normalized_name=original_name.lower(),
@@ -71,7 +69,7 @@ def _insert_artist(
     # upsert won't persist candidates; insert directly so candidates land in JSONB column
     conn.execute(
         """
-        INSERT INTO log_artists (id, original_name, normalized_name, match_status, artist_candidates)
+        INSERT INTO broadcast_artists (id, original_name, normalized_name, match_status, artist_candidates)
         VALUES (%s, %s, %s, %s, %s)
         """,
         (
@@ -88,19 +86,19 @@ def _insert_artist(
 
 def _insert_identity(
     conn: psycopg.Connection,
-    artist: LogArtist,
+    artist: BroadcastArtist,
     original_title: str = "Test Song",
     match_status: MatchStatus = MatchStatus.PENDING,
-) -> LogIdentity:
-    identity = LogIdentity(
+) -> TrackIdentity:
+    identity = TrackIdentity(
         id=uuid4(),
-        artist_id=artist.id,
+        broadcast_artist_id=artist.id,
         original_title=original_title,
         normalized_title=original_title.lower(),
         normalized_signature=f"{artist.normalized_name}:{original_title.lower()}:{uuid4().hex}",
         match_status=match_status,
     )
-    result = PgLogIdentityRepository(conn).upsert(identity)
+    result = PgTrackIdentityRepository(conn).upsert(identity)
     conn.commit()
     return result
 
@@ -108,15 +106,15 @@ def _insert_identity(
 def _insert_event(
     conn: psycopg.Connection,
     playlist: Playlist,
-    identity: LogIdentity,
-) -> LogEvent:
-    event = LogEvent(
+    identity: TrackIdentity,
+) -> PlayEvent:
+    event = PlayEvent(
         id=uuid4(),
         identity_id=identity.id,
         playlist_id=playlist.id,
-        played_at=datetime.now(tz=timezone.utc),
+        played_at=datetime.now(tz=UTC),
     )
-    result = PgLogEventRepository(conn).create(event)
+    result = PgPlayEventRepository(conn).create(event)
     conn.commit()
     return result
 
@@ -143,7 +141,7 @@ def _seed_review_chain(
     db_conn: psycopg.Connection,
     artist_name: str = "Review Artist",
     with_candidates: bool = True,
-) -> tuple[Station, Playlist, LogArtist, LogIdentity, LogEvent]:
+) -> tuple[Station, Playlist, BroadcastArtist, TrackIdentity, PlayEvent]:
     station = _insert_station(db_conn)
     playlist = _insert_playlist(db_conn, station)
     artist = _insert_artist(db_conn, original_name=artist_name, with_candidates=with_candidates)
@@ -170,7 +168,7 @@ class TestMatchingQueue:
         item = data["items"][0]
         assert item["id"] == str(artist.id)
         assert item["original_name"] == "Review Artist"
-        assert item["match_status"] == "NEEDS_REVIEW"
+        assert item["match_status"] == "needs_review"
         assert item["candidates"] is not None
         assert len(item["candidates"]) == 1
         assert item["candidates"][0]["mbid"] == "abc-123"
@@ -179,7 +177,7 @@ class TestMatchingQueue:
         qi = item["identities"][0]
         assert qi["id"] == str(identity.id)
         assert qi["original_title"] == "Test Song"
-        assert qi["match_status"] == "PENDING"
+        assert qi["match_status"] == "pending"
         assert qi["match_tier"] is None
 
     def test_empty_queue(self, client, db_conn):
@@ -222,19 +220,19 @@ class TestResolveArtist:
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MANUAL_MATCHED", "target_artist_id": target_mbid},
+            json={"match_status": "manual_matched", "target_artist_id": target_mbid},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(artist.id)
-        assert data["match_status"] == "MANUAL_MATCHED"
+        assert data["match_status"] == "manual_matched"
 
-        # Verify DB state: log_artists updated
+        # Verify DB state: broadcast_artists updated
         row = db_conn.execute(
-            "SELECT match_status FROM log_artists WHERE id = %s", (artist.id,)
+            "SELECT match_status FROM broadcast_artists WHERE id = %s", (artist.id,)
         ).fetchone()
         assert row is not None
-        assert row["match_status"] == "MANUAL_MATCHED"
+        assert row["match_status"] == "manual_matched"
 
         # Verify match row created
         match_row = db_conn.execute(
@@ -242,33 +240,33 @@ class TestResolveArtist:
         ).fetchone()
         assert match_row is not None
         assert match_row["target_id"] == target_mbid
-        assert match_row["target_type"] == "Artist"
+        assert match_row["target_type"] == "artist"
         assert match_row["confidence_score"] == 1.0
-        assert match_row["match_tier"] == "MANUAL"
+        assert match_row["match_tier"] == "manual"
 
     def test_manual_reject_cascades(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MANUAL_REJECTED"},
+            json={"match_status": "manual_rejected"},
         )
         assert resp.status_code == 200
-        assert resp.json()["match_status"] == "MANUAL_REJECTED"
+        assert resp.json()["match_status"] == "manual_rejected"
 
         # Artist updated
         artist_row = db_conn.execute(
-            "SELECT match_status FROM log_artists WHERE id = %s", (artist.id,)
+            "SELECT match_status FROM broadcast_artists WHERE id = %s", (artist.id,)
         ).fetchone()
         assert artist_row is not None
-        assert artist_row["match_status"] == "MANUAL_REJECTED"
+        assert artist_row["match_status"] == "manual_rejected"
 
         # Child identity cascaded to AUTO_REJECTED
         identity_row = db_conn.execute(
-            "SELECT match_status FROM log_identities WHERE id = %s", (identity.id,)
+            "SELECT match_status FROM track_identities WHERE id = %s", (identity.id,)
         ).fetchone()
         assert identity_row is not None
-        assert identity_row["match_status"] == "AUTO_REJECTED"
+        assert identity_row["match_status"] == "auto_rejected"
 
     def test_manual_reject_does_not_cascade_protected(self, client, db_conn):
         """MANUAL_MATCHED/MANUAL_REJECTED child identities must not be overwritten."""
@@ -281,19 +279,19 @@ class TestResolveArtist:
 
         client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MANUAL_REJECTED"},
+            json={"match_status": "manual_rejected"},
         )
 
         protected_row = db_conn.execute(
-            "SELECT match_status FROM log_identities WHERE id = %s", (protected.id,)
+            "SELECT match_status FROM track_identities WHERE id = %s", (protected.id,)
         ).fetchone()
         assert protected_row is not None
-        assert protected_row["match_status"] == "MANUAL_MATCHED"
+        assert protected_row["match_status"] == "manual_matched"
 
     def test_not_found(self, client):
         resp = client.post(
             f"/api/v1/matching/artists/{uuid4()}/resolve",
-            json={"match_status": "MANUAL_REJECTED"},
+            json={"match_status": "manual_rejected"},
         )
         assert resp.status_code == 404
 
@@ -302,7 +300,7 @@ class TestResolveArtist:
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "PENDING"},
+            json={"match_status": "pending"},
         )
         assert resp.status_code == 422
 
@@ -311,7 +309,7 @@ class TestResolveArtist:
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
-            json={"match_status": "MANUAL_MATCHED"},
+            json={"match_status": "manual_matched"},
         )
         assert resp.status_code == 422
 
@@ -328,21 +326,21 @@ class TestResolveIdentity:
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MANUAL_MATCHED", "library_file_id": str(lib_file.id)},
+            json={"match_status": "manual_matched", "library_file_id": str(lib_file.id)},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(identity.id)
-        assert data["match_status"] == "MANUAL_MATCHED"
+        assert data["match_status"] == "manual_matched"
 
-        # Verify log_identity updated with MANUAL tier
+        # Verify track_identity updated with MANUAL tier
         id_row = db_conn.execute(
-            "SELECT match_status, match_tier FROM log_identities WHERE id = %s",
+            "SELECT match_status, match_tier FROM track_identities WHERE id = %s",
             (identity.id,),
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "MANUAL_MATCHED"
-        assert id_row["match_tier"] == "MANUAL"
+        assert id_row["match_status"] == "manual_matched"
+        assert id_row["match_tier"] == "manual"
 
         # Verify match row created
         match_row = db_conn.execute(
@@ -350,26 +348,26 @@ class TestResolveIdentity:
         ).fetchone()
         assert match_row is not None
         assert match_row["library_file_id"] == lib_file.id
-        assert match_row["target_type"] == "LibraryFile"
+        assert match_row["target_type"] == "library_file"
         assert match_row["confidence_score"] == 1.0
-        assert match_row["match_tier"] == "MANUAL"
+        assert match_row["match_tier"] == "manual"
 
     def test_manual_reject(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MANUAL_REJECTED"},
+            json={"match_status": "manual_rejected"},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["match_status"] == "MANUAL_REJECTED"
+        assert data["match_status"] == "manual_rejected"
 
         id_row = db_conn.execute(
-            "SELECT match_status FROM log_identities WHERE id = %s", (identity.id,)
+            "SELECT match_status FROM track_identities WHERE id = %s", (identity.id,)
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "MANUAL_REJECTED"
+        assert id_row["match_status"] == "manual_rejected"
 
     def test_manual_match_replaces_existing_match(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
@@ -386,16 +384,16 @@ class TestResolveIdentity:
                 uuid4(),
                 identity.id,
                 lib_file_old.id,
-                "LibraryFile",
+                "library_file",
                 0.85,
-                "VECTOR",
+                "vector",
             ),
         )
         db_conn.commit()
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "MANUAL_MATCHED", "library_file_id": str(lib_file_new.id)},
+            json={"match_status": "manual_matched", "library_file_id": str(lib_file_new.id)},
         )
         assert resp.status_code == 200
 
@@ -405,12 +403,12 @@ class TestResolveIdentity:
         ).fetchall()
         assert len(rows) == 1
         assert rows[0]["library_file_id"] == lib_file_new.id
-        assert rows[0]["match_tier"] == "MANUAL"
+        assert rows[0]["match_tier"] == "manual"
 
     def test_not_found(self, client):
         resp = client.post(
             f"/api/v1/matching/identities/{uuid4()}/resolve",
-            json={"match_status": "MANUAL_REJECTED"},
+            json={"match_status": "manual_rejected"},
         )
         assert resp.status_code == 404
 
@@ -419,7 +417,7 @@ class TestResolveIdentity:
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "AUTO_MATCHED"},
+            json={"match_status": "auto_matched"},
         )
         assert resp.status_code == 422
 

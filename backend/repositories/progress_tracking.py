@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import TaskProgress
+from backend.domain.system import TaskProgress
 
 
 class TaskProgressRepository(ABC):

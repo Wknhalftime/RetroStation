@@ -13,17 +13,17 @@ def test_broadcast_day_fake_is_concrete() -> None:
     from tests.fakes.broadcast_days import FakeBroadcastDayRepository
     assert FakeBroadcastDayRepository() is not None
 
-def test_log_artist_fake_is_concrete() -> None:
-    from tests.fakes.log_artists import FakeLogArtistRepository
-    assert FakeLogArtistRepository() is not None
+def test_broadcast_artist_fake_is_concrete() -> None:
+    from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
+    assert FakeBroadcastArtistRepository() is not None
 
-def test_log_identity_fake_is_concrete() -> None:
-    from tests.fakes.log_identities import FakeLogIdentityRepository
-    assert FakeLogIdentityRepository() is not None
+def test_track_identity_fake_is_concrete() -> None:
+    from tests.fakes.track_identities import FakeTrackIdentityRepository
+    assert FakeTrackIdentityRepository() is not None
 
-def test_log_event_fake_is_concrete() -> None:
-    from tests.fakes.log_events import FakeLogEventRepository
-    assert FakeLogEventRepository() is not None
+def test_play_event_fake_is_concrete() -> None:
+    from tests.fakes.play_events import FakePlayEventRepository
+    assert FakePlayEventRepository() is not None
 
 def test_artist_fake_is_concrete() -> None:
     from tests.fakes.artists import FakeArtistRepository
@@ -57,9 +57,9 @@ def test_format_override_fake_is_concrete() -> None:
     from tests.fakes.format_overrides import FakeFormatOverrideRepository
     assert FakeFormatOverrideRepository() is not None
 
-def test_global_mapping_rule_fake_is_concrete() -> None:
-    from tests.fakes.global_mapping_rules import FakeGlobalMappingRuleRepository
-    assert FakeGlobalMappingRuleRepository() is not None
+def test_mapping_rule_fake_is_concrete() -> None:
+    from tests.fakes.mapping_rules import FakeMappingRuleRepository
+    assert FakeMappingRuleRepository() is not None
 
 def test_mb_cache_fake_is_concrete() -> None:
     from tests.fakes.mb_cache import FakeMusicBrainzCacheRepository

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
-from backend.domain.enums import Origin
+from backend.domain.enums import CatalogSource
 from backend.tasks.library_tasks import library_scan_task
 
 
@@ -523,7 +523,7 @@ async def get_work_detail(
                 recordings_map[rid] = {
                     "id": rid,
                     "title": row["rec_title"],
-                    "version_type": row["rec_version_type"] or "ORIGINAL",
+                    "version_type": row["rec_version_type"] or "original",
                     "duration_ms": row["rec_duration_ms"],
                     "files": [],
                 }
@@ -626,7 +626,7 @@ async def get_work_detail(
             RecordingDetail(
                 id=work_id,
                 title=track_title,
-                version_type="ORIGINAL",
+                version_type="original",
                 duration_ms=file_rows[0].get("duration_ms") if file_rows else None,
                 files=files,
             )
@@ -1136,7 +1136,7 @@ async def merge_works(
         artist_row = await artist_cur.fetchone()
         if artist_row is None:
             continue
-        if artist_row["origin"] != Origin.LOCAL:
+        if artist_row["origin"] != CatalogSource.LOCAL:
             continue
         works_cur = await conn.execute(
             "SELECT id FROM works WHERE artist_id = %s LIMIT 1", (artist_id,)
@@ -1237,7 +1237,7 @@ async def split_work(
                 new_rec_id,
                 rec_row["title"] if rec_row else work_row["title"],
                 new_work_id,
-                rec_row["version_type"] if rec_row else "ORIGINAL",
+                rec_row["version_type"] if rec_row else "original",
                 rec_row["duration_ms"] if rec_row else None,
             ),
         )
@@ -1365,7 +1365,7 @@ async def reassign_file_work(
             (recording_id,),
         )
         rec_row = await rec_cur.fetchone()
-        rec_version = rec_row["version_type"] if rec_row else "ORIGINAL"
+        rec_version = rec_row["version_type"] if rec_row else "original"
 
         # Check if target already has this version_type
         tgt_cur = await conn.execute(

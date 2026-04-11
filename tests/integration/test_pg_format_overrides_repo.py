@@ -3,15 +3,15 @@ from __future__ import annotations
 from uuid import uuid4
 
 import psycopg
-import pytest
 from psycopg.rows import dict_row
 
-from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.artists import PgArtistRepository
+from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.works import PgWorkRepository
-from backend.domain.models import Artist, FormatOverride, LibraryFile, Work
-
+from backend.domain.catalog import Artist, Work
+from backend.domain.library import LibraryFile
+from backend.domain.curation import FormatOverride
 
 # ---------------------------------------------------------------------------
 # Helpers

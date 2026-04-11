@@ -23,9 +23,9 @@ def ingestion_task(file_bytes: bytes, file_name: str, station_id: str) -> str:
             file_name=file_name,
             station_id=station_id,
             playlist_repo=repos.playlists,
-            log_artist_repo=repos.log_artists,
-            log_identity_repo=repos.log_identities,
-            log_event_repo=repos.log_events,
+            broadcast_artist_repo=repos.broadcast_artists,
+            track_identity_repo=repos.track_identities,
+            play_event_repo=repos.play_events,
             broadcast_day_repo=repos.broadcast_days,
         )
         conn.commit()

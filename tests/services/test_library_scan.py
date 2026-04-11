@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mutagen._util import MutagenError
 
-from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.library_scan_service import (
     _sanitise_tag_value,
     extract_tags,

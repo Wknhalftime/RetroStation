@@ -9,7 +9,7 @@ from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, LogLevel
-from backend.domain.models import SystemLog
+from backend.domain.system import SystemLog
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,

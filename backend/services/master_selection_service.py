@@ -5,7 +5,7 @@ from uuid import uuid4
 import structlog
 
 from backend.domain.enums import SelectionMethod
-from backend.domain.models import SongMaster
+from backend.domain.curation import SongMaster
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -26,7 +26,7 @@ def _score_file(lib_file: object) -> tuple[int, int, int]:
 
     Higher is better for all three values.
     """
-    from backend.domain.models import LibraryFile
+    from backend.domain.library import LibraryFile
     f: LibraryFile = lib_file  # type: ignore[assignment]
 
     score = 0

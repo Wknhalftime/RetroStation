@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from backend.domain.enums import LogCategory, LogLevel
-from backend.domain.models import SystemLog
+from backend.domain.system import SystemLog
 from backend.repositories.system_logs import SystemLogRepository
 
 

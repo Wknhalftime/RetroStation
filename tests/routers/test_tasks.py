@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.db.repositories.progress_tracking import PgTaskProgressRepository
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import TaskProgress
+from backend.domain.system import TaskProgress
 
 # ---------------------------------------------------------------------------
 # Helpers

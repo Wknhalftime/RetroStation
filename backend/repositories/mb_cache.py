@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import MusicBrainzCache
+from backend.domain.system import MusicBrainzCache
 
 
 class MusicBrainzCacheRepository(ABC):

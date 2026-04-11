@@ -7,12 +7,13 @@ import structlog
 from rapidfuzz import fuzz
 
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
-from backend.domain.models import Artist, Match
+from backend.domain.catalog import Artist
+from backend.domain.matching import Match
 from backend.repositories.artists import ArtistRepository
-from backend.repositories.global_mapping_rules import GlobalMappingRuleRepository
-from backend.repositories.log_artists import LogArtistRepository
-from backend.repositories.log_identities import LogIdentityRepository
+from backend.repositories.broadcast_artists import BroadcastArtistRepository
+from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.track_identities import TrackIdentityRepository
 from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_artist
 
@@ -27,33 +28,33 @@ class MbClientProtocol(Protocol):
 
 def match_artists_for_playlist(
     playlist_id: UUID,
-    log_artist_repo: LogArtistRepository,
-    log_identity_repo: LogIdentityRepository,
+    broadcast_artist_repo: BroadcastArtistRepository,
+    track_identity_repo: TrackIdentityRepository,
     artist_repo: ArtistRepository,
     match_repo: MatchRepository,
-    rules_repo: GlobalMappingRuleRepository,
+    rules_repo: MappingRuleRepository,
     mb_client: MbClientProtocol,
     mb_auto_link_score: int = 95,
     mb_score_gap: int = 10,
 ) -> None:
     """Run artist matching for all PENDING artists linked to this playlist."""
-    pending = log_artist_repo.get_pending_for_playlist(playlist_id)
+    pending = broadcast_artist_repo.get_pending_for_playlist(playlist_id)
     rules = rules_repo.list_ordered()
     all_canonical = artist_repo.list_all()
 
-    for log_artist in pending:
+    for broadcast_artist in pending:
         # Pre-check global mapping rules
         rule_matched = False
         for rule in rules:
             if rule.target_type == TargetType.ARTIST and _rule_matches(
-                rule.source_pattern, log_artist.normalized_name
+                rule.source_pattern, broadcast_artist.normalized_name
             ):
-                log_artist_repo.update_match_status(
-                    log_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.MANUAL
+                broadcast_artist_repo.update_match_status(
+                    broadcast_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.MANUAL
                 )
                 match_repo.create(Match(
                     id=uuid4(),
-                    artist_id=log_artist.id,
+                    artist_id=broadcast_artist.id,
                     target_id=rule.target_id,
                     target_type=TargetType.ARTIST,
                     confidence_score=100.0,
@@ -67,17 +68,17 @@ def match_artists_for_playlist(
         # Tier 1: Exact normalized name match against canonical artists
         exact_match = None
         for canonical in all_canonical:
-            if normalize_artist(canonical.name) == log_artist.normalized_name:
+            if normalize_artist(canonical.name) == broadcast_artist.normalized_name:
                 exact_match = canonical
                 break
 
         if exact_match:
-            log_artist_repo.update_match_status(
-                log_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.NORMALIZATION
+            broadcast_artist_repo.update_match_status(
+                broadcast_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.NORMALIZATION
             )
             match_repo.create(Match(
                 id=uuid4(),
-                artist_id=log_artist.id,
+                artist_id=broadcast_artist.id,
                 target_id=exact_match.id,
                 target_type=TargetType.ARTIST,
                 confidence_score=100.0,
@@ -90,7 +91,7 @@ def match_artists_for_playlist(
             candidates: list[dict[str, Any]] = []
             for canonical in all_canonical:
                 score = fuzz.token_sort_ratio(
-                    log_artist.normalized_name,
+                    broadcast_artist.normalized_name,
                     normalize_artist(canonical.name),
                 )
                 if score >= 60:
@@ -106,11 +107,11 @@ def match_artists_for_playlist(
                     top["score"], gap, mb_auto_link_score, mb_score_gap
                 )
                 if status is not None:
-                    log_artist_repo.update_match_status(log_artist.id, status, tier)
+                    broadcast_artist_repo.update_match_status(broadcast_artist.id, status, tier)
                     if status == MatchStatus.AUTO_MATCHED:
                         match_repo.create(Match(
                             id=uuid4(),
-                            artist_id=log_artist.id,
+                            artist_id=broadcast_artist.id,
                             target_id=top["artist"].id,
                             target_type=TargetType.ARTIST,
                             confidence_score=top["score"],
@@ -119,7 +120,7 @@ def match_artists_for_playlist(
                     continue
 
         # Tier 3: MusicBrainz API search
-        mb_results = mb_client.search_artist(log_artist.original_name)
+        mb_results = mb_client.search_artist(broadcast_artist.original_name)
         if mb_results:
             mb_candidates: list[dict[str, Any]] = []
             for mb_result in mb_results:
@@ -146,13 +147,13 @@ def match_artists_for_playlist(
                         sort_name=top_mb.get("sort-name", top_mb["name"]),
                         disambiguation=top_mb.get("disambiguation"),
                     ))
-                    log_artist_repo.update_match_status(
-                        log_artist.id, mb_status, MatchTier.MUSICBRAINZ_API
+                    broadcast_artist_repo.update_match_status(
+                        broadcast_artist.id, mb_status, MatchTier.MUSICBRAINZ_API
                     )
                     if mb_status == MatchStatus.AUTO_MATCHED:
                         match_repo.create(Match(
                             id=uuid4(),
-                            artist_id=log_artist.id,
+                            artist_id=broadcast_artist.id,
                             target_id=canonical.id,
                             target_type=TargetType.ARTIST,
                             confidence_score=top_mb.get("score", 0),
@@ -161,17 +162,17 @@ def match_artists_for_playlist(
                     continue
 
         # No match from any tier → NEEDS_REVIEW
-        log_artist_repo.update_match_status(
-            log_artist.id, MatchStatus.NEEDS_REVIEW
+        broadcast_artist_repo.update_match_status(
+            broadcast_artist.id, MatchStatus.NEEDS_REVIEW
         )
 
     # Cascade: AUTO_REJECTED artists → bulk reject child identities
     # (This handles cases where global rules set AUTO_REJECTED, as well as
     # artists that were already AUTO_REJECTED before this run)
-    all_playlist_artists = log_artist_repo.get_all_for_playlist(playlist_id)
-    for log_artist in all_playlist_artists:
-        if log_artist.match_status == MatchStatus.AUTO_REJECTED:
-            log_identity_repo.bulk_reject_by_artist(log_artist.id)
+    all_playlist_artists = broadcast_artist_repo.get_all_for_playlist(playlist_id)
+    for broadcast_artist in all_playlist_artists:
+        if broadcast_artist.match_status == MatchStatus.AUTO_REJECTED:
+            track_identity_repo.bulk_reject_by_artist(broadcast_artist.id)
 
 
 def _apply_thresholds(

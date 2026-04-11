@@ -5,7 +5,7 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.models import FormatOverride
+from backend.domain.curation import FormatOverride
 from backend.repositories.format_overrides import FormatOverrideRepository
 
 

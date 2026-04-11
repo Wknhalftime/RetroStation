@@ -4,7 +4,7 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.models import LibraryQuarantine
+from backend.domain.library import LibraryQuarantine
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
 
 

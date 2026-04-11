@@ -2,47 +2,47 @@ from enum import StrEnum
 
 
 class MatchStatus(StrEnum):
-    PENDING       = "PENDING"
-    AUTO_MATCHED  = "AUTO_MATCHED"
-    NEEDS_REVIEW  = "NEEDS_REVIEW"
-    MANUAL_MATCHED  = "MANUAL_MATCHED"
-    AUTO_REJECTED   = "AUTO_REJECTED"
-    MANUAL_REJECTED = "MANUAL_REJECTED"
+    PENDING         = "pending"
+    AUTO_MATCHED    = "auto_matched"
+    NEEDS_REVIEW    = "needs_review"
+    MANUAL_MATCHED  = "manual_matched"
+    AUTO_REJECTED   = "auto_rejected"
+    MANUAL_REJECTED = "manual_rejected"
 
 
 class MatchTier(StrEnum):
-    MBID_EXACT      = "MBID_EXACT"
-    NORMALIZATION   = "NORMALIZATION"
-    VECTOR          = "VECTOR"
-    MUSICBRAINZ_API = "MUSICBRAINZ_API"
-    MANUAL          = "MANUAL"
-    UNKNOWN         = "UNKNOWN"
+    MUSICBRAINZ_ID_EXACT = "musicbrainz_id_exact"
+    NORMALIZATION        = "normalization"
+    VECTOR               = "vector"
+    MUSICBRAINZ_API      = "musicbrainz_api"
+    MANUAL               = "manual"
+    UNCLASSIFIED         = "unclassified"
 
 
 class TargetType(StrEnum):
-    ARTIST       = "Artist"
-    WORK         = "Work"
-    RECORDING    = "Recording"
-    LIBRARY_FILE = "LibraryFile"
+    ARTIST       = "artist"
+    WORK         = "work"
+    RECORDING    = "recording"
+    LIBRARY_FILE = "library_file"
 
 
 class VersionType(StrEnum):
-    ORIGINAL     = "ORIGINAL"
-    LIVE         = "LIVE"
-    REMASTER     = "REMASTER"
-    REMIX        = "REMIX"
-    RADIO_EDIT   = "RADIO_EDIT"
-    DEMO         = "DEMO"
-    ACOUSTIC     = "ACOUSTIC"
-    EXTENDED     = "EXTENDED"
-    INSTRUMENTAL = "INSTRUMENTAL"
-    EXPLICIT     = "EXPLICIT"
-    COVER        = "COVER"
-    EDITION      = "EDITION"
-    ALTERNATE    = "ALTERNATE"
-    FORMAT       = "FORMAT"
-    UNKNOWN      = "UNKNOWN"
-    OTHER        = "OTHER"
+    ORIGINAL     = "original"
+    LIVE         = "live"
+    REMASTER     = "remaster"
+    REMIX        = "remix"
+    RADIO_EDIT   = "radio_edit"
+    DEMO         = "demo"
+    ACOUSTIC     = "acoustic"
+    EXTENDED     = "extended"
+    INSTRUMENTAL = "instrumental"
+    EXPLICIT     = "explicit"
+    COVER        = "cover"
+    EDITION      = "edition"
+    ALTERNATE    = "alternate"
+    FORMAT       = "format"
+    UNKNOWN      = "unknown"
+    OTHER        = "other"
 
 
 class EnrichmentStatus(StrEnum):
@@ -54,9 +54,9 @@ class EnrichmentStatus(StrEnum):
 
 
 class FileStatus(StrEnum):
-    PRESENT = "PRESENT"
-    MISSING = "MISSING"
-    DELETED = "DELETED"
+    PRESENT = "present"
+    MISSING = "missing"
+    DELETED = "deleted"
 
 
 class ReleaseType(StrEnum):
@@ -81,7 +81,7 @@ class SelectionMethod(StrEnum):
     MANUAL = "manual"
 
 
-class Origin(StrEnum):
+class CatalogSource(StrEnum):
     LOCAL        = "local"
     MUSICBRAINZ  = "musicbrainz"
 
@@ -102,6 +102,7 @@ class TaskStatus(StrEnum):
     TIMEOUT   = "timeout"
 
 
+# uppercase intentional: matches Python logging, structlog, and external sink conventions
 class LogLevel(StrEnum):
     DEBUG   = "DEBUG"
     INFO    = "INFO"

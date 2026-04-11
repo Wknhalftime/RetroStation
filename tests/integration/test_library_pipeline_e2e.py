@@ -15,18 +15,20 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.artists import PgArtistRepository
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import AudioMetadata, LibraryFile, Recording, Station
+from backend.domain.catalog import Recording
+from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.broadcast import Station
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
@@ -55,9 +57,9 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             file_name="KAZR-LIB-E2E.csv",
             station_id=str(station.id),
             playlist_repo=PgPlaylistRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_event_repo=PgLogEventRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            play_event_repo=PgPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
         conn.commit()
@@ -79,18 +81,18 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
 
         match_artists_for_playlist(
             playlist_id=playlist_id,
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
             mb_client=fake_mb,
         )
         conn.commit()
 
         # Confirm Metallica was matched
         metallica_rows = conn.execute(
-            "SELECT la.id FROM log_artists la WHERE la.normalized_name = 'metallica'"
+            "SELECT la.id FROM broadcast_artists la WHERE la.normalized_name = 'metallica'"
         ).fetchall()
         assert len(metallica_rows) >= 1, "Metallica log_artist not found"
         metallica_log_id = metallica_rows[0]["id"]
@@ -105,7 +107,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # --- Step 3: Find a Metallica identity from the fixture ---
         # Query for an identity belonging to Metallica to get the title
         metallica_identities = conn.execute(
-            "SELECT li.original_title FROM log_identities li "
+            "SELECT li.original_title FROM track_identities li "
             "WHERE li.artist_id = %s LIMIT 5",
             (metallica_log_id,),
         ).fetchall()
@@ -142,17 +144,17 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # --- Step 5: Identity matching ---
         work_ids = match_identities_for_playlist(
             playlist_id=playlist_id,
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=PgLibraryFileRepository(conn),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
         )
         conn.commit()
 
         # --- Verify: at least one identity is AUTO_MATCHED ---
         auto_matched_rows = conn.execute(
-            "SELECT count(*) AS cnt FROM log_identities "
+            "SELECT count(*) AS cnt FROM track_identities "
             "WHERE match_status = 'AUTO_MATCHED'"
         ).fetchone()
         assert auto_matched_rows is not None
@@ -163,7 +165,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # The matched identity's match row should reference the library file
         match_row = conn.execute(
             "SELECT m.library_file_id FROM matches m "
-            "JOIN log_identities li ON li.id = m.identity_id "
+            "JOIN track_identities li ON li.id = m.identity_id "
             "WHERE li.match_status = 'AUTO_MATCHED' LIMIT 1"
         ).fetchone()
         assert match_row is not None, "No match row found for AUTO_MATCHED identity"

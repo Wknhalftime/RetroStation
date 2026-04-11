@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.domain.enums import LogCategory, LogLevel
-from backend.domain.models import SystemLog
+from backend.domain.system import SystemLog
 
 
 def _make_log(

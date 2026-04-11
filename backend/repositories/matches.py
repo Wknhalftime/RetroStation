@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.models import Match
+from backend.domain.matching import Match
 
 
 class MatchRepository(ABC):

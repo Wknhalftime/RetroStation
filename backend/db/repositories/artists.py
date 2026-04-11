@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import psycopg
 
-from backend.domain.enums import Origin
-from backend.domain.models import Artist
+from backend.domain.enums import CatalogSource
+from backend.domain.catalog import Artist
 from backend.repositories.artists import ArtistRepository
 
 
@@ -25,9 +25,9 @@ class PgArtistRepository(ArtistRepository):
             enhancement_error=row.get("enhancement_error"),
             mbid=row.get("mbid"),
             origin=(
-                Origin(row["origin"])
+                CatalogSource(row["origin"])
                 if row.get("origin")
-                else Origin.LOCAL
+                else CatalogSource.LOCAL
             ),
             normalized_name=row.get("normalized_name"),
         )

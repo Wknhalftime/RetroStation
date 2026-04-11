@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 
-from backend.domain.models import BroadcastDay
+from backend.domain.broadcast import BroadcastDay
 from backend.repositories.broadcast_days import BroadcastDayRepository
 
 

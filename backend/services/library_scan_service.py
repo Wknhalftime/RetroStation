@@ -25,7 +25,7 @@ from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.models import AudioMetadata, LibraryFile, LibraryQuarantine
+from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
 from backend.services.normalization import normalize_artist, normalize_title

@@ -3,8 +3,8 @@ from __future__ import annotations
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.tasks.huey_app import huey
@@ -22,8 +22,8 @@ def artist_matching_task(playlist_id: str) -> None:
         from backend.db.repositories.artists import (
             PgArtistRepository,
         )
-        from backend.db.repositories.global_mapping_rules import (
-            PgGlobalMappingRuleRepository,
+        from backend.db.repositories.mapping_rules import (
+            PgMappingRuleRepository,
         )
         from backend.db.repositories.matches import (
             PgMatchRepository,
@@ -35,11 +35,11 @@ def artist_matching_task(playlist_id: str) -> None:
 
         match_artists_for_playlist(
             playlist_id=UUID(playlist_id),
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
             mb_client=RealMbClient(PgMusicBrainzCacheRepository(conn)),
             mb_auto_link_score=settings.mb_auto_link_score,
             mb_score_gap=settings.mb_score_gap,

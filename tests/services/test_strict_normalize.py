@@ -1,4 +1,4 @@
-from backend.services.normalization import strict_normalize, normalize_title
+from backend.services.normalization import normalize_title, strict_normalize
 
 
 def test_strict_strips_hyphens() -> None:

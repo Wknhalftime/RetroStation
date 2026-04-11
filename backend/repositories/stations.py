@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.models import Station
+from backend.domain.broadcast import Station
 
 
 class StationRepository(ABC):

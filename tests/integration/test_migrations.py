@@ -15,9 +15,9 @@ def test_all_migrations_applied(migrated_db: str) -> None:
 
 def test_all_expected_tables_exist(migrated_db: str) -> None:
     expected = {
-        "playlists", "log_artists", "log_identities", "log_events",
+        "playlists", "broadcast_artists", "track_identities", "play_events",
         "artists", "works", "recordings",
-        "matches", "global_mapping_rules",
+        "matches", "mapping_rules",
         "library_files", "library_quarantine",
         "user_settings", "system_logs", "progress_tracking",
         "stations", "broadcast_days",
@@ -44,7 +44,7 @@ def test_pgvector_extension_installed(migrated_db: str) -> None:
 
 
 def test_embedding_columns_on_four_tables(migrated_db: str) -> None:
-    tables = ["log_artists", "log_identities", "works", "recordings"]
+    tables = ["broadcast_artists", "track_identities", "works", "recordings"]
     with psycopg.connect(migrated_db) as conn:
         for table in tables:
             row = conn.execute("""
@@ -57,7 +57,7 @@ def test_embedding_columns_on_four_tables(migrated_db: str) -> None:
 def test_deferred_fk_columns_exist(migrated_db: str) -> None:
     checks = [
         ("playlists",  "station_id"),
-        ("log_events", "broadcast_day_id"),
+        ("play_events", "broadcast_day_id"),
     ]
     with psycopg.connect(migrated_db) as conn:
         for table, column in checks:

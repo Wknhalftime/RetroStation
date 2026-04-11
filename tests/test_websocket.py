@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from collections.abc import Generator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
 
 from backend.domain.enums import TaskStatus, TaskType
-from backend.domain.models import TaskProgress
+from backend.domain.system import TaskProgress
 
 # psycopg async requires SelectorEventLoop on Windows (not ProactorEventLoop)
 if sys.platform == "win32":
@@ -72,7 +72,7 @@ def _seed_task(
     status: TaskStatus = TaskStatus.RUNNING,
     progress_data: dict | None = None,
 ) -> TaskProgress:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     task = TaskProgress(
         task_id=task_id,
         task_type=TaskType.SCAN,

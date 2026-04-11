@@ -5,7 +5,7 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.models import MusicBrainzCache
+from backend.domain.system import MusicBrainzCache
 from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 

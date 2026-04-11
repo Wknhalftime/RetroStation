@@ -13,7 +13,8 @@ from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.domain.enums import SelectionMethod
-from backend.domain.models import AudioMetadata, LibraryFile, SongMaster
+from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.curation import SongMaster
 from backend.services.grouping_service import assign_work
 from backend.services.normalization import normalize_artist, normalize_title
 from tests.helpers import assert_grouping_invariants

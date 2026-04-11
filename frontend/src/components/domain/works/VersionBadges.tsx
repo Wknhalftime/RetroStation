@@ -1,26 +1,26 @@
 /** Display label mapping for VersionType enum values. */
 const VERSION_LABELS: Record<string, string> = {
-  ORIGINAL: "Studio",
-  LIVE: "Live",
-  REMASTER: "Remaster",
-  REMIX: "Remix",
-  RADIO_EDIT: "Radio Edit",
-  DEMO: "Demo",
-  ACOUSTIC: "Acoustic",
-  EXTENDED: "Extended",
-  INSTRUMENTAL: "Instrumental",
-  EXPLICIT: "Explicit",
-  COVER: "Cover",
-  EDITION: "Edition",
-  ALTERNATE: "Alt",
-  FORMAT: "Format",
+  original: "Studio",
+  live: "Live",
+  remaster: "Remaster",
+  remix: "Remix",
+  radio_edit: "Radio Edit",
+  demo: "Demo",
+  acoustic: "Acoustic",
+  extended: "Extended",
+  instrumental: "Instrumental",
+  explicit: "Explicit",
+  cover: "Cover",
+  edition: "Edition",
+  alternate: "Alt",
+  format: "Format",
 };
 
-/** Sort order: ORIGINAL first, then alphabetical by label. */
+/** Sort order: original first, then alphabetical by label. */
 function sortVersionTypes(types: string[]): string[] {
   return [...types].sort((a, b) => {
-    if (a === "ORIGINAL") return -1;
-    if (b === "ORIGINAL") return 1;
+    if (a === "original") return -1;
+    if (b === "original") return 1;
     const la = VERSION_LABELS[a] ?? a;
     const lb = VERSION_LABELS[b] ?? b;
     return la.localeCompare(lb);
@@ -34,9 +34,9 @@ interface VersionBadgesProps {
 }
 
 export function VersionBadges({ versionTypes }: VersionBadgesProps) {
-  // Filter out UNKNOWN and OTHER — they indicate bad data
+  // Filter out unknown and other — they indicate bad data
   const displayable = versionTypes.filter(
-    (v) => v !== "UNKNOWN" && v !== "OTHER" && VERSION_LABELS[v] != null,
+    (v) => v !== "unknown" && v !== "other" && VERSION_LABELS[v] != null,
   );
 
   if (displayable.length === 0) return null;

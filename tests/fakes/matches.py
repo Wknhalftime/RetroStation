@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from backend.domain.models import Match
+from backend.domain.matching import Match
 from backend.repositories.matches import MatchRepository
 
 

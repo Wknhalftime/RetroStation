@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from backend.domain.models import LibraryFolder
+from backend.domain.library import LibraryFolder
 from backend.repositories.library_folders import LibraryFolderRepository
 
 

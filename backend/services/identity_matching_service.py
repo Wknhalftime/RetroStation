@@ -6,12 +6,12 @@ import structlog
 from rapidfuzz import fuzz
 
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
-from backend.domain.models import Match
-from backend.repositories.global_mapping_rules import GlobalMappingRuleRepository
+from backend.domain.matching import Match
+from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
-from backend.repositories.log_artists import LogArtistRepository
-from backend.repositories.log_identities import LogIdentityRepository
+from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.track_identities import TrackIdentityRepository
 from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_title
 
@@ -20,11 +20,11 @@ logger = structlog.get_logger()
 
 def match_identities_for_playlist(
     playlist_id: UUID,
-    log_identity_repo: LogIdentityRepository,
-    log_artist_repo: LogArtistRepository,
+    track_identity_repo: TrackIdentityRepository,
+    broadcast_artist_repo: BroadcastArtistRepository,
     match_repo: MatchRepository,
     library_file_repo: LibraryFileRepository,
-    rules_repo: GlobalMappingRuleRepository,
+    rules_repo: MappingRuleRepository,
 ) -> list[str]:
     """Run identity matching for all pending identities in this playlist.
 
@@ -37,7 +37,7 @@ def match_identities_for_playlist(
         List of work_ids (recording.work_id) for newly AUTO_MATCHED identities,
         for downstream master selection recalculation.
     """
-    pending = log_identity_repo.get_pending_for_playlist(playlist_id)
+    pending = track_identity_repo.get_pending_for_playlist(playlist_id)
 
     if not pending:
         logger.info("no_pending_identities", playlist_id=str(playlist_id))
@@ -70,10 +70,10 @@ def match_identities_for_playlist(
                 identity_id=identity.id,
                 library_file_id=lib_file.id,
                 confidence_score=100.0,
-                match_tier=MatchTier.MBID_EXACT,
+                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
             ))
-            log_identity_repo.update_match_status(
-                identity.id, MatchStatus.AUTO_MATCHED, MatchTier.MBID_EXACT
+            track_identity_repo.update_match_status(
+                identity.id, MatchStatus.AUTO_MATCHED, MatchTier.MUSICBRAINZ_ID_EXACT
             )
             if lib_file.work_id:
                 work_ids.append(lib_file.work_id)
@@ -93,10 +93,10 @@ def match_identities_for_playlist(
 
         # --- Tier 2: MBID graph ---
         # Find the artist's match to get canonical artist MBID
-        log_artist = log_artist_repo.get_by_id(identity.artist_id)
+        broadcast_artist = broadcast_artist_repo.get_by_id(identity.broadcast_artist_id)
         canonical_artist_mbid: str | None = None
-        if log_artist is not None:
-            artist_match = match_repo.get_by_artist(log_artist.id)
+        if broadcast_artist is not None:
+            artist_match = match_repo.get_by_artist(broadcast_artist.id)
             if artist_match is not None:
                 canonical_artist_mbid = artist_match.target_id
 
@@ -119,7 +119,7 @@ def match_identities_for_playlist(
                 if best_file is not None and best_score >= 60:
                     if best_score >= 95:
                         status = MatchStatus.AUTO_MATCHED
-                        tier = MatchTier.MBID_EXACT
+                        tier = MatchTier.MUSICBRAINZ_ID_EXACT
                     elif best_score >= 80:
                         status = MatchStatus.AUTO_MATCHED
                         tier = MatchTier.NORMALIZATION
@@ -135,7 +135,7 @@ def match_identities_for_playlist(
                         confidence_score=best_score,
                         match_tier=tier,
                     ))
-                    log_identity_repo.update_match_status(identity.id, status, tier)
+                    track_identity_repo.update_match_status(identity.id, status, tier)
 
                     if status == MatchStatus.AUTO_MATCHED:
                         auto_matched += 1
@@ -154,8 +154,8 @@ def match_identities_for_playlist(
                     continue
 
         # --- Fallback: NEEDS_REVIEW / UNKNOWN ---
-        log_identity_repo.update_match_status(
-            identity.id, MatchStatus.NEEDS_REVIEW, MatchTier.UNKNOWN
+        track_identity_repo.update_match_status(
+            identity.id, MatchStatus.NEEDS_REVIEW, MatchTier.UNCLASSIFIED
         )
         needs_review += 1
 

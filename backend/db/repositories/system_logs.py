@@ -7,7 +7,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.enums import LogCategory, LogLevel
-from backend.domain.models import SystemLog
+from backend.domain.system import SystemLog
 from backend.repositories.system_logs import SystemLogRepository
 
 

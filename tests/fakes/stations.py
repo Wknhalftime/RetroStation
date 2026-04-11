@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from backend.domain.models import Station
+from backend.domain.broadcast import Station
 from backend.repositories.stations import StationRepository
 
 

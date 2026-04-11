@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from backend.domain.enums import LogCategory, LogLevel
-from backend.domain.models import SystemLog
+from backend.domain.system import SystemLog
 
 
 class SystemLogRepository(ABC):

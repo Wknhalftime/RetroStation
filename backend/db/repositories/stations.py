@@ -5,7 +5,7 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.models import Station
+from backend.domain.broadcast import Station
 from backend.repositories.stations import StationRepository
 
 

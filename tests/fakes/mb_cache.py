@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from backend.domain.models import MusicBrainzCache
+from backend.domain.system import MusicBrainzCache
 from backend.repositories.mb_cache import MusicBrainzCacheRepository
 
 

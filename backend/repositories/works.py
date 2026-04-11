@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import Work
+from backend.domain.catalog import Work
 
 
 class WorkRepository(ABC):

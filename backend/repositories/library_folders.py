@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.models import LibraryFolder
+from backend.domain.library import LibraryFolder
 
 
 class LibraryFolderRepository(ABC):

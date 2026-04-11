@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus
-from backend.domain.models import AudioMetadata, LibraryFile
+from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,

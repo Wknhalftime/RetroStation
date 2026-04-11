@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import psycopg
 
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.domain.enums import MatchStatus
-from backend.domain.models import (
-    LogArtist,
-    LogEvent,
-    LogIdentity,
+from backend.domain.broadcast import (
+    BroadcastArtist,
+    PlayEvent,
     Playlist,
     Station,
+    TrackIdentity,
 )
 
 
@@ -41,25 +41,25 @@ def _insert_playlist(conn, station, name="show.csv"):
 
 def _insert_event_full(conn, playlist, artist_name="Test Artist", title="Test Song", played_at=None):
     """Insert artist + identity + event. Returns the event."""
-    artist = LogArtist(
+    artist = BroadcastArtist(
         id=uuid4(), original_name=artist_name,
         normalized_name=artist_name.lower(), match_status=MatchStatus.PENDING,
     )
-    PgLogArtistRepository(conn).upsert(artist)
+    PgBroadcastArtistRepository(conn).upsert(artist)
 
-    identity = LogIdentity(
-        id=uuid4(), artist_id=artist.id, original_title=title,
+    identity = TrackIdentity(
+        id=uuid4(), broadcast_artist_id=artist.id, original_title=title,
         normalized_title=title.lower(),
         normalized_signature=f"{artist_name.lower()}:{title.lower()}",
         match_status=MatchStatus.PENDING,
     )
-    PgLogIdentityRepository(conn).upsert(identity)
+    PgTrackIdentityRepository(conn).upsert(identity)
 
-    event = LogEvent(
+    event = PlayEvent(
         id=uuid4(), identity_id=identity.id, playlist_id=playlist.id,
-        played_at=played_at or datetime.now(tz=timezone.utc),
+        played_at=played_at or datetime.now(tz=UTC),
     )
-    PgLogEventRepository(conn).create(event)
+    PgPlayEventRepository(conn).create(event)
     conn.commit()
     return event
 
@@ -83,7 +83,7 @@ class TestListStations:
     def test_includes_playlist_count(self, client, db_conn):
         station = _insert_station(db_conn, "KAZR-FM")
         from backend.db.repositories.playlists import PgPlaylistRepository
-        from backend.domain.models import Playlist
+        from backend.domain.broadcast import Playlist
         PgPlaylistRepository(db_conn).create(
             Playlist(id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id)
         )
@@ -177,11 +177,11 @@ class TestStationEventsByDate:
         playlist = _insert_playlist(db_conn, station, name="morning.csv")
         _insert_event_full(
             db_conn, playlist, "The Clash", "London Calling",
-            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
             db_conn, playlist, "Nirvana", "Smells Like Teen Spirit",
-            played_at=datetime(2001, 3, 15, 9, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 15, 9, 0, 0, tzinfo=UTC),
         )
 
         resp = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15")
@@ -199,11 +199,11 @@ class TestStationEventsByDate:
         p2 = _insert_playlist(db_conn, station, name="evening.csv")
         _insert_event_full(
             db_conn, p1, "The Clash", "London Calling",
-            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
             db_conn, p2, "Nirvana", "In Bloom",
-            played_at=datetime(2001, 3, 15, 20, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 15, 20, 0, 0, tzinfo=UTC),
         )
 
         resp = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15")
@@ -218,11 +218,11 @@ class TestStationEventsByDate:
         playlist = _insert_playlist(db_conn, station)
         _insert_event_full(
             db_conn, playlist, "The Clash", "London Calling",
-            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
             db_conn, playlist, "Nirvana", "In Bloom",
-            played_at=datetime(2001, 3, 16, 8, 0, 0, tzinfo=timezone.utc),
+            played_at=datetime(2001, 3, 16, 8, 0, 0, tzinfo=UTC),
         )
 
         resp = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15")
@@ -235,7 +235,7 @@ class TestStationEventsByDate:
         for i in range(5):
             _insert_event_full(
                 db_conn, playlist, f"Artist {i}", f"Song {i}",
-                played_at=datetime(2001, 3, 15, 8, i, 0, tzinfo=timezone.utc),
+                played_at=datetime(2001, 3, 15, 8, i, 0, tzinfo=UTC),
             )
 
         resp = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15&limit=2&offset=0")

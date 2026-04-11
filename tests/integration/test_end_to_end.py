@@ -7,16 +7,16 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.artists import PgArtistRepository
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.domain.enums import MatchStatus
-from backend.domain.models import Station
+from backend.domain.broadcast import Station
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
@@ -46,9 +46,9 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
             file_name="KAZR-E2E.csv",
             station_id=str(station.id),
             playlist_repo=PgPlaylistRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_event_repo=PgLogEventRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            play_event_repo=PgPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
         conn.commit()
@@ -80,18 +80,18 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
 
         match_artists_for_playlist(
             playlist_id=playlist_id,
-            log_artist_repo=PgLogArtistRepository(conn),
-            log_identity_repo=PgLogIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
             mb_client=fake_mb,
         )
         conn.commit()
 
         # Verify artist match status distribution
         all_artists_rows = conn.execute(
-            "SELECT match_status, count(*) FROM log_artists GROUP BY match_status"
+            "SELECT match_status, count(*) FROM broadcast_artists GROUP BY match_status"
         ).fetchall()
         status_counts = {r["match_status"]: r["count"] for r in all_artists_rows}
 
@@ -102,17 +102,17 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         # Step 4: Identity matching (no library → NEEDS_REVIEW)
         match_identities_for_playlist(
             playlist_id=playlist_id,
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=FakeLibraryFileRepository(),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
         )
         conn.commit()
 
         # Verify identity statuses
         identity_status_rows = conn.execute(
-            "SELECT match_status, count(*) FROM log_identities GROUP BY match_status"
+            "SELECT match_status, count(*) FROM track_identities GROUP BY match_status"
         ).fetchall()
         identity_statuses = {r["match_status"]: r["count"] for r in identity_status_rows}
 

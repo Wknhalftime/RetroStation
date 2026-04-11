@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import psycopg
 from fastapi.testclient import TestClient
-from psycopg.rows import dict_row
 
 from backend.db.repositories.settings import PgSettingsRepository
-
 
 # ---------------------------------------------------------------------------
 # Helpers

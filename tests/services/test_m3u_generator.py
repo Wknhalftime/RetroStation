@@ -5,30 +5,26 @@ All tests use in-memory fake repositories; no database required.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, SelectionMethod
-from backend.domain.models import (
-    FormatOverride,
-    LibraryFile,
-    LogEvent,
-    LogIdentity,
-    Match,
-    Recording,
-    SongMaster,
-)
+from backend.domain.catalog import Recording
+from backend.domain.library import LibraryFile
+from backend.domain.broadcast import PlayEvent, TrackIdentity
+from backend.domain.curation import FormatOverride, SongMaster
+from backend.domain.matching import Match
 from backend.services.m3u_generator_service import generate_m3u
 from tests.fakes.format_overrides import FakeFormatOverrideRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
-from tests.fakes.log_events import FakeLogEventRepository
-from tests.fakes.log_identities import FakeLogIdentityRepository
 from tests.fakes.matches import FakeMatchRepository
+from tests.fakes.play_events import FakePlayEventRepository
 from tests.fakes.recordings import FakeRecordingRepository
 from tests.fakes.settings import FakeSettingsRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
+from tests.fakes.track_identities import FakeTrackIdentityRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,11 +35,11 @@ def _make_identity(
     *,
     title: str = "Test Song",
     match_status: MatchStatus = MatchStatus.AUTO_MATCHED,
-) -> LogIdentity:
+) -> TrackIdentity:
     artist_id = uuid4()
-    return LogIdentity(
+    return TrackIdentity(
         id=uuid4(),
-        artist_id=artist_id,
+        broadcast_artist_id=artist_id,
         original_title=title,
         normalized_title=title.lower(),
         normalized_signature=f"artist:{title.lower()}",
@@ -52,18 +48,18 @@ def _make_identity(
     )
 
 
-def _make_event(*, identity: LogIdentity, playlist_id: object) -> LogEvent:
+def _make_event(*, identity: TrackIdentity, playlist_id: object) -> PlayEvent:
     from uuid import UUID
-    return LogEvent(
+    return PlayEvent(
         id=uuid4(),
         identity_id=identity.id,
         playlist_id=UUID(str(playlist_id)),
-        played_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        played_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
     )
 
 
 def _make_file(*, file_path: str = "/music/track.flac", duration_ms: int | None = 301_000) -> LibraryFile:
-    from backend.domain.models import AudioMetadata
+    from backend.domain.library import AudioMetadata
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
@@ -74,7 +70,7 @@ def _make_file(*, file_path: str = "/music/track.flac", duration_ms: int | None 
     )
 
 
-def _make_match(*, identity: LogIdentity, library_file: LibraryFile) -> Match:
+def _make_match(*, identity: TrackIdentity, library_file: LibraryFile) -> Match:
     return Match(
         id=uuid4(),
         identity_id=identity.id,
@@ -88,8 +84,8 @@ def _build_repos(
     *,
     settings: dict[str, str] | None = None,
 ) -> tuple[
-    FakeLogEventRepository,
-    FakeLogIdentityRepository,
+    FakePlayEventRepository,
+    FakeTrackIdentityRepository,
     FakeMatchRepository,
     FakeLibraryFileRepository,
     FakeRecordingRepository,
@@ -98,8 +94,8 @@ def _build_repos(
     FakeSettingsRepository,
 ]:
     return (
-        FakeLogEventRepository(),
-        FakeLogIdentityRepository(),
+        FakePlayEventRepository(),
+        FakeTrackIdentityRepository(),
         FakeMatchRepository(),
         FakeLibraryFileRepository(),
         FakeRecordingRepository(),
@@ -112,8 +108,8 @@ def _build_repos(
 def _call_generate(
     playlist_id: object,
     *,
-    event_repo: FakeLogEventRepository,
-    identity_repo: FakeLogIdentityRepository,
+    event_repo: FakePlayEventRepository,
+    identity_repo: FakeTrackIdentityRepository,
     match_repo: FakeMatchRepository,
     file_repo: FakeLibraryFileRepository,
     recording_repo: FakeRecordingRepository,

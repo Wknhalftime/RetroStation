@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import psycopg
 
+from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.log_artists import PgLogArtistRepository
-from backend.db.repositories.log_events import PgLogEventRepository
-from backend.db.repositories.log_identities import PgLogIdentityRepository
+from backend.db.repositories.play_events import PgPlayEventRepository
 from backend.db.repositories.playlists import PgPlaylistRepository
 from backend.db.repositories.stations import PgStationRepository
+from backend.db.repositories.track_identities import PgTrackIdentityRepository
 from backend.domain.enums import MatchStatus
-from backend.domain.models import (
-    LogArtist,
-    LogEvent,
-    LogIdentity,
+from backend.domain.broadcast import (
+    BroadcastArtist,
+    PlayEvent,
     Playlist,
     Station,
+    TrackIdentity,
 )
-
 
 # ---------------------------------------------------------------------------
 # Seeding helpers
@@ -54,33 +53,33 @@ def _insert_artist(
     conn: psycopg.Connection,
     original_name: str = "Test Artist",
     normalized_name: str | None = None,
-) -> LogArtist:
-    artist = LogArtist(
+) -> BroadcastArtist:
+    artist = BroadcastArtist(
         id=uuid4(),
         original_name=original_name,
         normalized_name=normalized_name or original_name.lower(),
         match_status=MatchStatus.PENDING,
     )
-    result = PgLogArtistRepository(conn).upsert(artist)
+    result = PgBroadcastArtistRepository(conn).upsert(artist)
     conn.commit()
     return result
 
 
 def _insert_identity(
     conn: psycopg.Connection,
-    artist: LogArtist,
+    artist: BroadcastArtist,
     original_title: str = "Test Song",
     normalized_signature: str | None = None,
-) -> LogIdentity:
-    identity = LogIdentity(
+) -> TrackIdentity:
+    identity = TrackIdentity(
         id=uuid4(),
-        artist_id=artist.id,
+        broadcast_artist_id=artist.id,
         original_title=original_title,
         normalized_title=original_title.lower(),
         normalized_signature=normalized_signature or f"{artist.normalized_name}:{original_title.lower()}",
         match_status=MatchStatus.PENDING,
     )
-    result = PgLogIdentityRepository(conn).upsert(identity)
+    result = PgTrackIdentityRepository(conn).upsert(identity)
     conn.commit()
     return result
 
@@ -88,16 +87,16 @@ def _insert_identity(
 def _insert_event(
     conn: psycopg.Connection,
     playlist: Playlist,
-    identity: LogIdentity,
+    identity: TrackIdentity,
     played_at: datetime | None = None,
-) -> LogEvent:
-    event = LogEvent(
+) -> PlayEvent:
+    event = PlayEvent(
         id=uuid4(),
         identity_id=identity.id,
         playlist_id=playlist.id,
-        played_at=played_at or datetime.now(tz=timezone.utc),
+        played_at=played_at or datetime.now(tz=UTC),
     )
-    result = PgLogEventRepository(conn).create(event)
+    result = PgPlayEventRepository(conn).create(event)
     conn.commit()
     return result
 
@@ -197,7 +196,7 @@ class TestPlaylistEvents:
                 db_conn,
                 playlist,
                 identity,
-                played_at=datetime(2024, 1, 1, 12, i, 0, tzinfo=timezone.utc),
+                played_at=datetime(2024, 1, 1, 12, i, 0, tzinfo=UTC),
             )
         return station, playlist, artist
 
@@ -231,7 +230,7 @@ class TestPlaylistEvents:
         item = resp.json()["items"][0]
         assert item["artist_name"] == "The Clash"
         assert item["title"] == "London Calling"
-        assert item["match_status"] == "PENDING"
+        assert item["match_status"] == "pending"
         assert item["match_tier"] is None
         assert "id" in item
         assert "played_at" in item

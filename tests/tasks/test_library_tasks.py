@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus, TaskStatus
-from backend.domain.models import LibraryFile, LibraryQuarantine
+from backend.domain.library import LibraryFile, LibraryQuarantine
 
 
 def _make_lf(idx: int) -> LibraryFile:

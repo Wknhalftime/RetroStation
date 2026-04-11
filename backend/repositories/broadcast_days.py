@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from uuid import UUID
 
-from backend.domain.models import BroadcastDay
+from backend.domain.broadcast import BroadcastDay
 
 
 class BroadcastDayRepository(ABC):

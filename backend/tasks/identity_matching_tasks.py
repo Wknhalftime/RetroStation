@@ -19,21 +19,21 @@ def identity_matching_task(playlist_id: str) -> None:
     settings = get_settings()
 
     with connect_sync(settings.database_url) as conn:
-        from backend.db.repositories.global_mapping_rules import PgGlobalMappingRuleRepository
+        from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
         from backend.db.repositories.library_files import PgLibraryFileRepository
-        from backend.db.repositories.log_artists import PgLogArtistRepository
-        from backend.db.repositories.log_identities import PgLogIdentityRepository
+        from backend.db.repositories.mapping_rules import PgMappingRuleRepository
         from backend.db.repositories.matches import PgMatchRepository
         from backend.db.repositories.recordings import PgRecordingRepository
         from backend.db.repositories.song_masters import PgSongMasterRepository
+        from backend.db.repositories.track_identities import PgTrackIdentityRepository
 
         work_ids = match_identities_for_playlist(
             playlist_id=UUID(playlist_id),
-            log_identity_repo=PgLogIdentityRepository(conn),
-            log_artist_repo=PgLogArtistRepository(conn),
+            track_identity_repo=PgTrackIdentityRepository(conn),
+            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=PgLibraryFileRepository(conn),
-            rules_repo=PgGlobalMappingRuleRepository(conn),
+            rules_repo=PgMappingRuleRepository(conn),
         )
         conn.commit()
 

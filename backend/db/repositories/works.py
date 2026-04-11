@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import psycopg
 
-from backend.domain.enums import Origin
-from backend.domain.models import Work
+from backend.domain.enums import CatalogSource
+from backend.domain.catalog import Work
 from backend.repositories.works import WorkRepository
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,9 @@ class PgWorkRepository(WorkRepository):
             embedding=_parse_embedding(row.get("embedding")),
             mbid=row.get("mbid"),
             origin=(
-                Origin(row["origin"])
+                CatalogSource(row["origin"])
                 if row.get("origin")
-                else Origin.LOCAL
+                else CatalogSource.LOCAL
             ),
         )
 

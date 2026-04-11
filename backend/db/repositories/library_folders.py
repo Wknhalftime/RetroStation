@@ -5,7 +5,7 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.models import LibraryFolder
+from backend.domain.library import LibraryFolder
 from backend.repositories.library_folders import LibraryFolderRepository
 
 

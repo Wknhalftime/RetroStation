@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from backend.domain.models import LibraryFolder
+from backend.domain.library import LibraryFolder
 from backend.repositories.library_folders import LibraryFolderRepository
 from backend.services.library_scan_service import SUPPORTED_EXTENSIONS
 

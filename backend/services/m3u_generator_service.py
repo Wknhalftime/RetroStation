@@ -1,6 +1,6 @@
 """M3U playlist export service.
 
-Resolves the preferred audio file for each log event using the priority chain
+Resolves the preferred audio file for each play event using the priority chain
 defined in the design spec (Section 3.4):
 
     format_override > song_master > direct match (match.library_file_id)
@@ -14,14 +14,14 @@ from __future__ import annotations
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus
-from backend.domain.models import LogEvent
+from backend.domain.broadcast import PlayEvent
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
-from backend.repositories.log_identities import LogIdentityRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.settings import SettingsRepository
 from backend.repositories.song_masters import SongMasterRepository
+from backend.repositories.track_identities import TrackIdentityRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
     {MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED}
@@ -30,8 +30,8 @@ _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
 
 def generate_m3u(
     *,
-    events: list[LogEvent],
-    identity_repo: LogIdentityRepository,
+    events: list[PlayEvent],
+    identity_repo: TrackIdentityRepository,
     match_repo: MatchRepository,
     file_repo: LibraryFileRepository,
     recording_repo: RecordingRepository,
@@ -43,7 +43,7 @@ def generate_m3u(
     """Generate an M3U playlist string for the given events.
 
     Args:
-        events: Pre-fetched list of log events to export.
+        events: Pre-fetched list of play events to export.
         identity_repo: Repository for log identities.
         match_repo: Repository for identity matches.
         file_repo: Repository for library files.

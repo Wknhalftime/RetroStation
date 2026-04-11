@@ -9,8 +9,8 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
-from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.models import LibraryFile
+from backend.domain.enums import EnrichmentStatus
+from backend.domain.library import LibraryFile
 from backend.services.folder_hash_service import diff_tree
 
 

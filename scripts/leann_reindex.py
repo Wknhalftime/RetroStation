@@ -222,10 +222,9 @@ def do_incremental_update(changed_files: list[Path]) -> None:
 
 def do_full_rebuild() -> None:
     """Full rebuild with non-compact index for future incremental updates."""
-    from llama_index.core import SimpleDirectoryReader
-
     from leann.api import LeannBuilder
     from leann.chunking_utils import create_text_chunks
+    from llama_index.core import SimpleDirectoryReader
 
     print("[leann] Full rebuild (non-compact for incremental updates)")
 

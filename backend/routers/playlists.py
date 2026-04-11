@@ -109,7 +109,7 @@ async def list_playlists(
             p.ingested_at,
             COUNT(le.id) AS event_count
         FROM playlists p
-        LEFT JOIN log_events le ON le.playlist_id = p.id
+        LEFT JOIN play_events le ON le.playlist_id = p.id
         WHERE p.station_id = %s
         GROUP BY p.id, p.name, p.station_id, p.content_hash, p.ingested_at
         ORDER BY p.ingested_at DESC
@@ -204,7 +204,7 @@ async def get_playlist_events(
 
     # Total count
     count_cur = await conn.execute(
-        "SELECT COUNT(*) AS total FROM log_events WHERE playlist_id = %s",
+        "SELECT COUNT(*) AS total FROM play_events WHERE playlist_id = %s",
         (playlist_id,),
     )
     count_row = await count_cur.fetchone()
@@ -220,9 +220,9 @@ async def get_playlist_events(
             li.original_title AS title,
             li.match_status,
             li.match_tier
-        FROM log_events le
-        JOIN log_identities li ON li.id = le.identity_id
-        JOIN log_artists la ON la.id = li.artist_id
+        FROM play_events le
+        JOIN track_identities li ON li.id = le.identity_id
+        JOIN broadcast_artists la ON la.id = li.broadcast_artist_id
         WHERE le.playlist_id = %s
         ORDER BY le.played_at
         LIMIT %s OFFSET %s
@@ -314,10 +314,10 @@ def _generate_m3u_sync(
     pid = UUID(playlist_id_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
-        events = repos.log_events.get_by_playlist(pid)
+        events = repos.play_events.get_by_playlist(pid)
         return generate_m3u(
             events=events,
-            identity_repo=repos.log_identities,
+            identity_repo=repos.track_identities,
             match_repo=repos.matches,
             file_repo=repos.library_files,
             recording_repo=repos.recordings,

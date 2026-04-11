@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.models import Playlist
+from backend.domain.broadcast import Playlist
 
 
 class PlaylistRepository(ABC):

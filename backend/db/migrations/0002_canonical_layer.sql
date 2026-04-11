@@ -27,7 +27,7 @@ CREATE TABLE recordings (
     title             TEXT        NOT NULL,
     work_id           TEXT        REFERENCES works(id),
     duration_ms       INTEGER,
-    version_type      TEXT        NOT NULL DEFAULT 'ORIGINAL',
+    version_type      TEXT        NOT NULL DEFAULT 'original',
     needs_enhancement BOOLEAN     NOT NULL DEFAULT TRUE,
     enhanced_at       TIMESTAMPTZ,
     enhancement_error TEXT

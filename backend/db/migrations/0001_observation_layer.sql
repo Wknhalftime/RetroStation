@@ -12,7 +12,7 @@ CREATE TABLE log_artists (
     id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     original_name     TEXT        NOT NULL,
     normalized_name   TEXT        NOT NULL UNIQUE,
-    match_status      TEXT        NOT NULL DEFAULT 'PENDING',
+    match_status      TEXT        NOT NULL DEFAULT 'pending',
     artist_candidates JSONB,
     error_message     TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -25,7 +25,7 @@ CREATE TABLE log_identities (
     original_title       TEXT        NOT NULL,
     normalized_title     TEXT        NOT NULL,
     normalized_signature TEXT        NOT NULL UNIQUE,
-    match_status         TEXT        NOT NULL DEFAULT 'PENDING',
+    match_status         TEXT        NOT NULL DEFAULT 'pending',
     match_tier           TEXT,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
     -- embedding vector(1024) added in 0005_vector_indexes.sql

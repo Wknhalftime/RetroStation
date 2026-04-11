@@ -8,7 +8,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.models import AudioMetadata, LibraryFile
+from backend.domain.library import AudioMetadata, LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
             file_hash=row["file_hash"],
             format=row.get("format") or "unknown",
             enrichment_status=EnrichmentStatus(row["enrichment_status"]),
-            file_status=FileStatus(row.get("file_status", "PRESENT")),
+            file_status=FileStatus(row.get("file_status", "present")),
             indexed_at=row["indexed_at"],
             trace_id=row.get("trace_id"),
             recording_id=row.get("recording_id"),
@@ -89,7 +89,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
                     THEN library_files.enrichment_status
                     ELSE EXCLUDED.enrichment_status
                 END,
-                file_status            = 'PRESENT',
+                file_status            = 'present',
                 trace_id               = EXCLUDED.trace_id,
                 recording_id           = EXCLUDED.recording_id,
                 recording_mbid         = EXCLUDED.recording_mbid,
@@ -189,7 +189,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
                     THEN library_files.enrichment_status
                     ELSE EXCLUDED.enrichment_status
                 END,
-                file_status            = 'PRESENT',
+                file_status            = 'present',
                 trace_id               = EXCLUDED.trace_id,
                 recording_id           = EXCLUDED.recording_id,
                 recording_mbid         = EXCLUDED.recording_mbid,

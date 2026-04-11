@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.models import AudioMetadata, LibraryFile
+from backend.domain.library import AudioMetadata, LibraryFile
 
 
 def _make_file(

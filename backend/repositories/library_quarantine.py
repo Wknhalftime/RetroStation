@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.models import LibraryQuarantine
+from backend.domain.library import LibraryQuarantine
 
 
 class LibraryQuarantineRepository(ABC):

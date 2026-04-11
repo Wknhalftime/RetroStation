@@ -6,7 +6,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
-from backend.domain.models import LibraryFolder
+from backend.domain.library import LibraryFolder
 
 
 def test_upsert_and_get_by_path(migrated_db: str) -> None:

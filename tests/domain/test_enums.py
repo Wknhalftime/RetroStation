@@ -2,18 +2,18 @@
 from uuid import uuid4
 
 from backend.domain.enums import FileStatus
-from backend.domain.models import LibraryFile, LibraryFolder
+from backend.domain.library import LibraryFile, LibraryFolder
 
 
 class TestFileStatus:
     def test_present_value(self) -> None:
-        assert FileStatus.PRESENT == "PRESENT"
+        assert FileStatus.PRESENT == "present"
 
     def test_missing_value(self) -> None:
-        assert FileStatus.MISSING == "MISSING"
+        assert FileStatus.MISSING == "missing"
 
     def test_deleted_value(self) -> None:
-        assert FileStatus.DELETED == "DELETED"
+        assert FileStatus.DELETED == "deleted"
 
     def test_is_str_enum(self) -> None:
         assert isinstance(FileStatus.PRESENT, str)

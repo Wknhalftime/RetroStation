@@ -105,7 +105,7 @@ async def get_matching_queue(
         :class:`MatchingQueue` with artist items and total count.
     """
     count_cur = await conn.execute(
-        "SELECT COUNT(*) AS total FROM log_artists WHERE match_status = ANY(%s)",
+        "SELECT COUNT(*) AS total FROM broadcast_artists WHERE match_status = ANY(%s)",
         (_QUEUE_STATUSES,),
     )
     count_row = await count_cur.fetchone()
@@ -114,7 +114,7 @@ async def get_matching_queue(
     artists_cur = await conn.execute(
         """
         SELECT id, original_name, normalized_name, match_status, artist_candidates
-        FROM log_artists
+        FROM broadcast_artists
         WHERE match_status = ANY(%s)
         ORDER BY created_at
         LIMIT %s OFFSET %s
@@ -130,19 +130,19 @@ async def get_matching_queue(
 
     identities_cur = await conn.execute(
         """
-        SELECT id, artist_id, original_title, normalized_title, match_status, match_tier
-        FROM log_identities
-        WHERE artist_id = ANY(%s)
+        SELECT id, broadcast_artist_id, original_title, normalized_title, match_status, match_tier
+        FROM track_identities
+        WHERE broadcast_artist_id = ANY(%s)
         ORDER BY original_title
         """,
         (artist_ids,),
     )
     identity_rows = await identities_cur.fetchall()
 
-    # Group identities by artist_id in Python
+    # Group identities by broadcast_artist_id in Python
     identities_by_artist: dict[UUID, list[QueueIdentity]] = {}
     for irow in identity_rows:
-        aid = irow["artist_id"]
+        aid = irow["broadcast_artist_id"]
         identities_by_artist.setdefault(aid, []).append(
             QueueIdentity(
                 id=irow["id"],
@@ -225,7 +225,7 @@ async def resolve_artist(
 
     # Fetch artist
     artist_cur = await conn.execute(
-        "SELECT id FROM log_artists WHERE id = %s",
+        "SELECT id FROM broadcast_artists WHERE id = %s",
         (artist_id,),
     )
     if await artist_cur.fetchone() is None:
@@ -239,7 +239,7 @@ async def resolve_artist(
     if new_status == MatchStatus.MANUAL_MATCHED:
         # Update status
         await conn.execute(
-            "UPDATE log_artists SET match_status = %s WHERE id = %s",
+            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
             (new_status.value, artist_id),
         )
         # Create match row: artist_id → target MBID, confidence=1.0, tier=MANUAL
@@ -266,15 +266,15 @@ async def resolve_artist(
     else:
         # MANUAL_REJECTED: update artist, cascade child identities
         await conn.execute(
-            "UPDATE log_artists SET match_status = %s WHERE id = %s",
+            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
             (new_status.value, artist_id),
         )
         # Cascade all child identities that are NOT already manually resolved
         await conn.execute(
             """
-            UPDATE log_identities
+            UPDATE track_identities
             SET match_status = %s
-            WHERE artist_id = %s
+            WHERE broadcast_artist_id = %s
               AND match_status != ALL(%s)
             """,
             (
@@ -327,7 +327,7 @@ async def resolve_identity(
         )
 
     identity_cur = await conn.execute(
-        "SELECT id FROM log_identities WHERE id = %s",
+        "SELECT id FROM track_identities WHERE id = %s",
         (identity_id,),
     )
     if await identity_cur.fetchone() is None:
@@ -341,7 +341,7 @@ async def resolve_identity(
     if new_status == MatchStatus.MANUAL_MATCHED:
         # Update log_identity with status and MANUAL tier
         await conn.execute(
-            "UPDATE log_identities SET match_status = %s, match_tier = %s WHERE id = %s",
+            "UPDATE track_identities SET match_status = %s, match_tier = %s WHERE id = %s",
             (new_status.value, MatchTier.MANUAL.value, identity_id),
         )
         # Delete any existing match for this identity
@@ -369,7 +369,7 @@ async def resolve_identity(
     else:
         # MANUAL_REJECTED: update status, delete existing match
         await conn.execute(
-            "UPDATE log_identities SET match_status = %s, match_tier = %s WHERE id = %s",
+            "UPDATE track_identities SET match_status = %s, match_tier = %s WHERE id = %s",
             (new_status.value, MatchTier.MANUAL.value, identity_id),
         )
         await conn.execute(
@@ -393,7 +393,7 @@ async def run_matching(
     """Trigger artist-matching tasks for all playlists with unresolved artists.
 
     Finds all playlists that have at least one log_artist in PENDING or
-    NEEDS_REVIEW state (via log_identities → log_events join), then fires a
+    NEEDS_REVIEW state (via track_identities → play_events join), then fires a
     background Huey task for each.
 
     Args:
@@ -406,9 +406,9 @@ async def run_matching(
     playlists_cur = await conn.execute(
         """
         SELECT DISTINCT le.playlist_id
-        FROM log_events le
-        JOIN log_identities li ON li.id = le.identity_id
-        JOIN log_artists la ON la.id = li.artist_id
+        FROM play_events le
+        JOIN track_identities li ON li.id = le.identity_id
+        JOIN broadcast_artists la ON la.id = li.broadcast_artist_id
         WHERE la.match_status = ANY(%s)
         """,
         (_QUEUE_STATUSES,),
