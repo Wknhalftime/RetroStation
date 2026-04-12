@@ -13,15 +13,15 @@ import structlog
 from backend.domain.broadcast import (
     BroadcastArtist,
     BroadcastDay,
-    PlayEvent,
-    Playlist,
-    TrackIdentity,
+    BroadcastPlayEvent,
+    BroadcastPlaylist,
+    BroadcastTrackIdentity,
 )
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_days import BroadcastDayRepository
-from backend.repositories.play_events import PlayEventRepository
-from backend.repositories.playlists import PlaylistRepository
-from backend.repositories.track_identities import TrackIdentityRepository
+from backend.repositories.play_events import BroadcastPlayEventRepository
+from backend.repositories.playlists import BroadcastPlaylistRepository
+from backend.repositories.track_identities import BroadcastTrackIdentityRepository
 from backend.services.normalization import (
     compute_normalized_signature,
     normalize_artist,
@@ -45,10 +45,10 @@ def ingest_csv(
     file_bytes: bytes,
     file_name: str,
     station_id: str,
-    playlist_repo: PlaylistRepository,
+    playlist_repo: BroadcastPlaylistRepository,
     broadcast_artist_repo: BroadcastArtistRepository,
-    track_identity_repo: TrackIdentityRepository,
-    play_event_repo: PlayEventRepository,
+    track_identity_repo: BroadcastTrackIdentityRepository,
+    play_event_repo: BroadcastPlayEventRepository,
     broadcast_day_repo: BroadcastDayRepository,
 ) -> IngestionResult:
     """Parse a CSV file and create playlist, artists, identities, events, and broadcast days."""
@@ -69,7 +69,7 @@ def ingest_csv(
 
     # Create playlist
     from uuid import UUID
-    playlist = playlist_repo.create(Playlist(
+    playlist = playlist_repo.create(BroadcastPlaylist(
         id=uuid4(),
         name=posixpath.basename(file_name),
         content_hash=content_hash,
@@ -81,7 +81,7 @@ def ingest_csv(
     reader = csv.DictReader(io.StringIO(text))
 
     seen_artists: dict[str, BroadcastArtist] = {}  # normalized_name → BroadcastArtist
-    seen_signatures: dict[str, TrackIdentity] = {}  # signature → TrackIdentity
+    seen_signatures: dict[str, BroadcastTrackIdentity] = {}  # signature → BroadcastTrackIdentity
     seen_broadcast_dates: dict[str, BroadcastDay] = {}  # date_str → BroadcastDay
 
     for row in reader:
@@ -116,7 +116,7 @@ def ingest_csv(
         # Upsert identity
         if signature not in seen_signatures:
             identity_input_id = uuid4()
-            identity = track_identity_repo.upsert(TrackIdentity(
+            identity = track_identity_repo.upsert(BroadcastTrackIdentity(
                 id=identity_input_id,
                 broadcast_artist_id=artist.id,
                 original_title=raw_title,
@@ -139,7 +139,7 @@ def ingest_csv(
         broadcast_day = seen_broadcast_dates.get(date_str)
 
         # Create event
-        play_event_repo.create(PlayEvent(
+        play_event_repo.create(BroadcastPlayEvent(
             id=uuid4(),
             identity_id=identity.id,
             playlist_id=playlist.id,

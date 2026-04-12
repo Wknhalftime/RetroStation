@@ -71,28 +71,46 @@ def library_enrichment_task() -> dict[str, int]:
             ))
 
             for release_mbid in release_mbids:
-                count = enrich_by_release(
-                    release_mbid,
-                    repos.library_files,
-                    repos.recordings,
-                    repos.works,
-                    repos.artists,
-                    mb_client,
-                )
-                total_enriched += count
+                try:
+                    count = enrich_by_release(
+                        release_mbid,
+                        repos.library_files,
+                        repos.recordings,
+                        repos.works,
+                        repos.artists,
+                        mb_client,
+                    )
+                    total_enriched += count
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001
+                    conn.rollback()
+                    total_failed += 1
+                    logger.warning(
+                        "enrich_by_release_error",
+                        release_mbid=release_mbid,
+                        error=str(exc),
+                    )
 
             for recording_mbid in recording_mbids:
-                count = enrich_by_recording(
-                    recording_mbid,
-                    repos.library_files,
-                    repos.recordings,
-                    repos.works,
-                    repos.artists,
-                    mb_client,
-                )
-                total_enriched += count
-
-            conn.commit()
+                try:
+                    count = enrich_by_recording(
+                        recording_mbid,
+                        repos.library_files,
+                        repos.recordings,
+                        repos.works,
+                        repos.artists,
+                        mb_client,
+                    )
+                    total_enriched += count
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001
+                    conn.rollback()
+                    total_failed += 1
+                    logger.warning(
+                        "enrich_by_recording_error",
+                        recording_mbid=recording_mbid,
+                        error=str(exc),
+                    )
 
         sys_log_repo.create(SystemLog(
             category=LogCategory.ENRICHMENT,

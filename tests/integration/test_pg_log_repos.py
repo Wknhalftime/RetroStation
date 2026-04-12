@@ -6,9 +6,9 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
-from backend.db.repositories.track_identities import PgTrackIdentityRepository
+from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus
-from backend.domain.broadcast import BroadcastArtist, TrackIdentity
 
 
 def test_broadcast_artist_upsert_and_conflict(migrated_db: str) -> None:
@@ -57,12 +57,12 @@ def test_broadcast_artist_update_embedding(migrated_db: str) -> None:
 def test_track_identity_upsert_and_conflict(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         artist_repo = PgBroadcastArtistRepository(conn)
-        identity_repo = PgTrackIdentityRepository(conn)
+        identity_repo = PgBroadcastTrackIdentityRepository(conn)
 
         artist = artist_repo.upsert(
             BroadcastArtist(id=uuid4(), original_name="PEARL JAM", normalized_name="pearl jam")
         )
-        i1 = TrackIdentity(
+        i1 = BroadcastTrackIdentity(
             id=uuid4(), broadcast_artist_id=artist.id,
             original_title="Alive", normalized_title="alive",
             normalized_signature="abc123def456abc123def456abc123de",
@@ -71,7 +71,7 @@ def test_track_identity_upsert_and_conflict(migrated_db: str) -> None:
         assert result.normalized_signature == "abc123def456abc123def456abc123de"
 
         # Conflict returns existing
-        i2 = TrackIdentity(
+        i2 = BroadcastTrackIdentity(
             id=uuid4(), broadcast_artist_id=artist.id,
             original_title="Alive (Live)", normalized_title="alive",
             normalized_signature="abc123def456abc123def456abc123de",
@@ -84,14 +84,14 @@ def test_track_identity_upsert_and_conflict(migrated_db: str) -> None:
 def test_track_identity_bulk_reject_by_artist(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         artist_repo = PgBroadcastArtistRepository(conn)
-        identity_repo = PgTrackIdentityRepository(conn)
+        identity_repo = PgBroadcastTrackIdentityRepository(conn)
 
         artist = artist_repo.upsert(
             BroadcastArtist(id=uuid4(), original_name="UNKNOWN ARTIST",
                       normalized_name="unknown artist test reject")
         )
         for i in range(3):
-            identity_repo.upsert(TrackIdentity(
+            identity_repo.upsert(BroadcastTrackIdentity(
                 id=uuid4(), broadcast_artist_id=artist.id,
                 original_title=f"Song {i}", normalized_title=f"song {i}",
                 normalized_signature=f"reject_test_{i}_{'0' * 19}",

@@ -19,7 +19,7 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, database_url=settings.database_url)
 
     if settings.airwave_token == "dev-token":
         logger.warning(

@@ -4,7 +4,7 @@ import structlog
 
 from backend.config import get_settings
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
-from backend.db.repositories.track_identities import PgTrackIdentityRepository
+from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.tasks.huey_app import huey
@@ -36,7 +36,7 @@ def artist_matching_task(playlist_id: str) -> None:
         match_artists_for_playlist(
             playlist_id=UUID(playlist_id),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgTrackIdentityRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),

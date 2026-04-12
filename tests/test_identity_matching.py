@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.broadcast import BroadcastArtist, TrackIdentity
 from backend.domain.matching import Match
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.normalization import (
@@ -16,7 +16,7 @@ from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
-from tests.fakes.track_identities import FakeTrackIdentityRepository
+from tests.fakes.track_identities import FakeBroadcastTrackIdentityRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,14 +53,14 @@ def _setup_artist_with_match(
 def _make_identity(
     artist_id: UUID,
     title: str,
-    track_identity_repo: FakeTrackIdentityRepository,
+    track_identity_repo: FakeBroadcastTrackIdentityRepository,
     playlist_id: UUID,
     artist_normalized_name: str = "",
-) -> TrackIdentity:
-    """Create a PENDING TrackIdentity, register it in the playlist."""
+) -> BroadcastTrackIdentity:
+    """Create a PENDING BroadcastTrackIdentity, register it in the playlist."""
     norm_title = normalize_title(title)
     norm_sig = compute_normalized_signature(artist_normalized_name, norm_title)
-    identity = TrackIdentity(
+    identity = BroadcastTrackIdentity(
         id=uuid4(),
         broadcast_artist_id=artist_id,
         original_title=title,
@@ -85,7 +85,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
     """
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
-    track_identity_repo = FakeTrackIdentityRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
     library_file_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
@@ -150,7 +150,7 @@ def test_no_library_files_falls_to_needs_review() -> None:
     """Artist is resolved but no library files exist for that MBID → NEEDS_REVIEW / UNCLASSIFIED."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
-    track_identity_repo = FakeTrackIdentityRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
     library_file_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()

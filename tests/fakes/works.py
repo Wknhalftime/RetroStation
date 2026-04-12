@@ -1,7 +1,7 @@
 from uuid import uuid4
 
-from backend.domain.enums import CatalogSource
 from backend.domain.catalog import Work
+from backend.domain.enums import CatalogSource
 from backend.repositories.works import WorkRepository
 
 

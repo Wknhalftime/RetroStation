@@ -1,27 +1,27 @@
 from uuid import UUID
 
-from backend.domain.broadcast import Station
-from backend.repositories.stations import StationRepository
+from backend.domain.broadcast import BroadcastStation
+from backend.repositories.stations import BroadcastStationRepository
 
 
-class FakeStationRepository(StationRepository):
+class FakeBroadcastStationRepository(BroadcastStationRepository):
     def __init__(self) -> None:
-        self._data: dict[UUID, Station] = {}
+        self._data: dict[UUID, BroadcastStation] = {}
 
-    def create(self, station: Station) -> Station:
+    def create(self, station: BroadcastStation) -> BroadcastStation:
         self._data[station.id] = station
         return station
 
-    def get_by_id(self, id: UUID) -> Station | None:
+    def get_by_id(self, id: UUID) -> BroadcastStation | None:
         return self._data.get(id)
 
-    def get_by_call_letters(self, call_letters: str) -> Station | None:
+    def get_by_call_letters(self, call_letters: str) -> BroadcastStation | None:
         return next((s for s in self._data.values() if s.call_letters == call_letters), None)
 
-    def list_all(self) -> list[Station]:
+    def list_all(self) -> list[BroadcastStation]:
         return list(self._data.values())
 
-    def update(self, station: Station) -> Station:
+    def update(self, station: BroadcastStation) -> BroadcastStation:
         self._data[station.id] = station
         return station
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 import dataclasses
 from uuid import uuid4
 
-from backend.domain.enums import VersionType
 from backend.domain.catalog import Recording
+from backend.domain.enums import VersionType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.grouping_service import (
     GroupingResult,

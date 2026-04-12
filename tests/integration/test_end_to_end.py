@@ -11,12 +11,12 @@ from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepositor
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
-from backend.db.repositories.play_events import PgPlayEventRepository
-from backend.db.repositories.playlists import PgPlaylistRepository
-from backend.db.repositories.stations import PgStationRepository
-from backend.db.repositories.track_identities import PgTrackIdentityRepository
+from backend.db.repositories.play_events import PgBroadcastPlayEventRepository
+from backend.db.repositories.playlists import PgBroadcastPlaylistRepository
+from backend.db.repositories.stations import PgBroadcastStationRepository
+from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.domain.broadcast import BroadcastStation
 from backend.domain.enums import MatchStatus
-from backend.domain.broadcast import Station
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
@@ -34,8 +34,8 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
     """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         # Setup
-        station_repo = PgStationRepository(conn)
-        station = station_repo.create(Station(
+        station_repo = PgBroadcastStationRepository(conn)
+        station = station_repo.create(BroadcastStation(
             id=uuid4(), call_letters="KAZR-FM-E2E", name="KAZR E2E",
         ))
 
@@ -45,10 +45,10 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
             file_bytes=file_bytes,
             file_name="KAZR-E2E.csv",
             station_id=str(station.id),
-            playlist_repo=PgPlaylistRepository(conn),
+            playlist_repo=PgBroadcastPlaylistRepository(conn),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgTrackIdentityRepository(conn),
-            play_event_repo=PgPlayEventRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+            play_event_repo=PgBroadcastPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
         conn.commit()
@@ -81,7 +81,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         match_artists_for_playlist(
             playlist_id=playlist_id,
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgTrackIdentityRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
@@ -102,7 +102,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         # Step 4: Identity matching (no library → NEEDS_REVIEW)
         match_identities_for_playlist(
             playlist_id=playlist_id,
-            track_identity_repo=PgTrackIdentityRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=FakeLibraryFileRepository(),

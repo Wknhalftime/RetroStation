@@ -35,6 +35,15 @@ class SettingEntry(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+# NOTE (tracked debt): These endpoints issue raw asyncpg SQL directly instead
+# of delegating to UserSettingRepository.  The repository layer uses a
+# synchronous psycopg connection, while FastAPI's dependency stack provides an
+# AsyncConnection — bridging the two requires an AsyncUserSettingRepository
+# adapter that does not yet exist.  Until that adapter is implemented, the SQL
+# here and in PgUserSettingRepository must be kept in sync manually (same
+# INSERT … ON CONFLICT shape, same column set).  Follow-up task:
+# "Implement AsyncUserSettingRepository and wire it into the settings router."
+# ---------------------------------------------------------------------------
 
 
 @router.get("", response_model=dict[str, str])

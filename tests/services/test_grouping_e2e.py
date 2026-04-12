@@ -12,9 +12,9 @@ from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.works import PgWorkRepository
+from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.curation import SongMaster
 from backend.services.grouping_service import assign_work
 from backend.services.normalization import normalize_artist, normalize_title
 from tests.helpers import assert_grouping_invariants
@@ -257,7 +257,7 @@ class TestGroupingE2E:
             # They may or may not get the same work depending on fuzzy
             # score. If they already matched, create a forced second work.
             if w_a == w_b:
-                artist_id = artist_repo.upsert_local(
+                artist_id = artist_repo.upsert_local_artist(
                     "Stones", normalize_artist("Stones"),
                 )
                 w_b = work_repo.create_local("Paint It Blk", artist_id)
@@ -359,7 +359,7 @@ class TestGroupingE2E:
             assert original_work_id is not None
 
             # Split f2 into a new work
-            artist_id = artist_repo.upsert_local(
+            artist_id = artist_repo.upsert_local_artist(
                 "Beatles", normalize_artist("Beatles"),
             )
             new_work_id = work_repo.create_local(

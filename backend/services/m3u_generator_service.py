@@ -13,15 +13,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from backend.domain.broadcast import BroadcastPlayEvent
 from backend.domain.enums import MatchStatus
-from backend.domain.broadcast import PlayEvent
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
-from backend.repositories.settings import SettingsRepository
 from backend.repositories.song_masters import SongMasterRepository
-from backend.repositories.track_identities import TrackIdentityRepository
+from backend.repositories.track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.user_settings import UserSettingRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
     {MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED}
@@ -30,14 +30,14 @@ _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
 
 def generate_m3u(
     *,
-    events: list[PlayEvent],
-    identity_repo: TrackIdentityRepository,
+    events: list[BroadcastPlayEvent],
+    identity_repo: BroadcastTrackIdentityRepository,
     match_repo: MatchRepository,
     file_repo: LibraryFileRepository,
     recording_repo: RecordingRepository,
     master_repo: SongMasterRepository,
     override_repo: FormatOverrideRepository,
-    settings_repo: SettingsRepository,
+    settings_repo: UserSettingRepository,
     station_format: str | None = None,
 ) -> str:
     """Generate an M3U playlist string for the given events.
@@ -57,8 +57,10 @@ def generate_m3u(
     Returns:
         A UTF-8 M3U string beginning with ``#EXTM3U``.
     """
-    local_prefix: str = settings_repo.get("local_path_prefix") or ""
-    navidrome_prefix: str = settings_repo.get("navidrome_path_prefix") or ""
+    _local = settings_repo.get("local_path_prefix")
+    local_prefix: str = _local.value if _local is not None else ""
+    _navidrome = settings_repo.get("navidrome_path_prefix")
+    navidrome_prefix: str = _navidrome.value if _navidrome is not None else ""
 
     sorted_events = sorted(events, key=lambda e: e.played_at)
 

@@ -4,12 +4,13 @@ from typing import Any, Protocol
 
 import structlog
 
-from backend.domain.enums import EnrichmentStatus
 from backend.domain.catalog import Recording
+from backend.domain.enums import EnrichmentStatus
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.works import WorkRepository
+from backend.services.normalization import extract_version_info
 
 logger = structlog.get_logger()
 
@@ -82,7 +83,7 @@ def enrich_by_release(
     artist_id: str | None = None
     if artist_info:
         artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_id = artist_repo.upsert_from_mb(
+        artist_id = artist_repo.upsert_musicbrainz_artist(
             mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
@@ -130,12 +131,15 @@ def enrich_by_release(
                 artist_id=artist_id,
             )
 
-        # Upsert recording
+        # Upsert recording — derive version_type from the recording title
+        rec_title = rec_data.get("title", "")
+        _, version_type = extract_version_info(rec_title)
         recording_repo.upsert(Recording(
             id=rec_mbid,
-            title=rec_data.get("title", ""),
+            title=rec_title,
             work_id=work_id,
             duration_ms=rec_data.get("length"),
+            version_type=version_type,
         ))
 
         library_file_repo.update_recording_link(
@@ -193,7 +197,7 @@ def enrich_by_recording(
     artist_id: str | None = None
     if artist_info:
         artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_id = artist_repo.upsert_from_mb(
+        artist_id = artist_repo.upsert_musicbrainz_artist(
             mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
@@ -211,12 +215,15 @@ def enrich_by_recording(
             artist_id=artist_id,
         )
 
-    # Upsert recording
+    # Upsert recording — derive version_type from the recording title
+    rec_title = rec_data.get("title", "")
+    _, version_type = extract_version_info(rec_title)
     recording_repo.upsert(Recording(
         id=recording_mbid,
-        title=rec_data.get("title", ""),
+        title=rec_title,
         work_id=work_id,
         duration_ms=rec_data.get("length"),
+        version_type=version_type,
     ))
 
     enriched_count = 0

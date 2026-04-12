@@ -9,7 +9,7 @@ from backend.domain.enums import MatchStatus, MatchTier
 
 
 @dataclass
-class Station:
+class BroadcastStation:
     id: UUID
     call_letters: str
     name: str | None = None
@@ -19,7 +19,7 @@ class Station:
 
 
 @dataclass
-class Playlist:
+class BroadcastPlaylist:
     id: UUID
     name: str
     content_hash: str
@@ -47,7 +47,7 @@ class BroadcastArtist:
 
 
 @dataclass
-class TrackIdentity:
+class BroadcastTrackIdentity:
     id: UUID
     broadcast_artist_id: UUID
     original_title: str
@@ -60,7 +60,7 @@ class TrackIdentity:
 
 
 @dataclass(frozen=True)
-class PlayEvent:
+class BroadcastPlayEvent:
     id: UUID
     identity_id: UUID
     playlist_id: UUID

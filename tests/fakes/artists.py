@@ -1,7 +1,7 @@
 from uuid import uuid4
 
-from backend.domain.enums import CatalogSource
 from backend.domain.catalog import Artist
+from backend.domain.enums import CatalogSource
 from backend.repositories.artists import ArtistRepository
 from backend.services.normalization import normalize_artist
 
@@ -17,10 +17,10 @@ class FakeArtistRepository(ArtistRepository):
     def get_by_id(self, mbid: str) -> Artist | None:
         return self._data.get(mbid)
 
-    def list_all(self) -> list[Artist]:
+    def fetch_all(self) -> list[Artist]:
         return list(self._data.values())
 
-    def list_needing_enhancement(self) -> list[Artist]:
+    def fetch_unenhanced(self) -> list[Artist]:
         return [a for a in self._data.values() if a.needs_enhancement]
 
     def mark_enhanced(self, mbid: str) -> None:
@@ -31,7 +31,7 @@ class FakeArtistRepository(ArtistRepository):
         if artist := self._data.get(mbid):
             artist.enhancement_error = error
 
-    def upsert_local(self, name: str, normalized_name: str) -> str:
+    def upsert_local_artist(self, name: str, normalized_name: str) -> str:
         for artist in self._data.values():
             if artist.normalized_name == normalized_name:
                 return artist.id
@@ -46,7 +46,7 @@ class FakeArtistRepository(ArtistRepository):
         )
         return artist_id
 
-    def upsert_from_mb(
+    def upsert_musicbrainz_artist(
         self,
         mbid: str,
         name: str,

@@ -39,7 +39,8 @@ def library_watcher_poll() -> None:
     ) as conn:
         repos = RepositoryFactory(conn)
 
-        root_path = repos.settings.get("local_path_prefix")
+        _setting = repos.settings.get("local_path_prefix")
+        root_path = _setting.value if _setting is not None else None
         if not root_path:
             return
 

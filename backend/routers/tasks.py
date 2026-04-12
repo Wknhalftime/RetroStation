@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
+from backend.config import get_settings
+from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.sync_conn import connect_sync
 from backend.dependencies import get_current_token, get_db_connection
 
 router = APIRouter()
@@ -19,6 +22,13 @@ Token = Annotated[str, Depends(get_current_token)]
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
+
+class RetryEnrichmentResult(BaseModel):
+    """Result returned by the retry-enrichment endpoint."""
+
+    reset: int
+    message: str
 
 
 class TaskInfo(BaseModel):
@@ -83,3 +93,37 @@ async def get_active_tasks(conn: DbConn, _token: Token) -> list[TaskInfo]:
         )
 
     return tasks
+
+
+@router.post("/retry-enrichment", response_model=RetryEnrichmentResult)
+async def retry_enrichment(_token: Token) -> RetryEnrichmentResult:
+    """Reset all enrichment_failed library files to pending and re-enqueue enrichment.
+
+    Resets every ``library_files`` row whose ``enrichment_status`` is ``'failed'``
+    back to ``'pending'``, then enqueues a fresh ``library_enrichment_task`` run.
+    Use this when enrichment has stalled due to transient MusicBrainz errors or a
+    task-level crash.
+
+    Args:
+        _token: Bearer token (auth check only).
+
+    Returns:
+        :class:`RetryEnrichmentResult` with the count of rows reset and a status
+        message.
+    """
+    from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
+    settings = get_settings()
+    with connect_sync(settings.database_url) as conn:
+        repo = PgLibraryFileRepository(conn)
+        reset_count = repo.reset_failed_enrichments()
+        conn.commit()
+
+    library_enrichment_task()
+
+    return RetryEnrichmentResult(
+        reset=reset_count,
+        message=(
+            f"Reset {reset_count} failed file(s) to pending and queued enrichment."
+        ),
+    )

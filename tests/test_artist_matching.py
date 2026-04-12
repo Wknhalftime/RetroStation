@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from backend.domain.enums import MatchStatus, TargetType
-from backend.domain.catalog import Artist
 from backend.domain.broadcast import BroadcastArtist
+from backend.domain.catalog import Artist
+from backend.domain.enums import MatchStatus, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.normalization import normalize_artist
@@ -13,7 +13,7 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
-from tests.fakes.track_identities import FakeTrackIdentityRepository
+from tests.fakes.track_identities import FakeBroadcastTrackIdentityRepository
 
 
 class StubMbClient:
@@ -55,7 +55,7 @@ def test_tier1_exact_match() -> None:
     match_artists_for_playlist(
         playlist_id=playlist_id,
         broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeTrackIdentityRepository(),
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
         artist_repo=artist_repo,
         match_repo=match_repo,
         rules_repo=FakeMappingRuleRepository(),
@@ -84,7 +84,7 @@ def test_tier3_mb_api_auto_matched() -> None:
     match_artists_for_playlist(
         playlist_id=playlist_id,
         broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeTrackIdentityRepository(),
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
         artist_repo=artist_repo,
         match_repo=match_repo,
         rules_repo=FakeMappingRuleRepository(),
@@ -105,7 +105,7 @@ def test_no_match_any_tier_needs_review() -> None:
     match_artists_for_playlist(
         playlist_id=playlist_id,
         broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeTrackIdentityRepository(),
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
         artist_repo=FakeArtistRepository(),
         match_repo=FakeMatchRepository(),
         rules_repo=FakeMappingRuleRepository(),
@@ -132,7 +132,7 @@ def test_global_rule_exact_match() -> None:
     match_artists_for_playlist(
         playlist_id=playlist_id,
         broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeTrackIdentityRepository(),
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
         artist_repo=FakeArtistRepository(),
         match_repo=match_repo,
         rules_repo=rules_repo,
@@ -146,14 +146,14 @@ def test_global_rule_exact_match() -> None:
 def test_cascade_auto_rejected() -> None:
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
-    track_identity_repo = FakeTrackIdentityRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
 
     artist = _make_pending_artist("BAD ARTIST", broadcast_artist_repo, playlist_id)
     # Manually set to AUTO_REJECTED to test cascade
     broadcast_artist_repo.update_match_status(artist.id, MatchStatus.AUTO_REJECTED)
 
-    from backend.domain.broadcast import TrackIdentity
-    identity = TrackIdentity(
+    from backend.domain.broadcast import BroadcastTrackIdentity
+    identity = BroadcastTrackIdentity(
         id=uuid4(), broadcast_artist_id=artist.id,
         original_title="Song", normalized_title="song",
         normalized_signature="cascade_test_sig_00000000000000",

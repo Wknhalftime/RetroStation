@@ -25,11 +25,11 @@ def identity_matching_task(playlist_id: str) -> None:
         from backend.db.repositories.matches import PgMatchRepository
         from backend.db.repositories.recordings import PgRecordingRepository
         from backend.db.repositories.song_masters import PgSongMasterRepository
-        from backend.db.repositories.track_identities import PgTrackIdentityRepository
+        from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
 
         work_ids = match_identities_for_playlist(
             playlist_id=UUID(playlist_id),
-            track_identity_repo=PgTrackIdentityRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             library_file_repo=PgLibraryFileRepository(conn),

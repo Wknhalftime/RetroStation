@@ -7,34 +7,34 @@ import psycopg
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.play_events import PgPlayEventRepository
-from backend.db.repositories.playlists import PgPlaylistRepository
-from backend.db.repositories.stations import PgStationRepository
-from backend.db.repositories.track_identities import PgTrackIdentityRepository
-from backend.domain.enums import MatchStatus
+from backend.db.repositories.play_events import PgBroadcastPlayEventRepository
+from backend.db.repositories.playlists import PgBroadcastPlaylistRepository
+from backend.db.repositories.stations import PgBroadcastStationRepository
+from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
 from backend.domain.broadcast import (
     BroadcastArtist,
-    PlayEvent,
-    Playlist,
-    Station,
-    TrackIdentity,
+    BroadcastPlayEvent,
+    BroadcastPlaylist,
+    BroadcastStation,
+    BroadcastTrackIdentity,
 )
+from backend.domain.enums import MatchStatus
 
 
 def _insert_station(
     conn: psycopg.Connection, call_letters: str, **kwargs
-) -> Station:
-    station = Station(id=uuid4(), call_letters=call_letters, **kwargs)
-    result = PgStationRepository(conn).create(station)
+) -> BroadcastStation:
+    station = BroadcastStation(id=uuid4(), call_letters=call_letters, **kwargs)
+    result = PgBroadcastStationRepository(conn).create(station)
     conn.commit()
     return result
 
 
 def _insert_playlist(conn, station, name="show.csv"):
-    playlist = Playlist(
+    playlist = BroadcastPlaylist(
         id=uuid4(), name=name, content_hash=uuid4().hex, station_id=station.id,
     )
-    result = PgPlaylistRepository(conn).create(playlist)
+    result = PgBroadcastPlaylistRepository(conn).create(playlist)
     conn.commit()
     return result
 
@@ -47,19 +47,19 @@ def _insert_event_full(conn, playlist, artist_name="Test Artist", title="Test So
     )
     PgBroadcastArtistRepository(conn).upsert(artist)
 
-    identity = TrackIdentity(
+    identity = BroadcastTrackIdentity(
         id=uuid4(), broadcast_artist_id=artist.id, original_title=title,
         normalized_title=title.lower(),
         normalized_signature=f"{artist_name.lower()}:{title.lower()}",
         match_status=MatchStatus.PENDING,
     )
-    PgTrackIdentityRepository(conn).upsert(identity)
+    PgBroadcastTrackIdentityRepository(conn).upsert(identity)
 
-    event = PlayEvent(
+    event = BroadcastPlayEvent(
         id=uuid4(), identity_id=identity.id, playlist_id=playlist.id,
         played_at=played_at or datetime.now(tz=UTC),
     )
-    PgPlayEventRepository(conn).create(event)
+    PgBroadcastPlayEventRepository(conn).create(event)
     conn.commit()
     return event
 
@@ -82,10 +82,8 @@ class TestListStations:
 
     def test_includes_playlist_count(self, client, db_conn):
         station = _insert_station(db_conn, "KAZR-FM")
-        from backend.db.repositories.playlists import PgPlaylistRepository
-        from backend.domain.broadcast import Playlist
-        PgPlaylistRepository(db_conn).create(
-            Playlist(id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id)
+        PgBroadcastPlaylistRepository(db_conn).create(
+            BroadcastPlaylist(id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id)
         )
         db_conn.commit()
         resp = client.get("/api/v1/stations")

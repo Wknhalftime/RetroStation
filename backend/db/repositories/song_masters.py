@@ -4,8 +4,8 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.enums import SelectionMethod
 from backend.domain.curation import SongMaster
+from backend.domain.enums import SelectionMethod
 from backend.repositories.song_masters import SongMasterRepository
 
 

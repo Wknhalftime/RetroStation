@@ -8,11 +8,11 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
-from backend.db.repositories.play_events import PgPlayEventRepository
-from backend.db.repositories.playlists import PgPlaylistRepository
-from backend.db.repositories.stations import PgStationRepository
-from backend.db.repositories.track_identities import PgTrackIdentityRepository
-from backend.domain.broadcast import Station
+from backend.db.repositories.play_events import PgBroadcastPlayEventRepository
+from backend.db.repositories.playlists import PgBroadcastPlaylistRepository
+from backend.db.repositories.stations import PgBroadcastStationRepository
+from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.domain.broadcast import BroadcastStation
 from backend.services.ingestion_service import ingest_csv
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
@@ -20,8 +20,8 @@ FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 
 def test_ingest_kazr_csv(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        station_repo = PgStationRepository(conn)
-        station = station_repo.create(Station(
+        station_repo = PgBroadcastStationRepository(conn)
+        station = station_repo.create(BroadcastStation(
             id=uuid4(), call_letters="KAZR-FM", name="KAZR",
         ))
 
@@ -30,10 +30,10 @@ def test_ingest_kazr_csv(migrated_db: str) -> None:
             file_bytes=file_bytes,
             file_name="KAZR-FakeData.csv",
             station_id=str(station.id),
-            playlist_repo=PgPlaylistRepository(conn),
+            playlist_repo=PgBroadcastPlaylistRepository(conn),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgTrackIdentityRepository(conn),
-            play_event_repo=PgPlayEventRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+            play_event_repo=PgBroadcastPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
 
@@ -57,8 +57,8 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
     )
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        station_repo = PgStationRepository(conn)
-        station = station_repo.create(Station(
+        station_repo = PgBroadcastStationRepository(conn)
+        station = station_repo.create(BroadcastStation(
             id=uuid4(), call_letters="KAZR-FM-DUP", name="KAZR Dup Test",
         ))
 
@@ -66,10 +66,10 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
             file_bytes=unique_bytes,
             file_name="dup-test.csv",
             station_id=str(station.id),
-            playlist_repo=PgPlaylistRepository(conn),
+            playlist_repo=PgBroadcastPlaylistRepository(conn),
             broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgTrackIdentityRepository(conn),
-            play_event_repo=PgPlayEventRepository(conn),
+            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+            play_event_repo=PgBroadcastPlayEventRepository(conn),
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
 
@@ -78,10 +78,10 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
                 file_bytes=unique_bytes,
                 file_name="dup-test.csv",
                 station_id=str(station.id),
-                playlist_repo=PgPlaylistRepository(conn),
+                playlist_repo=PgBroadcastPlaylistRepository(conn),
                 broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-                track_identity_repo=PgTrackIdentityRepository(conn),
-                play_event_repo=PgPlayEventRepository(conn),
+                track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+                play_event_repo=PgBroadcastPlayEventRepository(conn),
                 broadcast_day_repo=PgBroadcastDayRepository(conn),
             )
         conn.commit()

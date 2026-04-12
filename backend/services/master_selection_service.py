@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import structlog
 
-from backend.domain.enums import SelectionMethod
 from backend.domain.curation import SongMaster
+from backend.domain.enums import SelectionMethod
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository

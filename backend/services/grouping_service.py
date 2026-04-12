@@ -7,19 +7,16 @@ from uuid import uuid4
 
 from rapidfuzz import fuzz
 
-from backend.domain.enums import SelectionMethod, VersionType
-from backend.domain.library import LibraryFile
 from backend.domain.curation import SongMaster
+from backend.domain.enums import SelectionMethod
+from backend.domain.library import LibraryFile
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.normalization import (
-    classify_version_descriptor,
-    detect_embedded_remix,
-    extract_dash_version,
-    extract_version_tags,
+    extract_version_info,
     normalize_artist,
     normalize_title,
     strict_normalize,
@@ -47,31 +44,7 @@ def _dynamic_threshold(title_length: int) -> float:
     return 80.0
 
 
-def _extract_version_info(raw_title: str) -> tuple[str, VersionType]:
-    """Strip version tags from a raw title and classify the version type.
-
-    Tries parenthetical tags first, then dash-separated suffixes, then
-    embedded remix patterns.  Returns (base_title, version_type).
-    """
-    base, tags = extract_version_tags(raw_title)
-    if tags:
-        vtype = classify_version_descriptor(tags[0])
-        if vtype != VersionType.UNKNOWN:
-            return base, vtype
-
-    base_dash, dash_tag = extract_dash_version(raw_title)
-    if dash_tag is not None:
-        vtype = classify_version_descriptor(dash_tag)
-        if vtype != VersionType.UNKNOWN:
-            return base_dash, vtype
-
-    base_embed, embed_tag = detect_embedded_remix(raw_title)
-    if embed_tag is not None:
-        vtype = classify_version_descriptor(embed_tag)
-        if vtype != VersionType.UNKNOWN:
-            return base_embed, vtype
-
-    return raw_title, VersionType.ORIGINAL
+_extract_version_info = extract_version_info
 
 
 def assign_work(
@@ -156,7 +129,7 @@ def assign_work(
 
     # Step 4: Create local work if no match
     if work_id is None:
-        artist_id = artist_repo.upsert_local(raw_artist, norm_artist)
+        artist_id = artist_repo.upsert_local_artist(raw_artist, norm_artist)
         work_id = work_repo.create_local(base_title, artist_id)
 
         song_master_repo.upsert(

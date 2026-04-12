@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import psycopg
 
-from backend.domain.enums import VersionType
 from backend.domain.catalog import Recording
+from backend.domain.enums import VersionType
 from backend.repositories.recordings import RecordingRepository
 
 
@@ -50,7 +50,8 @@ class PgRecordingRepository(RecordingRepository):
             """INSERT INTO recordings (id, title, work_id, duration_ms, version_type)
                VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
-                 title = EXCLUDED.title""",
+                 title = EXCLUDED.title,
+                 work_id = COALESCE(EXCLUDED.work_id, recordings.work_id)""",
             (recording.id, recording.title, recording.work_id,
              recording.duration_ms, recording.version_type.value),
         )

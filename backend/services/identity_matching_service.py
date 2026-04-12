@@ -11,7 +11,7 @@ from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
-from backend.repositories.track_identities import TrackIdentityRepository
+from backend.repositories.track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_title
 
@@ -20,7 +20,7 @@ logger = structlog.get_logger()
 
 def match_identities_for_playlist(
     playlist_id: UUID,
-    track_identity_repo: TrackIdentityRepository,
+    track_identity_repo: BroadcastTrackIdentityRepository,
     broadcast_artist_repo: BroadcastArtistRepository,
     match_repo: MatchRepository,
     library_file_repo: LibraryFileRepository,

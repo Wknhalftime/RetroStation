@@ -417,8 +417,10 @@ def classify_version_descriptor(descriptor: str) -> VersionType:
     if "original" in d:
         return VersionType.ORIGINAL
     # New single keywords (FR22 coverage)
-    if "explicit" in d or re.search(r"\bclean\b", d) or "lyrical" in d:
+    if "explicit" in d or "lyrical" in d:
         return VersionType.EXPLICIT
+    if re.search(r"\bclean\b", d):
+        return VersionType.CLEAN
     if re.search(r"\bcover\b", d):
         return VersionType.COVER
     if (
@@ -435,6 +437,41 @@ def classify_version_descriptor(descriptor: str) -> VersionType:
         return VersionType.FORMAT
 
     return VersionType.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Version info extraction — combines all three extraction strategies
+# ---------------------------------------------------------------------------
+
+
+def extract_version_info(raw_title: str) -> tuple[str, VersionType]:
+    """Strip version tags from a raw title and classify the version type.
+
+    Tries parenthetical tags first, then dash-separated suffixes, then
+    embedded remix patterns.  Returns (base_title, version_type).
+
+    Falls back to (raw_title, VersionType.ORIGINAL) when no version
+    descriptor is found.
+    """
+    base, tags = extract_version_tags(raw_title)
+    if tags:
+        vtype = classify_version_descriptor(tags[0])
+        if vtype != VersionType.UNKNOWN:
+            return base, vtype
+
+    base_dash, dash_tag = extract_dash_version(raw_title)
+    if dash_tag is not None:
+        vtype = classify_version_descriptor(dash_tag)
+        if vtype != VersionType.UNKNOWN:
+            return base_dash, vtype
+
+    base_embed, embed_tag = detect_embedded_remix(raw_title)
+    if embed_tag is not None:
+        vtype = classify_version_descriptor(embed_tag)
+        if vtype != VersionType.UNKNOWN:
+            return base_embed, vtype
+
+    return raw_title, VersionType.ORIGINAL
 
 
 # ---------------------------------------------------------------------------

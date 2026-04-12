@@ -5,9 +5,9 @@ from uuid import UUID
 
 import psycopg
 
+from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
-from backend.domain.broadcast import TrackIdentity
-from backend.repositories.track_identities import TrackIdentityRepository
+from backend.repositories.track_identities import BroadcastTrackIdentityRepository
 
 
 def _parse_embedding(raw: Any) -> list[float] | None:
@@ -24,12 +24,12 @@ def _parse_embedding(raw: Any) -> list[float] | None:
     return [float(x) for x in str(raw).strip("[]").split(",")]
 
 
-class PgTrackIdentityRepository(TrackIdentityRepository):
+class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> TrackIdentity:
-        return TrackIdentity(
+    def _row_to_model(self, row: dict[str, Any]) -> BroadcastTrackIdentity:
+        return BroadcastTrackIdentity(
             id=row["id"],
             broadcast_artist_id=row["broadcast_artist_id"],
             original_title=row["original_title"],
@@ -43,7 +43,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
             embedding=_parse_embedding(row.get("embedding")),
         )
 
-    def upsert(self, identity: TrackIdentity) -> TrackIdentity:
+    def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:
         self._conn.execute(
             """INSERT INTO track_identities
                (id, broadcast_artist_id, original_title, normalized_title,
@@ -63,7 +63,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, id: UUID) -> TrackIdentity | None:
+    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None:
         row = self._conn.execute(
             "SELECT * FROM track_identities WHERE id = %s", (id,)
         ).fetchone()
@@ -71,7 +71,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
 
     def get_by_signature(
         self, normalized_signature: str
-    ) -> TrackIdentity | None:
+    ) -> BroadcastTrackIdentity | None:
         row = self._conn.execute(
             "SELECT * FROM track_identities WHERE normalized_signature = %s",
             (normalized_signature,),
@@ -80,7 +80,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
 
     def get_for_artist(
         self, broadcast_artist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         rows = self._conn.execute(
             "SELECT * FROM track_identities WHERE broadcast_artist_id = %s",
             (broadcast_artist_id,),
@@ -89,7 +89,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
 
     def get_pending_for_playlist(
         self, playlist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         rows = self._conn.execute(
             """SELECT DISTINCT li.* FROM track_identities li
                JOIN play_events le ON le.identity_id = li.id
@@ -106,7 +106,7 @@ class PgTrackIdentityRepository(TrackIdentityRepository):
 
     def get_unembedded_for_playlist(
         self, playlist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         rows = self._conn.execute(
             """SELECT DISTINCT li.* FROM track_identities li
                JOIN play_events le ON le.identity_id = li.id

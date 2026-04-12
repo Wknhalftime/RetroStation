@@ -10,8 +10,8 @@ from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.domain.catalog import Artist, Work
-from backend.domain.library import LibraryFile
 from backend.domain.curation import FormatOverride
+from backend.domain.library import LibraryFile
 
 # ---------------------------------------------------------------------------
 # Helpers

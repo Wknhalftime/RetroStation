@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import psycopg
 
-from backend.domain.enums import CatalogSource
 from backend.domain.catalog import Work
+from backend.domain.enums import CatalogSource
 from backend.repositories.works import WorkRepository
 
 logger = logging.getLogger(__name__)
