@@ -17,7 +17,12 @@ if sys.platform == "win32":
 
 @pytest.fixture(scope="module")
 def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
-    """Session-scoped TestClient. Pool created once, reused across tests."""
+    """Module-scoped TestClient with auth bypass for router tests.
+
+    Created once per test module and torn down after, clearing dependency
+    overrides and settings cache to prevent state leakage across modules
+    under pytest-xdist parallel execution.
+    """
     os.environ["DATABASE_URL"] = _migrated_db_url
 
     from backend.config import get_settings
