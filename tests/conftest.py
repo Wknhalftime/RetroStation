@@ -13,17 +13,6 @@ TEST_DATABASE_URL = os.environ.get(
 
 
 @pytest.fixture(scope="session")
-def worker_id(request: pytest.FixtureRequest) -> str:
-    """Return xdist worker id, or 'master' when running without xdist.
-
-    pytest-xdist provides this fixture in worker processes. In the controller
-    process (or when xdist is not active) workerinput is absent so we fall
-    back to 'master', preserving the original single-database behaviour.
-    """
-    return getattr(request.config, "workerinput", {}).get("workerid", "master")
-
-
-@pytest.fixture(scope="session")
 def db_url(worker_id: str) -> str:
     """Return a worker-specific DB URL to isolate parallel test workers.
 
@@ -40,23 +29,22 @@ def db_url(worker_id: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def clean_db(db_url: str) -> None:
+def clean_db(db_url: str, worker_id: str) -> None:
     """Ensure the worker DB exists, then drop and recreate its public schema."""
-    params = psycopg.conninfo.conninfo_to_dict(db_url)
-    dbname = params["dbname"]
-
-    # To CREATE a database we must connect to a different one first.
-    admin_params = dict(params)
-    admin_params["dbname"] = "postgres"
-    admin_url = psycopg.conninfo.make_conninfo(**admin_params)
-    with psycopg.connect(admin_url, autocommit=True) as admin_conn:
-        exists = admin_conn.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
-        ).fetchone()
-        if not exists:
-            admin_conn.execute(
-                pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
-            )
+    if worker_id != "master":
+        params = psycopg.conninfo.conninfo_to_dict(db_url)
+        dbname = params["dbname"]
+        admin_params = dict(params)
+        admin_params["dbname"] = "postgres"
+        admin_url = psycopg.conninfo.make_conninfo(**admin_params)
+        with psycopg.connect(admin_url, autocommit=True) as admin_conn:
+            exists = admin_conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
+            ).fetchone()
+            if not exists:
+                admin_conn.execute(
+                    pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
+                )
 
     with psycopg.connect(db_url, autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
