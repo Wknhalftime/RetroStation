@@ -15,7 +15,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
     """Session-scoped TestClient. Pool created once, reused across tests."""
     os.environ["DATABASE_URL"] = _migrated_db_url
