@@ -51,7 +51,8 @@ class PgRecordingRepository(RecordingRepository):
                VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
                  title = EXCLUDED.title,
-                 work_id = COALESCE(EXCLUDED.work_id, recordings.work_id)""",
+                 work_id = COALESCE(EXCLUDED.work_id, recordings.work_id),
+                 version_type = EXCLUDED.version_type""",
             (recording.id, recording.title, recording.work_id,
              recording.duration_ms, recording.version_type.value),
         )
