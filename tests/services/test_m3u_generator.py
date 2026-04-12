@@ -10,21 +10,21 @@ from uuid import uuid4
 
 import pytest
 
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, SelectionMethod
+from backend.domain.broadcast import BroadcastPlayEvent, BroadcastTrackIdentity
 from backend.domain.catalog import Recording
-from backend.domain.library import LibraryFile
-from backend.domain.broadcast import PlayEvent, TrackIdentity
 from backend.domain.curation import FormatOverride, SongMaster
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, SelectionMethod
+from backend.domain.library import LibraryFile
 from backend.domain.matching import Match
 from backend.services.m3u_generator_service import generate_m3u
 from tests.fakes.format_overrides import FakeFormatOverrideRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
-from tests.fakes.play_events import FakePlayEventRepository
+from tests.fakes.play_events import FakeBroadcastPlayEventRepository
 from tests.fakes.recordings import FakeRecordingRepository
-from tests.fakes.settings import FakeSettingsRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
-from tests.fakes.track_identities import FakeTrackIdentityRepository
+from tests.fakes.track_identities import FakeBroadcastTrackIdentityRepository
+from tests.fakes.user_settings import FakeUserSettingRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,9 +35,9 @@ def _make_identity(
     *,
     title: str = "Test Song",
     match_status: MatchStatus = MatchStatus.AUTO_MATCHED,
-) -> TrackIdentity:
+) -> BroadcastTrackIdentity:
     artist_id = uuid4()
-    return TrackIdentity(
+    return BroadcastTrackIdentity(
         id=uuid4(),
         broadcast_artist_id=artist_id,
         original_title=title,
@@ -48,9 +48,9 @@ def _make_identity(
     )
 
 
-def _make_event(*, identity: TrackIdentity, playlist_id: object) -> PlayEvent:
+def _make_event(*, identity: BroadcastTrackIdentity, playlist_id: object) -> BroadcastPlayEvent:
     from uuid import UUID
-    return PlayEvent(
+    return BroadcastPlayEvent(
         id=uuid4(),
         identity_id=identity.id,
         playlist_id=UUID(str(playlist_id)),
@@ -70,7 +70,7 @@ def _make_file(*, file_path: str = "/music/track.flac", duration_ms: int | None 
     )
 
 
-def _make_match(*, identity: TrackIdentity, library_file: LibraryFile) -> Match:
+def _make_match(*, identity: BroadcastTrackIdentity, library_file: LibraryFile) -> Match:
     return Match(
         id=uuid4(),
         identity_id=identity.id,
@@ -84,38 +84,38 @@ def _build_repos(
     *,
     settings: dict[str, str] | None = None,
 ) -> tuple[
-    FakePlayEventRepository,
-    FakeTrackIdentityRepository,
+    FakeBroadcastPlayEventRepository,
+    FakeBroadcastTrackIdentityRepository,
     FakeMatchRepository,
     FakeLibraryFileRepository,
     FakeRecordingRepository,
     FakeSongMasterRepository,
     FakeFormatOverrideRepository,
-    FakeSettingsRepository,
+    FakeUserSettingRepository,
 ]:
     return (
-        FakePlayEventRepository(),
-        FakeTrackIdentityRepository(),
+        FakeBroadcastPlayEventRepository(),
+        FakeBroadcastTrackIdentityRepository(),
         FakeMatchRepository(),
         FakeLibraryFileRepository(),
         FakeRecordingRepository(),
         FakeSongMasterRepository(),
         FakeFormatOverrideRepository(),
-        FakeSettingsRepository(initial=settings),
+        FakeUserSettingRepository(initial=settings),
     )
 
 
 def _call_generate(
     playlist_id: object,
     *,
-    event_repo: FakePlayEventRepository,
-    identity_repo: FakeTrackIdentityRepository,
+    event_repo: FakeBroadcastPlayEventRepository,
+    identity_repo: FakeBroadcastTrackIdentityRepository,
     match_repo: FakeMatchRepository,
     file_repo: FakeLibraryFileRepository,
     recording_repo: FakeRecordingRepository,
     master_repo: FakeSongMasterRepository,
     override_repo: FakeFormatOverrideRepository,
-    settings_repo: FakeSettingsRepository,
+    settings_repo: FakeUserSettingRepository,
     station_format: str | None = None,
 ) -> str:
     from uuid import UUID

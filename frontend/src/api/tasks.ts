@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
 import type { TaskList } from "@/lib/schemas/tasks";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -15,5 +16,19 @@ export function useActiveTasks() {
       return res.json() as Promise<TaskList>;
     },
     refetchInterval: 5000,
+  });
+}
+
+interface RetryEnrichmentResult {
+  reset: number;
+  message: string;
+}
+
+export function useRetryEnrichment() {
+  return useMutation<RetryEnrichmentResult, Error, void>({
+    mutationFn: () =>
+      apiFetch<RetryEnrichmentResult>("/api/v1/tasks/retry-enrichment", {
+        method: "POST",
+      }),
   });
 }

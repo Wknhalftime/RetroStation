@@ -1,13 +1,13 @@
 from uuid import UUID
 
+from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
-from backend.domain.broadcast import TrackIdentity
-from backend.repositories.track_identities import TrackIdentityRepository
+from backend.repositories.track_identities import BroadcastTrackIdentityRepository
 
 
-class FakeTrackIdentityRepository(TrackIdentityRepository):
+class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def __init__(self) -> None:
-        self._data: dict[UUID, TrackIdentity] = {}
+        self._data: dict[UUID, BroadcastTrackIdentity] = {}
         self._playlist_identities: dict[UUID, set[UUID]] = {}
 
     def register_playlist_identity(
@@ -17,19 +17,19 @@ class FakeTrackIdentityRepository(TrackIdentityRepository):
             identity_id
         )
 
-    def upsert(self, identity: TrackIdentity) -> TrackIdentity:
+    def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:
         existing = self.get_by_signature(identity.normalized_signature)
         if existing:
             return existing
         self._data[identity.id] = identity
         return identity
 
-    def get_by_id(self, id: UUID) -> TrackIdentity | None:
+    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None:
         return self._data.get(id)
 
     def get_by_signature(
         self, normalized_signature: str
-    ) -> TrackIdentity | None:
+    ) -> BroadcastTrackIdentity | None:
         return next(
             (i for i in self._data.values()
              if i.normalized_signature == normalized_signature), None
@@ -37,7 +37,7 @@ class FakeTrackIdentityRepository(TrackIdentityRepository):
 
     def get_for_artist(
         self, broadcast_artist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         return [
             i for i in self._data.values()
             if i.broadcast_artist_id == broadcast_artist_id
@@ -45,7 +45,7 @@ class FakeTrackIdentityRepository(TrackIdentityRepository):
 
     def get_pending_for_playlist(
         self, playlist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         ids = self._playlist_identities.get(playlist_id, set())
         return [
             i for i in self._data.values()
@@ -54,7 +54,7 @@ class FakeTrackIdentityRepository(TrackIdentityRepository):
 
     def get_unembedded_for_playlist(
         self, playlist_id: UUID
-    ) -> list[TrackIdentity]:
+    ) -> list[BroadcastTrackIdentity]:
         ids = self._playlist_identities.get(playlist_id, set())
         return [
             i for i in self._data.values()

@@ -1,33 +1,33 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
-from backend.domain.broadcast import TrackIdentity
 
 
-class TrackIdentityRepository(ABC):
+class BroadcastTrackIdentityRepository(ABC):
     @abstractmethod
-    def upsert(self, identity: TrackIdentity) -> TrackIdentity:
+    def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:
         """Insert or ignore on normalized_signature conflict. Always returns stored row."""
         ...
 
     @abstractmethod
-    def get_by_id(self, id: UUID) -> TrackIdentity | None: ...
+    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None: ...
 
     @abstractmethod
-    def get_by_signature(self, normalized_signature: str) -> TrackIdentity | None: ...
+    def get_by_signature(self, normalized_signature: str) -> BroadcastTrackIdentity | None: ...
 
     @abstractmethod
-    def get_for_artist(self, artist_id: UUID) -> list[TrackIdentity]: ...
+    def get_for_artist(self, artist_id: UUID) -> list[BroadcastTrackIdentity]: ...
 
     @abstractmethod
-    def get_pending_for_playlist(self, playlist_id: UUID) -> list[TrackIdentity]:
+    def get_pending_for_playlist(self, playlist_id: UUID) -> list[BroadcastTrackIdentity]:
         """Identities linked to this playlist's events with match_status=PENDING
         and their log_artist already resolved."""
         ...
 
     @abstractmethod
-    def get_unembedded_for_playlist(self, playlist_id: UUID) -> list[TrackIdentity]:
+    def get_unembedded_for_playlist(self, playlist_id: UUID) -> list[BroadcastTrackIdentity]:
         """Identities linked to this playlist's events with embedding IS NULL."""
         ...
 

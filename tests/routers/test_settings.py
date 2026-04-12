@@ -3,7 +3,8 @@ from __future__ import annotations
 import psycopg
 from fastapi.testclient import TestClient
 
-from backend.db.repositories.settings import PgSettingsRepository
+from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.domain.system import UserSetting
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -11,9 +12,9 @@ from backend.db.repositories.settings import PgSettingsRepository
 
 
 def _seed_setting(conn: psycopg.Connection[dict], key: str, value: str) -> None:
-    """Insert a setting directly via the repository."""
-    repo = PgSettingsRepository(conn)
-    repo.set(key, value)
+    """Insert a setting directly via the repository (HTTP contract test seeding)."""
+    repo = PgUserSettingRepository(conn)
+    repo.upsert(UserSetting(key=key, value=value))
     conn.commit()
 
 

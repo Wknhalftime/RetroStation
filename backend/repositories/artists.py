@@ -11,12 +11,12 @@ class ArtistRepository(ABC):
     def get_by_id(self, mbid: str) -> Artist | None: ...
 
     @abstractmethod
-    def list_all(self) -> list[Artist]:
+    def fetch_all(self) -> list[Artist]:
         """Return all artists for fuzzy-matching in artist_matching_service."""
         ...
 
     @abstractmethod
-    def list_needing_enhancement(self) -> list[Artist]: ...
+    def fetch_unenhanced(self) -> list[Artist]: ...
 
     @abstractmethod
     def mark_enhanced(self, mbid: str) -> None: ...
@@ -25,7 +25,7 @@ class ArtistRepository(ABC):
     def mark_enhancement_failed(self, mbid: str, error: str) -> None: ...
 
     @abstractmethod
-    def upsert_local(self, name: str, normalized_name: str) -> str:
+    def upsert_local_artist(self, name: str, normalized_name: str) -> str:
         """Create local artist or return existing by normalized_name.
         INSERT ON CONFLICT (normalized_name) DO NOTHING + retry-SELECT.
         Returns artist id.
@@ -33,7 +33,7 @@ class ArtistRepository(ABC):
         ...
 
     @abstractmethod
-    def upsert_from_mb(
+    def upsert_musicbrainz_artist(
         self,
         mbid: str,
         name: str,

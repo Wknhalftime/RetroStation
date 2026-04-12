@@ -11,7 +11,8 @@ huey = SqliteHuey(filename="huey.db", results=False)
 # Ensure structured logging is configured in the worker process.
 # The FastAPI server calls configure_logging() in its lifespan, but the
 # Huey consumer is a separate process that never imports backend.main.
-configure_logging(get_settings().log_level)
+_settings = get_settings()
+configure_logging(_settings.log_level, database_url=_settings.database_url)
 
 # Import all task modules so they register with the Huey consumer.
 # Without these imports, the worker cannot deserialize queued tasks.

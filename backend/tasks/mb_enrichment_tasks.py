@@ -32,7 +32,7 @@ def mb_enrichment_task() -> dict[str, int]:
         cache_repo = PgMusicBrainzCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)
 
-        pending_artists = repos.artists.list_needing_enhancement()
+        pending_artists = repos.artists.fetch_unenhanced()
         for artist in pending_artists:
             try:
                 results = mb_client.search_artist(artist.name)

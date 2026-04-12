@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from backend.domain.enums import MatchStatus, MatchTier
 from backend.domain.broadcast import BroadcastArtist
+from backend.domain.enums import MatchStatus, MatchTier
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 
 

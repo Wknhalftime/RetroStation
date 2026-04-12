@@ -2,12 +2,12 @@
 
 
 def test_station_fake_is_concrete() -> None:
-    from tests.fakes.stations import FakeStationRepository
-    assert FakeStationRepository() is not None
+    from tests.fakes.stations import FakeBroadcastStationRepository
+    assert FakeBroadcastStationRepository() is not None
 
 def test_playlist_fake_is_concrete() -> None:
-    from tests.fakes.playlists import FakePlaylistRepository
-    assert FakePlaylistRepository() is not None
+    from tests.fakes.playlists import FakeBroadcastPlaylistRepository
+    assert FakeBroadcastPlaylistRepository() is not None
 
 def test_broadcast_day_fake_is_concrete() -> None:
     from tests.fakes.broadcast_days import FakeBroadcastDayRepository
@@ -18,12 +18,12 @@ def test_broadcast_artist_fake_is_concrete() -> None:
     assert FakeBroadcastArtistRepository() is not None
 
 def test_track_identity_fake_is_concrete() -> None:
-    from tests.fakes.track_identities import FakeTrackIdentityRepository
-    assert FakeTrackIdentityRepository() is not None
+    from tests.fakes.track_identities import FakeBroadcastTrackIdentityRepository
+    assert FakeBroadcastTrackIdentityRepository() is not None
 
 def test_play_event_fake_is_concrete() -> None:
-    from tests.fakes.play_events import FakePlayEventRepository
-    assert FakePlayEventRepository() is not None
+    from tests.fakes.play_events import FakeBroadcastPlayEventRepository
+    assert FakeBroadcastPlayEventRepository() is not None
 
 def test_artist_fake_is_concrete() -> None:
     from tests.fakes.artists import FakeArtistRepository
@@ -70,8 +70,8 @@ def test_progress_tracking_fake_is_concrete() -> None:
     assert FakeTaskProgressRepository() is not None
 
 def test_settings_fake_is_concrete() -> None:
-    from tests.fakes.settings import FakeSettingsRepository
-    assert FakeSettingsRepository() is not None
+    from tests.fakes.user_settings import FakeUserSettingRepository
+    assert FakeUserSettingRepository() is not None
 
 def test_library_folder_fake_is_concrete() -> None:
     from tests.fakes.library_folders import FakeLibraryFolderRepository

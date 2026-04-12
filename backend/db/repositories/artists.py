@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import psycopg
 
-from backend.domain.enums import CatalogSource
 from backend.domain.catalog import Artist
+from backend.domain.enums import CatalogSource
 from backend.repositories.artists import ArtistRepository
 
 
@@ -55,13 +55,13 @@ class PgArtistRepository(ArtistRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def list_all(self) -> list[Artist]:
+    def fetch_all(self) -> list[Artist]:
         rows = self._conn.execute(
             "SELECT * FROM artists ORDER BY name"
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def list_needing_enhancement(self) -> list[Artist]:
+    def fetch_unenhanced(self) -> list[Artist]:
         rows = self._conn.execute(
             "SELECT * FROM artists WHERE needs_enhancement = TRUE"
         ).fetchall()
@@ -79,7 +79,7 @@ class PgArtistRepository(ArtistRepository):
             (error, mbid),
         )
 
-    def upsert_local(self, name: str, normalized_name: str) -> str:
+    def upsert_local_artist(self, name: str, normalized_name: str) -> str:
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name,
@@ -101,7 +101,7 @@ class PgArtistRepository(ArtistRepository):
             )
         return row["id"]
 
-    def upsert_from_mb(
+    def upsert_musicbrainz_artist(
         self,
         mbid: str,
         name: str,
@@ -133,7 +133,7 @@ class PgArtistRepository(ArtistRepository):
         ).fetchone()
         if row is None:
             raise RuntimeError(
-                f"Artist upsert_from_mb failed: {mbid}"
+                f"Artist upsert_musicbrainz_artist failed: {mbid}"
             )
         return row["id"]
 

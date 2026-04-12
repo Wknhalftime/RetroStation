@@ -573,11 +573,22 @@ def test_detect_embedded_remix_prefix_not_matched() -> None:
 
 
 def test_classify_explicit() -> None:
-    """Explicit/Clean/Lyrical descriptors map to EXPLICIT (FR22)."""
+    """Explicit/Lyrical descriptors map to EXPLICIT (FR22)."""
     assert classify_version_descriptor("Explicit") == VersionType.EXPLICIT
-    assert classify_version_descriptor("Clean") == VersionType.EXPLICIT
     assert classify_version_descriptor("Lyrical") == VersionType.EXPLICIT
     assert classify_version_descriptor("EXPLICIT") == VersionType.EXPLICIT
+
+
+def test_classify_clean() -> None:
+    """'Clean' descriptor maps to CLEAN — distinct from EXPLICIT (Bug fix).
+
+    'Clean' indicates profanity-removed content, the semantic opposite of
+    EXPLICIT.  A recording titled '[...Clean Version]' must NOT be classified
+    as EXPLICIT.
+    """
+    assert classify_version_descriptor("Clean") == VersionType.CLEAN
+    assert classify_version_descriptor("CLEAN") == VersionType.CLEAN
+    assert classify_version_descriptor("Clean Version") == VersionType.CLEAN
 
 
 def test_classify_cover() -> None:
@@ -936,7 +947,7 @@ def test_split_artist_acdc_single_no_regression() -> None:
 
 
 def test_extract_version_tags_all_new_types_extractable() -> None:
-    """Comprehensive check — all five new VersionType descriptors are extracted."""
+    """Comprehensive check — Clean/Alt/Stereo/Bonus/Anniversary descriptors are extracted."""
     cases = [
         ("Song (Clean)", "Song", "Clean"),
         ("Song (Alt Version)", "Song", "Alt Version"),

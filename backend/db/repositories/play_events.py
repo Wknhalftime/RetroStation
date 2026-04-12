@@ -6,16 +6,16 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.broadcast import PlayEvent
-from backend.repositories.play_events import PlayEventRepository
+from backend.domain.broadcast import BroadcastPlayEvent
+from backend.repositories.play_events import BroadcastPlayEventRepository
 
 
-class PgPlayEventRepository(PlayEventRepository):
+class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
-    def _row_to_model(self, row: dict[str, Any]) -> PlayEvent:
-        return PlayEvent(
+    def _row_to_model(self, row: dict[str, Any]) -> BroadcastPlayEvent:
+        return BroadcastPlayEvent(
             id=row["id"],
             identity_id=row["identity_id"],
             playlist_id=row["playlist_id"],
@@ -23,7 +23,7 @@ class PgPlayEventRepository(PlayEventRepository):
             broadcast_day_id=row.get("broadcast_day_id"),
         )
 
-    def create(self, event: PlayEvent) -> PlayEvent:
+    def create(self, event: BroadcastPlayEvent) -> BroadcastPlayEvent:
         self._conn.execute(
             """INSERT INTO play_events
                (id, identity_id, playlist_id, played_at, broadcast_day_id)
@@ -42,14 +42,14 @@ class PgPlayEventRepository(PlayEventRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_playlist(self, playlist_id: UUID) -> list[PlayEvent]:
+    def get_by_playlist(self, playlist_id: UUID) -> list[BroadcastPlayEvent]:
         rows = self._conn.execute(
             "SELECT * FROM play_events WHERE playlist_id = %s ORDER BY played_at",
             (playlist_id,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def get_by_identity(self, identity_id: UUID) -> list[PlayEvent]:
+    def get_by_identity(self, identity_id: UUID) -> list[BroadcastPlayEvent]:
         rows = self._conn.execute(
             "SELECT * FROM play_events WHERE identity_id = %s ORDER BY played_at",
             (identity_id,),
@@ -58,7 +58,7 @@ class PgPlayEventRepository(PlayEventRepository):
 
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
-    ) -> list[PlayEvent]:
+    ) -> list[BroadcastPlayEvent]:
         rows = self._conn.execute(
             """SELECT le.* FROM play_events le
                JOIN playlists p ON p.id = le.playlist_id

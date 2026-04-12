@@ -102,3 +102,11 @@ class FakeLibraryFileRepository(LibraryFileRepository):
 
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.file_hash == file_hash]
+
+    def reset_failed_enrichments(self) -> int:
+        count = 0
+        for f in self._data.values():
+            if f.enrichment_status == EnrichmentStatus.FAILED:
+                f.enrichment_status = EnrichmentStatus.PENDING
+                count += 1
+        return count

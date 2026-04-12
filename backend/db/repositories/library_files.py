@@ -362,3 +362,16 @@ class PgLibraryFileRepository(LibraryFileRepository):
             (file_hash,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def reset_failed_enrichments(self) -> int:
+        """Reset all files in 'failed' enrichment status back to 'pending'.
+
+        Returns the number of rows updated.
+        """
+        result = self._conn.execute(
+            """UPDATE library_files
+               SET enrichment_status = %s
+               WHERE enrichment_status = %s""",
+            (EnrichmentStatus.PENDING.value, EnrichmentStatus.FAILED.value),
+        )
+        return result.rowcount if result.rowcount is not None else 0

@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: retrostation
+Version: 0.1.0
+Requires-Python: >=3.13
+Requires-Dist: fastapi>=0.134
+Requires-Dist: uvicorn[standard]
+Requires-Dist: psycopg[binary]>=3.1
+Requires-Dist: psycopg-pool>=3.1
+Requires-Dist: huey>=2.6
+Requires-Dist: mutagen>=1.47
+Requires-Dist: sentence-transformers>=3.0
+Requires-Dist: rapidfuzz>=3.0
+Requires-Dist: httpx>=0.27
+Requires-Dist: structlog
+Requires-Dist: pydantic-settings
+Requires-Dist: pgvector
+Requires-Dist: chardet
+Requires-Dist: unidecode>=1.3
+Requires-Dist: python-multipart>=0.0.22
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: mypy>=1.11; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"

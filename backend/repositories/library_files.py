@@ -57,3 +57,11 @@ class LibraryFileRepository(ABC):
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         """Return all files with the given content hash."""
         ...
+
+    @abstractmethod
+    def reset_failed_enrichments(self) -> int:
+        """Reset all files in 'failed' enrichment status back to 'pending'.
+
+        Returns the number of rows updated.
+        """
+        ...

@@ -1,3 +1,10 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
 [project]
 name = "retrostation"
 version = "0.1.0"
@@ -24,6 +31,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio",
+    "pytest-cov>=5.0",
     "mypy>=1.11",
     "ruff>=0.6",
 ]
@@ -53,3 +61,11 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.coverage.run]
+source = ["backend"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 1
+show_missing = true

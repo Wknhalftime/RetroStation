@@ -37,6 +37,7 @@ class VersionType(StrEnum):
     EXTENDED     = "extended"
     INSTRUMENTAL = "instrumental"
     EXPLICIT     = "explicit"
+    CLEAN        = "clean"
     COVER        = "cover"
     EDITION      = "edition"
     ALTERNATE    = "alternate"
