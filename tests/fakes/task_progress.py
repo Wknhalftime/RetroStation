@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from backend.domain.enums import TaskStatus
 from backend.domain.system import TaskProgress
-from backend.repositories.progress_tracking import TaskProgressRepository
+from backend.repositories.task_progress import TaskProgressRepository
 
 
 class FakeTaskProgressRepository(TaskProgressRepository):
@@ -27,3 +27,4 @@ class FakeTaskProgressRepository(TaskProgressRepository):
                 task.status = TaskStatus.FAILED
                 count += 1
         return count
+

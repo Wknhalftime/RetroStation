@@ -2,7 +2,7 @@ from datetime import date
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastPlayEvent
-from backend.repositories.play_events import BroadcastPlayEventRepository
+from backend.repositories.broadcast_play_events import BroadcastPlayEventRepository
 
 
 class FakeBroadcastPlayEventRepository(BroadcastPlayEventRepository):
@@ -51,3 +51,4 @@ class FakeBroadcastPlayEventRepository(BroadcastPlayEventRepository):
             if e.playlist_id in playlist_ids
             and e.played_at.date() == broadcast_date
         ]
+

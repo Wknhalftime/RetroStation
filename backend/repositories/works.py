@@ -33,9 +33,6 @@ class WorkRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_mbid(self, mbid: str) -> Work | None: ...
-
-    @abstractmethod
     def delete_if_empty(self, work_id: str) -> bool:
         """Delete work if no library_files reference it. Returns True if deleted."""
         ...

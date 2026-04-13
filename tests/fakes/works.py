@@ -56,12 +56,6 @@ class FakeWorkRepository(WorkRepository):
         )
         return work_id
 
-    def get_by_mbid(self, mbid: str) -> Work | None:
-        for work in self._data.values():
-            if work.mbid == mbid:
-                return work
-        return None
-
     def delete_if_empty(self, work_id: str) -> bool:
         if work_id in self._data:
             del self._data[work_id]

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import psycopg
 from fastapi.testclient import TestClient
 
-from backend.db.repositories.progress_tracking import PgTaskProgressRepository
+from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 

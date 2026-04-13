@@ -63,8 +63,8 @@ class PgLibraryFolderRepository(LibraryFolderRepository):
         )
 
     def stage_hashes(self, hashes: list[tuple[UUID, str]], task_id: str) -> None:
-        for folder_id, new_hash in hashes:
-            self._conn.execute(
+        with self._conn.cursor() as cur:
+            cur.executemany(
                 """
                 INSERT INTO library_folder_staged_hashes (folder_id, new_hash, staged_by_task)
                 VALUES (%s, %s, %s)
@@ -72,7 +72,7 @@ class PgLibraryFolderRepository(LibraryFolderRepository):
                     new_hash  = EXCLUDED.new_hash,
                     staged_at = NOW()
                 """,
-                (folder_id, new_hash, task_id),
+                [(folder_id, new_hash, task_id) for folder_id, new_hash in hashes],
             )
 
     def commit_staged_hashes(self, task_id: str) -> int:

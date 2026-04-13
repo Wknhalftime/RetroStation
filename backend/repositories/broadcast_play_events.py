@@ -21,3 +21,4 @@ class BroadcastPlayEventRepository(ABC):
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
     ) -> list[BroadcastPlayEvent]: ...
+

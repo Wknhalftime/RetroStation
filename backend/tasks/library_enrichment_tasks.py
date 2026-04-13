@@ -5,7 +5,7 @@ import contextlib
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, LogLevel

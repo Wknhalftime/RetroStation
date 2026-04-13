@@ -11,12 +11,12 @@ class ArtistRepository(ABC):
     def get_by_id(self, mbid: str) -> Artist | None: ...
 
     @abstractmethod
-    def fetch_all(self) -> list[Artist]:
+    def list_all(self) -> list[Artist]:
         """Return all artists for fuzzy-matching in artist_matching_service."""
         ...
 
     @abstractmethod
-    def fetch_unenhanced(self) -> list[Artist]: ...
+    def list_unenhanced(self) -> list[Artist]: ...
 
     @abstractmethod
     def mark_enhanced(self, mbid: str) -> None: ...
@@ -38,9 +38,15 @@ class ArtistRepository(ABC):
         mbid: str,
         name: str,
         sort_name: str,
+        normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
         """Lookup by mbid or normalized_name, promote/create/reuse.
+
+        The caller is responsible for computing ``normalized_name`` via
+        ``backend.services.normalization.normalize_artist`` before calling
+        this method; this keeps the repository layer free of service imports.
+
         Returns artist id (may be a promoted local UUID).
         """
         ...

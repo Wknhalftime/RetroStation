@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 
 
@@ -24,8 +24,8 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
         self._data[artist.id] = artist
         return artist
 
-    def get_by_id(self, id: UUID) -> BroadcastArtist | None:
-        return self._data.get(id)
+    def get_by_id(self, artist_id: UUID) -> BroadcastArtist | None:
+        return self._data.get(artist_id)
 
     def get_by_normalized_name(
         self, normalized_name: str
@@ -59,14 +59,10 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
             if a.id in ids and a.embedding is None
         ]
 
-    def update_match_status(
-        self, id: UUID, status: MatchStatus, tier: MatchTier | None = None
-    ) -> None:
-        if artist := self._data.get(id):
+    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
+        if artist := self._data.get(artist_id):
             artist.match_status = status
-            if tier is not None:
-                artist.match_tier = tier
 
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None:
-        if artist := self._data.get(id):
+    def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
+        if artist := self._data.get(artist_id):
             artist.embedding = embedding

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
@@ -55,13 +55,13 @@ class PgArtistRepository(ArtistRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def fetch_all(self) -> list[Artist]:
+    def list_all(self) -> list[Artist]:
         rows = self._conn.execute(
             "SELECT * FROM artists ORDER BY name"
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def fetch_unenhanced(self) -> list[Artist]:
+    def list_unenhanced(self) -> list[Artist]:
         rows = self._conn.execute(
             "SELECT * FROM artists WHERE needs_enhancement = TRUE"
         ).fetchall()
@@ -90,7 +90,7 @@ class PgArtistRepository(ArtistRepository):
             (str(uuid4()), name, name, normalized_name),
         ).fetchone()
         if row is not None:
-            return row["id"]
+            return cast(str, row["id"])
         row = self._conn.execute(
             "SELECT id FROM artists WHERE normalized_name = %s",
             (normalized_name,),
@@ -99,13 +99,14 @@ class PgArtistRepository(ArtistRepository):
             raise RuntimeError(
                 f"Artist not found after ON CONFLICT: {normalized_name}"
             )
-        return row["id"]
+        return cast(str, row["id"])
 
     def upsert_musicbrainz_artist(
         self,
         mbid: str,
         name: str,
         sort_name: str,
+        normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
         row = self._conn.execute(
@@ -113,9 +114,7 @@ class PgArtistRepository(ArtistRepository):
             (mbid,),
         ).fetchone()
         if row is not None:
-            return row["id"]
-        from backend.services.normalization import normalize_artist
-        norm = normalize_artist(name)
+            return cast(str, row["id"])
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name, mbid,
@@ -129,13 +128,13 @@ class PgArtistRepository(ArtistRepository):
                  disambiguation = EXCLUDED.disambiguation,
                  needs_enhancement = TRUE
                RETURNING id""",
-            (str(uuid4()), name, sort_name, norm, mbid, disambiguation),
+            (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
         ).fetchone()
         if row is None:
             raise RuntimeError(
                 f"Artist upsert_musicbrainz_artist failed: {mbid}"
             )
-        return row["id"]
+        return cast(str, row["id"])
 
     def get_by_normalized_name(
         self, normalized_name: str,

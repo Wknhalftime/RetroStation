@@ -1,27 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
 
+from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.catalog import Recording
 from backend.domain.enums import VersionType
 from backend.repositories.recordings import RecordingRepository
-
-
-def _parse_embedding(raw: Any) -> list[float] | None:
-    """Convert a pgvector embedding column value to a list of floats.
-
-    pgvector may return the value as a Python list (already parsed) or as a
-    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
-    gracefully; ``None`` is returned when the column is NULL.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, list):
-        return raw
-    return [float(x) for x in str(raw).strip("[]").split(",")]
 
 
 class PgRecordingRepository(RecordingRepository):
@@ -42,7 +29,7 @@ class PgRecordingRepository(RecordingRepository):
             needs_enhancement=row["needs_enhancement"],
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
-            embedding=_parse_embedding(row.get("embedding")),
+            embedding=parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, recording: Recording) -> Recording:
@@ -78,7 +65,7 @@ class PgRecordingRepository(RecordingRepository):
     def update_embedding(self, mbid: str, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE recordings SET embedding = %s WHERE id = %s",
-            ("[" + ",".join(str(v) for v in embedding) + "]", mbid),
+            (format_embedding(embedding), mbid),
         )
 
     def list_needing_enhancement(self) -> list[Recording]:
@@ -108,7 +95,7 @@ class PgRecordingRepository(RecordingRepository):
         )
         row = cur.fetchone()
         if row is not None:
-            return row["id"]
+            return cast(str, row["id"])
         # Row already existed — fetch the winner
         existing = self._conn.execute(
             "SELECT id FROM recordings"
@@ -119,4 +106,4 @@ class PgRecordingRepository(RecordingRepository):
             raise RuntimeError(
                 "Recording not found after ON CONFLICT DO NOTHING"
             )
-        return existing["id"]
+        return cast(str, existing["id"])

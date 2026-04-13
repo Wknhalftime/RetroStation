@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus
 
 
 class BroadcastArtistRepository(ABC):
@@ -12,7 +12,7 @@ class BroadcastArtistRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_id(self, id: UUID) -> BroadcastArtist | None: ...
+    def get_by_id(self, artist_id: UUID) -> BroadcastArtist | None: ...
 
     @abstractmethod
     def get_by_normalized_name(self, normalized_name: str) -> BroadcastArtist | None: ...
@@ -33,12 +33,10 @@ class BroadcastArtistRepository(ABC):
         ...
 
     @abstractmethod
-    def update_match_status(
-        self,
-        id: UUID,
-        status: MatchStatus,
-        tier: MatchTier | None = None,
-    ) -> None: ...
+    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
+        """Update match status. The artist table has no tier column; tier is
+        recorded only on the match row itself, which the caller creates separately."""
+        ...
 
     @abstractmethod
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None: ...
+    def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None: ...

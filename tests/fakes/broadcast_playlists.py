@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastPlaylist
-from backend.repositories.playlists import BroadcastPlaylistRepository
+from backend.repositories.broadcast_playlists import BroadcastPlaylistRepository
 
 
 class FakeBroadcastPlaylistRepository(BroadcastPlaylistRepository):
@@ -20,3 +20,4 @@ class FakeBroadcastPlaylistRepository(BroadcastPlaylistRepository):
 
     def list_by_station(self, station_id: UUID) -> list[BroadcastPlaylist]:
         return [p for p in self._data.values() if p.station_id == station_id]
+

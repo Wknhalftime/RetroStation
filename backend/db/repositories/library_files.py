@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 from uuid import UUID
 
@@ -10,8 +9,6 @@ import psycopg
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
-
-logger = logging.getLogger(__name__)
 
 
 class PgLibraryFileRepository(LibraryFileRepository):
@@ -343,9 +340,8 @@ class PgLibraryFileRepository(LibraryFileRepository):
 
     def mark_missing(self, file_path: str) -> None:
         self._conn.execute(
-            "UPDATE library_files SET file_status = 'MISSING'"
-            " WHERE file_path = %s",
-            (file_path,),
+            "UPDATE library_files SET file_status = %s WHERE file_path = %s",
+            (FileStatus.MISSING, file_path),
         )
 
     def update_work_id(

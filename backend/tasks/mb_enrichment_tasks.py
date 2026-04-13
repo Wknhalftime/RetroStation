@@ -3,7 +3,7 @@ from __future__ import annotations
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.mb_client import RealMbClient
 from backend.services.repository_factory import RepositoryFactory
@@ -32,7 +32,7 @@ def mb_enrichment_task() -> dict[str, int]:
         cache_repo = PgMusicBrainzCacheRepository(conn)
         mb_client = RealMbClient(cache_repo)
 
-        pending_artists = repos.artists.fetch_unenhanced()
+        pending_artists = repos.artists.list_unenhanced()
         for artist in pending_artists:
             try:
                 results = mb_client.search_artist(artist.name)

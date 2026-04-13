@@ -3,7 +3,7 @@ from __future__ import annotations
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.services.mb_client import RealMbClient
 
 

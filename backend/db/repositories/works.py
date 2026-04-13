@@ -1,30 +1,17 @@
 from __future__ import annotations
 
-import logging
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
+import structlog
 
+from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.catalog import Work
 from backend.domain.enums import CatalogSource
 from backend.repositories.works import WorkRepository
 
-logger = logging.getLogger(__name__)
-
-
-def _parse_embedding(raw: Any) -> list[float] | None:
-    """Convert a pgvector embedding column value to a list of floats.
-
-    pgvector may return the value as a Python list (already parsed) or as a
-    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
-    gracefully; ``None`` is returned when the column is NULL.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, list):
-        return raw
-    return [float(x) for x in str(raw).strip("[]").split(",")]
+logger = structlog.get_logger()
 
 
 class PgWorkRepository(WorkRepository):
@@ -39,7 +26,7 @@ class PgWorkRepository(WorkRepository):
             needs_enhancement=row["needs_enhancement"],
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
-            embedding=_parse_embedding(row.get("embedding")),
+            embedding=parse_embedding(row.get("embedding")),
             mbid=row.get("mbid"),
             origin=(
                 CatalogSource(row["origin"])
@@ -90,7 +77,7 @@ class PgWorkRepository(WorkRepository):
     def update_embedding(self, mbid: str, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE works SET embedding = %s WHERE id = %s",
-            ("[" + ",".join(str(v) for v in embedding) + "]", mbid),
+            (format_embedding(embedding), mbid),
         )
 
     def create_local(self, title: str, artist_id: str) -> str:
@@ -111,7 +98,7 @@ class PgWorkRepository(WorkRepository):
             (mbid,),
         ).fetchone()
         if row is not None:
-            return row["id"]
+            return cast(str, row["id"])
         work_id = str(uuid4())
         self._conn.execute(
             """INSERT INTO works
@@ -122,11 +109,6 @@ class PgWorkRepository(WorkRepository):
         )
         return work_id
 
-    def get_by_mbid(self, mbid: str) -> Work | None:
-        row = self._conn.execute(
-            "SELECT * FROM works WHERE mbid = %s", (mbid,),
-        ).fetchone()
-        return self._row_to_model(row) if row else None
 
     def delete_if_empty(self, work_id: str) -> bool:
         count = self._conn.execute(

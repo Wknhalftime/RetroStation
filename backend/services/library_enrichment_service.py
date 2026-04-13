@@ -10,7 +10,7 @@ from backend.repositories.artists import ArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.works import WorkRepository
-from backend.services.normalization import extract_version_info
+from backend.services.normalization import extract_version_info, normalize_artist
 
 logger = structlog.get_logger()
 
@@ -87,6 +87,7 @@ def enrich_by_release(
             mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
+            normalized_name=normalize_artist(artist_name),
         )
 
     # Build recording map: recording_mbid -> recording dict from media tracks
@@ -201,6 +202,7 @@ def enrich_by_recording(
             mbid=artist_mbid,
             name=artist_name,
             sort_name=artist_sort_name,
+            normalized_name=normalize_artist(artist_name),
         )
 
     # Extract work from relations

@@ -12,7 +12,7 @@ class BroadcastTrackIdentityRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None: ...
+    def get_by_id(self, identity_id: UUID) -> BroadcastTrackIdentity | None: ...
 
     @abstractmethod
     def get_by_signature(self, normalized_signature: str) -> BroadcastTrackIdentity | None: ...
@@ -34,15 +34,16 @@ class BroadcastTrackIdentityRepository(ABC):
     @abstractmethod
     def update_match_status(
         self,
-        id: UUID,
+        identity_id: UUID,
         status: MatchStatus,
         tier: MatchTier,
     ) -> None: ...
 
     @abstractmethod
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None: ...
+    def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None: ...
 
     @abstractmethod
     def bulk_reject_by_artist(self, artist_id: UUID) -> None:
         """Set all identities for this artist to AUTO_REJECTED."""
         ...
+

@@ -13,15 +13,15 @@ from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
-from backend.db.repositories.mb_cache import PgMusicBrainzCacheRepository
-from backend.db.repositories.play_events import PgBroadcastPlayEventRepository
-from backend.db.repositories.playlists import PgBroadcastPlaylistRepository
-from backend.db.repositories.progress_tracking import PgTaskProgressRepository
+from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
+from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
+from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
-from backend.db.repositories.stations import PgBroadcastStationRepository
+from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
-from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.works import PgWorkRepository
 

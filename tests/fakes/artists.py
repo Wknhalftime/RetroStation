@@ -3,7 +3,6 @@ from uuid import uuid4
 from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
 from backend.repositories.artists import ArtistRepository
-from backend.services.normalization import normalize_artist
 
 
 class FakeArtistRepository(ArtistRepository):
@@ -17,10 +16,10 @@ class FakeArtistRepository(ArtistRepository):
     def get_by_id(self, mbid: str) -> Artist | None:
         return self._data.get(mbid)
 
-    def fetch_all(self) -> list[Artist]:
+    def list_all(self) -> list[Artist]:
         return list(self._data.values())
 
-    def fetch_unenhanced(self) -> list[Artist]:
+    def list_unenhanced(self) -> list[Artist]:
         return [a for a in self._data.values() if a.needs_enhancement]
 
     def mark_enhanced(self, mbid: str) -> None:
@@ -51,6 +50,7 @@ class FakeArtistRepository(ArtistRepository):
         mbid: str,
         name: str,
         sort_name: str,
+        normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
         # Check by mbid first
@@ -58,9 +58,8 @@ class FakeArtistRepository(ArtistRepository):
             if artist.mbid == mbid:
                 return artist.id
         # Check by normalized_name (promote local)
-        norm = normalize_artist(name)
         for artist in self._data.values():
-            if artist.normalized_name == norm:
+            if artist.normalized_name == normalized_name:
                 artist.mbid = mbid
                 artist.origin = CatalogSource.MUSICBRAINZ
                 artist.name = name
@@ -75,7 +74,7 @@ class FakeArtistRepository(ArtistRepository):
             name=name,
             sort_name=sort_name,
             disambiguation=disambiguation,
-            normalized_name=norm,
+            normalized_name=normalized_name,
             mbid=mbid,
             origin=CatalogSource.MUSICBRAINZ,
             needs_enhancement=True,

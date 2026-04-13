@@ -6,7 +6,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.broadcast import BroadcastStation
-from backend.repositories.stations import BroadcastStationRepository
+from backend.repositories.broadcast_stations import BroadcastStationRepository
 
 
 class PgBroadcastStationRepository(BroadcastStationRepository):
@@ -72,3 +72,4 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
 
     def delete(self, id: UUID) -> None:
         self._conn.execute("DELETE FROM stations WHERE id = %s", (id,))
+

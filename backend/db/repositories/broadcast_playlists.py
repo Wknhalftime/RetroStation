@@ -6,7 +6,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.broadcast import BroadcastPlaylist
-from backend.repositories.playlists import BroadcastPlaylistRepository
+from backend.repositories.broadcast_playlists import BroadcastPlaylistRepository
 
 
 class PgBroadcastPlaylistRepository(BroadcastPlaylistRepository):
@@ -53,3 +53,4 @@ class PgBroadcastPlaylistRepository(BroadcastPlaylistRepository):
             (station_id,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+

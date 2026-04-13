@@ -6,7 +6,7 @@ from typing import Any
 import psycopg
 
 from backend.domain.system import MusicBrainzCache
-from backend.repositories.mb_cache import MusicBrainzCacheRepository
+from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 
 
 class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
@@ -52,3 +52,4 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
             "DELETE FROM mb_cache WHERE expires_at < now()"
         )
         return result.rowcount
+

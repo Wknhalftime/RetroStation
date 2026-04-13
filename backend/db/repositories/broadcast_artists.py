@@ -5,23 +5,10 @@ from uuid import UUID
 
 import psycopg
 
+from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
-
-
-def _parse_embedding(raw: Any) -> list[float] | None:
-    """Convert a pgvector embedding column value to a list of floats.
-
-    pgvector may return the value as a Python list (already parsed) or as a
-    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
-    gracefully; ``None`` is returned when the column is NULL.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, list):
-        return raw
-    return [float(x) for x in str(raw).strip("[]").split(",")]
 
 
 class PgBroadcastArtistRepository(BroadcastArtistRepository):
@@ -37,7 +24,7 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             artist_candidates=row.get("artist_candidates"),
             error_message=row.get("error_message"),
             created_at=row["created_at"],
-            embedding=_parse_embedding(row.get("embedding")),
+            embedding=parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, artist: BroadcastArtist) -> BroadcastArtist:
@@ -57,9 +44,9 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, id: UUID) -> BroadcastArtist | None:
+    def get_by_id(self, artist_id: UUID) -> BroadcastArtist | None:
         row = self._conn.execute(
-            "SELECT * FROM broadcast_artists WHERE id = %s", (id,)
+            "SELECT * FROM broadcast_artists WHERE id = %s", (artist_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
@@ -102,18 +89,14 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def update_match_status(
-        self, id: UUID, status: MatchStatus, tier: MatchTier | None = None
-    ) -> None:
-        # broadcast_artists has no match_tier column (only track_identities does).
-        # The tier parameter is accepted for ABC interface consistency but not stored.
+    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
         self._conn.execute(
             "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
-            (status.value, id),
+            (status.value, artist_id),
         )
 
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None:
+    def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE broadcast_artists SET embedding = %s WHERE id = %s",
-            ("[" + ",".join(str(v) for v in embedding) + "]", id),
+            (format_embedding(embedding), artist_id),
         )

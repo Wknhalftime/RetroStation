@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from backend.domain.system import MusicBrainzCache
-from backend.repositories.mb_cache import MusicBrainzCacheRepository
+from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 
 
 class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
@@ -23,3 +23,4 @@ class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         for k in expired:
             del self._data[k]
         return len(expired)
+

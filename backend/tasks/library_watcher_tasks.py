@@ -16,7 +16,7 @@ import structlog
 from huey import crontab  # type: ignore[import-untyped]
 
 from backend.config import get_settings
-from backend.db.repositories.progress_tracking import PgTaskProgressRepository
+from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
 from backend.domain.system import TaskProgress

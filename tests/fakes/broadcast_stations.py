@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastStation
-from backend.repositories.stations import BroadcastStationRepository
+from backend.repositories.broadcast_stations import BroadcastStationRepository
 
 
 class FakeBroadcastStationRepository(BroadcastStationRepository):
@@ -27,3 +27,4 @@ class FakeBroadcastStationRepository(BroadcastStationRepository):
 
     def delete(self, id: UUID) -> None:
         self._data.pop(id, None)
+

@@ -16,3 +16,4 @@ class BroadcastPlaylistRepository(ABC):
 
     @abstractmethod
     def list_by_station(self, station_id: UUID) -> list[BroadcastPlaylist]: ...
+

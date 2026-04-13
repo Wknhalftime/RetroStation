@@ -7,7 +7,7 @@ import psycopg
 
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
-from backend.repositories.progress_tracking import TaskProgressRepository
+from backend.repositories.task_progress import TaskProgressRepository
 
 
 class PgTaskProgressRepository(TaskProgressRepository):
@@ -70,3 +70,4 @@ class PgTaskProgressRepository(TaskProgressRepository):
             (stale_threshold_minutes,),
         )
         return result.rowcount
+

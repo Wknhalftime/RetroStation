@@ -5,23 +5,10 @@ from uuid import UUID
 
 import psycopg
 
+from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
-
-
-def _parse_embedding(raw: Any) -> list[float] | None:
-    """Convert a pgvector embedding column value to a list of floats.
-
-    pgvector may return the value as a Python list (already parsed) or as a
-    bracketed string such as ``"[0.1,0.2,0.3]"``.  Both cases are handled
-    gracefully; ``None`` is returned when the column is NULL.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, list):
-        return raw
-    return [float(x) for x in str(raw).strip("[]").split(",")]
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 
 
 class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -40,7 +27,7 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 MatchTier(row["match_tier"]) if row.get("match_tier") else None
             ),
             created_at=row["created_at"],
-            embedding=_parse_embedding(row.get("embedding")),
+            embedding=parse_embedding(row.get("embedding")),
         )
 
     def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:
@@ -63,9 +50,9 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None:
+    def get_by_id(self, identity_id: UUID) -> BroadcastTrackIdentity | None:
         row = self._conn.execute(
-            "SELECT * FROM track_identities WHERE id = %s", (id,)
+            "SELECT * FROM track_identities WHERE id = %s", (identity_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
@@ -116,19 +103,19 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         return [self._row_to_model(r) for r in rows]
 
     def update_match_status(
-        self, id: UUID, status: MatchStatus, tier: MatchTier
+        self, identity_id: UUID, status: MatchStatus, tier: MatchTier
     ) -> None:
         self._conn.execute(
             """UPDATE track_identities
                SET match_status = %s, match_tier = %s
                WHERE id = %s""",
-            (status.value, tier.value, id),
+            (status.value, tier.value, identity_id),
         )
 
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None:
+    def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE track_identities SET embedding = %s WHERE id = %s",
-            ("[" + ",".join(str(v) for v in embedding) + "]", id),
+            (format_embedding(embedding), identity_id),
         )
 
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
@@ -139,3 +126,4 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             (MatchStatus.AUTO_REJECTED.value, MatchTier.UNCLASSIFIED.value,
              broadcast_artist_id, MatchStatus.PENDING.value),
         )
+

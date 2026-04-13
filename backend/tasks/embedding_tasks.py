@@ -6,7 +6,7 @@ import structlog
 
 from backend.config import get_settings
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
-from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.sync_conn import connect_sync
 from backend.services import embedding_service
 from backend.tasks.huey_app import huey

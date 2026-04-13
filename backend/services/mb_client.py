@@ -10,7 +10,7 @@ import httpx
 import structlog
 
 from backend.domain.system import MusicBrainzCache
-from backend.repositories.mb_cache import MusicBrainzCacheRepository
+from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 
 logger = structlog.get_logger()
 

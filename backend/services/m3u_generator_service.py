@@ -20,7 +20,7 @@ from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.user_settings import UserSettingRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(

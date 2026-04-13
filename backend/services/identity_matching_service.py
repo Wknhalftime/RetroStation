@@ -11,7 +11,7 @@ from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_title
 

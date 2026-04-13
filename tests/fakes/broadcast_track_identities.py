@@ -2,7 +2,7 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -24,8 +24,8 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         self._data[identity.id] = identity
         return identity
 
-    def get_by_id(self, id: UUID) -> BroadcastTrackIdentity | None:
-        return self._data.get(id)
+    def get_by_id(self, identity_id: UUID) -> BroadcastTrackIdentity | None:
+        return self._data.get(identity_id)
 
     def get_by_signature(
         self, normalized_signature: str
@@ -62,14 +62,14 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         ]
 
     def update_match_status(
-        self, id: UUID, status: MatchStatus, tier: MatchTier
+        self, identity_id: UUID, status: MatchStatus, tier: MatchTier
     ) -> None:
-        if identity := self._data.get(id):
+        if identity := self._data.get(identity_id):
             identity.match_status = status
             identity.match_tier = tier
 
-    def update_embedding(self, id: UUID, embedding: list[float]) -> None:
-        if identity := self._data.get(id):
+    def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
+        if identity := self._data.get(identity_id):
             identity.embedding = embedding
 
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
@@ -77,3 +77,4 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             if identity.broadcast_artist_id == broadcast_artist_id:
                 identity.match_status = MatchStatus.AUTO_REJECTED
                 identity.match_tier = MatchTier.UNCLASSIFIED
+

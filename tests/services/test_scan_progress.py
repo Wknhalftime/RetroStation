@@ -10,7 +10,7 @@ import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
 from backend.services.library_scan_service import scan_directory
-from tests.fakes.progress_tracking import FakeTaskProgressRepository
+from tests.fakes.task_progress import FakeTaskProgressRepository
 
 AUDIO_DIR = Path(__file__).parent.parent / "fixtures" / "audio"
 NO_TAGS_WAV = AUDIO_DIR / "no_tags.wav"

@@ -19,9 +19,9 @@ from backend.domain.broadcast import (
 )
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_days import BroadcastDayRepository
-from backend.repositories.play_events import BroadcastPlayEventRepository
-from backend.repositories.playlists import BroadcastPlaylistRepository
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.broadcast_play_events import BroadcastPlayEventRepository
+from backend.repositories.broadcast_playlists import BroadcastPlaylistRepository
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.normalization import (
     compute_normalized_signature,
     normalize_artist,

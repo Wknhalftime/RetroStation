@@ -6,7 +6,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
-from backend.db.repositories.track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus
 

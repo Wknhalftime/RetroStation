@@ -7,7 +7,7 @@ from uuid import UUID
 import psycopg
 
 from backend.domain.broadcast import BroadcastPlayEvent
-from backend.repositories.play_events import BroadcastPlayEventRepository
+from backend.repositories.broadcast_play_events import BroadcastPlayEventRepository
 
 
 class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
@@ -67,3 +67,4 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
             (station_id, broadcast_date),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+

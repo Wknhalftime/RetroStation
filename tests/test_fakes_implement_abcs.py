@@ -2,11 +2,11 @@
 
 
 def test_station_fake_is_concrete() -> None:
-    from tests.fakes.stations import FakeBroadcastStationRepository
+    from tests.fakes.broadcast_stations import FakeBroadcastStationRepository
     assert FakeBroadcastStationRepository() is not None
 
 def test_playlist_fake_is_concrete() -> None:
-    from tests.fakes.playlists import FakeBroadcastPlaylistRepository
+    from tests.fakes.broadcast_playlists import FakeBroadcastPlaylistRepository
     assert FakeBroadcastPlaylistRepository() is not None
 
 def test_broadcast_day_fake_is_concrete() -> None:
@@ -18,11 +18,11 @@ def test_broadcast_artist_fake_is_concrete() -> None:
     assert FakeBroadcastArtistRepository() is not None
 
 def test_track_identity_fake_is_concrete() -> None:
-    from tests.fakes.track_identities import FakeBroadcastTrackIdentityRepository
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
     assert FakeBroadcastTrackIdentityRepository() is not None
 
 def test_play_event_fake_is_concrete() -> None:
-    from tests.fakes.play_events import FakeBroadcastPlayEventRepository
+    from tests.fakes.broadcast_play_events import FakeBroadcastPlayEventRepository
     assert FakeBroadcastPlayEventRepository() is not None
 
 def test_artist_fake_is_concrete() -> None:
@@ -62,11 +62,11 @@ def test_mapping_rule_fake_is_concrete() -> None:
     assert FakeMappingRuleRepository() is not None
 
 def test_mb_cache_fake_is_concrete() -> None:
-    from tests.fakes.mb_cache import FakeMusicBrainzCacheRepository
+    from tests.fakes.musicbrainz_cache import FakeMusicBrainzCacheRepository
     assert FakeMusicBrainzCacheRepository() is not None
 
 def test_progress_tracking_fake_is_concrete() -> None:
-    from tests.fakes.progress_tracking import FakeTaskProgressRepository
+    from tests.fakes.task_progress import FakeTaskProgressRepository
     assert FakeTaskProgressRepository() is not None
 
 def test_settings_fake_is_concrete() -> None:

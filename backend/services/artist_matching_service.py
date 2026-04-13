@@ -11,9 +11,9 @@ from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.domain.matching import Match
 from backend.repositories.artists import ArtistRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
-from backend.repositories.track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_utils import _rule_matches
 from backend.services.normalization import normalize_artist
 
@@ -40,7 +40,7 @@ def match_artists_for_playlist(
     """Run artist matching for all PENDING artists linked to this playlist."""
     pending = broadcast_artist_repo.get_pending_for_playlist(playlist_id)
     rules = rules_repo.list_ordered()
-    all_canonical = artist_repo.fetch_all()
+    all_canonical = artist_repo.list_all()
 
     for broadcast_artist in pending:
         # Pre-check global mapping rules
@@ -50,7 +50,7 @@ def match_artists_for_playlist(
                 rule.source_pattern, broadcast_artist.normalized_name
             ):
                 broadcast_artist_repo.update_match_status(
-                    broadcast_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.MANUAL
+                    broadcast_artist.id, MatchStatus.AUTO_MATCHED
                 )
                 match_repo.create(Match(
                     id=uuid4(),
@@ -74,7 +74,7 @@ def match_artists_for_playlist(
 
         if exact_match:
             broadcast_artist_repo.update_match_status(
-                broadcast_artist.id, MatchStatus.AUTO_MATCHED, MatchTier.NORMALIZATION
+                broadcast_artist.id, MatchStatus.AUTO_MATCHED
             )
             match_repo.create(Match(
                 id=uuid4(),
@@ -107,7 +107,7 @@ def match_artists_for_playlist(
                     top["score"], gap, mb_auto_link_score, mb_score_gap
                 )
                 if status is not None:
-                    broadcast_artist_repo.update_match_status(broadcast_artist.id, status, tier)
+                    broadcast_artist_repo.update_match_status(broadcast_artist.id, status)
                     if status == MatchStatus.AUTO_MATCHED:
                         match_repo.create(Match(
                             id=uuid4(),
@@ -148,7 +148,7 @@ def match_artists_for_playlist(
                         disambiguation=top_mb.get("disambiguation"),
                     ))
                     broadcast_artist_repo.update_match_status(
-                        broadcast_artist.id, mb_status, MatchTier.MUSICBRAINZ_API
+                        broadcast_artist.id, mb_status
                     )
                     if mb_status == MatchStatus.AUTO_MATCHED:
                         match_repo.create(Match(

@@ -2,7 +2,7 @@ import dataclasses
 from pathlib import Path
 from uuid import UUID
 
-from backend.domain.enums import EnrichmentStatus
+from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 
@@ -12,7 +12,6 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         self._data: dict[UUID, LibraryFile] = {}
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
-        from backend.domain.enums import FileStatus
         existing = self.get_by_path(file.file_path)
         if existing:
             if existing.file_hash == file.file_hash:
@@ -88,7 +87,6 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         return result
 
     def mark_missing(self, file_path: str) -> None:
-        from backend.domain.enums import FileStatus
         for f in self._data.values():
             if f.file_path == file_path:
                 f.file_status = FileStatus.MISSING
