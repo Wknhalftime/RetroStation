@@ -10,9 +10,9 @@ from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.grouping_service import (
     GroupingResult,
     _dynamic_threshold,
-    _extract_version_info,
     assign_work,
 )
+from backend.services.normalization import extract_version_info as _extract_version_info
 from backend.services.normalization import normalize_artist, normalize_title
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository

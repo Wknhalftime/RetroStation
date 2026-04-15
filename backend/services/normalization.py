@@ -235,7 +235,7 @@ def normalize_title(raw: str) -> str:
     t = t.lower()
     t = _remove_remaster_year_truncation(t)
     # Remove standalone years outside parentheses (1950-2029)
-    temp_text = _YEAR_PATTERN.sub("", t)
+    temp_text = _YEAR_RE.sub("", t)
     # Only apply if it doesn't strip the entire title (e.g. "1999" by Prince)
     if temp_text.strip() or not t.strip():
         t = temp_text
@@ -260,8 +260,8 @@ def compute_normalized_signature(normalized_artist: str, normalized_title: str) 
     MD5 of (normalized_artist + '||' + normalized_title).
 
     Args:
-        normalized_artist: Already-normalised artist string.
-        normalized_title: Already-normalised title string.
+        normalized_artist: Already-normalized artist string.
+        normalized_title: Already-normalized title string.
 
     Returns:
         32-character lowercase hexadecimal string.
@@ -276,7 +276,7 @@ def compute_normalized_signature(normalized_artist: str, normalized_title: str) 
 
 
 def split_artist_string(raw: str) -> list[str]:
-    """Split a compound artist string into individually normalised names (FR20).
+    """Split a compound artist string into individually normalized names (FR20).
 
     Three-step algorithm:
     1. Primary separators (feat., ft., vs., w/, with, duet, F/, W/, spaced /)
@@ -296,7 +296,7 @@ def split_artist_string(raw: str) -> list[str]:
         raw: Raw artist string, possibly containing multiple artist names.
 
     Returns:
-        Sorted, deduplicated list of normalised artist name strings.
+        Sorted, deduplicated list of normalized artist name strings.
         Empty list for blank input.
     """
     if not raw or not raw.strip():
@@ -313,23 +313,23 @@ def split_artist_string(raw: str) -> list[str]:
     # because the commas are not digit-guarded.  Neither implementation can
     # avoid this without an allowlist.  See test_split_artist_earth_wind_fire*.
     comma_expanded: list[str] = []
-    for tok in tokens:
-        comma_expanded.extend(_DIGIT_COMMA_RE.split(tok))
+    for token in tokens:
+        comma_expanded.extend(_DIGIT_COMMA_RE.split(token))
     tokens = comma_expanded
 
     # Step 3: Secondary separators (&, and, x) applied to each token
     expanded: list[str] = []
-    for tok in tokens:
-        expanded.extend(_SECONDARY_SEP_RE.split(tok))
+    for token in tokens:
+        expanded.extend(_SECONDARY_SEP_RE.split(token))
     tokens = expanded
 
     # Normalise each token; discard blanks
-    normalised = [normalize_artist(tok.strip()) for tok in tokens if tok.strip()]
+    normalized = [normalize_artist(token.strip()) for token in tokens if token.strip()]
 
     # Deduplicate (preserve first occurrence order) then sort
     seen: set[str] = set()
     unique: list[str] = []
-    for name in normalised:
+    for name in normalized:
         if name and name not in seen:
             seen.add(name)
             unique.append(name)
@@ -341,13 +341,51 @@ def split_artist_string(raw: str) -> list[str]:
 # FR22: Version descriptor classification
 # ---------------------------------------------------------------------------
 
+# Ordered dispatch table for classify_version_descriptor.
+# Multi-word phrases come first — order matters to avoid partial overlaps
+# (e.g. "rough mix" → DEMO before the bare "mix" → REMIX rule fires).
+# Word-boundary patterns (\b) prevent substring false positives such as
+# "Alive" ⊃ "live" or "Credit" ⊃ "edit".
+_VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
+    # Multi-word phrases
+    (re.compile(r"rough mix"), VersionType.DEMO),
+    (re.compile(r"radio edit|radio version|single version"), VersionType.RADIO_EDIT),
+    (re.compile(r"club mix|extended mix"), VersionType.REMIX),
+    (re.compile(r"long version|full version"), VersionType.EXTENDED),
+    (re.compile(r"original recording|original version"), VersionType.ORIGINAL),
+    (re.compile(r"backing track"), VersionType.INSTRUMENTAL),
+    (re.compile(r"in concert"), VersionType.LIVE),
+    (re.compile(r"cover version"), VersionType.COVER),
+    (re.compile(r"a\s+cappella"), VersionType.A_CAPPELLA),
+    (re.compile(r"deluxe edition|special edition|limited edition|anniversary edition"),
+     VersionType.EDITION),
+    (re.compile(r"alt version|alternate version|alternative version"), VersionType.ALTERNATE),
+    # Single keywords
+    (re.compile(r"\blive\b|\bconcert\b"), VersionType.LIVE),
+    (re.compile(r"\bacoustic\b|unplugged"), VersionType.ACOUSTIC),
+    (re.compile(r"\b(?:remix|remixed)\b|\bdub\b|\bmix\b"), VersionType.REMIX),
+    (re.compile(r"remaster"), VersionType.REMASTER),
+    (re.compile(r"edition"), VersionType.EDITION),   # after "deluxe edition" etc.
+    (re.compile(r"\bedit\b"), VersionType.RADIO_EDIT),
+    (re.compile(r"\bdemo\b"), VersionType.DEMO),
+    (re.compile(r"extended"), VersionType.EXTENDED),
+    (re.compile(r"instrumental"), VersionType.INSTRUMENTAL),
+    (re.compile(r"original"), VersionType.ORIGINAL),
+    (re.compile(r"explicit|lyrical"), VersionType.EXPLICIT),
+    (re.compile(r"\bclean\b"), VersionType.CLEAN),
+    (re.compile(r"\bcover\b"), VersionType.COVER),
+    (re.compile(r"deluxe|bonus|anniversary|\bspecial\b|\blimited\b"), VersionType.EDITION),
+    (re.compile(r"\balt\b|alternate|alternative"), VersionType.ALTERNATE),
+    (re.compile(r"\bmono\b|\bstereo\b"), VersionType.FORMAT),
+]
+
 
 def classify_version_descriptor(descriptor: str) -> VersionType:
     """Classify a version descriptor string into a canonical VersionType (FR22).
 
-    Uses keyword heuristics; multi-word phrases are checked before single
-    keywords to avoid false matches (e.g. "Rough Mix" → DEMO, not REMIX).
-    Matching is case-insensitive.
+    Dispatches via ``_VERSION_RULES``; rules are ordered from most to least
+    specific (multi-word phrases before single keywords).  Matching is
+    case-insensitive (input is lowercased before comparison).
 
     Args:
         descriptor: Raw version descriptor string (e.g. "Live at Wembley").
@@ -358,84 +396,9 @@ def classify_version_descriptor(descriptor: str) -> VersionType:
     d = descriptor.lower().strip()
     if not d:
         return VersionType.UNKNOWN
-
-    # Multi-word phrases first (order matters to avoid partial overlaps)
-    if "rough mix" in d:
-        return VersionType.DEMO
-    if "radio edit" in d or "radio version" in d or "single version" in d:
-        return VersionType.RADIO_EDIT
-    if "club mix" in d or "extended mix" in d:
-        return VersionType.REMIX
-    if "long version" in d or "full version" in d:
-        return VersionType.EXTENDED
-    if "original recording" in d or "original version" in d:
-        return VersionType.ORIGINAL
-    if "backing track" in d:
-        return VersionType.INSTRUMENTAL
-    if "in concert" in d:
-        return VersionType.LIVE
-    # New multi-word phrases (FR22 coverage — checked before single keywords)
-    if "cover version" in d:
-        return VersionType.COVER
-    if (
-        "deluxe edition" in d
-        or "special edition" in d
-        or "limited edition" in d
-        or "anniversary edition" in d
-    ):
-        return VersionType.EDITION
-    if "alt version" in d or "alternate version" in d or "alternative version" in d:
-        return VersionType.ALTERNATE
-
-    # Single keywords — word-boundary guards prevent substring false positives
-    # (e.g. "Alive" ⊃ "live", "Concerto" ⊃ "concert", "Mixtape" ⊃ "mix",
-    # "Credit" ⊃ "edit").  Pattern: re.search(r"\bkeyword\b", d) mirrors the
-    # existing guards already used for "special" / "limited" / "clean" / "alt".
-    if re.search(r"\blive\b", d) or re.search(r"\bconcert\b", d):
-        return VersionType.LIVE
-    if re.search(r"\bacoustic\b", d) or "unplugged" in d:
-        return VersionType.ACOUSTIC
-    if (
-        re.search(r"\b(?:remix|remixed)\b", d)
-        or re.search(r"\bdub\b", d)
-        or re.search(r"\bmix\b", d)
-    ):
-        return VersionType.REMIX
-    if "remaster" in d:
-        return VersionType.REMASTER
-    # "edition" must be checked before "edit" to avoid "Edition" → RADIO_EDIT
-    if "edition" in d:
-        return VersionType.EDITION
-    if re.search(r"\bedit\b", d):
-        return VersionType.RADIO_EDIT
-    if re.search(r"\bdemo\b", d):
-        return VersionType.DEMO
-    if "extended" in d:
-        return VersionType.EXTENDED
-    if "instrumental" in d:
-        return VersionType.INSTRUMENTAL
-    if "original" in d:
-        return VersionType.ORIGINAL
-    # New single keywords (FR22 coverage)
-    if "explicit" in d or "lyrical" in d:
-        return VersionType.EXPLICIT
-    if re.search(r"\bclean\b", d):
-        return VersionType.CLEAN
-    if re.search(r"\bcover\b", d):
-        return VersionType.COVER
-    if (
-        "deluxe" in d
-        or "bonus" in d
-        or "anniversary" in d
-        or re.search(r"\bspecial\b", d)
-        or re.search(r"\blimited\b", d)
-    ):
-        return VersionType.EDITION
-    if re.search(r"\balt\b", d) or "alternate" in d or "alternative" in d:
-        return VersionType.ALTERNATE
-    if re.search(r"\bmono\b", d) or re.search(r"\bstereo\b", d):
-        return VersionType.FORMAT
-
+    for pattern, version_type in _VERSION_RULES:
+        if pattern.search(d):
+            return version_type
     return VersionType.UNKNOWN
 
 
@@ -587,7 +550,7 @@ def detect_embedded_remix(raw_title: str) -> tuple[str, str | None]:
 # Covers 1950-2029; intentionally excludes years before 1950 or after 2029
 # to avoid stripping numeric-looking titles like "1984" (Orwell) in the
 # near future.
-_YEAR_PATTERN = re.compile(r"\b(19[5-9]\d|20[0-2]\d)\b")
+_YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-2]\d)\b")
 
 # ---------------------------------------------------------------------------
 # Station call letters (Story 5.4)

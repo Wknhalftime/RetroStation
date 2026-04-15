@@ -122,13 +122,13 @@ def _call_generate(
     events = event_repo.get_by_playlist(UUID(str(playlist_id)))
     return generate_m3u(
         events=events,
-        identity_repo=identity_repo,
+        track_identity_repo=identity_repo,
         match_repo=match_repo,
-        file_repo=file_repo,
+        library_file_repo=file_repo,
         recording_repo=recording_repo,
-        master_repo=master_repo,
-        override_repo=override_repo,
-        settings_repo=settings_repo,
+        song_master_repo=master_repo,
+        format_override_repo=override_repo,
+        user_settings_repo=settings_repo,
         station_format=station_format,
     )
 

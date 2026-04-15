@@ -22,7 +22,7 @@ from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.services.folder_hash_service import coalesce_paths, diff_tree
 from backend.services.grouping_service import assign_work
-from backend.services.library_scan_service import scan_folder_smart
+from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -39,7 +39,7 @@ def library_watcher_poll() -> None:
     ) as conn:
         repos = RepositoryFactory(conn)
 
-        _setting = repos.settings.get("local_path_prefix")
+        _setting = repos.user_settings.get("local_path_prefix")
         root_path = _setting.value if _setting is not None else None
         if not root_path:
             return
@@ -127,7 +127,7 @@ def library_scan_files_task(
         )
 
         for idx, folder_path in enumerate(folder_paths, start=1):
-            result = scan_folder_smart(
+            result = scan_folder_incrementally(
                 folder_path=Path(folder_path),
                 file_repo=repos.library_files,
                 quarantine_repo=repos.library_quarantine,
@@ -144,7 +144,7 @@ def library_scan_files_task(
                     if lf.work_id is not None:
                         continue
                     try:
-                        result = assign_work(
+                        grouping = assign_work(
                             lf,
                             artist_repo=repos.artists,
                             work_repo=repos.works,
@@ -152,14 +152,14 @@ def library_scan_files_task(
                             recording_repo=repos.recordings,
                             song_master_repo=repos.song_masters,
                         )
-                        if result:
+                        if grouping:
                             repos.library_files.update_work_id(
-                                lf.id, result.work_id,
+                                lf.id, grouping.work_id,
                             )
-                            if result.recording_id:
+                            if grouping.recording_id:
                                 repos.library_files.update_recording_link(
                                     lf.id,
-                                    result.recording_id,
+                                    grouping.recording_id,
                                     EnrichmentStatus.PENDING,
                                 )
                     except Exception:  # noqa: BLE001

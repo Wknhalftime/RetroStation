@@ -3,22 +3,26 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Protocol, cast
 from uuid import uuid4
 
 import httpx
 import structlog
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
+from backend.services.mb_types import MbArtistResult, MbRecording, MbRelease
 
 logger = structlog.get_logger()
 
+# --- Module-level constants ---
 _MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
 _USER_AGENT = "RetroStation/0.1.0 (https://github.com/retrostation)"
 _RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
 
+# --- Module-level mutable state (rate-limiting) ---
 _rate_lock: threading.Lock = threading.Lock()
 _last_request_time: float = 0.0
 
@@ -33,8 +37,24 @@ def _rate_limit() -> None:
         _last_request_time = time.monotonic()
 
 
-class RealMbClient:
-    """MusicBrainz API client with caching and rate limiting."""
+def _is_transient_mb_error(exc: BaseException) -> bool:
+    """Return True for HTTP errors that are transient and worth retrying (429, 5xx)."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and (exc.response.status_code == 429 or exc.response.status_code >= 500)
+    )
+
+
+class MusicBrainzClientProtocol(Protocol):
+    """Protocol for MusicBrainz API clients (production + test doubles)."""
+
+    def search_artist(self, name: str) -> list[MbArtistResult]: ...
+    def lookup_release(self, mbid: str) -> MbRelease | None: ...
+    def lookup_recording(self, mbid: str) -> MbRecording | None: ...
+
+
+class MusicBrainzApiClient:
+    """MusicBrainz API client with caching, rate limiting, and exponential-backoff retry."""
 
     def __init__(self, cache_repo: MusicBrainzCacheRepository) -> None:
         self._cache = cache_repo
@@ -43,59 +63,89 @@ class RealMbClient:
             timeout=30.0,
         )
 
-    def search_artist(self, name: str) -> list[dict[str, Any]]:
+    def __enter__(self) -> MusicBrainzApiClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._http.close()
+
+    @retry(
+        retry=retry_if_exception(_is_transient_mb_error),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True,
+    )
+    def _fetch(self, url: str, params: dict[str, str]) -> httpx.Response:
+        """Rate-limited HTTP GET; raises HTTPStatusError on any non-2xx response.
+
+        Decorated with tenacity retry: up to 3 attempts with exponential backoff
+        (2–30s) on transient errors (429, 5xx).  Non-transient errors (e.g. 404)
+        are re-raised immediately without retrying.
+        """
+        _rate_limit()
+        response = self._http.get(url, params=params)
+        response.raise_for_status()
+        return response
+
+    def search_artist(self, name: str) -> list[MbArtistResult]:
+        """Search MusicBrainz for artists matching name.
+
+        Results are cached in the local MusicBrainz cache as a transparent
+        read-through side-effect. This is intentional (cache-aside pattern).
+        """
         cache_key = f"artist-search:{name.lower()}"
 
-        # Check cache
-        cached = self._cache.get(cache_key)
-        if cached is not None:
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None:
             logger.debug("mb_cache_hit", cache_key=cache_key)
-            return cached.response_data.get("artists", [])  # type: ignore[no-any-return]
+            return cast(list[MbArtistResult], cached_entry.response_data.get("artists", []))
 
-        # Rate limit and call API
-        _rate_limit()
-        response = self._http.get(
+        response = self._fetch(
             f"{_MUSICBRAINZ_API}/artist/",
-            params={"query": name, "fmt": "json", "limit": "10"},
+            {"query": name, "fmt": "json", "limit": "10"},
         )
-        response.raise_for_status()
-        data = response.json()
+        response_payload: dict[str, object] = response.json()
 
-        # Cache response
         now = datetime.now(tz=UTC)
         self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type="artist-search",
             entity_mbid="",
-            response_data=data,
+            response_data=dict(response_payload),
             cached_at=now,
             expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
         ))
 
-        artists = data.get("artists", [])
+        artists = cast(list[MbArtistResult], response_payload.get("artists", []))
         logger.info("mb_api_search", name=name, results=len(artists))
-        return artists  # type: ignore[no-any-return]
+        return artists
 
-    def lookup_release(self, mbid: str) -> dict[str, Any] | None:
-        """Fetch a release by MBID, including recordings, artist-credits, and release-groups."""
+    def lookup_release(self, mbid: str) -> MbRelease | None:
+        """Fetch a release by MBID, including recordings, artist-credits, and release-groups.
+
+        Results are cached in the local MusicBrainz cache as a transparent
+        read-through side-effect. This is intentional (cache-aside pattern).
+        """
         cache_key = f"release:{mbid}"
 
-        cached = self._cache.get(cache_key)
-        if cached is not None:
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None:
             logger.debug("mb_cache_hit", cache_key=cache_key)
-            return cached.response_data
+            return cast(MbRelease, cached_entry.response_data)
 
-        _rate_limit()
-        response = self._http.get(
-            f"{_MUSICBRAINZ_API}/release/{mbid}",
-            params={"fmt": "json", "inc": "recordings+artist-credits+release-groups"},
-        )
-        if response.status_code == 404:
-            logger.info("mb_release_not_found", mbid=mbid)
-            return None
-        response.raise_for_status()
-        data: dict[str, Any] = response.json()
+        try:
+            response = self._fetch(
+                f"{_MUSICBRAINZ_API}/release/{mbid}",
+                {"fmt": "json", "inc": "recordings+artist-credits+release-groups"},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.info("mb_release_not_found", mbid=mbid)
+                return None
+            raise
+
+        release = cast(MbRelease, response.json())
 
         now = datetime.now(tz=UTC)
         self._cache.set(MusicBrainzCache(
@@ -103,33 +153,39 @@ class RealMbClient:
             cache_key=cache_key,
             entity_type="release",
             entity_mbid=mbid,
-            response_data=data,
+            response_data=dict(release),
             cached_at=now,
             expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
         ))
 
         logger.info("mb_api_lookup_release", mbid=mbid)
-        return data
+        return release
 
-    def lookup_recording(self, mbid: str) -> dict[str, Any] | None:
-        """Fetch a recording by MBID, including artist-credits and work relations."""
+    def lookup_recording(self, mbid: str) -> MbRecording | None:
+        """Fetch a recording by MBID, including artist-credits and work relations.
+
+        Results are cached in the local MusicBrainz cache as a transparent
+        read-through side-effect. This is intentional (cache-aside pattern).
+        """
         cache_key = f"recording:{mbid}"
 
-        cached = self._cache.get(cache_key)
-        if cached is not None:
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None:
             logger.debug("mb_cache_hit", cache_key=cache_key)
-            return cached.response_data
+            return cast(MbRecording, cached_entry.response_data)
 
-        _rate_limit()
-        response = self._http.get(
-            f"{_MUSICBRAINZ_API}/recording/{mbid}",
-            params={"fmt": "json", "inc": "artist-credits+work-rels"},
-        )
-        if response.status_code == 404:
-            logger.info("mb_recording_not_found", mbid=mbid)
-            return None
-        response.raise_for_status()
-        data: dict[str, Any] = response.json()
+        try:
+            response = self._fetch(
+                f"{_MUSICBRAINZ_API}/recording/{mbid}",
+                {"fmt": "json", "inc": "artist-credits+work-rels"},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.info("mb_recording_not_found", mbid=mbid)
+                return None
+            raise
+
+        recording = cast(MbRecording, response.json())
 
         now = datetime.now(tz=UTC)
         self._cache.set(MusicBrainzCache(
@@ -137,10 +193,10 @@ class RealMbClient:
             cache_key=cache_key,
             entity_type="recording",
             entity_mbid=mbid,
-            response_data=data,
+            response_data=dict(recording),
             cached_at=now,
             expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
         ))
 
         logger.info("mb_api_lookup_recording", mbid=mbid)
-        return data
+        return recording

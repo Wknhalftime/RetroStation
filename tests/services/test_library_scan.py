@@ -356,7 +356,7 @@ class TestExtractTagsGenericFallback:
     """Test the generic fallback when tag type is not ID3/Vorbis/WAV."""
 
     @patch("backend.services.library_scan_service.mutagen.File")
-    @patch("backend.services.library_scan_service._sha256", return_value="a" * 64)
+    @patch("backend.services.library_scan_service._compute_file_hash", return_value="a" * 64)
     def test_generic_fallback_returns_library_file(
         self, _mock_sha: MagicMock, mock_file: MagicMock, tmp_path: Path
     ) -> None:

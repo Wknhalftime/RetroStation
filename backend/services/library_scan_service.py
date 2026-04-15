@@ -15,7 +15,6 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 import mutagen
@@ -68,7 +67,7 @@ _VORBIS_RELEASE_MBID = "musicbrainz_albumid"
 # ---------------------------------------------------------------------------
 
 
-def _sha256(path: Path) -> str:
+def _compute_file_hash(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(65536), b""):
@@ -76,12 +75,12 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _first(tags: Any, key: str) -> str | None:
+def _extract_first_tag_value(tags: object, key: str) -> str | None:
     """Return tags[key][0] as a string, or None on any error."""
     if tags is None:
         return None
     try:
-        val = tags[key]
+        val = tags[key]  # type: ignore[index]
         raw = val[0] if isinstance(val, list) else val
         # mutagen ID3 frame objects stringify to their text content
         return str(raw).strip() or None
@@ -89,9 +88,9 @@ def _first(tags: Any, key: str) -> str | None:
         return None
 
 
-def _txxx(tags: Any, desc: str) -> str | None:
+def _txxx(tags: object, desc: str) -> str | None:
     """Return value of TXXX frame with the given description, or None."""
-    return _first(tags, f"TXXX:{desc}")
+    return _extract_first_tag_value(tags, f"TXXX:{desc}")
 
 
 def _parse_slash_int(value: str | None) -> int | None:
@@ -122,9 +121,9 @@ def _to_release_status(value: str | None) -> ReleaseStatus | None:
         return None
 
 
-def _duration_and_bitrate(audio: MutagenFileType) -> tuple[int | None, int | None]:
+def _extract_audio_stream_metrics(audio: MutagenFileType) -> tuple[int | None, int | None]:
     """Return (duration_ms, bitrate_kbps) from audio.info, tolerating None."""
-    info: Any = audio.info  # stubs type this as StreamInfo | None
+    info = audio.info  # stubs type this as StreamInfo | None
     if info is None:
         return None, None
     duration_ms: int | None = None
@@ -142,19 +141,18 @@ def _sanitise_tag_value(val: object) -> str:
     Strips null bytes (``\\x00``) which PostgreSQL cannot store in text.
     """
     try:
-        s = str(val)
-    except Exception:
-        s = repr(val)
-    return s.replace("\x00", "")
+        return str(val).replace("\x00", "")
+    except Exception:  # noqa: BLE001 — __str__ may raise anything on exotic types
+        return repr(val).replace("\x00", "")
 
 
-def _raw_metadata(audio: MutagenFileType) -> dict[str, Any]:
+def _raw_metadata(audio: MutagenFileType) -> dict[str, str]:
     """Dump all tag frames to a plain-Python dict.
 
     Both keys and values are sanitised to remove null bytes (``\\x00``)
     which PostgreSQL cannot store in text/jsonb columns.
     """
-    result: dict[str, Any] = {}
+    result: dict[str, str] = {}
     if audio.tags is None:
         return result
     for key, val in audio.tags.items():
@@ -178,18 +176,18 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     release_type = _to_release_type(_txxx(tags, _TXXX_RELEASE_TYPE))
     release_status = _to_release_status(_txxx(tags, _TXXX_RELEASE_STATUS))
 
-    artist_name = _first(tags, "TPE1")
-    track_title = _first(tags, "TIT2")
-    release_title = _first(tags, "TALB")
-    track_number = _parse_slash_int(_first(tags, "TRCK"))
-    disc_number = _parse_slash_int(_first(tags, "TPOS"))
+    artist_name = _extract_first_tag_value(tags, "TPE1")
+    track_title = _extract_first_tag_value(tags, "TIT2")
+    release_title = _extract_first_tag_value(tags, "TALB")
+    track_number = _parse_slash_int(_extract_first_tag_value(tags, "TRCK"))
+    disc_number = _parse_slash_int(_extract_first_tag_value(tags, "TPOS"))
 
-    duration_ms, bitrate = _duration_and_bitrate(audio)
+    duration_ms, bitrate = _extract_audio_stream_metrics(audio)
 
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_sha256(path),
+        file_hash=_compute_file_hash(path),
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -225,25 +223,25 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
 def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile:
     tags = audio.tags
 
-    recording_mbid = _first(tags, _VORBIS_RECORDING_MBID)
-    artist_mbid = _first(tags, _VORBIS_ARTIST_MBID)
-    album_artist_mbid = _first(tags, _VORBIS_ALBUM_ARTIST_MBID)
-    release_mbid = _first(tags, _VORBIS_RELEASE_MBID)
-    release_type = _to_release_type(_first(tags, "releasetype"))
-    release_status = _to_release_status(_first(tags, "releasestatus"))
+    recording_mbid = _extract_first_tag_value(tags, _VORBIS_RECORDING_MBID)
+    artist_mbid = _extract_first_tag_value(tags, _VORBIS_ARTIST_MBID)
+    album_artist_mbid = _extract_first_tag_value(tags, _VORBIS_ALBUM_ARTIST_MBID)
+    release_mbid = _extract_first_tag_value(tags, _VORBIS_RELEASE_MBID)
+    release_type = _to_release_type(_extract_first_tag_value(tags, "releasetype"))
+    release_status = _to_release_status(_extract_first_tag_value(tags, "releasestatus"))
 
-    artist_name = _first(tags, "artist")
-    track_title = _first(tags, "title")
-    release_title = _first(tags, "album")
-    track_number = _parse_slash_int(_first(tags, "tracknumber"))
-    disc_number = _parse_slash_int(_first(tags, "discnumber"))
+    artist_name = _extract_first_tag_value(tags, "artist")
+    track_title = _extract_first_tag_value(tags, "title")
+    release_title = _extract_first_tag_value(tags, "album")
+    track_number = _parse_slash_int(_extract_first_tag_value(tags, "tracknumber"))
+    disc_number = _parse_slash_int(_extract_first_tag_value(tags, "discnumber"))
 
-    duration_ms, bitrate = _duration_and_bitrate(audio)
+    duration_ms, bitrate = _extract_audio_stream_metrics(audio)
 
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_sha256(path),
+        file_hash=_compute_file_hash(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -277,12 +275,12 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
 
 
 def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
-    duration_ms, _ = _duration_and_bitrate(audio)
+    duration_ms, _ = _extract_audio_stream_metrics(audio)
 
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_sha256(path),
+        file_hash=_compute_file_hash(path),
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -295,6 +293,24 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+# Dispatch table: file extension → extractor function with signature
+# (audio, path, fmt) -> LibraryFile.  Extensions not listed here fall through
+# to the tag-type fallback and then the generic extractor.
+def _dispatch_id3(audio: MutagenFileType, path: Path, _fmt: str) -> LibraryFile:
+    return _extract_id3(audio, path)
+
+
+def _dispatch_wav(audio: MutagenFileType, path: Path, _fmt: str) -> LibraryFile:
+    return _extract_wav(audio, path)
+
+
+_FORMAT_EXTRACTORS: dict[str, Callable[[MutagenFileType, Path, str], LibraryFile]] = {
+    ".mp3": _dispatch_id3,
+    ".flac": _extract_vorbis,
+    ".ogg": _extract_vorbis,
+    ".wav": _dispatch_wav,
+}
 
 
 def extract_tags(path: Path) -> LibraryFile:
@@ -310,25 +326,25 @@ def extract_tags(path: Path) -> LibraryFile:
     ext = path.suffix.lower()
     fmt = _EXT_TO_FORMAT.get(ext, ext.lstrip("."))
 
-    # Dispatch by tag type
+    # Primary dispatch: extension → extractor
+    extractor = _FORMAT_EXTRACTORS.get(ext)
+    if extractor is not None:
+        return extractor(audio, path, fmt)
+
+    # Tag-type fallback for files with unexpected extensions
     tag_type = type(audio.tags).__name__ if audio.tags is not None else ""
-
-    if ext == ".mp3" or "ID3" in tag_type:
+    if "ID3" in tag_type:
         return _extract_id3(audio, path)
-
-    if ext in {".flac", ".ogg"} or "VComment" in tag_type or "Vorbis" in tag_type:
+    if "VComment" in tag_type or "Vorbis" in tag_type:
         return _extract_vorbis(audio, path, fmt)
 
-    if ext == ".wav":
-        return _extract_wav(audio, path)
-
     # Generic fallback — no tags extracted beyond format/hash/duration
-    duration_ms, _ = _duration_and_bitrate(audio)
+    duration_ms, _ = _extract_audio_stream_metrics(audio)
 
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_sha256(path),
+        file_hash=_compute_file_hash(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -404,8 +420,8 @@ def scan_directory(
 
 
 @dataclass
-class SmartScanResult:
-    """Result counts from a smart per-folder scan."""
+class FolderScanResult:
+    """Result counts from an incremental per-folder scan."""
 
     files_written: int = 0
     files_skipped: int = 0
@@ -414,13 +430,47 @@ class SmartScanResult:
     quarantined: int = 0
 
 
-def scan_folder_smart(
+def _extract_tags_safe(
+    path: Path,
+    file_path_str: str,
+    quarantine_repo: LibraryQuarantineRepository,
+    result: FolderScanResult,
+) -> LibraryFile | None:
+    """Extract tags from path; on any failure quarantine the file and return None."""
+    try:
+        return extract_tags(path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
+        quarantine_repo.create_write_only(
+            LibraryQuarantine(
+                id=uuid4(),
+                file_path=file_path_str,
+                error_message=str(exc),
+            )
+        )
+        result.quarantined += 1
+        return None
+
+
+def _mark_missing_files(
+    existing_by_path: dict[str, LibraryFile],
+    file_repo: LibraryFileRepository,
+    result: FolderScanResult,
+) -> None:
+    """Mark files that are in DB but absent from disk as MISSING."""
+    for file_path_str, existing in existing_by_path.items():
+        if existing.file_status == FileStatus.PRESENT:
+            file_repo.mark_missing(file_path_str)
+            result.files_missing += 1
+
+
+def scan_folder_incrementally(
     *,
     folder_path: Path,
     file_repo: LibraryFileRepository,
     quarantine_repo: LibraryQuarantineRepository,
-) -> SmartScanResult:
-    """Smart scan of a single folder — diffs disk vs DB, handles all 6 scenarios.
+) -> FolderScanResult:
+    """Incremental scan of a single folder — diffs disk vs DB, handles all 6 scenarios.
 
     Only processes files directly in this folder (not recursive).
 
@@ -432,62 +482,48 @@ def scan_folder_smart(
       5. Missing file (in DB, not on disk)-> mark MISSING
       6. Parse failure (Mutagen error)    -> quarantine
     """
-    result = SmartScanResult()
+    result = FolderScanResult()
 
-    # Get existing DB records for this folder (includes MISSING files)
     existing_by_path: dict[str, LibraryFile] = {
         f.file_path: f
         for f in file_repo.get_by_folder_path(str(folder_path))
     }
 
-    # Get audio files on disk in this folder (non-recursive)
     disk_files: dict[str, Path] = {}
     if folder_path.is_dir():
         for entry in folder_path.iterdir():
             if entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
                 disk_files[str(entry)] = entry
 
-    # Process files on disk
     for file_path_str, path in disk_files.items():
         existing = existing_by_path.pop(file_path_str, None)
 
         if existing is not None:
-            # File exists in DB
             if existing.file_status == FileStatus.MISSING:
                 # Scenario 4: Re-appeared file
                 try:
-                    current_hash = _sha256(path)
+                    current_hash = _compute_file_hash(path)
                 except OSError as exc:
                     logger.warning("hash_failed", path=file_path_str, error=str(exc))
                     result.quarantined += 1
                     continue
 
                 if current_hash == existing.file_hash:
-                    # Same content — just restore status, keep enrichment
+                    # Same content — restore status, keep enrichment
                     existing.file_status = FileStatus.PRESENT
                     file_repo.upsert(existing)
                 else:
                     # Content changed — re-extract tags
-                    try:
-                        lf = extract_tags(path)
-                        file_repo.upsert(lf)
-                        result.files_written += 1
-                    except (MutagenError, Exception) as exc:  # noqa: BLE001
-                        logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
-                        quarantine_repo.create_write_only(
-                            LibraryQuarantine(
-                                id=uuid4(),
-                                file_path=file_path_str,
-                                error_message=str(exc),
-                            )
-                        )
-                        result.quarantined += 1
+                    lf = _extract_tags_safe(path, file_path_str, quarantine_repo, result)
+                    if lf is None:
                         continue
+                    file_repo.upsert(lf)
+                    result.files_written += 1
                 result.files_reappeared += 1
             else:
                 # File is PRESENT in DB — check hash
                 try:
-                    current_hash = _sha256(path)
+                    current_hash = _compute_file_hash(path)
                 except OSError as exc:
                     logger.warning("hash_failed", path=file_path_str, error=str(exc))
                     result.quarantined += 1
@@ -498,42 +534,17 @@ def scan_folder_smart(
                     result.files_skipped += 1
                 else:
                     # Scenario 2: Modified — re-extract and upsert
-                    try:
-                        lf = extract_tags(path)
+                    lf = _extract_tags_safe(path, file_path_str, quarantine_repo, result)
+                    if lf is not None:
                         file_repo.upsert(lf)
                         result.files_written += 1
-                    except (MutagenError, Exception) as exc:  # noqa: BLE001
-                        logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
-                        quarantine_repo.create_write_only(
-                            LibraryQuarantine(
-                                id=uuid4(),
-                                file_path=file_path_str,
-                                error_message=str(exc),
-                            )
-                        )
-                        result.quarantined += 1
         else:
             # Scenario 3: New file — extract tags and insert
-            try:
-                lf = extract_tags(path)
+            lf = _extract_tags_safe(path, file_path_str, quarantine_repo, result)
+            if lf is not None:
                 file_repo.upsert(lf)
                 result.files_written += 1
-            except (MutagenError, Exception) as exc:  # noqa: BLE001
-                # Scenario 6: Parse failure — quarantine
-                logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
-                quarantine_repo.create_write_only(
-                    LibraryQuarantine(
-                        id=uuid4(),
-                        file_path=file_path_str,
-                        error_message=str(exc),
-                    )
-                )
-                result.quarantined += 1
 
-    # Scenario 5: Files in DB but not on disk -> mark MISSING
-    for file_path_str, existing in existing_by_path.items():
-        if existing.file_status == FileStatus.PRESENT:
-            file_repo.mark_missing(file_path_str)
-            result.files_missing += 1
+    _mark_missing_files(existing_by_path, file_repo, result)
 
     return result

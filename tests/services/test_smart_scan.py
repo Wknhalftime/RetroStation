@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import LibraryFile
-from backend.services.library_scan_service import scan_folder_smart
+from backend.services.library_scan_service import scan_folder_incrementally
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.library_quarantine import FakeLibraryQuarantineRepository
 
@@ -32,7 +32,7 @@ def _make_existing(
 class TestScanFolderSmartUnchanged:
     """Scenario 1: File on disk, hash matches DB -> no DB write."""
 
-    @patch("backend.services.library_scan_service._sha256", return_value="existing_hash")
+    @patch("backend.services.library_scan_service._compute_file_hash", return_value="existing_hash")
     def test_unchanged_file_not_written(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()
@@ -43,7 +43,7 @@ class TestScanFolderSmartUnchanged:
         existing = _make_existing(file_path=str(folder / "track.flac"))
         file_repo.upsert(existing)
 
-        result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.files_written == 0
         assert result.files_skipped == 1
@@ -54,7 +54,7 @@ class TestScanFolderSmartUnchanged:
 class TestScanFolderSmartModified:
     """Scenario 2: File on disk, hash differs -> update, reset enrichment."""
 
-    @patch("backend.services.library_scan_service._sha256", return_value="new_hash")
+    @patch("backend.services.library_scan_service._compute_file_hash", return_value="new_hash")
     def test_modified_file_written(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()
@@ -73,7 +73,7 @@ class TestScanFolderSmartModified:
                 format="flac",
                 enrichment_status=EnrichmentStatus.PENDING,
             )
-            result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.files_written == 1
 
@@ -97,7 +97,7 @@ class TestScanFolderSmartNew:
                 format="flac",
                 enrichment_status=EnrichmentStatus.PENDING,
             )
-            result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.files_written == 1
         f = file_repo.get_by_path(str(folder / "track.flac"))
@@ -108,7 +108,7 @@ class TestScanFolderSmartNew:
 class TestScanFolderSmartReappeared:
     """Scenario 4: File on disk, MISSING in DB -> restore to PRESENT."""
 
-    @patch("backend.services.library_scan_service._sha256", return_value="existing_hash")
+    @patch("backend.services.library_scan_service._compute_file_hash", return_value="existing_hash")
     def test_reappeared_same_hash_preserves_enrichment(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()
@@ -123,7 +123,7 @@ class TestScanFolderSmartReappeared:
         )
         file_repo.upsert(existing)
 
-        result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.files_reappeared == 1
         f = file_repo.get_by_path(str(folder / "track.flac"))
@@ -143,7 +143,7 @@ class TestScanFolderSmartMissing:
         ghost = _make_existing(file_path=str(folder / "ghost.flac"), file_status=FileStatus.PRESENT)
         file_repo.upsert(ghost)
 
-        result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.files_missing == 1
         f = file_repo.get_by_path(str(folder / "ghost.flac"))
@@ -164,7 +164,7 @@ class TestScanFolderSmartParseFailure:
 
         from mutagen._util import MutagenError
         with patch("backend.services.library_scan_service.extract_tags", side_effect=MutagenError("bad file")):
-            result = scan_folder_smart(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
 
         assert result.quarantined == 1
         q = q_repo.get_by_path(str(folder / "corrupt.flac"))

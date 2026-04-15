@@ -14,7 +14,7 @@ from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,
 )
-from backend.services.mb_client import RealMbClient
+from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -40,7 +40,7 @@ def library_enrichment_task() -> dict[str, int]:
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
-            mb_client = RealMbClient(cache_repo)
+            mb_client = MusicBrainzApiClient(cache_repo)
 
             # Pre-query both phases so counts are known for enrichment_started log.
             release_rows = conn.execute("""

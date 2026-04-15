@@ -49,8 +49,8 @@ def compute_folder_hash(
                 continue
             stat = entry.stat()
             file_parts.append(f"{entry.name}:{stat.st_mtime}:{stat.st_size}")
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("compute_folder_hash_scandir_failed", path=str(folder_path), error=str(exc))
 
     parts = sorted(child_hashes or []) + sorted(file_parts)
     combined = "\n".join(parts).encode("utf-8")
@@ -81,6 +81,67 @@ def coalesce_paths(paths: list[str]) -> list[str]:
     return result
 
 
+def _walk_folder_paths(root: Path) -> tuple[dict[str, str], list[str]]:
+    """Walk root bottom-up; return (folder_hashes, all_dirs)."""
+    folder_hashes: dict[str, str] = {}
+    all_dirs: list[str] = []
+    for dirpath, dirnames, _filenames in os.walk(str(root), topdown=False):
+        canonical = canonicalize_path(dirpath)
+        all_dirs.append(canonical)
+        child_hashes = [
+            folder_hashes[canonicalize_path(os.path.join(dirpath, d))]
+            for d in sorted(dirnames)
+            if canonicalize_path(os.path.join(dirpath, d)) in folder_hashes
+        ]
+        folder_hashes[canonical] = compute_folder_hash(Path(dirpath), child_hashes)
+    return folder_hashes, all_dirs
+
+
+def _sync_new_folders(
+    all_dirs: list[str],
+    folder_hashes: dict[str, str],
+    existing_folders: dict[str, LibraryFolder],
+    is_first_run: bool,
+    folder_repo: LibraryFolderRepository,
+) -> None:
+    """Create DB rows for folders not yet in existing_folders (parents before children)."""
+    for dir_path in reversed(all_dirs):
+        if dir_path in existing_folders:
+            continue
+        parent_path = canonicalize_path(str(Path(dir_path).parent))
+        parent = existing_folders.get(parent_path)
+        folder = LibraryFolder(
+            id=uuid4(),
+            name=Path(dir_path).name,
+            full_path=dir_path,
+            parent_id=parent.id if parent else None,
+            folder_hash=folder_hashes[dir_path] if is_first_run else None,
+        )
+        folder_repo.upsert(folder)
+        existing_folders[dir_path] = folder
+
+
+def _compute_diff(
+    folder_hashes: dict[str, str],
+    existing_folders: dict[str, LibraryFolder],
+    in_flight_ids: set[UUID],
+) -> tuple[list[str], list[tuple[UUID, str]]]:
+    """Diff computed hashes against stored hashes; return (changed_paths, pending)."""
+    changed: list[str] = []
+    pending: list[tuple[UUID, str]] = []
+    for dir_path, new_hash in folder_hashes.items():
+        folder = existing_folders.get(dir_path)
+        if folder is not None:
+            if folder.id in in_flight_ids:
+                continue
+            pending.append((folder.id, new_hash))
+            if folder.folder_hash != new_hash:
+                changed.append(dir_path)
+        else:
+            changed.append(dir_path)
+    return changed, pending
+
+
 def diff_tree(
     root_path: str,
     folder_repo: LibraryFolderRepository,
@@ -101,82 +162,23 @@ def diff_tree(
         return [], []
 
     is_first_run = not folder_repo.has_any()
-
-    # Build folder structure bottom-up using os.walk
-    folder_hashes: dict[str, str] = {}
-    all_dirs: list[str] = []
-
-    for dirpath, dirnames, _filenames in os.walk(str(root), topdown=False):
-        canonical = canonicalize_path(dirpath)
-        all_dirs.append(canonical)
-
-        child_hashes = []
-        for d in sorted(dirnames):
-            child_path = canonicalize_path(os.path.join(dirpath, d))
-            if child_path in folder_hashes:
-                child_hashes.append(folder_hashes[child_path])
-
-        folder_hash = compute_folder_hash(Path(dirpath), child_hashes)
-        folder_hashes[canonical] = folder_hash
-
-    # Build path -> existing folder mapping
+    folder_hashes, all_dirs = _walk_folder_paths(root)
     existing_folders: dict[str, LibraryFolder] = {
         f.full_path: f for f in folder_repo.get_all()
     }
+    _sync_new_folders(all_dirs, folder_hashes, existing_folders, is_first_run, folder_repo)
 
-    # Create missing folder entries — parents before children so parent_id
-    # references resolve correctly.  all_dirs is in bottom-up order (from
-    # os.walk topdown=False), so reverse it to get root-first.
-    for dir_path in reversed(all_dirs):
-        if dir_path not in existing_folders:
-            parent_path = canonicalize_path(str(Path(dir_path).parent))
-            parent = existing_folders.get(parent_path)
-            folder = LibraryFolder(
-                id=uuid4(),
-                name=Path(dir_path).name,
-                full_path=dir_path,
-                parent_id=parent.id if parent else None,
-                folder_hash=folder_hashes[dir_path] if is_first_run else None,
-            )
-            folder_repo.upsert(folder)
-            existing_folders[dir_path] = folder
-
-    # First run: set all hashes and return no changes
     if is_first_run:
         for dir_path, new_hash in folder_hashes.items():
-            folder = existing_folders[dir_path]
-            folder_repo.update_hash(folder.id, new_hash)
+            folder_repo.update_hash(existing_folders[dir_path].id, new_hash)
         logger.info("diff_tree_first_run", folders=len(all_dirs))
         return [], []
 
-    # Diff: find folders where hash changed.  Return pending as (folder_id,
-    # new_hash) tuples so callers can stage directly without a second
-    # get_all().
-    #
-    # Folders with uncommitted staged hashes (in-flight scans) are excluded
-    # from both ``changed`` and ``pending`` to prevent duplicate staging
-    # across overlapping poll cycles.
     in_flight_ids = folder_repo.get_folders_with_staged_hashes()
-
-    changed: list[str] = []
-    pending: list[tuple[UUID, str]] = []
-
-    for dir_path, new_hash in folder_hashes.items():
-        folder = existing_folders.get(dir_path)
-        if folder is not None:
-            if folder.id in in_flight_ids:
-                continue
-            pending.append((folder.id, new_hash))
-            if folder.folder_hash != new_hash:
-                changed.append(dir_path)
-        else:
-            changed.append(dir_path)
+    changed, pending = _compute_diff(folder_hashes, existing_folders, in_flight_ids)
 
     if in_flight_ids:
-        logger.info(
-            "watcher_poll_skipped_in_flight",
-            skipped=len(in_flight_ids),
-        )
+        logger.info("watcher_poll_skipped_in_flight", skipped=len(in_flight_ids))
 
     logger.info(
         "diff_tree_complete",

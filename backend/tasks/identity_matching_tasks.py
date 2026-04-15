@@ -20,12 +20,14 @@ def identity_matching_task(playlist_id: str) -> None:
 
     with connect_sync(settings.database_url) as conn:
         from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
+        from backend.db.repositories.broadcast_track_identities import (
+            PgBroadcastTrackIdentityRepository,
+        )
         from backend.db.repositories.library_files import PgLibraryFileRepository
         from backend.db.repositories.mapping_rules import PgMappingRuleRepository
         from backend.db.repositories.matches import PgMatchRepository
         from backend.db.repositories.recordings import PgRecordingRepository
         from backend.db.repositories.song_masters import PgSongMasterRepository
-        from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 
         work_ids = match_identities_for_playlist(
             playlist_id=UUID(playlist_id),
@@ -39,7 +41,7 @@ def identity_matching_task(playlist_id: str) -> None:
 
         # Recalculate song masters for any newly matched work IDs
         if work_ids:
-            master_selection_service.recalculate(
+            master_selection_service.recalculate_song_masters(
                 work_ids=work_ids,
                 song_master_repo=PgSongMasterRepository(conn),
                 recording_repo=PgRecordingRepository(conn),

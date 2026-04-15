@@ -31,7 +31,7 @@ def artist_matching_task(playlist_id: str) -> None:
         from backend.db.repositories.musicbrainz_cache import (
             PgMusicBrainzCacheRepository,
         )
-        from backend.services.mb_client import RealMbClient
+        from backend.services.mb_client import MusicBrainzApiClient
 
         match_artists_for_playlist(
             playlist_id=UUID(playlist_id),
@@ -40,7 +40,7 @@ def artist_matching_task(playlist_id: str) -> None:
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
-            mb_client=RealMbClient(PgMusicBrainzCacheRepository(conn)),
+            mb_client=MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)),
             mb_auto_link_score=settings.mb_auto_link_score,
             mb_score_gap=settings.mb_score_gap,
         )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from uuid import UUID, uuid4
 
 import psycopg
@@ -108,7 +108,7 @@ async def _require_station(conn: AsyncConnection[Any], station_id: UUID) -> dict
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Station {station_id} not found",
         )
-    return row
+    return cast(dict[str, Any], row)
 
 
 # ---------------------------------------------------------------------------
@@ -347,16 +347,16 @@ def _generate_station_m3u_sync(
     d = date_type.fromisoformat(date_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
-        events = repos.play_events.get_by_station_date(sid, d)
+        events = repos.broadcast_events.get_by_station_date(sid, d)
         return generate_m3u(
             events=events,
-            identity_repo=repos.track_identities,
+            track_identity_repo=repos.broadcast_identities,
             match_repo=repos.matches,
-            file_repo=repos.library_files,
+            library_file_repo=repos.library_files,
             recording_repo=repos.recordings,
-            master_repo=repos.song_masters,
-            override_repo=repos.format_overrides,
-            settings_repo=repos.settings,
+            song_master_repo=repos.song_masters,
+            format_override_repo=repos.format_overrides,
+            user_settings_repo=repos.user_settings,
             station_format=station_format,
         )
 

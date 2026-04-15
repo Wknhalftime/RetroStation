@@ -314,16 +314,16 @@ def _generate_m3u_sync(
     pid = UUID(playlist_id_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
-        events = repos.play_events.get_by_playlist(pid)
+        events = repos.broadcast_events.get_by_playlist(pid)
         return generate_m3u(
             events=events,
-            identity_repo=repos.track_identities,
+            track_identity_repo=repos.broadcast_identities,
             match_repo=repos.matches,
-            file_repo=repos.library_files,
+            library_file_repo=repos.library_files,
             recording_repo=repos.recordings,
-            master_repo=repos.song_masters,
-            override_repo=repos.format_overrides,
-            settings_repo=repos.settings,
+            song_master_repo=repos.song_masters,
+            format_override_repo=repos.format_overrides,
+            user_settings_repo=repos.user_settings,
             station_format=station_format,
         )
 

@@ -9,8 +9,8 @@ import psycopg
 import structlog
 
 from backend.config import get_settings
-from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
+from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import (
     EnrichmentStatus,

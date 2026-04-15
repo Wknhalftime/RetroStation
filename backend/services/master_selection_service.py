@@ -6,6 +6,7 @@ import structlog
 
 from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod
+from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -21,28 +22,27 @@ RELEASE_TYPE_SCORE: dict[str, int] = {
 FORMAT_BONUS: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
 
 
-def _score_file(lib_file: object) -> tuple[int, int, int]:
+def _score_file(lib_file: LibraryFile) -> tuple[int, int, int]:
     """Return (score, bitrate, duration_ms) tuple for sorting.
 
     Higher is better for all three values.
     """
-    from backend.domain.library import LibraryFile
-    f: LibraryFile = lib_file  # type: ignore[assignment]
-
     score = 0
-    if f.audio.release_status is not None:
-        score += RELEASE_STATUS_SCORE.get(f.audio.release_status.value, 0)
-    if f.audio.release_type is not None:
-        score += RELEASE_TYPE_SCORE.get(f.audio.release_type.value, RELEASE_TYPE_SCORE["other"])
-    fmt = (f.format or "").lower()
+    if lib_file.audio.release_status is not None:
+        score += RELEASE_STATUS_SCORE.get(lib_file.audio.release_status.value, 0)
+    if lib_file.audio.release_type is not None:
+        score += RELEASE_TYPE_SCORE.get(
+            lib_file.audio.release_type.value, RELEASE_TYPE_SCORE["other"]
+        )
+    fmt = (lib_file.format or "").lower()
     score += FORMAT_BONUS.get(fmt, 1)
 
-    bitrate = f.audio.bitrate or 0
-    duration = f.audio.duration_ms or 0
+    bitrate = lib_file.audio.bitrate or 0
+    duration = lib_file.audio.duration_ms or 0
     return score, bitrate, duration
 
 
-def recalculate(
+def recalculate_song_masters(
     work_ids: list[str],
     song_master_repo: SongMasterRepository,
     recording_repo: RecordingRepository | None = None,
@@ -81,7 +81,7 @@ def recalculate(
             continue
 
         recordings = recording_repo.get_by_work(work_id)
-        all_files = []
+        all_files: list[LibraryFile] = []
         for recording in recordings:
             all_files.extend(library_file_repo.get_by_recording(recording.id))
 
@@ -89,7 +89,6 @@ def recalculate(
             logger.debug("master_selection_no_files", work_id=work_id)
             continue
 
-        # Sort: primary score DESC, then bitrate DESC, then duration_ms DESC
         best = max(all_files, key=_score_file)
         score_val, _, _ = _score_file(best)
 

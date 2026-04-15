@@ -15,12 +15,12 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastPlayEvent
 from backend.domain.enums import MatchStatus
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
-from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.user_settings import UserSettingRepository
 
 _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
@@ -31,43 +31,45 @@ _MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
 def generate_m3u(
     *,
     events: list[BroadcastPlayEvent],
-    identity_repo: BroadcastTrackIdentityRepository,
+    track_identity_repo: BroadcastTrackIdentityRepository,
     match_repo: MatchRepository,
-    file_repo: LibraryFileRepository,
+    library_file_repo: LibraryFileRepository,
     recording_repo: RecordingRepository,
-    master_repo: SongMasterRepository,
-    override_repo: FormatOverrideRepository,
-    settings_repo: UserSettingRepository,
+    song_master_repo: SongMasterRepository,
+    format_override_repo: FormatOverrideRepository,
+    user_settings_repo: UserSettingRepository,
     station_format: str | None = None,
 ) -> str:
     """Generate an M3U playlist string for the given events.
 
     Args:
         events: Pre-fetched list of play events to export.
-        identity_repo: Repository for log identities.
+        track_identity_repo: Repository for broadcast track identities.
         match_repo: Repository for identity matches.
-        file_repo: Repository for library files.
+        library_file_repo: Repository for library files.
         recording_repo: Repository for MusicBrainz recordings.
-        master_repo: Repository for song masters.
-        override_repo: Repository for format overrides.
-        settings_repo: Repository for user settings.
+        song_master_repo: Repository for song masters.
+        format_override_repo: Repository for format overrides.
+        user_settings_repo: Repository for user settings.
         station_format: Optional station format string used for format_override
             lookup (e.g. ``"CHR"``).
 
     Returns:
         A UTF-8 M3U string beginning with ``#EXTM3U``.
     """
-    _local = settings_repo.get("local_path_prefix")
-    local_prefix: str = _local.value if _local is not None else ""
-    _navidrome = settings_repo.get("navidrome_path_prefix")
-    navidrome_prefix: str = _navidrome.value if _navidrome is not None else ""
+    local_path_setting = user_settings_repo.get("local_path_prefix")
+    local_prefix: str = local_path_setting.value if local_path_setting is not None else ""
+    navidrome_path_setting = user_settings_repo.get("navidrome_path_prefix")
+    navidrome_prefix: str = (
+        navidrome_path_setting.value if navidrome_path_setting is not None else ""
+    )
 
     sorted_events = sorted(events, key=lambda e: e.played_at)
 
     lines: list[str] = ["#EXTM3U"]
 
     for event in sorted_events:
-        identity = identity_repo.get_by_id(event.identity_id)
+        identity = track_identity_repo.get_by_id(event.identity_id)
         if identity is None or identity.match_status not in _MATCHED_STATUSES:
             continue
 
@@ -77,25 +79,24 @@ def generate_m3u(
 
         resolved_file_id: UUID = match.library_file_id
 
-        # Attempt to walk up to a work so we can check master / format override.
-        direct_file = file_repo.get_by_id(match.library_file_id)
+        direct_file = library_file_repo.get_by_id(match.library_file_id)
         if direct_file is not None and direct_file.recording_id is not None:
             recording = recording_repo.get_by_id(direct_file.recording_id)
             if recording is not None and recording.work_id is not None:
                 work_id: str = recording.work_id
 
                 # Priority 1 (lowest): song_master
-                master = master_repo.get_by_work(work_id)
+                master = song_master_repo.get_by_work(work_id)
                 if master is not None:
                     resolved_file_id = master.preferred_file_id
 
                 # Priority 2 (highest): format_override
                 if station_format is not None:
-                    override = override_repo.get(work_id, station_format)
+                    override = format_override_repo.get(work_id, station_format)
                     if override is not None:
                         resolved_file_id = override.preferred_file_id
 
-        resolved_file = file_repo.get_by_id(resolved_file_id)
+        resolved_file = library_file_repo.get_by_id(resolved_file_id)
         if resolved_file is None:
             continue
 

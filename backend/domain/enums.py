@@ -41,6 +41,7 @@ class VersionType(StrEnum):
     COVER        = "cover"
     EDITION      = "edition"
     ALTERNATE    = "alternate"
+    A_CAPPELLA   = "a_cappella"
     FORMAT       = "format"
     UNKNOWN      = "unknown"
     OTHER        = "other"

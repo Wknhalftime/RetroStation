@@ -4,8 +4,9 @@ import csv
 import hashlib
 import io
 import posixpath
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import chardet
 import structlog
@@ -31,14 +32,14 @@ from backend.services.normalization import (
 logger = structlog.get_logger()
 
 
+@dataclass
 class IngestionResult:
-    def __init__(self) -> None:
-        self.playlist_id = ""
-        self.rows_processed = 0
-        self.artists_created = 0
-        self.identities_created = 0
-        self.events_created = 0
-        self.broadcast_days_created = 0
+    playlist_id: str = ""
+    rows_processed: int = 0
+    artists_created: int = 0
+    identities_created: int = 0
+    events_created: int = 0
+    broadcast_days_created: int = 0
 
 
 def ingest_csv(
@@ -68,7 +69,6 @@ def ingest_csv(
         raise ValueError(f"CSV already ingested as playlist {existing.id}")
 
     # Create playlist
-    from uuid import UUID
     playlist = playlist_repo.create(BroadcastPlaylist(
         id=uuid4(),
         name=posixpath.basename(file_name),
@@ -131,10 +131,9 @@ def ingest_csv(
         # Broadcast day
         date_str = played_at.date().isoformat()
         if date_str not in seen_broadcast_dates and station_id:
-            bd = broadcast_day_repo.get_or_create(
+            seen_broadcast_dates[date_str] = broadcast_day_repo.get_or_create(
                 UUID(station_id), played_at.date()
             )
-            seen_broadcast_dates[date_str] = bd
             result.broadcast_days_created += 1
         broadcast_day = seen_broadcast_dates.get(date_str)
 

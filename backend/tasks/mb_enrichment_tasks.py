@@ -5,7 +5,7 @@ import structlog
 from backend.config import get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.sync_conn import connect_sync
-from backend.services.mb_client import RealMbClient
+from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -30,7 +30,7 @@ def mb_enrichment_task() -> dict[str, int]:
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        mb_client = RealMbClient(cache_repo)
+        mb_client = MusicBrainzApiClient(cache_repo)
 
         pending_artists = repos.artists.list_unenhanced()
         for artist in pending_artists:
@@ -86,7 +86,7 @@ def mb_enrichment_task() -> dict[str, int]:
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        mb_client = RealMbClient(cache_repo)
+        mb_client = MusicBrainzApiClient(cache_repo)
 
         pending_recordings = repos.recordings.list_needing_enhancement()
         for recording in pending_recordings:
