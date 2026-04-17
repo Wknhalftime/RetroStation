@@ -164,7 +164,8 @@ class TestDiffTree:
         (sub / "track2.flac").write_bytes(b"\x00" * 200)
 
         # The jazz folder should be skipped because it has staged hashes
-        changes, pending = diff_tree(str(tmp_path), repo)
+        in_flight_ids = repo.get_folders_with_staged_hashes()
+        changes, pending = diff_tree(str(tmp_path), repo, in_flight_ids)
 
         # jazz folder should NOT appear in changed or pending
         assert jazz_folder.id not in {fid for fid, _ in pending}
