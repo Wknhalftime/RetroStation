@@ -13,8 +13,8 @@ class FakeArtistRepository(ArtistRepository):
         self._data[artist.id] = artist
         return artist
 
-    def get_by_id(self, mbid: str) -> Artist | None:
-        return self._data.get(mbid)
+    def get_by_id(self, artist_id: str) -> Artist | None:
+        return self._data.get(artist_id)
 
     def list_all(self) -> list[Artist]:
         return list(self._data.values())
@@ -22,12 +22,12 @@ class FakeArtistRepository(ArtistRepository):
     def list_unenhanced(self) -> list[Artist]:
         return [a for a in self._data.values() if a.needs_enhancement]
 
-    def mark_enhanced(self, mbid: str) -> None:
-        if artist := self._data.get(mbid):
+    def mark_enhanced(self, artist_id: str) -> None:
+        if artist := self._data.get(artist_id):
             artist.needs_enhancement = False
 
-    def mark_enhancement_failed(self, mbid: str, error: str) -> None:
-        if artist := self._data.get(mbid):
+    def mark_enhancement_failed(self, artist_id: str, error: str) -> None:
+        if artist := self._data.get(artist_id):
             artist.enhancement_error = error
 
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:

@@ -49,9 +49,9 @@ class PgArtistRepository(ArtistRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, mbid: str) -> Artist | None:
+    def get_by_id(self, artist_id: str) -> Artist | None:
         row = self._conn.execute(
-            "SELECT * FROM artists WHERE id = %s", (mbid,)
+            "SELECT * FROM artists WHERE id = %s", (artist_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
@@ -67,16 +67,16 @@ class PgArtistRepository(ArtistRepository):
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def mark_enhanced(self, mbid: str) -> None:
+    def mark_enhanced(self, artist_id: str) -> None:
         self._conn.execute(
             "UPDATE artists SET needs_enhancement = FALSE, enhanced_at = now() WHERE id = %s",
-            (mbid,),
+            (artist_id,),
         )
 
-    def mark_enhancement_failed(self, mbid: str, error: str) -> None:
+    def mark_enhancement_failed(self, artist_id: str, error: str) -> None:
         self._conn.execute(
             "UPDATE artists SET enhancement_error = %s WHERE id = %s",
-            (error, mbid),
+            (error, artist_id),
         )
 
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:
