@@ -21,7 +21,7 @@ import backend.tasks.embedding_tasks  # noqa: F401, E402
 import backend.tasks.identity_matching_tasks  # noqa: F401, E402
 import backend.tasks.ingestion_tasks  # noqa: F401, E402
 import backend.tasks.library_enrichment_tasks  # noqa: F401, E402
-import backend.tasks.library_tasks  # noqa: F401, E402
+import backend.tasks.library_scan_tasks  # noqa: F401, E402
 import backend.tasks.library_watcher_tasks  # noqa: F401, E402
 import backend.tasks.mb_enrichment_tasks  # noqa: F401, E402
-import backend.tasks.normalize_backfill_task  # noqa: F401, E402
+import backend.tasks.normalize_backfill_tasks  # noqa: F401, E402

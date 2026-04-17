@@ -102,13 +102,13 @@ class TestScanDirectoryProgress:
 class TestLibraryScanTaskProgress:
     """Tests for library_scan_task progress tracking lifecycle."""
 
-    @patch("backend.tasks.library_tasks.psycopg")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_running_record_exists_before_scan_starts(
         self, mock_scan: MagicMock, mock_psycopg: MagicMock
     ) -> None:
         """Verify RUNNING is written before scan_directory is called."""
-        from backend.tasks.library_tasks import library_scan_task
+        from backend.tasks.library_scan_tasks import library_scan_task
 
         fake_progress = FakeTaskProgressRepository()
         status_at_scan_time: list[TaskStatus] = []
@@ -137,7 +137,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgTaskProgressRepository",
+            "backend.tasks.library_scan_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task.call_local("/fake/path")
@@ -152,12 +152,12 @@ class TestLibraryScanTaskProgress:
         assert records[0].status == TaskStatus.COMPLETED
         assert records[0].task_type == TaskType.SCAN
 
-    @patch("backend.tasks.library_tasks.psycopg")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_marks_failed_on_scan_exception(
         self, mock_scan: MagicMock, mock_psycopg: MagicMock
     ) -> None:
-        from backend.tasks.library_tasks import library_scan_task
+        from backend.tasks.library_scan_tasks import library_scan_task
 
         fake_progress = FakeTaskProgressRepository()
         mock_scan.side_effect = RuntimeError("disk error")
@@ -167,7 +167,7 @@ class TestLibraryScanTaskProgress:
 
         with (
             patch(
-                "backend.tasks.library_tasks.PgTaskProgressRepository",
+                "backend.tasks.library_scan_tasks.PgTaskProgressRepository",
                 return_value=fake_progress,
             ),
             pytest.raises(RuntimeError, match="disk error"),
@@ -179,12 +179,12 @@ class TestLibraryScanTaskProgress:
         assert records[0].status == TaskStatus.FAILED
         assert "disk error" in records[0].progress_data.get("error", "")
 
-    @patch("backend.tasks.library_tasks.psycopg")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_progress_data_has_processed_and_total(
         self, mock_scan: MagicMock, mock_psycopg: MagicMock
     ) -> None:
-        from backend.tasks.library_tasks import library_scan_task
+        from backend.tasks.library_scan_tasks import library_scan_task
 
         fake_progress = FakeTaskProgressRepository()
         mock_scan.return_value = ([], [])
@@ -202,7 +202,7 @@ class TestLibraryScanTaskProgress:
         mock_psycopg.connect.side_effect = connect_side_effect
 
         with patch(
-            "backend.tasks.library_tasks.PgTaskProgressRepository",
+            "backend.tasks.library_scan_tasks.PgTaskProgressRepository",
             return_value=fake_progress,
         ):
             library_scan_task.call_local("/fake/path")

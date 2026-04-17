@@ -14,7 +14,7 @@ from backend.dependencies import get_current_token, get_db_connection
 from backend.domain.enums import CatalogSource
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
-from backend.tasks.library_tasks import library_scan_task
+from backend.tasks.library_scan_tasks import library_scan_task
 
 router = APIRouter()
 

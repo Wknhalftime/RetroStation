@@ -30,13 +30,13 @@ def _make_q(idx: int) -> LibraryQuarantine:
 class TestRunScanChunkedCommits:
     """Test that _run_scan commits at COMMIT_CHUNK_SIZE boundaries."""
 
-    @patch("backend.tasks.library_tasks.diff_tree")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.diff_tree")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_commit_fires_at_chunk_boundary(
         self, mock_scan: MagicMock, mock_diff_tree: MagicMock
     ) -> None:
         """With chunk_size=3 and 5 files, commit should fire at file 3 and at end."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         files = [_make_lf(i) for i in range(5)]
 
@@ -66,14 +66,14 @@ class TestRunScanChunkedCommits:
         # 3) folder commit (diff_tree always writes folder rows)
         assert mock_conn.commit.call_count == 3
 
-    @patch("backend.tasks.library_tasks.diff_tree")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.diff_tree")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_commit_fires_twice_when_exact_chunk(
         self, mock_scan: MagicMock, mock_diff_tree: MagicMock
     ) -> None:
         """With chunk_size=3 and exactly 3 files, expect 2 commits:
         one at the chunk boundary and one unconditional commit after diff_tree."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         files = [_make_lf(i) for i in range(3)]
 
@@ -104,10 +104,10 @@ class TestRunScanChunkedCommits:
         # Total: 2 commits.
         assert mock_conn.commit.call_count == 2
 
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_upsert_write_only_called_for_each_file(self, mock_scan: MagicMock) -> None:
         """Each file should trigger upsert_write_only, not the old upsert."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         files = [_make_lf(i) for i in range(3)]
 
@@ -135,10 +135,10 @@ class TestRunScanChunkedCommits:
         # The old upsert should NOT be called
         mock_repos.library_files.upsert.assert_not_called()
 
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_create_write_only_called_for_quarantine(self, mock_scan: MagicMock) -> None:
         """Quarantine entries should use create_write_only."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         quarantine = [_make_q(i) for i in range(2)]
 
@@ -165,13 +165,13 @@ class TestRunScanChunkedCommits:
         assert mock_repos.library_quarantine.create_write_only.call_count == 2
         mock_repos.library_quarantine.create.assert_not_called()
 
-    @patch("backend.tasks.library_tasks.diff_tree")
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.diff_tree")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_mixed_files_and_quarantine_share_chunk_counter(
         self, mock_scan: MagicMock, mock_diff_tree: MagicMock
     ) -> None:
         """Files and quarantine entries both count toward the chunk boundary."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         def fake_scan(root: Path, **kwargs):
             on_file = kwargs["on_file"]
@@ -203,10 +203,10 @@ class TestRunScanChunkedCommits:
         # Total: 2 commits.
         assert mock_conn.commit.call_count == 2
 
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_returns_counts_and_progress(self, mock_scan: MagicMock) -> None:
         """_run_scan should return (files_written, quarantine_written, last_progress)."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         def fake_scan(root: Path, **kwargs):
             on_file = kwargs["on_file"]
@@ -231,10 +231,10 @@ class TestRunScanChunkedCommits:
         assert quarantine_written == 1
         assert isinstance(last_progress, dict)
 
-    @patch("backend.tasks.library_tasks.scan_directory")
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_on_progress_updates_progress_repo(self, mock_scan: MagicMock) -> None:
         """on_progress callback should upsert into progress_repo."""
-        from backend.tasks.library_tasks import _run_scan
+        from backend.tasks.library_scan_tasks import _run_scan
 
         def fake_scan(root: Path, **kwargs):
             on_progress = kwargs["on_progress"]
