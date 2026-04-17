@@ -13,6 +13,7 @@ from backend.config import get_settings
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.sync_conn import connect_sync
 from backend.dependencies import get_current_token, get_db_connection
+from backend.tasks.library_enrichment_tasks import library_enrichment_task as _library_enrichment_task  # type: ignore[attr-defined]
 
 router = APIRouter()
 
@@ -112,8 +113,6 @@ async def retry_enrichment(_token: Token) -> RetryEnrichmentResult:
         :class:`RetryEnrichmentResult` with the count of rows reset and a status
         message.
     """
-    from backend.tasks.library_enrichment_tasks import library_enrichment_task
-
     settings = get_settings()
 
     def _reset_failed() -> int:
@@ -127,7 +126,7 @@ async def retry_enrichment(_token: Token) -> RetryEnrichmentResult:
     # Note: this does not fix thread-pool exhaustion under load — async repos
     # remain the long-term fix (see async infrastructure plan).
     reset_count = await asyncio.to_thread(_reset_failed)
-    library_enrichment_task()
+    _library_enrichment_task()
 
     return RetryEnrichmentResult(
         reset=reset_count,

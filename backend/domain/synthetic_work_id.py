@@ -19,7 +19,7 @@ def decode(work_id: str) -> tuple[str, str] | None:
         encoded += "=" * padding
     try:
         raw = base64.urlsafe_b64decode(encoded).decode()
-    except Exception:
+    except (ValueError, UnicodeDecodeError):
         return None
     colon_idx = raw.find(":")
     if colon_idx == -1:

@@ -192,9 +192,7 @@ class TestRetryEnrichment:
                 "backend.routers.tasks.PgLibraryFileRepository",
                 return_value=mock_repo,
             ),
-            patch(
-                "backend.tasks.library_enrichment_tasks.library_enrichment_task"
-            ),
+            patch("backend.routers.tasks._library_enrichment_task"),
         ):
             conn_mock = MagicMock()
             mock_conn_ctx.return_value.__enter__ = MagicMock(return_value=conn_mock)
