@@ -4,10 +4,11 @@ from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import LibraryFile
+from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
 
-class FakeLibraryFileRepository(LibraryFileRepository):
+class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, LibraryFile] = {}
 

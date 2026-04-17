@@ -8,10 +8,11 @@ import psycopg
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.library import AudioMetadata, LibraryFile
+from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
 
-class PgLibraryFileRepository(LibraryFileRepository):
+class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 

@@ -80,3 +80,8 @@ def test_library_folder_fake_is_concrete() -> None:
 def test_system_log_fake_is_concrete() -> None:
     from tests.fakes.system_logs import FakeSystemLogRepository
     assert FakeSystemLogRepository() is not None
+
+def test_library_file_enrichment_fake_is_concrete() -> None:
+    from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
+    from tests.fakes.library_files import FakeLibraryFileRepository
+    assert isinstance(FakeLibraryFileRepository(), LibraryFileEnrichmentRepository)
