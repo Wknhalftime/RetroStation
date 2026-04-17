@@ -39,3 +39,6 @@ class TestDecode:
 
     def test_returns_none_for_corrupted_input(self) -> None:
         assert decode("syn_notvalidbase64!!!") is None
+
+    def test_returns_none_for_empty_payload(self) -> None:
+        assert decode("syn_") is None
