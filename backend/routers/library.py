@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -13,27 +12,9 @@ from pydantic import BaseModel
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection
 from backend.domain.enums import CatalogSource
+from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 from backend.tasks.library_tasks import library_scan_task
-
-
-def _encode_synthetic_work_id(artist_id: str, track_title: str) -> str:
-    """Create a URL-safe synthetic work ID from artist_id + track_title."""
-    raw = f"{artist_id}:{track_title}"
-    return "syn_" + base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
-
-
-def _decode_synthetic_work_id(work_id: str) -> tuple[str, str] | None:
-    """Decode a synthetic work ID. Returns (artist_id, track_title) or None."""
-    if not work_id.startswith("syn_"):
-        return None
-    encoded = work_id[4:]
-    # Re-add padding
-    padding = 4 - len(encoded) % 4
-    if padding != 4:
-        encoded += "=" * padding
-    raw = base64.urlsafe_b64decode(encoded).decode()
-    colon_idx = raw.index(":")
-    return raw[:colon_idx], raw[colon_idx + 1:]
 
 router = APIRouter()
 
@@ -413,7 +394,7 @@ async def get_artist_detail(
         work_rows = await works_cur.fetchall()
         works = [
             WorkSummary(
-                id=_encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
+                id=encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
                 title=row["title"] or "Unknown",
                 recording_count=row["recording_count"],
                 has_master=False,
@@ -467,7 +448,7 @@ async def get_work_detail(
     """
     # Check if this is a synthetic ID (base64-encoded artist_id:track_title)
     # from the fallback path in get_artist_detail, or a real works table ID.
-    synthetic = _decode_synthetic_work_id(work_id)
+    synthetic = decode_synthetic_work_id(work_id)
     work_row: dict[str, Any] | None = None
     recordings: list[RecordingDetail] = []
     song_master: SongMasterInfo | None = None
