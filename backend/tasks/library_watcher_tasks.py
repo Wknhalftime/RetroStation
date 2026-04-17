@@ -44,7 +44,8 @@ def library_watcher_poll() -> None:
         if not root_path:
             return
 
-        changed, pending = diff_tree(root_path, repos.library_folders)
+        in_flight_ids = repos.library_folders.get_folders_with_staged_hashes()
+        changed, pending = diff_tree(root_path, repos.library_folders, in_flight_ids)
         conn.commit()
 
         if not changed:

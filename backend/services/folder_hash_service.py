@@ -145,12 +145,14 @@ def _compute_diff(
 def diff_tree(
     root_path: str,
     folder_repo: LibraryFolderRepository,
+    in_flight_ids: set[UUID] | None = None,
 ) -> tuple[list[str], list[tuple[UUID, str]]]:
     """Walk the directory tree and find folders whose hash has changed.
 
     Args:
         root_path: Root directory to walk.
         folder_repo: Repository for stored folder hashes.
+        in_flight_ids: Set of folder IDs currently being processed (to skip them).
 
     Returns:
         A tuple of (changed_folder_paths, pending_hashes) where
@@ -174,7 +176,7 @@ def diff_tree(
         logger.info("diff_tree_first_run", folders=len(all_dirs))
         return [], []
 
-    in_flight_ids = folder_repo.get_folders_with_staged_hashes()
+    in_flight_ids = in_flight_ids or set()
     changed, pending = _compute_diff(folder_hashes, existing_folders, in_flight_ids)
 
     if in_flight_ids:
