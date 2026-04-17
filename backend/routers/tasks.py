@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Annotated, Any
@@ -114,11 +115,18 @@ async def retry_enrichment(_token: Token) -> RetryEnrichmentResult:
     from backend.tasks.library_enrichment_tasks import library_enrichment_task
 
     settings = get_settings()
-    with connect_sync(settings.database_url) as conn:
-        repo = PgLibraryFileRepository(conn)
-        reset_count = repo.reset_failed_enrichments()
-        conn.commit()
 
+    def _reset_failed() -> int:
+        with connect_sync(settings.database_url) as conn:
+            repo = PgLibraryFileRepository(conn)
+            count = repo.reset_failed_enrichments()
+            conn.commit()
+            return count
+
+    # asyncio.to_thread avoids blocking the event loop during the sync DB call.
+    # Note: this does not fix thread-pool exhaustion under load — async repos
+    # remain the long-term fix (see async infrastructure plan).
+    reset_count = await asyncio.to_thread(_reset_failed)
     library_enrichment_task()
 
     return RetryEnrichmentResult(

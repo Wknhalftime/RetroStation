@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -169,3 +171,39 @@ class TestActiveTasks:
         resp = client.get("/api/v1/tasks/active")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# Tests — POST /api/v1/tasks/retry-enrichment
+# ---------------------------------------------------------------------------
+
+
+class TestRetryEnrichment:
+    def test_resets_failed_files_and_returns_count(
+        self, client: TestClient
+    ) -> None:
+        """retry_enrichment endpoint resets failed files and returns count."""
+        mock_repo = MagicMock()
+        mock_repo.reset_failed_enrichments.return_value = 5
+
+        with (
+            patch("backend.routers.tasks.connect_sync") as mock_conn_ctx,
+            patch(
+                "backend.routers.tasks.PgLibraryFileRepository",
+                return_value=mock_repo,
+            ),
+            patch(
+                "backend.tasks.library_enrichment_tasks.library_enrichment_task"
+            ),
+        ):
+            conn_mock = MagicMock()
+            mock_conn_ctx.return_value.__enter__ = MagicMock(return_value=conn_mock)
+            mock_conn_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+            resp = client.post("/api/v1/tasks/retry-enrichment")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["reset"] == 5
+        assert "5" in data["message"]
+        mock_repo.reset_failed_enrichments.assert_called_once()
