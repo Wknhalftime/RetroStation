@@ -75,6 +75,7 @@ def library_enrichment_task() -> dict[str, int]:
                     count = enrich_by_release(
                         release_mbid,
                         repos.library_files,
+                        repos.library_files,  # also implements LibraryFileEnrichmentRepository
                         repos.recordings,
                         repos.works,
                         repos.artists,
@@ -96,6 +97,7 @@ def library_enrichment_task() -> dict[str, int]:
                     count = enrich_by_recording(
                         recording_mbid,
                         repos.library_files,
+                        repos.library_files,  # also implements LibraryFileEnrichmentRepository
                         repos.recordings,
                         repos.works,
                         repos.artists,
