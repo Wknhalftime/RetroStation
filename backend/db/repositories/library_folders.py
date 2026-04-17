@@ -7,9 +7,10 @@ import psycopg
 
 from backend.domain.library import LibraryFolder
 from backend.repositories.library_folders import LibraryFolderRepository
+from backend.repositories.library_folder_staging import LibraryFolderHashStaging
 
 
-class PgLibraryFolderRepository(LibraryFolderRepository):
+class PgLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStaging):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 

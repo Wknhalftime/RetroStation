@@ -97,3 +97,9 @@ def test_artist_enhancement_fake_is_concrete() -> None:
     from backend.repositories.artist_enhancement import ArtistEnhancementRepository
     from tests.fakes.artists import FakeArtistRepository
     assert isinstance(FakeArtistRepository(), ArtistEnhancementRepository)
+
+
+def test_library_folder_staging_fake_is_concrete() -> None:
+    from backend.repositories.library_folder_staging import LibraryFolderHashStaging
+    from tests.fakes.library_folders import FakeLibraryFolderRepository
+    assert isinstance(FakeLibraryFolderRepository(), LibraryFolderHashStaging)
