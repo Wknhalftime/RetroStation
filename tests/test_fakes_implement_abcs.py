@@ -85,3 +85,15 @@ def test_library_file_enrichment_fake_is_concrete() -> None:
     from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
     from tests.fakes.library_files import FakeLibraryFileRepository
     assert isinstance(FakeLibraryFileRepository(), LibraryFileEnrichmentRepository)
+
+
+def test_artist_catalog_fake_is_concrete() -> None:
+    from backend.repositories.artist_catalog import ArtistCatalogRepository
+    from tests.fakes.artists import FakeArtistRepository
+    assert isinstance(FakeArtistRepository(), ArtistCatalogRepository)
+
+
+def test_artist_enhancement_fake_is_concrete() -> None:
+    from backend.repositories.artist_enhancement import ArtistEnhancementRepository
+    from tests.fakes.artists import FakeArtistRepository
+    assert isinstance(FakeArtistRepository(), ArtistEnhancementRepository)
