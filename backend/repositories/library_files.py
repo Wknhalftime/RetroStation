@@ -13,7 +13,7 @@ class LibraryFileRepository(ABC):
     def upsert_write_only(self, file: LibraryFile) -> None: ...
 
     @abstractmethod
-    def get_by_id(self, id: UUID) -> LibraryFile | None: ...
+    def get_by_id(self, file_id: UUID) -> LibraryFile | None: ...
 
     @abstractmethod
     def get_by_path(self, file_path: str) -> LibraryFile | None: ...
@@ -33,7 +33,7 @@ class LibraryFileRepository(ABC):
     @abstractmethod
     def update_recording_link(
         self,
-        id: UUID,
+        file_id: UUID,
         recording_id: str | None,
         enrichment_status: EnrichmentStatus,
     ) -> None: ...

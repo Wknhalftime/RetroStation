@@ -249,9 +249,9 @@ class PgLibraryFileRepository(LibraryFileRepository):
             ),
         )
 
-    def get_by_id(self, id: UUID) -> LibraryFile | None:
+    def get_by_id(self, file_id: UUID) -> LibraryFile | None:
         row = self._conn.execute(
-            "SELECT * FROM library_files WHERE id = %s", (id,)
+            "SELECT * FROM library_files WHERE id = %s", (file_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
@@ -297,7 +297,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
 
     def update_recording_link(
         self,
-        id: UUID,
+        file_id: UUID,
         recording_id: str | None,
         enrichment_status: EnrichmentStatus,
     ) -> None:
@@ -305,7 +305,7 @@ class PgLibraryFileRepository(LibraryFileRepository):
             """UPDATE library_files
                SET recording_id = %s, enrichment_status = %s
                WHERE id = %s""",
-            (recording_id, enrichment_status.value, id),
+            (recording_id, enrichment_status.value, file_id),
         )
 
     def count_by_format(self) -> dict[str, int]:

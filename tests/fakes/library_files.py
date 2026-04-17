@@ -25,8 +25,8 @@ class FakeLibraryFileRepository(LibraryFileRepository):
     def upsert_write_only(self, file: LibraryFile) -> None:
         self.upsert(file)
 
-    def get_by_id(self, id: UUID) -> LibraryFile | None:
-        return self._data.get(id)
+    def get_by_id(self, file_id: UUID) -> LibraryFile | None:
+        return self._data.get(file_id)
 
     def get_by_path(self, file_path: str) -> LibraryFile | None:
         return next((f for f in self._data.values() if f.file_path == file_path), None)
@@ -53,9 +53,9 @@ class FakeLibraryFileRepository(LibraryFileRepository):
         ]
 
     def update_recording_link(
-        self, id: UUID, recording_id: str | None, enrichment_status: EnrichmentStatus
+        self, file_id: UUID, recording_id: str | None, enrichment_status: EnrichmentStatus
     ) -> None:
-        if f := self._data.get(id):
+        if f := self._data.get(file_id):
             f.recording_id = recording_id
             f.enrichment_status = enrichment_status
 
