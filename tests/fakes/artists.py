@@ -4,10 +4,9 @@ from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
-from backend.repositories.artists import ArtistRepository
 
 
-class FakeArtistRepository(ArtistRepository, ArtistCatalogRepository, ArtistEnhancementRepository):
+class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
     def __init__(self) -> None:
         self._data: dict[str, Artist] = {}
 

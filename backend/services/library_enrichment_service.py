@@ -5,7 +5,7 @@ import structlog
 from backend.domain.catalog import Recording
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import LibraryFile
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
@@ -104,7 +104,7 @@ def enrich_by_release(
     enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
     """Enrich all pending library files that belong to the given release.
@@ -188,7 +188,7 @@ def enrich_by_recording(
     enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
     """Enrich pending library files that have a recording_mbid but no release_mbid.
