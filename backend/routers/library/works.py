@@ -600,6 +600,19 @@ async def create_format_override(
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
         )
 
+    existing_cur = await conn.execute(
+        "SELECT 1 FROM format_overrides WHERE work_id = %s AND format_name = %s",
+        (work_id, body.format_name),
+    )
+    if await existing_cur.fetchone() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Format override for work {work_id} and format "
+                f"'{body.format_name}' already exists"
+            ),
+        )
+
     override_id = uuid4()
     await conn.execute(
         """

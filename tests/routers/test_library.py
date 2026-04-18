@@ -703,6 +703,37 @@ class TestFormatOverrides:
         assert resp.status_code == 201
         assert resp.json()["notes"] is None
 
+    def test_create_duplicate_format_override_returns_409(
+        self, client, db_conn
+    ) -> None:
+        """Second override for the same (work_id, format_name) returns 409."""
+        _, work, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-dup",
+            work_mbid="w-dup",
+            recording_mbid="r-dup",
+            file_path="/m/dup.flac",
+        )
+
+        first = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(lf.id)},
+        )
+        assert first.status_code == 201
+
+        second = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(lf.id)},
+        )
+        assert second.status_code == 409
+        assert "flac" in second.json()["detail"]
+
+        rows = db_conn.execute(
+            "SELECT 1 FROM format_overrides WHERE work_id = %s AND format_name = %s",
+            (work.id, "flac"),
+        ).fetchall()
+        assert len(rows) == 1
+
     def test_create_format_override_rejects_file_not_in_work(
         self, client, db_conn
     ) -> None:
