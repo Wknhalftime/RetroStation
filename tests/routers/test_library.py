@@ -947,6 +947,87 @@ class TestSplitWork:
         assert row["selection_method"] == "auto"
         assert row["preferred_file_id"] == lf_b.id
 
+    def test_split_file_with_null_recording_id(self, client, db_conn) -> None:
+        """Split succeeds when the target file has work_id set but recording_id NULL.
+
+        Regression guard: the file lookup must key off library_files.work_id, not
+        the recordings join, so pre-enrichment files (recording_id IS NULL) can
+        still be split.
+        """
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-null-rec",
+            work_mbid="w-null-rec",
+            recording_mbid="r-null-rec",
+            file_path="/m/null_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/null_b.flac", format="flac",
+                recording_id=None, work_id="w-null-rec",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-null-rec/split",
+            json={"file_id": str(lf_b.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is False
+        new_work_id = data["new_work_id"]
+
+        moved = db_conn.execute(
+            "SELECT work_id, recording_id FROM library_files WHERE id = %s",
+            (lf_b.id,),
+        ).fetchone()
+        assert moved is not None
+        assert moved["work_id"] == new_work_id
+        assert moved["recording_id"] is None
+
+        remaining = db_conn.execute(
+            "SELECT work_id FROM library_files WHERE id = %s",
+            (lf_a.id,),
+        ).fetchone()
+        assert remaining is not None
+        assert remaining["work_id"] == "w-null-rec"
+
+    def test_split_empty_check_uses_library_files_work_id(
+        self, client, db_conn
+    ) -> None:
+        """Old-work emptiness is evaluated from library_files.work_id, not recordings.
+
+        Regression guard: if the remaining file has recording_id IS NULL,
+        the old work must survive because library_files.work_id still points at it.
+        """
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-empty-check",
+            work_mbid="w-empty-check",
+            recording_mbid="r-empty-check",
+            file_path="/m/ec_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/ec_b.flac", format="flac",
+                recording_id=None, work_id="w-empty-check",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-empty-check/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["old_work_deleted"] is False
+
+        still_there = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-empty-check",)
+        ).fetchone()
+        assert still_there is not None
+
 
 # ---------------------------------------------------------------------------
 # Tests — ReassignFileWork
@@ -1057,3 +1138,80 @@ class TestReassignFileWork:
         assert row is not None
         assert row["selection_method"] == "manual"
         assert row["preferred_file_id"] == lf_b.id
+
+    def test_reassign_file_with_null_recording_id_cleans_up_old_work(
+        self, client, db_conn
+    ) -> None:
+        """Reassign identifies the old work from library_files.work_id.
+
+        Regression guard: when the file has work_id set but recording_id NULL,
+        current_work_id must still resolve via library_files (not the recordings
+        join), so the now-empty old work is deleted.
+        """
+        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w1-orphan", "Old Work", artist_id=artist.id)
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-orphan", "New Work", artist_id=artist.id)
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/orphan.flac", format="flac",
+                recording_id=None, work_id="w1-orphan",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "w2-orphan"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["old_work_id"] == "w1-orphan"
+        assert data["old_work_deleted"] is True
+
+        gone = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w1-orphan",)
+        ).fetchone()
+        assert gone is None
+
+    def test_reassign_old_work_empty_check_uses_library_files_work_id(
+        self, client, db_conn
+    ) -> None:
+        """Old-work emptiness check keys off library_files.work_id.
+
+        Regression guard: if the only remaining file on the old work has
+        recording_id IS NULL, the old work must survive (the recordings-JOIN
+        emptiness check would wrongly return 0).
+        """
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-nullkeep",
+            work_mbid="w1-nullkeep",
+            recording_mbid="r1-nullkeep",
+            file_path="/m/nk_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/nk_b.flac", format="flac",
+                recording_id=None, work_id="w1-nullkeep",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-nullkeep", "Other Work", artist_id="a-nullkeep")
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-nullkeep"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["old_work_deleted"] is False
+
+        survived = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (w1.id,)
+        ).fetchone()
+        assert survived is not None

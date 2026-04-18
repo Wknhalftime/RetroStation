@@ -728,8 +728,7 @@ async def split_work(
         """
         SELECT lf.id, lf.recording_id
         FROM library_files lf
-        JOIN recordings r ON lf.recording_id = r.id
-        WHERE lf.id = %s AND r.work_id = %s
+        WHERE lf.id = %s AND lf.work_id = %s
         """,
         (body.file_id, work_id),
     )
@@ -792,12 +791,7 @@ async def split_work(
     )
 
     count_cur = await conn.execute(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM library_files lf
-        JOIN recordings r ON lf.recording_id = r.id
-        WHERE r.work_id = %s
-        """,
+        "SELECT COUNT(*) AS cnt FROM library_files WHERE work_id = %s",
         (work_id,),
     )
     count_row = await count_cur.fetchone()
@@ -819,9 +813,8 @@ async def reassign_file_work(
     """Reassign a library file to a different work."""
     file_cur = await conn.execute(
         """
-        SELECT lf.id, lf.recording_id, r.work_id AS current_work_id
+        SELECT lf.id, lf.recording_id, lf.work_id AS current_work_id
         FROM library_files lf
-        LEFT JOIN recordings r ON lf.recording_id = r.id
         WHERE lf.id = %s
         """,
         (file_id,),
@@ -910,12 +903,7 @@ async def reassign_file_work(
     old_work_deleted = False
     if current_work_id is not None:
         count_cur = await conn.execute(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM library_files lf
-            JOIN recordings r ON lf.recording_id = r.id
-            WHERE r.work_id = %s
-            """,
+            "SELECT COUNT(*) AS cnt FROM library_files WHERE work_id = %s",
             (current_work_id,),
         )
         count_row = await count_cur.fetchone()
