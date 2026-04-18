@@ -44,26 +44,48 @@ def db_url(worker_id: str) -> str:
     return psycopg.conninfo.make_conninfo(**params)
 
 
+_TEST_DB_SETTINGS: tuple[tuple[str, str], ...] = (
+    # Performance: skip WAL fsync wait on commit. Safe because crash durability
+    # doesn't matter for test DBs — the worker DB is rebuilt from scratch every
+    # session. Never apply to production.
+    ("synchronous_commit", "off"),
+    # Safety: bound runaway queries. Top legitimate test query is ~4s (CSV E2E);
+    # 15s leaves 3.75x headroom. Anything longer is a hang worth surfacing.
+    ("statement_timeout", "15s"),
+    # Safety: cap lock waits. TRUNCATE CASCADE is ~250 ms under no contention;
+    # 5s means any real lock contention (e.g. a leaked ACCESS EXCLUSIVE from
+    # another worker) surfaces as a test failure instead of a job-wide hang.
+    ("lock_timeout", "5s"),
+    # Safety: kill connections left idle-in-transaction by a test that forgot
+    # to commit/rollback. Prevents ACCESS EXCLUSIVE / row locks from pinning
+    # other workers. 30s is 6x the longest expected fixture setup.
+    ("idle_in_transaction_session_timeout", "30s"),
+)
+
+
 def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> None:
-    """Apply test-only, performance-over-durability settings to a test database.
+    """Apply test-only, performance-and-safety settings to a test database.
 
-    CRITICAL: only safe because crash durability doesn't matter for test DBs
-    — if Postgres crashes mid-test the worker DB is rebuilt from scratch on the
-    next session anyway. Never apply these to production.
+    Scoped via `ALTER DATABASE`, inherited by every new connection to this DB
+    (fixture conns, app pool, seed helpers). Takes effect only for connections
+    opened AFTER this runs; clean_db runs first in the fixture chain, so all
+    downstream conns inherit the settings.
 
-    Hard safety gate: refuse unless the dbname matches the test prefix.
-    `synchronous_commit = off` is session-inherited; every connection to this
-    database (fixture conns, app pool, seed helpers) gets it automatically.
+    Hard safety gate: refuses unless the dbname begins with the test prefix.
+    Rules out misconfiguration pointing tests at a prod URL.
     """
     if not dbname.startswith("retrostation_test"):
         raise RuntimeError(
             f"refusing to apply test tuning to non-test database {dbname!r}"
         )
-    admin_conn.execute(
-        pg_sql.SQL("ALTER DATABASE {} SET synchronous_commit = 'off'").format(
-            pg_sql.Identifier(dbname)
+    for setting, value in _TEST_DB_SETTINGS:
+        admin_conn.execute(
+            pg_sql.SQL("ALTER DATABASE {} SET {} = {}").format(
+                pg_sql.Identifier(dbname),
+                pg_sql.Identifier(setting),
+                pg_sql.Literal(value),
+            )
         )
-    )
 
 
 @pytest.fixture(scope="session")
