@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from backend.dependencies import get_current_token, get_db_connection
 from backend.domain.enums import CatalogSource, TargetType
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+from backend.services.master_selection_service import score_file_row
 
 router = APIRouter()
 
@@ -185,31 +186,8 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
     if not file_rows:
         return
 
-    release_status_score: dict[str, int] = {"promotion": 100, "official": 0}
-    release_type_score: dict[str, int] = {
-        "album": 80,
-        "ep": 70,
-        "single": 60,
-        "compilation": 40,
-        "live": 30,
-        "other": 20,
-    }
-    format_bonus: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
-
-    def _score(row: dict[str, Any]) -> tuple[int, int, int]:
-        score = 0
-        rs = row.get("release_status")
-        if rs:
-            score += release_status_score.get(rs, 0)
-        rt = row.get("release_type")
-        if rt:
-            score += release_type_score.get(rt, release_type_score["other"])
-        fmt = (row.get("format") or "").lower()
-        score += format_bonus.get(fmt, 1)
-        return score, row.get("bitrate") or 0, row.get("duration_ms") or 0
-
-    best = max(file_rows, key=_score)
-    score_val, _, _ = _score(best)
+    best = max(file_rows, key=score_file_row)
+    score_val, _, _ = score_file_row(best)
 
     master_id = sm_row["id"] if sm_row is not None else uuid4()
     await conn.execute(
