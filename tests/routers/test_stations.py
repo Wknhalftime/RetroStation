@@ -74,6 +74,12 @@ def _bulk_insert_events(
     FK order is enforced by statement order (artists -> identities -> events);
     each stage uses executemany. Use for >= 5-row seed loops; smaller loops
     should continue calling _insert_event_full for readability.
+
+    Callers MUST pass unique (artist_name, title) pairs: no ON CONFLICT clause
+    is used, so duplicate seed rows will raise UniqueViolation at the artist or
+    identity insert stage. Letting such failures surface is intentional — a
+    silent skip on artists would leave downstream identities and play_events
+    referencing an un-inserted row and produce a confusing FK violation.
     """
     artist_params: list[tuple] = []
     identity_params: list[tuple] = []
@@ -99,15 +105,14 @@ def _bulk_insert_events(
         cur.executemany(
             "INSERT INTO broadcast_artists "
             "(id, original_name, normalized_name, match_status) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (normalized_name) DO NOTHING",
+            "VALUES (%s, %s, %s, %s)",
             artist_params,
         )
         cur.executemany(
             "INSERT INTO track_identities "
             "(id, broadcast_artist_id, original_title, normalized_title, "
             " normalized_signature, match_status) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (normalized_signature) DO NOTHING",
+            "VALUES (%s, %s, %s, %s, %s, %s)",
             identity_params,
         )
         cur.executemany(

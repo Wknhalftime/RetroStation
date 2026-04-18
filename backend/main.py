@@ -1,4 +1,5 @@
 import os
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -34,13 +35,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # CRITICAL: RETROSTATION_SKIP_BOOT_MIGRATIONS is a TEST-ONLY escape hatch.
     # Production deployments must never set it. The test harness sets it from
     # tests/routers/conftest.py only, where session-scope fixtures have already
-    # applied migrations against the same DB URL.
-    if os.getenv("RETROSTATION_SKIP_BOOT_MIGRATIONS") == "1":
+    # applied migrations against the same DB URL. The flag is honored ONLY when
+    # pytest is loaded in this process; otherwise the flag is ignored and the
+    # critical log line fires, so a misconfigured prod deployment cannot boot
+    # against an unmigrated schema even if the env var leaks in.
+    skip_flag = os.getenv("RETROSTATION_SKIP_BOOT_MIGRATIONS") == "1"
+    in_pytest = "pytest" in sys.modules
+
+    if skip_flag and in_pytest:
         logger.warning(
             "boot_migrations_skipped",
             message="RETROSTATION_SKIP_BOOT_MIGRATIONS=1; skipping lifespan migrations.",
         )
     else:
+        if skip_flag and not in_pytest:
+            logger.critical(
+                "boot_migrations_skip_flag_ignored",
+                message=(
+                    "RETROSTATION_SKIP_BOOT_MIGRATIONS=1 but pytest is not loaded; "
+                    "ignoring flag and running migrations."
+                ),
+            )
         with psycopg.connect(settings.database_url) as conn:
             run_migrations(conn)
             conn.commit()

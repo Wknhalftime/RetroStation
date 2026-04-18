@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Generator
 from typing import Any
@@ -75,10 +76,34 @@ def _migrated_db_url(clean_db: None, db_url: str) -> str:
     return db_url
 
 
+class _SessionConnHolder:
+    """Mutable holder so migrated_db can swap in a fresh connection on failure.
+
+    The raw Connection object cannot be mutated in place; yielding a holder lets
+    the per-test fixture replace a broken session connection without leaving the
+    old one cached for subsequent tests (which would re-incur the reconnect
+    cost and mask the underlying fault).
+    """
+
+    def __init__(self, db_url: str) -> None:
+        self._db_url = db_url
+        self.conn: psycopg.Connection[Any] = psycopg.connect(db_url, autocommit=True)
+
+    def reconnect(self) -> None:
+        # Broken conn may refuse close(); drop it regardless.
+        with contextlib.suppress(psycopg.Error):
+            self.conn.close()
+        self.conn = psycopg.connect(self._db_url, autocommit=True)
+
+    def close(self) -> None:
+        with contextlib.suppress(psycopg.Error):
+            self.conn.close()
+
+
 @pytest.fixture(scope="session")
 def _db_session_conn(
     _migrated_db_url: str,
-) -> Generator[psycopg.Connection[Any]]:
+) -> Generator[_SessionConnHolder]:
     """Session-scope autocommit connection reused across all migrated_db calls.
 
     Each xdist worker owns its own DB (db_url fixture), so one connection per
@@ -86,23 +111,24 @@ def _db_session_conn(
     Autocommit means no wrapping transaction — safe to share across tests for
     TRUNCATE statements. Do NOT open transactions on this connection.
     """
-    conn = psycopg.connect(_migrated_db_url, autocommit=True)
+    holder = _SessionConnHolder(_migrated_db_url)
     try:
-        yield conn
+        yield holder
     finally:
-        conn.close()
+        holder.close()
 
 
 @pytest.fixture
 def migrated_db(
     _migrated_db_url: str,
-    _db_session_conn: psycopg.Connection[Any],
+    _db_session_conn: _SessionConnHolder,
 ) -> str:
     """Per-test fixture: truncates all tables then returns the DB URL."""
     try:
-        _db_session_conn.execute(_TRUNCATE_SQL)
+        _db_session_conn.conn.execute(_TRUNCATE_SQL)
     except psycopg.OperationalError:
-        # Session conn dropped (idle timeout etc.); fall back to a fresh conn.
-        with psycopg.connect(_migrated_db_url, autocommit=True) as conn:
-            conn.execute(_TRUNCATE_SQL)
+        # Session conn dropped (idle timeout etc.); invalidate and reconnect so
+        # later tests don't keep paying the exception+reconnect path.
+        _db_session_conn.reconnect()
+        _db_session_conn.conn.execute(_TRUNCATE_SQL)
     return _migrated_db_url
