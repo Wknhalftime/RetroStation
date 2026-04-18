@@ -883,6 +883,7 @@ async def split_work(
     old_work_deleted = False
     if count_row and count_row["cnt"] == 0:
         await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
+        await conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (work_id,))
         await conn.execute("DELETE FROM recordings WHERE work_id = %s", (work_id,))
         await conn.execute("DELETE FROM works WHERE id = %s", (work_id,))
         old_work_deleted = True
@@ -995,6 +996,9 @@ async def reassign_file_work(
         count_row = await count_cur.fetchone()
         if count_row and count_row["cnt"] == 0:
             await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (current_work_id,))
+            await conn.execute(
+                "DELETE FROM format_overrides WHERE work_id = %s", (current_work_id,)
+            )
             await conn.execute("DELETE FROM recordings WHERE work_id = %s", (current_work_id,))
             await conn.execute("DELETE FROM works WHERE id = %s", (current_work_id,))
             old_work_deleted = True
