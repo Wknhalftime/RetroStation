@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from backend.domain.catalog import Artist
 
 
-class ArtistRepository(ABC):
+class ArtistCatalogRepository(ABC):
     @abstractmethod
     def upsert(self, artist: Artist) -> Artist: ...
 
@@ -14,15 +14,6 @@ class ArtistRepository(ABC):
     def list_all(self) -> list[Artist]:
         """Return all artists for fuzzy-matching in artist_matching_service."""
         ...
-
-    @abstractmethod
-    def list_unenhanced(self) -> list[Artist]: ...
-
-    @abstractmethod
-    def mark_enhanced(self, artist_id: str) -> None: ...
-
-    @abstractmethod
-    def mark_enhancement_failed(self, artist_id: str, error: str) -> None: ...
 
     @abstractmethod
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:

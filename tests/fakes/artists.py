@@ -2,10 +2,11 @@ from uuid import uuid4
 
 from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
+from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 
 
-class FakeArtistRepository(ArtistRepository):
+class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
     def __init__(self) -> None:
         self._data: dict[str, Artist] = {}
 

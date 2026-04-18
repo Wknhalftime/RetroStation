@@ -5,7 +5,8 @@ import structlog
 from backend.domain.catalog import Recording
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import LibraryFile
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
+from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.works import WorkRepository
@@ -82,14 +83,14 @@ def _link_file_to_recording(
     library_file: LibraryFile,
     recording_mbid: str,
     work_id: str | None,
-    library_file_repo: LibraryFileRepository,
+    files: LibraryFileRepository,
 ) -> None:
     """Mark a library file as ENRICHED and link it to its recording and optional work."""
-    library_file_repo.update_recording_link(
+    files.update_recording_link(
         library_file.id, recording_mbid, EnrichmentStatus.ENRICHED
     )
     if work_id is not None:
-        library_file_repo.update_work_id(library_file.id, work_id)
+        files.update_work_id(library_file.id, work_id)
     logger.debug(
         "library_file_enriched",
         file_id=str(library_file.id),
@@ -99,10 +100,11 @@ def _link_file_to_recording(
 
 def enrich_by_release(
     release_mbid: str,
-    library_file_repo: LibraryFileRepository,
+    files: LibraryFileRepository,
+    enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
     """Enrich all pending library files that belong to the given release.
@@ -110,7 +112,7 @@ def enrich_by_release(
     Looks up the release once, extracts artist/recordings/works, then links
     each pending file to its Recording row. Returns the count of files enriched.
     """
-    pending_files = library_file_repo.get_pending_enrichment_by_release(release_mbid)
+    pending_files = enrichment_queries.get_pending_enrichment_by_release(release_mbid)
     if not pending_files:
         return 0
 
@@ -118,7 +120,7 @@ def enrich_by_release(
     if release_data is None:
         logger.warning("mb_release_lookup_failed", release_mbid=release_mbid)
         for library_file in pending_files:
-            library_file_repo.update_recording_link(
+            files.update_recording_link(
                 library_file.id, None, EnrichmentStatus.FAILED
             )
         return 0
@@ -148,7 +150,7 @@ def enrich_by_release(
         rec_mbid = library_file.audio.recording_mbid
         if not rec_mbid:
             logger.debug("library_file_no_recording_mbid", file_id=str(library_file.id))
-            library_file_repo.update_recording_link(
+            files.update_recording_link(
                 library_file.id, None, EnrichmentStatus.FAILED
             )
             continue
@@ -160,7 +162,7 @@ def enrich_by_release(
                 recording_mbid=rec_mbid,
                 release_mbid=release_mbid,
             )
-            library_file_repo.update_recording_link(
+            files.update_recording_link(
                 library_file.id, None, EnrichmentStatus.FAILED
             )
             continue
@@ -168,7 +170,7 @@ def enrich_by_release(
         work_id = _upsert_recording_with_work(
             rec_mbid, rec_data, artist_id, work_repo, recording_repo
         )
-        _link_file_to_recording(library_file, rec_mbid, work_id, library_file_repo)
+        _link_file_to_recording(library_file, rec_mbid, work_id, files)
         enriched_count += 1
 
     logger.info(
@@ -182,17 +184,18 @@ def enrich_by_release(
 
 def enrich_by_recording(
     recording_mbid: str,
-    library_file_repo: LibraryFileRepository,
+    files: LibraryFileRepository,
+    enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
     """Enrich pending library files that have a recording_mbid but no release_mbid.
 
     Looks up the recording directly. Returns count of files enriched.
     """
-    pending_files = library_file_repo.get_pending_enrichment_by_recording(recording_mbid)
+    pending_files = enrichment_queries.get_pending_enrichment_by_recording(recording_mbid)
     if not pending_files:
         return 0
 
@@ -200,7 +203,7 @@ def enrich_by_recording(
     if rec_data is None:
         logger.warning("mb_recording_lookup_failed", recording_mbid=recording_mbid)
         for library_file in pending_files:
-            library_file_repo.update_recording_link(
+            files.update_recording_link(
                 library_file.id, None, EnrichmentStatus.FAILED
             )
         return 0
@@ -223,7 +226,7 @@ def enrich_by_recording(
 
     enriched_count = 0
     for library_file in pending_files:
-        _link_file_to_recording(library_file, recording_mbid, work_id, library_file_repo)
+        _link_file_to_recording(library_file, recording_mbid, work_id, files)
         enriched_count += 1
 
     logger.info(

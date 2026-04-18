@@ -146,16 +146,8 @@ class TestDiffTree:
         # First run seeds the DB
         diff_tree(str(tmp_path), repo)
 
-        # Simulate an in-flight scan by staging hashes for the jazz folder
-        jazz_folder = repo.get_by_path(
-            str(sub).replace("\\", "\\\\") if "\\" in str(sub) else str(sub),
-        )
-        # Find the folder via get_all since path normalization may differ
-        if jazz_folder is None:
-            all_folders = repo.get_all()
-            jazz_folder = next(
-                f for f in all_folders if f.name == "jazz"
-            )
+        jazz_folder = repo.get_by_path(canonicalize_path(str(sub)))
+        assert jazz_folder is not None
         repo.stage_hashes(
             [(jazz_folder.id, "fake_in_flight_hash")], "in_flight_task",
         )

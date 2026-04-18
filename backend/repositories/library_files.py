@@ -25,12 +25,6 @@ class LibraryFileRepository(ABC):
     def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]: ...
 
     @abstractmethod
-    def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]: ...
-
-    @abstractmethod
-    def get_pending_enrichment_by_recording(self, recording_mbid: str) -> list[LibraryFile]: ...
-
-    @abstractmethod
     def update_recording_link(
         self,
         file_id: UUID,
@@ -58,10 +52,3 @@ class LibraryFileRepository(ABC):
         """Return all files with the given content hash."""
         ...
 
-    @abstractmethod
-    def reset_failed_enrichments(self) -> int:
-        """Reset all files in 'failed' enrichment status back to 'pending'.
-
-        Returns the number of rows updated.
-        """
-        ...

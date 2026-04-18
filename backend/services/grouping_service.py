@@ -10,7 +10,7 @@ from rapidfuzz import fuzz
 from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.domain.library import LibraryFile
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -116,7 +116,7 @@ def _create_local_work(
     file: LibraryFile,
     base_title: str,
     norm_artist: str,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
 ) -> str:
@@ -138,7 +138,7 @@ def _create_local_work(
 def assign_work(
     file: LibraryFile,
     *,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     work_repo: WorkRepository,
     library_file_repo: LibraryFileRepository,
     recording_repo: RecordingRepository,

@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 
 import psycopg
-from psycopg import sql as pg_sql
 import pytest
+from psycopg import sql as pg_sql
 
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",

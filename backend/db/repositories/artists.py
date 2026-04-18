@@ -7,10 +7,11 @@ import psycopg
 
 from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
+from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 
 
-class PgArtistRepository(ArtistRepository):
+class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 

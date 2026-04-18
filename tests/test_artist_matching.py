@@ -11,9 +11,9 @@ from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
+from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
-from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 
 
 class StubMbClient:

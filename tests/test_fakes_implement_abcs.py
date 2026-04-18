@@ -80,3 +80,26 @@ def test_library_folder_fake_is_concrete() -> None:
 def test_system_log_fake_is_concrete() -> None:
     from tests.fakes.system_logs import FakeSystemLogRepository
     assert FakeSystemLogRepository() is not None
+
+def test_library_file_enrichment_fake_is_concrete() -> None:
+    from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
+    from tests.fakes.library_files import FakeLibraryFileRepository
+    assert isinstance(FakeLibraryFileRepository(), LibraryFileEnrichmentRepository)
+
+
+def test_artist_catalog_fake_is_concrete() -> None:
+    from backend.repositories.artist_catalog import ArtistCatalogRepository
+    from tests.fakes.artists import FakeArtistRepository
+    assert isinstance(FakeArtistRepository(), ArtistCatalogRepository)
+
+
+def test_artist_enhancement_fake_is_concrete() -> None:
+    from backend.repositories.artist_enhancement import ArtistEnhancementRepository
+    from tests.fakes.artists import FakeArtistRepository
+    assert isinstance(FakeArtistRepository(), ArtistEnhancementRepository)
+
+
+def test_library_folder_staging_fake_is_concrete() -> None:
+    from backend.repositories.library_folder_staging import LibraryFolderHashStaging
+    from tests.fakes.library_folders import FakeLibraryFolderRepository
+    assert isinstance(FakeLibraryFolderRepository(), LibraryFolderHashStaging)

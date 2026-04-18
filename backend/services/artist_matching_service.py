@@ -10,7 +10,7 @@ from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.domain.matching import MappingRule, Match
-from backend.repositories.artists import ArtistRepository
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
@@ -129,7 +129,7 @@ def _try_fuzzy_match(
 def _try_mb_match(
     broadcast_artist: BroadcastArtist,
     mb_client: MusicBrainzClientProtocol,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     broadcast_artist_repo: BroadcastArtistRepository,
     match_repo: MatchRepository,
     mb_auto_link_score: int,
@@ -184,7 +184,7 @@ def match_artists_for_playlist(
     playlist_id: UUID,
     broadcast_artist_repo: BroadcastArtistRepository,
     track_identity_repo: BroadcastTrackIdentityRepository,
-    artist_repo: ArtistRepository,
+    artist_repo: ArtistCatalogRepository,
     match_repo: MatchRepository,
     rules_repo: MappingRuleRepository,
     mb_client: MusicBrainzClientProtocol,
