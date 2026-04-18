@@ -692,25 +692,40 @@ async def merge_works(
     )
     merged_file_count = files_cur.rowcount if files_cur.rowcount is not None else 0
 
-    conflict_cur = await conn.execute(
+    # Drop source overrides that collide with an existing target override
+    # (target wins) OR collide with another source override for the same
+    # format_name (oldest source wins, id tie-break) so the subsequent bulk
+    # UPDATE cannot violate the UNIQUE (work_id, format_name) constraint.
+    drop_cur = await conn.execute(
         f"""
-        SELECT fo_src.id AS src_id
-        FROM format_overrides fo_src
-        JOIN format_overrides fo_tgt
-          ON fo_tgt.work_id = %s AND fo_tgt.format_name = fo_src.format_name
-        WHERE fo_src.work_id IN ({src_placeholders})
+        SELECT id FROM format_overrides
+        WHERE work_id IN ({src_placeholders})
+          AND (
+            format_name IN (
+              SELECT format_name FROM format_overrides WHERE work_id = %s
+            )
+            OR id NOT IN (
+              SELECT DISTINCT ON (format_name) id
+              FROM format_overrides
+              WHERE work_id IN ({src_placeholders})
+                AND format_name NOT IN (
+                  SELECT format_name FROM format_overrides WHERE work_id = %s
+                )
+              ORDER BY format_name, created_at ASC, id ASC
+            )
+          )
         """,
-        [target_id, *existing_source_ids],
+        [*existing_source_ids, target_id, *existing_source_ids, target_id],
     )
-    conflict_rows = await conflict_cur.fetchall()
-    dropped_override_count = len(conflict_rows)
+    drop_rows = await drop_cur.fetchall()
+    dropped_override_count = len(drop_rows)
 
-    if conflict_rows:
-        conflict_ids = [r["src_id"] for r in conflict_rows]
-        conf_placeholders = ", ".join("%s" for _ in conflict_ids)
+    if drop_rows:
+        drop_ids = [r["id"] for r in drop_rows]
+        drop_placeholders = ", ".join("%s" for _ in drop_ids)
         await conn.execute(
-            f"DELETE FROM format_overrides WHERE id IN ({conf_placeholders})",
-            conflict_ids,
+            f"DELETE FROM format_overrides WHERE id IN ({drop_placeholders})",
+            drop_ids,
         )
 
     await conn.execute(

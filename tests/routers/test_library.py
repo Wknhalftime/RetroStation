@@ -985,6 +985,127 @@ class TestMergeWorks:
         )
         assert self_merge.status_code == 422
 
+    def test_merge_two_sources_sharing_format_override(self, client, db_conn) -> None:
+        """Two sources with an override for the same format_name must not 500.
+
+        Regression guard for UNIQUE (work_id, format_name): the bulk UPDATE
+        that moves format_overrides onto the target used to violate the
+        constraint when two source works each had an override for the same
+        format_name (and the target didn't). One source override must win,
+        the rest must be dropped.
+        """
+        _, _, _, lf_target = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-target",
+            recording_mbid="r-fo-target",
+            file_path="/m/fom_target.flac",
+        )
+        _, _, _, lf_src_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-src-a",
+            recording_mbid="r-fo-src-a",
+            file_path="/m/fom_src_a.flac",
+        )
+        _, _, _, lf_src_b = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-src-b",
+            recording_mbid="r-fo-src-b",
+            file_path="/m/fom_src_b.flac",
+        )
+        # Both sources have a "flac" override; target has none.
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=uuid4(),
+                work_id="w-fo-src-a",
+                format_name="flac",
+                preferred_file_id=lf_src_a.id,
+                notes="first",
+            )
+        )
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=uuid4(),
+                work_id="w-fo-src-b",
+                format_name="flac",
+                preferred_file_id=lf_src_b.id,
+                notes="second",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-fo-target/merge",
+            json={"source_work_ids": ["w-fo-src-a", "w-fo-src-b"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["deleted_work_count"] == 2
+        assert data["dropped_override_count"] == 1
+
+        rows = db_conn.execute(
+            "SELECT id, work_id FROM format_overrides WHERE format_name = %s",
+            ("flac",),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["work_id"] == "w-fo-target"
+        # lf_target is seeded but unused by the override — silence linters.
+        assert lf_target is not None
+
+    def test_merge_source_override_defers_to_target(self, client, db_conn) -> None:
+        """When target already has an override for the format, source's is dropped."""
+        _, _, _, lf_target = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-target-wins",
+            work_mbid="w-fotw-target",
+            recording_mbid="r-fotw-target",
+            file_path="/m/fotw_target.flac",
+        )
+        _, _, _, lf_src = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-target-wins",
+            work_mbid="w-fotw-src",
+            recording_mbid="r-fotw-src",
+            file_path="/m/fotw_src.flac",
+        )
+        target_override_id = uuid4()
+        src_override_id = uuid4()
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=target_override_id,
+                work_id="w-fotw-target",
+                format_name="flac",
+                preferred_file_id=lf_target.id,
+                notes="target-owned",
+            )
+        )
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=src_override_id,
+                work_id="w-fotw-src",
+                format_name="flac",
+                preferred_file_id=lf_src.id,
+                notes="source-owned",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-fotw-target/merge",
+            json={"source_work_ids": ["w-fotw-src"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dropped_override_count"] == 1
+
+        rows = db_conn.execute(
+            "SELECT id FROM format_overrides WHERE format_name = %s",
+            ("flac",),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["id"] == target_override_id
+
 
 # ---------------------------------------------------------------------------
 # Tests — SplitWork
