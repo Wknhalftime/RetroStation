@@ -1268,3 +1268,100 @@ class TestReassignFileWork:
             "SELECT id FROM works WHERE id = %s", (w1.id,)
         ).fetchone()
         assert survived is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests — _recalculate_song_master with NULL-recording files
+# ---------------------------------------------------------------------------
+
+
+class TestRecalculateSongMasterOrphans:
+    """Regression coverage: auto-master selection must consider files with
+    library_files.work_id set but recording_id IS NULL (pre-enrichment state)."""
+
+    def test_auto_master_picks_null_recording_file(self, client, db_conn) -> None:
+        """When a work's only file has recording_id NULL, auto picks it."""
+        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-auto-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w1-auto-orphan", "Old Work", artist_id=artist.id)
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-auto-orphan", "New Work", artist_id=artist.id)
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/auto_orphan.flac", format="flac",
+                recording_id=None, work_id="w1-auto-orphan",
+            )
+        )
+        db_conn.commit()
+
+        # Reassign triggers _recalculate_song_master on the destination work,
+        # which has only the orphan file after the move.
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "w2-auto-orphan"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            ("w2-auto-orphan",),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf.id
+
+    def test_manual_master_membership_check_allows_null_recording_file(
+        self, client, db_conn
+    ) -> None:
+        """Manual master pointing at a NULL-recording file in the same work survives.
+
+        The membership check must key off library_files.work_id; otherwise
+        the recordings-JOIN would treat the manual master as stale and
+        silently overwrite it with an auto pick.
+        """
+        _, w1, _, lf_enriched = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-manual-orphan",
+            work_mbid="w1-manual-orphan",
+            recording_mbid="r1-manual-orphan",
+            file_path="/m/manual_enriched.flac",
+        )
+        lf_orphan = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/manual_orphan.flac", format="flac",
+                recording_id=None, work_id="w1-manual-orphan",
+            )
+        )
+        # Manual master points at the orphan file.
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_orphan.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-manual-orphan", "Other Work", artist_id="a-manual-orphan")
+        )
+        db_conn.commit()
+
+        # Reassign the other (enriched) file out of w1 — this triggers a
+        # _recalculate_song_master call for w1 which must preserve the manual pick.
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_enriched.id}/work",
+            json={"work_id": "w2-manual-orphan"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "manual"
+        assert row["preferred_file_id"] == lf_orphan.id

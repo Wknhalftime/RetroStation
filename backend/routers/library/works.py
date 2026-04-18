@@ -160,8 +160,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
             """
             SELECT 1
             FROM library_files lf
-            JOIN recordings r ON lf.recording_id = r.id
-            WHERE lf.id = %s AND r.work_id = %s
+            WHERE lf.id = %s AND lf.work_id = %s
             """,
             (sm_row["preferred_file_id"], work_id),
         )
@@ -178,8 +177,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
             lf.bitrate,
             lf.duration_ms
         FROM library_files lf
-        JOIN recordings r ON lf.recording_id = r.id
-        WHERE r.work_id = %s
+        WHERE lf.work_id = %s
         """,
         (work_id,),
     )
