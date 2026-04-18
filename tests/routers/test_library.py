@@ -618,8 +618,8 @@ class TestFormatOverrides:
 class TestScanLibrary:
     """POST /api/v1/library/scan endpoint tests."""
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_accepted(
         self,
         mock_settings: MagicMock,
@@ -639,8 +639,8 @@ class TestScanLibrary:
         assert body["status"] == "accepted"
         mock_task.assert_called_once_with(str(scan_dir))
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_invalid_directory(
         self,
         mock_settings: MagicMock,
@@ -660,8 +660,8 @@ class TestScanLibrary:
         assert "Invalid directory" in resp.json()["detail"]
         mock_task.assert_not_called()
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_disallowed_path(
         self,
         mock_settings: MagicMock,
@@ -682,8 +682,8 @@ class TestScanLibrary:
         assert "not in allowed" in resp.json()["detail"]
         mock_task.assert_not_called()
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_empty_allowlist_permits_any(
         self,
         mock_settings: MagicMock,
