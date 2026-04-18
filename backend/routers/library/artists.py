@@ -90,9 +90,7 @@ async def list_artists(
         ORDER BY a.sort_name
         LIMIT %s OFFSET %s
     """
-    items_params: tuple[Any, ...] = (
-        (search_param, limit, offset) if search else (limit, offset)
-    )
+    items_params: tuple[Any, ...] = (search_param, limit, offset) if search else (limit, offset)
 
     items_cur = await conn.execute(items_sql, items_params)
     rows = await items_cur.fetchall()
@@ -114,9 +112,7 @@ async def list_artists(
 
 
 @router.get("/artists/{artist_id}", response_model=ArtistDetail)
-async def get_artist_detail(
-    artist_id: str, conn: DbConn, _token: Token
-) -> ArtistDetail:
+async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> ArtistDetail:
     """Return an artist with a summary of their works."""
     artist_cur = await conn.execute(
         "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",

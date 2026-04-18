@@ -26,9 +26,7 @@ async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
 
     settings = get_settings()
     allowed = [Path(p).resolve() for p in settings.library_scan_paths]
-    if allowed and not any(
-        scan_path == p or scan_path.is_relative_to(p) for p in allowed
-    ):
+    if allowed and not any(scan_path == p or scan_path.is_relative_to(p) for p in allowed):
         raise HTTPException(
             status_code=403,
             detail="Path not in allowed scan paths",

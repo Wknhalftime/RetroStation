@@ -178,8 +178,12 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
 
     release_status_score: dict[str, int] = {"promotion": 100, "official": 0}
     release_type_score: dict[str, int] = {
-        "album": 80, "ep": 70, "single": 60,
-        "compilation": 40, "live": 30, "other": 20,
+        "album": 80,
+        "ep": 70,
+        "single": 60,
+        "compilation": 40,
+        "live": 30,
+        "other": 20,
     }
     format_bonus: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
 
@@ -200,9 +204,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
 
     existing_id: UUID | None = None
     if sm_row is not None:
-        id_cur = await conn.execute(
-            "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
-        )
+        id_cur = await conn.execute("SELECT id FROM song_masters WHERE work_id = %s", (work_id,))
         id_row = await id_cur.fetchone()
         if id_row:
             existing_id = id_row["id"]
@@ -241,24 +243,21 @@ async def _consolidate_recordings(
     src_ph = ", ".join("%s" for _ in source_work_ids)
 
     src_cur = await conn.execute(
-        f"SELECT id, version_type FROM recordings"
-        f" WHERE work_id IN ({src_ph})",
+        f"SELECT id, version_type FROM recordings WHERE work_id IN ({src_ph})",
         source_work_ids,
     )
     src_recs = await src_cur.fetchall()
 
     for src_rec in src_recs:
         tgt_cur = await conn.execute(
-            "SELECT id FROM recordings"
-            " WHERE work_id = %s AND version_type = %s",
+            "SELECT id FROM recordings WHERE work_id = %s AND version_type = %s",
             (target_work_id, src_rec["version_type"]),
         )
         tgt_row = await tgt_cur.fetchone()
 
         if tgt_row:
             await conn.execute(
-                "UPDATE library_files SET recording_id = %s"
-                " WHERE recording_id = %s",
+                "UPDATE library_files SET recording_id = %s WHERE recording_id = %s",
                 (tgt_row["id"], src_rec["id"]),
             )
             await conn.execute(
@@ -278,9 +277,7 @@ async def _consolidate_recordings(
 
 
 @router.get("/works/{work_id}", response_model=WorkDetail)
-async def get_work_detail(
-    work_id: str, conn: DbConn, _token: Token
-) -> WorkDetail:
+async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDetail:
     """Return a work with its recordings, files, master, and format overrides."""
     synthetic = decode_synthetic_work_id(work_id)
     work_row: dict[str, Any] | None = None
@@ -367,7 +364,8 @@ async def get_work_detail(
         ]
 
         sm_cur = await conn.execute(
-            "SELECT * FROM song_masters WHERE work_id = %s", (work_id,),
+            "SELECT * FROM song_masters WHERE work_id = %s",
+            (work_id,),
         )
         sm_row = await sm_cur.fetchone()
         if sm_row is not None:
@@ -380,8 +378,7 @@ async def get_work_detail(
             )
 
         fo_cur = await conn.execute(
-            "SELECT * FROM format_overrides WHERE work_id = %s "
-            "ORDER BY format_name",
+            "SELECT * FROM format_overrides WHERE work_id = %s ORDER BY format_name",
             (work_id,),
         )
         fo_rows = await fo_cur.fetchall()
@@ -470,9 +467,7 @@ async def set_work_master(
     work_id: str, body: SetMasterRequest, conn: DbConn, _token: Token
 ) -> SongMasterResponse:
     """Manually set the preferred file for a work (UPSERT)."""
-    work_cur = await conn.execute(
-        "SELECT id FROM works WHERE id = %s", (work_id,)
-    )
+    work_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (work_id,))
     if await work_cur.fetchone() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -494,9 +489,7 @@ async def set_work_master(
         (master_id, work_id, body.preferred_file_id),
     )
 
-    row_cur = await conn.execute(
-        "SELECT * FROM song_masters WHERE work_id = %s", (work_id,)
-    )
+    row_cur = await conn.execute("SELECT * FROM song_masters WHERE work_id = %s", (work_id,))
     row = await row_cur.fetchone()
     if row is None:
         raise RuntimeError("Expected row after INSERT")
@@ -511,13 +504,9 @@ async def set_work_master(
 
 
 @router.delete("/works/{work_id}/master", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_work_master(
-    work_id: str, conn: DbConn, _token: Token
-) -> None:
+async def delete_work_master(work_id: str, conn: DbConn, _token: Token) -> None:
     """Remove the manual song master for a work."""
-    cur = await conn.execute(
-        "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
-    )
+    cur = await conn.execute("SELECT id FROM song_masters WHERE work_id = %s", (work_id,))
     if await cur.fetchone() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -540,9 +529,7 @@ async def create_format_override(
     work_id: str, body: CreateFormatOverrideRequest, conn: DbConn, _token: Token
 ) -> FormatOverrideResponse:
     """Create a per-format preferred file override for a work."""
-    work_cur = await conn.execute(
-        "SELECT id FROM works WHERE id = %s", (work_id,)
-    )
+    work_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (work_id,))
     if await work_cur.fetchone() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -558,9 +545,7 @@ async def create_format_override(
         (override_id, work_id, body.format_name, body.preferred_file_id, body.notes),
     )
 
-    row_cur = await conn.execute(
-        "SELECT * FROM format_overrides WHERE id = %s", (override_id,)
-    )
+    row_cur = await conn.execute("SELECT * FROM format_overrides WHERE id = %s", (override_id,))
     row = await row_cur.fetchone()
     if row is None:
         raise RuntimeError("Expected row after INSERT")
@@ -604,9 +589,7 @@ async def merge_works(
     target_id: str, body: MergeRequest, conn: DbConn, _token: Token
 ) -> MergeResponse:
     """Merge one or more source works into a target work."""
-    target_cur = await conn.execute(
-        "SELECT id, artist_id FROM works WHERE id = %s", (target_id,)
-    )
+    target_cur = await conn.execute("SELECT id, artist_id FROM works WHERE id = %s", (target_id,))
     target_row = await target_cur.fetchone()
     if target_row is None:
         raise HTTPException(
@@ -699,9 +682,7 @@ async def merge_works(
     for artist_id in source_artist_ids:
         if artist_id == target_row["artist_id"]:
             continue
-        artist_cur = await conn.execute(
-            "SELECT origin FROM artists WHERE id = %s", (artist_id,)
-        )
+        artist_cur = await conn.execute("SELECT origin FROM artists WHERE id = %s", (artist_id,))
         artist_row = await artist_cur.fetchone()
         if artist_row is None:
             continue
@@ -768,8 +749,7 @@ async def split_work(
 
     if recording_id is not None:
         rec_cur = await conn.execute(
-            "SELECT title, version_type, duration_ms"
-            " FROM recordings WHERE id = %s",
+            "SELECT title, version_type, duration_ms FROM recordings WHERE id = %s",
             (recording_id,),
         )
         rec_row = await rec_cur.fetchone()
@@ -788,8 +768,7 @@ async def split_work(
             ),
         )
         await conn.execute(
-            "UPDATE library_files SET recording_id = %s"
-            " WHERE id = %s",
+            "UPDATE library_files SET recording_id = %s WHERE id = %s",
             (new_rec_id, body.file_id),
         )
 
@@ -853,9 +832,7 @@ async def reassign_file_work(
     current_work_id: str | None = file_row["current_work_id"]
     recording_id: str | None = file_row["recording_id"]
 
-    target_cur = await conn.execute(
-        "SELECT id FROM works WHERE id = %s", (body.work_id,)
-    )
+    target_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (body.work_id,))
     if await target_cur.fetchone() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -870,32 +847,28 @@ async def reassign_file_work(
 
     if recording_id is not None:
         share_cur = await conn.execute(
-            "SELECT COUNT(*) AS cnt FROM library_files"
-            " WHERE recording_id = %s AND id != %s",
+            "SELECT COUNT(*) AS cnt FROM library_files WHERE recording_id = %s AND id != %s",
             (recording_id, str(file_id)),
         )
         share_row = await share_cur.fetchone()
         is_shared = share_row is not None and share_row["cnt"] > 0
 
         rec_cur = await conn.execute(
-            "SELECT title, version_type, duration_ms"
-            " FROM recordings WHERE id = %s",
+            "SELECT title, version_type, duration_ms FROM recordings WHERE id = %s",
             (recording_id,),
         )
         rec_row = await rec_cur.fetchone()
         rec_version = rec_row["version_type"] if rec_row else "original"
 
         tgt_cur = await conn.execute(
-            "SELECT id FROM recordings"
-            " WHERE work_id = %s AND version_type = %s",
+            "SELECT id FROM recordings WHERE work_id = %s AND version_type = %s",
             (body.work_id, rec_version),
         )
         tgt_rec = await tgt_cur.fetchone()
 
         if tgt_rec:
             await conn.execute(
-                "UPDATE library_files SET recording_id = %s"
-                " WHERE id = %s",
+                "UPDATE library_files SET recording_id = %s WHERE id = %s",
                 (tgt_rec["id"], str(file_id)),
             )
         elif is_shared:
@@ -914,8 +887,7 @@ async def reassign_file_work(
                 ),
             )
             await conn.execute(
-                "UPDATE library_files SET recording_id = %s"
-                " WHERE id = %s",
+                "UPDATE library_files SET recording_id = %s WHERE id = %s",
                 (new_rec_id, str(file_id)),
             )
         else:
@@ -944,9 +916,7 @@ async def reassign_file_work(
         )
         count_row = await count_cur.fetchone()
         if count_row and count_row["cnt"] == 0:
-            await conn.execute(
-                "DELETE FROM song_masters WHERE work_id = %s", (current_work_id,)
-            )
+            await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (current_work_id,))
             await conn.execute("DELETE FROM works WHERE id = %s", (current_work_id,))
             old_work_deleted = True
         else:
