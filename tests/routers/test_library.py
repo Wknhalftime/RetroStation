@@ -1224,6 +1224,42 @@ class TestSplitWork:
         assert row["selection_method"] == "auto"
         assert row["preferred_file_id"] == lf_b.id
 
+    def test_split_last_file_deletes_old_work_and_recordings(
+        self, client, db_conn
+    ) -> None:
+        """Splitting the only file from a work must cascade-clean recordings.
+
+        Regression guard: recordings.work_id REFERENCES works(id) has no
+        ON DELETE CASCADE, so leaving behind the original recording would
+        FK-violate the DELETE FROM works and surface as a 500.
+        """
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-last",
+            work_mbid="w-last",
+            recording_mbid="r-last",
+            file_path="/m/last.flac",
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-last/split",
+            json={"file_id": str(lf.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is True
+
+        old_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-last",),
+        ).fetchone()
+        assert old_work is None
+        # Original recording must have been deleted alongside the work.
+        old_rec = db_conn.execute(
+            "SELECT id FROM recordings WHERE id = %s", ("r-last",),
+        ).fetchone()
+        assert old_rec is None
+
     def test_split_file_with_null_recording_id(self, client, db_conn) -> None:
         """Split succeeds when the target file has work_id set but recording_id NULL.
 
@@ -1415,6 +1451,61 @@ class TestReassignFileWork:
         assert row is not None
         assert row["selection_method"] == "manual"
         assert row["preferred_file_id"] == lf_b.id
+
+    def test_reassign_last_file_deletes_old_work_and_recordings(
+        self, client, db_conn
+    ) -> None:
+        """Reassigning the only file out of a work cascade-cleans recordings.
+
+        Regression guard: when the target work already has a recording with
+        the same version_type, the old recording stays on the old work (only
+        library_files.recording_id is moved). If that leaves the old work
+        empty, DELETE FROM works would FK-violate the still-pointing recording
+        and surface as a 500.
+        """
+        # w1 has r1 with only lf_a (version_type "original").
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-last-reassign",
+            work_mbid="w1-last-reassign",
+            recording_mbid="r1-last-reassign",
+            file_path="/m/last_reassign_a.flac",
+        )
+        # w2 has r2 (same version_type "original") with its own file, so
+        # reassign will route lf_a onto r2 and leave r1 orphaned in w1.
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-last-reassign", "New Work", artist_id="a-last-reassign")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording(
+                "r2-last-reassign", "New Recording", work_id="w2-last-reassign"
+            )
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/last_reassign_b.flac", format="flac",
+                recording_id="r2-last-reassign", work_id="w2-last-reassign",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-last-reassign"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["old_work_id"] == w1.id
+        assert data["old_work_deleted"] is True
+
+        gone_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (w1.id,)
+        ).fetchone()
+        assert gone_work is None
+        gone_rec = db_conn.execute(
+            "SELECT id FROM recordings WHERE id = %s", ("r1-last-reassign",)
+        ).fetchone()
+        assert gone_rec is None
 
     def test_reassign_file_with_null_recording_id_cleans_up_old_work(
         self, client, db_conn
