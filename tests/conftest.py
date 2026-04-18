@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
+from typing import Any
 
 import psycopg
 import pytest
 from psycopg import sql as pg_sql
+
+_TRUNCATE_SQL = """
+    TRUNCATE play_events, track_identities, broadcast_artists,
+             playlists, broadcast_days, stations,
+             matches, mapping_rules,
+             artists, works, recordings,
+             library_files, library_quarantine,
+             song_masters, format_overrides,
+             mb_cache, progress_tracking, user_settings,
+             system_logs,
+             library_folder_staged_hashes, library_folders
+    CASCADE
+"""
 
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -60,20 +75,34 @@ def _migrated_db_url(clean_db: None, db_url: str) -> str:
     return db_url
 
 
+@pytest.fixture(scope="session")
+def _db_session_conn(
+    _migrated_db_url: str,
+) -> Generator[psycopg.Connection[Any]]:
+    """Session-scope autocommit connection reused across all migrated_db calls.
+
+    Each xdist worker owns its own DB (db_url fixture), so one connection per
+    worker. Reusing amortizes ~45 ms psycopg handshake across ~120 tests.
+    Autocommit means no wrapping transaction — safe to share across tests for
+    TRUNCATE statements. Do NOT open transactions on this connection.
+    """
+    conn = psycopg.connect(_migrated_db_url, autocommit=True)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 @pytest.fixture
-def migrated_db(_migrated_db_url: str) -> str:
+def migrated_db(
+    _migrated_db_url: str,
+    _db_session_conn: psycopg.Connection[Any],
+) -> str:
     """Per-test fixture: truncates all tables then returns the DB URL."""
-    with psycopg.connect(_migrated_db_url, autocommit=True) as conn:
-        conn.execute("""
-            TRUNCATE play_events, track_identities, broadcast_artists,
-                     playlists, broadcast_days, stations,
-                     matches, mapping_rules,
-                     artists, works, recordings,
-                     library_files, library_quarantine,
-                     song_masters, format_overrides,
-                     mb_cache, progress_tracking, user_settings,
-                     system_logs,
-                     library_folder_staged_hashes, library_folders
-            CASCADE
-        """)
+    try:
+        _db_session_conn.execute(_TRUNCATE_SQL)
+    except psycopg.OperationalError:
+        # Session conn dropped (idle timeout etc.); fall back to a fresh conn.
+        with psycopg.connect(_migrated_db_url, autocommit=True) as conn:
+            conn.execute(_TRUNCATE_SQL)
     return _migrated_db_url

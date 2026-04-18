@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg.rows import dict_row
 
 from backend.db.repositories.artists import PgArtistRepository
@@ -26,6 +27,7 @@ from tests.fakes.mb_client import FakeMbClient
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 
 
+@pytest.mark.slow
 def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
     """End-to-end: ingest → artist matching → identity matching.
 

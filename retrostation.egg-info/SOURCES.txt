@@ -42,7 +42,8 @@ backend/domain/matching.py
 backend/domain/synthetic_work_id.py
 backend/domain/system.py
 backend/repositories/__init__.py
-backend/repositories/artists.py
+backend/repositories/artist_catalog.py
+backend/repositories/artist_enhancement.py
 backend/repositories/broadcast_artists.py
 backend/repositories/broadcast_days.py
 backend/repositories/broadcast_play_events.py
@@ -50,7 +51,9 @@ backend/repositories/broadcast_playlists.py
 backend/repositories/broadcast_stations.py
 backend/repositories/broadcast_track_identities.py
 backend/repositories/format_overrides.py
+backend/repositories/library_file_enrichment.py
 backend/repositories/library_files.py
+backend/repositories/library_folder_staging.py
 backend/repositories/library_folders.py
 backend/repositories/library_quarantine.py
 backend/repositories/mapping_rules.py
@@ -64,7 +67,6 @@ backend/repositories/user_settings.py
 backend/repositories/works.py
 backend/routers/__init__.py
 backend/routers/ingestion.py
-backend/routers/library.py
 backend/routers/matching.py
 backend/routers/playlists.py
 backend/routers/settings.py
@@ -72,6 +74,11 @@ backend/routers/stations.py
 backend/routers/system_logs.py
 backend/routers/tasks.py
 backend/routers/v1.py
+backend/routers/library/__init__.py
+backend/routers/library/artists.py
+backend/routers/library/scan.py
+backend/routers/library/status.py
+backend/routers/library/works.py
 backend/services/__init__.py
 backend/services/artist_matching_service.py
 backend/services/embedding_service.py

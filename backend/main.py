@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -30,10 +31,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     pool = init_pool(settings.database_url)
     await pool.open()
 
-    # Run migrations synchronously before accepting requests
-    with psycopg.connect(settings.database_url) as conn:
-        run_migrations(conn)
-        conn.commit()
+    # CRITICAL: RETROSTATION_SKIP_BOOT_MIGRATIONS is a TEST-ONLY escape hatch.
+    # Production deployments must never set it. The test harness sets it from
+    # tests/routers/conftest.py only, where session-scope fixtures have already
+    # applied migrations against the same DB URL.
+    if os.getenv("RETROSTATION_SKIP_BOOT_MIGRATIONS") == "1":
+        logger.warning(
+            "boot_migrations_skipped",
+            message="RETROSTATION_SKIP_BOOT_MIGRATIONS=1; skipping lifespan migrations.",
+        )
+    else:
+        with psycopg.connect(settings.database_url) as conn:
+            run_migrations(conn)
+            conn.commit()
 
     yield
 

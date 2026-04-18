@@ -38,12 +38,15 @@ class TestScanDirectoryProgress:
         assert total == 3
         assert processed == 3
 
-    @pytest.mark.slow
     def test_callback_fires_every_50_files(self, tmp_path: Path) -> None:
-        """Callback fires at file 50 and at the end for 75 files."""
-        wav = _require_wav()
+        """Callback fires at file 50 and at the end for 75 files.
+
+        Empty files suffice: callback cadence counts enumerate()-index, not
+        successful extractions, so MutagenError-quarantined files still
+        advance the counter and exercise the every-50 branch.
+        """
         for i in range(75):
-            shutil.copy(wav, tmp_path / f"track_{i:03d}.wav")
+            (tmp_path / f"track_{i:03d}.wav").touch()
 
         calls: list[tuple[int, int, str]] = []
         scan_directory(tmp_path, on_progress=lambda p, t, c: calls.append((p, t, c)))
