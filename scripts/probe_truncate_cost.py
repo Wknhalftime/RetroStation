@@ -6,9 +6,10 @@ Prints min/median/p95 (ms) for:
   1. Fresh `psycopg.connect(url, autocommit=True)`  -> handshake band
   2. Reused-connection `TRUNCATE ... CASCADE`       -> truncate band
 
-Does not modify the schema. Requires `retrostation_test` DB to already be
-migrated (run `uv run pytest tests/conftest.py -q --co` once, or any
-pytest session -n0, to trigger the session-scope migration fixture).
+The probe applies schema migrations itself on start (idempotent, via
+`backend.db.migrations.run_migrations`), so the target database only needs
+to exist — no prior pytest run is required. The DB itself is NOT created
+by this script; create `retrostation_test` beforehand if it is missing.
 
 DESTRUCTIVE: this script runs TRUNCATE ... CASCADE on every domain table
 in the target database. It refuses to run unless the DB name starts with
@@ -27,6 +28,8 @@ import sys
 import time
 
 import psycopg
+
+from backend.db.migrations import run_migrations
 
 URL = os.environ.get(
     "DATABASE_URL",
@@ -120,8 +123,20 @@ def probe_truncate(url: str, n: int) -> list[float]:
     return samples
 
 
+def _ensure_migrated(url: str) -> None:
+    """Apply migrations on the target DB so probe_truncate finds real tables.
+
+    run_migrations uses a schema_migrations table to skip already-applied
+    versions, so this is cheap on a warm DB and correct on a cold one.
+    """
+    with psycopg.connect(url) as conn:
+        run_migrations(conn)
+        conn.commit()
+
+
 def main() -> None:
     _assert_safe_to_run(URL)
+    _ensure_migrated(URL)
 
     print(f"probe url: {URL}")
     print(f"iterations: {ITERATIONS}\n")
