@@ -26,6 +26,7 @@ import os
 import statistics
 import sys
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 
@@ -49,6 +50,35 @@ TRUNCATE_SQL = """
              library_folder_staged_hashes, library_folders
     CASCADE
 """
+
+
+def _redact_url(url: str) -> str:
+    """Return a display-safe version of a connection URL with credentials stripped.
+
+    Handles libpq URI form (``postgresql://user:pass@host/db``) via urlsplit.
+    For keyword-value form or unparseable strings, falls back to showing only
+    ``host=... dbname=...`` so callers never print ``password=...`` verbatim.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        parts = None
+    if parts is not None and parts.scheme and parts.hostname:
+        netloc = parts.hostname
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        if parts.username or parts.password:
+            netloc = f"***@{netloc}"
+        return urlunsplit(
+            (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
+        )
+    try:
+        params = psycopg.conninfo.conninfo_to_dict(url)
+    except psycopg.Error:
+        return "<redacted>"
+    host = str(params.get("host", "<unknown>"))
+    dbname = str(params.get("dbname", "<unknown>"))
+    return f"(host={host} dbname={dbname})"
 
 
 def _is_test_database(url: str) -> bool:
@@ -82,7 +112,7 @@ def _assert_safe_to_run(url: str) -> None:
         return
     print(
         "REFUSED: DATABASE_URL does not point at a `retrostation_test*` database.\n"
-        f"  url: {url}\n"
+        f"  url: {_redact_url(url)}\n"
         "  This script runs TRUNCATE ... CASCADE on every domain table. Refusing\n"
         "  to proceed. If this really is a throwaway DB, set "
         "PROBE_CONFIRM_DESTRUCTIVE=1.",
@@ -138,7 +168,7 @@ def main() -> None:
     _assert_safe_to_run(URL)
     _ensure_migrated(URL)
 
-    print(f"probe url: {URL}")
+    print(f"probe url: {_redact_url(URL)}")
     print(f"iterations: {ITERATIONS}\n")
 
     hs = probe_handshake(URL, ITERATIONS)

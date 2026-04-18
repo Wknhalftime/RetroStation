@@ -27,23 +27,23 @@ def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
     modules on the same xdist worker don't inherit them.
     """
     mp = pytest.MonkeyPatch()
-    mp.setenv("DATABASE_URL", _migrated_db_url)
-    # Session fixture already migrated this DB URL; skip redundant lifespan migration.
-    mp.setenv("RETROSTATION_SKIP_BOOT_MIGRATIONS", "1")
-
-    from backend.config import get_settings
-
-    get_settings.cache_clear()
-
-    from backend.dependencies import get_current_token
-    from backend.main import app
-
-    async def _skip_auth() -> str:
-        return "test-token"
-
-    app.dependency_overrides[get_current_token] = _skip_auth
-
     try:
+        mp.setenv("DATABASE_URL", _migrated_db_url)
+        # Session fixture already migrated this DB URL; skip redundant lifespan migration.
+        mp.setenv("RETROSTATION_SKIP_BOOT_MIGRATIONS", "1")
+
+        from backend.config import get_settings
+
+        get_settings.cache_clear()
+
+        from backend.dependencies import get_current_token
+        from backend.main import app
+
+        async def _skip_auth() -> str:
+            return "test-token"
+
+        app.dependency_overrides[get_current_token] = _skip_auth
+
         with TestClient(app, raise_server_exceptions=False) as c:
             yield c
     finally:
