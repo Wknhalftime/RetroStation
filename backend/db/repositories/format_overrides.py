@@ -86,12 +86,12 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def delete(self, id: UUID) -> None:
+    def delete(self, override_id: UUID) -> None:
         """Delete a format override by primary key.
 
         Args:
-            id: The UUID of the override to remove.
+            override_id: The UUID of the override to remove.
         """
         self._conn.execute(
-            "DELETE FROM format_overrides WHERE id = %s", (id,)
+            "DELETE FROM format_overrides WHERE id = %s", (override_id,)
         )

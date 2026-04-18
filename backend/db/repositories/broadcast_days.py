@@ -48,8 +48,8 @@ class PgBroadcastDayRepository(BroadcastDayRepository):
         ).fetchall()
         return [r["broadcast_date"] for r in rows]
 
-    def get_by_id(self, id: UUID) -> BroadcastDay | None:
+    def get_by_id(self, day_id: UUID) -> BroadcastDay | None:
         row = self._conn.execute(
-            "SELECT * FROM broadcast_days WHERE id = %s", (id,)
+            "SELECT * FROM broadcast_days WHERE id = %s", (day_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None

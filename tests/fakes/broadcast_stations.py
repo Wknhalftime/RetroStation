@@ -12,8 +12,8 @@ class FakeBroadcastStationRepository(BroadcastStationRepository):
         self._data[station.id] = station
         return station
 
-    def get_by_id(self, id: UUID) -> BroadcastStation | None:
-        return self._data.get(id)
+    def get_by_id(self, station_id: UUID) -> BroadcastStation | None:
+        return self._data.get(station_id)
 
     def get_by_call_letters(self, call_letters: str) -> BroadcastStation | None:
         return next((s for s in self._data.values() if s.call_letters == call_letters), None)
@@ -25,6 +25,6 @@ class FakeBroadcastStationRepository(BroadcastStationRepository):
         self._data[station.id] = station
         return station
 
-    def delete(self, id: UUID) -> None:
-        self._data.pop(id, None)
+    def delete(self, station_id: UUID) -> None:
+        self._data.pop(station_id, None)
 

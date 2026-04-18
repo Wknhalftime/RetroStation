@@ -37,9 +37,9 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, id: UUID) -> BroadcastStation | None:
+    def get_by_id(self, station_id: UUID) -> BroadcastStation | None:
         row = self._conn.execute(
-            "SELECT * FROM stations WHERE id = %s", (id,)
+            "SELECT * FROM stations WHERE id = %s", (station_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 
@@ -70,6 +70,6 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def delete(self, id: UUID) -> None:
-        self._conn.execute("DELETE FROM stations WHERE id = %s", (id,))
+    def delete(self, station_id: UUID) -> None:
+        self._conn.execute("DELETE FROM stations WHERE id = %s", (station_id,))
 

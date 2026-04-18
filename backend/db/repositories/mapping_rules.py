@@ -45,7 +45,7 @@ class PgMappingRuleRepository(MappingRuleRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def delete(self, id: UUID) -> None:
+    def delete(self, rule_id: UUID) -> None:
         self._conn.execute(
-            "DELETE FROM mapping_rules WHERE id = %s", (id,)
+            "DELETE FROM mapping_rules WHERE id = %s", (rule_id,)
         )

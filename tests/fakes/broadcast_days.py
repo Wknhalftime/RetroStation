@@ -26,5 +26,5 @@ class FakeBroadcastDayRepository(BroadcastDayRepository):
             d.broadcast_date for d in self._data.values() if d.station_id == station_id
         )
 
-    def get_by_id(self, id: UUID) -> BroadcastDay | None:
-        return self._data.get(id)
+    def get_by_id(self, day_id: UUID) -> BroadcastDay | None:
+        return self._data.get(day_id)
