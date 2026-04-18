@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import psycopg
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
@@ -700,3 +704,356 @@ class TestScanLibrary:
 
         assert resp.status_code == 202
         mock_task.assert_called_once()
+
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
+    def test_scan_passes_resolved_path_to_worker(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """Raw root_path with '..' segments must be normalized before the task."""
+        scan_dir = tmp_path / "music"
+        scan_dir.mkdir()
+        mock_settings.return_value = MagicMock(library_scan_paths=[str(tmp_path)])
+
+        raw_input = str(tmp_path / "sub" / ".." / "music")
+        resolved = str(scan_dir.resolve())
+        assert raw_input != resolved
+
+        resp = client.post("/api/v1/library/scan", json={"root_path": raw_input})
+
+        assert resp.status_code == 202
+        mock_task.assert_called_once_with(resolved)
+        assert resolved in resp.json()["message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests — MergeWorks
+# ---------------------------------------------------------------------------
+
+
+def _seed_match_for_work(conn: psycopg.Connection, work_id: str) -> str:
+    """Insert a broadcast_artists -> track_identities -> matches row.
+
+    The matches row targets work_id with target_type='work'.
+    Returns the UUID of the seeded matches row as a string.
+    """
+    suffix = uuid4().hex[:8]
+    ba_id = uuid4()
+    conn.execute(
+        "INSERT INTO broadcast_artists (id, original_name, normalized_name)"
+        " VALUES (%s, %s, %s)",
+        (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
+    )
+    ti_id = uuid4()
+    conn.execute(
+        "INSERT INTO track_identities"
+        " (id, broadcast_artist_id, original_title,"
+        "  normalized_title, normalized_signature)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (
+            ti_id, ba_id, f"Seed Track {suffix}",
+            f"seed_track_{suffix}", f"seed_sig_{suffix}",
+        ),
+    )
+    match_id = uuid4()
+    conn.execute(
+        "INSERT INTO matches (id, identity_id, target_id, target_type)"
+        " VALUES (%s, %s, %s, 'work')",
+        (match_id, ti_id, work_id),
+    )
+    conn.commit()
+    return str(match_id)
+
+
+class TestMergeWorks:
+    def test_merge_basic_happy_path(self, client, db_conn) -> None:
+        """Files move from source to target and source work is deleted."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-merge",
+            work_mbid="w-target",
+            recording_mbid="r-target",
+            file_path="/m/target.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-merge",
+            work_mbid="w-source",
+            recording_mbid="r-source",
+            file_path="/m/source.flac",
+        )
+
+        resp = client.post(
+            "/api/v1/library/works/w-target/merge",
+            json={"source_work_ids": ["w-source"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["merged_file_count"] >= 1
+        assert data["deleted_work_count"] == 1
+
+        gone = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-source",)
+        ).fetchone()
+        assert gone is None
+
+    def test_merge_rewrites_matches_rows(self, client, db_conn) -> None:
+        """matches.target_id must be rewritten from source to target work.
+
+        Regression guard: the matches table stores target_type lowercased
+        ('work'), so the UPDATE must compare against TargetType.WORK.value,
+        not the class-name literal 'Work'.
+        """
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-match",
+            work_mbid="w-match-target",
+            recording_mbid="r-match-target",
+            file_path="/m/mt.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-match",
+            work_mbid="w-match-source",
+            recording_mbid="r-match-source",
+            file_path="/m/ms.flac",
+        )
+        match_id = _seed_match_for_work(db_conn, "w-match-source")
+
+        resp = client.post(
+            "/api/v1/library/works/w-match-target/merge",
+            json={"source_work_ids": ["w-match-source"]},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT target_id, target_type FROM matches WHERE id = %s",
+            (match_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["target_id"] == "w-match-target"
+        assert row["target_type"] == "work"
+
+    def test_merge_validation_errors(self, client, db_conn) -> None:
+        """Missing target returns 404; self-merge returns 422."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-val",
+            work_mbid="w-val",
+            recording_mbid="r-val",
+            file_path="/m/v.flac",
+        )
+
+        missing = client.post(
+            "/api/v1/library/works/does-not-exist/merge",
+            json={"source_work_ids": ["w-val"]},
+        )
+        assert missing.status_code == 404
+
+        self_merge = client.post(
+            "/api/v1/library/works/w-val/merge",
+            json={"source_work_ids": ["w-val"]},
+        )
+        assert self_merge.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Tests — SplitWork
+# ---------------------------------------------------------------------------
+
+
+class TestSplitWork:
+    def test_split_basic_happy_path(self, client, db_conn) -> None:
+        """Splitting one of two files creates a new work and keeps the old."""
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-split",
+            work_mbid="w-split",
+            recording_mbid="r-split",
+            file_path="/m/split_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/split_b.flac", format="flac",
+                recording_id="r-split", work_id="w-split",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-split/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is False
+        new_work_id = data["new_work_id"]
+
+        still_there = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-split",)
+        ).fetchone()
+        assert still_there is not None
+        new_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (new_work_id,)
+        ).fetchone()
+        assert new_work is not None
+
+    def test_split_invalidates_stale_manual_master(self, client, db_conn) -> None:
+        """Manual master pointing at a split-out file must be recalculated.
+
+        Regression guard: _recalculate_song_master must verify the manual
+        master's preferred_file_id still belongs to the work after split_work
+        reassigns the file to a new work.
+        """
+        _, work, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-stale",
+            work_mbid="w-stale",
+            recording_mbid="r-stale",
+            file_path="/m/stale_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/stale_b.flac", format="flac",
+                recording_id="r-stale", work_id="w-stale",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=work.id,
+                preferred_file_id=lf_a.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (work.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf_b.id
+
+
+# ---------------------------------------------------------------------------
+# Tests — ReassignFileWork
+# ---------------------------------------------------------------------------
+
+
+class TestReassignFileWork:
+    def test_reassign_invalidates_stale_manual_master(self, client, db_conn) -> None:
+        """Reassigning the file the manual master points at drops the selection."""
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-reassign",
+            work_mbid="w1-reassign",
+            recording_mbid="r1-reassign",
+            file_path="/m/rs_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/rs_b.flac", format="flac",
+                recording_id="r1-reassign", work_id="w1-reassign",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-reassign", "Other Work", artist_id="a-reassign")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording("r2-reassign", "Other Recording", work_id="w2-reassign")
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/rs_c.flac", format="flac",
+                recording_id="r2-reassign", work_id="w2-reassign",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_a.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-reassign"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf_b.id
+
+    def test_reassign_preserves_valid_manual_master(self, client, db_conn) -> None:
+        """Manual master pointing at a file still in the work survives reassign."""
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-keep",
+            work_mbid="w1-keep",
+            recording_mbid="r1-keep",
+            file_path="/m/keep_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/keep_b.flac", format="flac",
+                recording_id="r1-keep", work_id="w1-keep",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-keep", "Other Work", artist_id="a-keep")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording("r2-keep", "Other Recording", work_id="w2-keep")
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/keep_c.flac", format="flac",
+                recording_id="r2-keep", work_id="w2-keep",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_b.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-keep"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "manual"
+        assert row["preferred_file_id"] == lf_b.id
