@@ -115,7 +115,7 @@ async def list_artists(
 async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> ArtistDetail:
     """Return an artist with a summary of their works."""
     artist_cur = await conn.execute(
-        "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",
+        "SELECT id, name, sort_name, disambiguation, mbid FROM artists WHERE id = %s",
         (artist_id,),
     )
     artist_row = await artist_cur.fetchone()
@@ -150,23 +150,25 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
     work_rows = await works_cur.fetchall()
 
     if not work_rows:
-        works_cur = await conn.execute(
-            """
-            SELECT
-                lf.track_title AS title,
-                COUNT(*) AS recording_count
-            FROM library_files lf
-            WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
-              AND lf.track_title IS NOT NULL
-            GROUP BY lf.track_title
-            ORDER BY lf.track_title
-            """,
-            (artist_id, artist_id),
-        )
-        work_rows = await works_cur.fetchall()
+        artist_mbid = artist_row.get("mbid")
+        if artist_mbid:
+            works_cur = await conn.execute(
+                """
+                SELECT
+                    lf.track_title AS title,
+                    COUNT(*) AS recording_count
+                FROM library_files lf
+                WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
+                  AND lf.track_title IS NOT NULL
+                GROUP BY lf.track_title
+                ORDER BY lf.track_title
+                """,
+                (artist_mbid, artist_mbid),
+            )
+            work_rows = await works_cur.fetchall()
         works = [
             WorkSummary(
-                id=encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
+                id=encode_synthetic_work_id(artist_mbid or artist_id, row["title"] or "unknown"),
                 title=row["title"] or "Unknown",
                 recording_count=row["recording_count"],
                 has_master=False,
