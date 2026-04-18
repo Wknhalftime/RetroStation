@@ -428,6 +428,59 @@ class TestWorkDetail:
         assert len(data["recordings"]) == 1
         assert data["recordings"][0]["files"] == []
 
+    def test_surfaces_files_with_null_recording_id(self, client, db_conn) -> None:
+        """Files linked to a work but not yet matched to a recording are surfaced."""
+        PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w-orphan-detail", "Orphan Work", artist_id="a-orphan")
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/orphan_detail.flac", format="flac",
+                recording_id=None, work_id="w-orphan-detail",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/works/w-orphan-detail")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == "w-orphan-detail"
+        assert len(data["recordings"]) == 1
+        rec = data["recordings"][0]
+        assert rec["id"] == "orphan:w-orphan-detail"
+        assert len(rec["files"]) == 1
+        assert rec["files"][0]["id"] == str(lf.id)
+        assert rec["files"][0]["file_path"] == "/m/orphan_detail.flac"
+
+    def test_mixes_enriched_and_orphan_files(self, client, db_conn) -> None:
+        """Work with one enriched recording and one NULL-recording file lists both."""
+        _, work, recording, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-mixed",
+            work_mbid="w-mixed",
+            recording_mbid="r-mixed",
+            file_path="/m/mixed_a.flac",
+        )
+        orphan_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/mixed_b.flac", format="mp3",
+                recording_id=None, work_id="w-mixed",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get(f"/api/v1/library/works/{work.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["recordings"]) == 2
+        rec_ids = {rec["id"] for rec in data["recordings"]}
+        assert recording.id in rec_ids
+        assert f"orphan:{work.id}" in rec_ids
+        orphan_bucket = next(r for r in data["recordings"] if r["id"].startswith("orphan:"))
+        assert len(orphan_bucket["files"]) == 1
+        assert orphan_bucket["files"][0]["id"] == str(orphan_lf.id)
+
 
 # ---------------------------------------------------------------------------
 # Tests — SetMaster / DeleteMaster

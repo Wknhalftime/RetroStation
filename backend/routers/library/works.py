@@ -367,6 +367,48 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
             for rec in recordings_map.values()
         ]
 
+        orphan_cur = await conn.execute(
+            """
+            SELECT
+                lf.id AS file_id,
+                lf.file_path,
+                lf.format,
+                lf.bitrate,
+                lf.duration_ms,
+                lf.track_title,
+                lf.release_title,
+                lf.enrichment_status
+            FROM library_files lf
+            WHERE lf.work_id = %s AND lf.recording_id IS NULL
+            ORDER BY lf.file_path
+            """,
+            (work_id,),
+        )
+        orphan_rows = await orphan_cur.fetchall()
+        if orphan_rows:
+            orphan_files = [
+                FileInfo(
+                    id=row["file_id"],
+                    file_path=row["file_path"],
+                    format=row["format"],
+                    bitrate=row.get("bitrate"),
+                    duration_ms=row.get("duration_ms"),
+                    track_title=row.get("track_title"),
+                    release_title=row.get("release_title"),
+                    enrichment_status=row["enrichment_status"],
+                )
+                for row in orphan_rows
+            ]
+            recordings.append(
+                RecordingDetail(
+                    id=f"orphan:{work_id}",
+                    title=work_row["title"],
+                    version_type="original",
+                    duration_ms=None,
+                    files=orphan_files,
+                )
+            )
+
         sm_cur = await conn.execute(
             "SELECT * FROM song_masters WHERE work_id = %s",
             (work_id,),
