@@ -9,7 +9,7 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel
 
 from backend.dependencies import get_current_token, get_db_connection
-from backend.domain.enums import CatalogSource
+from backend.domain.enums import CatalogSource, TargetType
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
 
 router = APIRouter()
@@ -146,16 +146,27 @@ class ReassignResponse(BaseModel):
 async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> None:
     """Recalculate the auto song master for a work using async SQL.
 
-    Skips recalculation if a manual master already exists for the work.
-    Upserts the best-scored file as the new auto master.
+    Honors a manual master only if its preferred_file_id still belongs to the
+    work; otherwise falls through to auto-recalculation so split_work and
+    reassign_file_work cannot leave a stale pointer.
     """
     sm_cur = await conn.execute(
-        "SELECT selection_method FROM song_masters WHERE work_id = %s",
+        "SELECT id, preferred_file_id, selection_method FROM song_masters WHERE work_id = %s",
         (work_id,),
     )
     sm_row = await sm_cur.fetchone()
     if sm_row is not None and sm_row["selection_method"] == "manual":
-        return
+        member_cur = await conn.execute(
+            """
+            SELECT 1
+            FROM library_files lf
+            JOIN recordings r ON lf.recording_id = r.id
+            WHERE lf.id = %s AND r.work_id = %s
+            """,
+            (sm_row["preferred_file_id"], work_id),
+        )
+        if await member_cur.fetchone() is not None:
+            return
 
     files_cur = await conn.execute(
         """
@@ -202,14 +213,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
     best = max(file_rows, key=_score)
     score_val, _, _ = _score(best)
 
-    existing_id: UUID | None = None
-    if sm_row is not None:
-        id_cur = await conn.execute("SELECT id FROM song_masters WHERE work_id = %s", (work_id,))
-        id_row = await id_cur.fetchone()
-        if id_row:
-            existing_id = id_row["id"]
-
-    master_id = existing_id if existing_id is not None else uuid4()
+    master_id = sm_row["id"] if sm_row is not None else uuid4()
     await conn.execute(
         """
         INSERT INTO song_masters
@@ -660,9 +664,9 @@ async def merge_works(
         f"""
         UPDATE matches
         SET target_id = %s
-        WHERE target_type = 'Work' AND target_id IN ({src_placeholders})
+        WHERE target_type = %s AND target_id IN ({src_placeholders})
         """,
-        [target_id, *existing_source_ids],
+        [target_id, TargetType.WORK.value, *existing_source_ids],
     )
 
     await conn.execute(

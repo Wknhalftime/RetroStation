@@ -35,5 +35,6 @@ async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
     if not scan_path.exists() or not scan_path.is_dir():
         raise HTTPException(status_code=400, detail="Invalid directory path")
 
-    library_scan_task(body.root_path)
-    return {"status": "accepted", "message": f"Library scan queued for {body.root_path}"}
+    validated_path = str(scan_path)
+    library_scan_task(validated_path)
+    return {"status": "accepted", "message": f"Library scan queued for {validated_path}"}
