@@ -44,16 +44,38 @@ def db_url(worker_id: str) -> str:
     return psycopg.conninfo.make_conninfo(**params)
 
 
+def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> None:
+    """Apply test-only, performance-over-durability settings to a test database.
+
+    CRITICAL: only safe because crash durability doesn't matter for test DBs
+    — if Postgres crashes mid-test the worker DB is rebuilt from scratch on the
+    next session anyway. Never apply these to production.
+
+    Hard safety gate: refuse unless the dbname matches the test prefix.
+    `synchronous_commit = off` is session-inherited; every connection to this
+    database (fixture conns, app pool, seed helpers) gets it automatically.
+    """
+    if not dbname.startswith("retrostation_test"):
+        raise RuntimeError(
+            f"refusing to apply test tuning to non-test database {dbname!r}"
+        )
+    admin_conn.execute(
+        pg_sql.SQL("ALTER DATABASE {} SET synchronous_commit = 'off'").format(
+            pg_sql.Identifier(dbname)
+        )
+    )
+
+
 @pytest.fixture(scope="session")
 def clean_db(db_url: str, worker_id: str) -> None:
     """Ensure the worker DB exists, then drop and recreate its public schema."""
-    if worker_id != "master":
-        params = psycopg.conninfo.conninfo_to_dict(db_url)
-        dbname = params["dbname"]
-        admin_params = dict(params)
-        admin_params["dbname"] = "postgres"
-        admin_url = psycopg.conninfo.make_conninfo(**admin_params)
-        with psycopg.connect(admin_url, autocommit=True) as admin_conn:
+    params = psycopg.conninfo.conninfo_to_dict(db_url)
+    dbname = params["dbname"]
+    admin_params = dict(params)
+    admin_params["dbname"] = "postgres"
+    admin_url = psycopg.conninfo.make_conninfo(**admin_params)
+    with psycopg.connect(admin_url, autocommit=True) as admin_conn:
+        if worker_id != "master":
             exists = admin_conn.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
             ).fetchone()
@@ -61,6 +83,10 @@ def clean_db(db_url: str, worker_id: str) -> None:
                 admin_conn.execute(
                     pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
                 )
+        # Apply unsafe-but-fast settings scoped to this test DB only.
+        # Takes effect for connections opened AFTER this runs (which is fine:
+        # clean_db runs first in the fixture chain).
+        _apply_test_db_tuning(admin_conn, dbname)
 
     with psycopg.connect(db_url, autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
