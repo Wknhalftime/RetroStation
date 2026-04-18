@@ -21,5 +21,5 @@ class FakeFormatOverrideRepository(FormatOverrideRepository):
     def list_by_work(self, work_id: str) -> list[FormatOverride]:
         return [o for o in self._data.values() if o.work_id == work_id]
 
-    def delete(self, id: UUID) -> None:
-        self._data.pop(id, None)
+    def delete(self, override_id: UUID) -> None:
+        self._data.pop(override_id, None)

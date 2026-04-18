@@ -15,5 +15,5 @@ class FakeMappingRuleRepository(MappingRuleRepository):
         self._data[rule.id] = rule
         return rule
 
-    def delete(self, id: UUID) -> None:
-        self._data.pop(id, None)
+    def delete(self, rule_id: UUID) -> None:
+        self._data.pop(rule_id, None)

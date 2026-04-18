@@ -35,9 +35,9 @@ class PgBroadcastPlaylistRepository(BroadcastPlaylistRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
-    def get_by_id(self, id: UUID) -> BroadcastPlaylist | None:
+    def get_by_id(self, playlist_id: UUID) -> BroadcastPlaylist | None:
         row = self._conn.execute(
-            "SELECT * FROM playlists WHERE id = %s", (id,)
+            "SELECT * FROM playlists WHERE id = %s", (playlist_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
 

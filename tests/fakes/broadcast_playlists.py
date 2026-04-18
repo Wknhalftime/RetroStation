@@ -12,8 +12,8 @@ class FakeBroadcastPlaylistRepository(BroadcastPlaylistRepository):
         self._data[playlist.id] = playlist
         return playlist
 
-    def get_by_id(self, id: UUID) -> BroadcastPlaylist | None:
-        return self._data.get(id)
+    def get_by_id(self, playlist_id: UUID) -> BroadcastPlaylist | None:
+        return self._data.get(playlist_id)
 
     def get_by_content_hash(self, content_hash: str) -> BroadcastPlaylist | None:
         return next((p for p in self._data.values() if p.content_hash == content_hash), None)
