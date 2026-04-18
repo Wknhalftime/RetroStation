@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 import structlog
@@ -16,10 +17,32 @@ logger = structlog.get_logger()
 # Scoring constants per spec Section 5.4
 RELEASE_STATUS_SCORE: dict[str, int] = {"promotion": 100, "official": 0}
 RELEASE_TYPE_SCORE: dict[str, int] = {
-    "album": 80, "ep": 70, "single": 60,
-    "compilation": 40, "live": 30, "other": 20,
+    "album": 80,
+    "ep": 70,
+    "single": 60,
+    "compilation": 40,
+    "live": 30,
+    "other": 20,
 }
 FORMAT_BONUS: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
+
+
+def score_file_row(row: dict[str, Any]) -> tuple[int, int, int]:
+    """Return (score, bitrate, duration_ms) for a raw DB row dict.
+
+    Used by async router helpers that work with psycopg row dicts rather than
+    domain objects. Shares the same scoring constants as :func:`_score_file`.
+    """
+    score = 0
+    rs = row.get("release_status")
+    if rs:
+        score += RELEASE_STATUS_SCORE.get(rs, 0)
+    rt = row.get("release_type")
+    if rt:
+        score += RELEASE_TYPE_SCORE.get(rt, RELEASE_TYPE_SCORE["other"])
+    fmt = (row.get("format") or "").lower()
+    score += FORMAT_BONUS.get(fmt, 1)
+    return score, row.get("bitrate") or 0, row.get("duration_ms") or 0
 
 
 def _score_file(lib_file: LibraryFile) -> tuple[int, int, int]:
