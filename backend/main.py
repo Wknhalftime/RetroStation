@@ -5,8 +5,10 @@ from contextlib import asynccontextmanager
 
 import psycopg
 import structlog
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from psycopg_pool import PoolTimeout, TooManyRequests
 
 from backend.config import get_settings
 from backend.db.migrations import run_migrations
@@ -74,6 +76,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def _pool_saturation_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Translate connection-pool saturation into HTTP 503.
+
+    PoolTimeout fires when a waiter exceeds the 30s default client timeout;
+    TooManyRequests fires when the wait queue is already at max_waiting.
+    Both mean the service is overloaded (not broken), so 503 with
+    Retry-After is the honest signal and matches the claim in
+    backend.db.pool.init_pool.
+    """
+    logger.warning(
+        "db_pool_saturated",
+        exception=type(exc).__name__,
+        path=request.url.path,
+        method=request.method,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Database pool saturated; please retry."},
+        headers={"Retry-After": "1"},
+    )
+
+
+app.add_exception_handler(PoolTimeout, _pool_saturation_handler)
+app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 
 app.include_router(v1_router)
 
