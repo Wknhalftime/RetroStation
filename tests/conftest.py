@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import warnings
 from collections.abc import Generator
 from typing import Any
 
@@ -90,25 +91,50 @@ def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> N
 
 @pytest.fixture(scope="session")
 def clean_db(db_url: str, worker_id: str) -> None:
-    """Ensure the worker DB exists, then drop and recreate its public schema."""
+    """Ensure the worker DB exists, then drop and recreate its public schema.
+
+    The admin connection to the ``postgres`` maintenance DB is required when
+    ``worker_id != "master"`` (to CREATE DATABASE for the per-worker suffix)
+    and optional for ``"master"`` (only used to ALTER DATABASE for tuning).
+    If the test role lacks CONNECT privilege on ``postgres``, the master
+    branch degrades gracefully: a warning is emitted and tuning is skipped,
+    so the suite still runs against an untuned but functional test DB.
+    """
     params = psycopg.conninfo.conninfo_to_dict(db_url)
     dbname = params["dbname"]
     admin_params = dict(params)
     admin_params["dbname"] = "postgres"
     admin_url = psycopg.conninfo.make_conninfo(**admin_params)
-    with psycopg.connect(admin_url, autocommit=True) as admin_conn:
+
+    try:
+        admin_cm = psycopg.connect(admin_url, autocommit=True)
+    except psycopg.OperationalError as exc:
         if worker_id != "master":
-            exists = admin_conn.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
-            ).fetchone()
-            if not exists:
-                admin_conn.execute(
-                    pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
-                )
-        # Apply unsafe-but-fast settings scoped to this test DB only.
-        # Takes effect for connections opened AFTER this runs (which is fine:
-        # clean_db runs first in the fixture chain).
-        _apply_test_db_tuning(admin_conn, dbname)
+            # Per-worker DBs REQUIRE admin access; no safe fallback.
+            raise
+        warnings.warn(
+            f"tests: could not connect to 'postgres' maintenance DB ({exc}); "
+            "skipping per-database tuning (synchronous_commit/statement_timeout/"
+            "lock_timeout/idle_in_transaction_session_timeout). The suite will "
+            "still run but slower and without the runaway-query safety nets.",
+            stacklevel=1,
+        )
+    else:
+        with admin_cm as admin_conn:
+            if worker_id != "master":
+                exists = admin_conn.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
+                ).fetchone()
+                if not exists:
+                    admin_conn.execute(
+                        pg_sql.SQL("CREATE DATABASE {}").format(
+                            pg_sql.Identifier(dbname)
+                        )
+                    )
+            # Apply unsafe-but-fast settings scoped to this test DB only.
+            # Takes effect for connections opened AFTER this runs (which is fine:
+            # clean_db runs first in the fixture chain).
+            _apply_test_db_tuning(admin_conn, dbname)
 
     with psycopg.connect(db_url, autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
