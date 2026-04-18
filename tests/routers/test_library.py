@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import psycopg
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
@@ -424,6 +428,59 @@ class TestWorkDetail:
         assert len(data["recordings"]) == 1
         assert data["recordings"][0]["files"] == []
 
+    def test_surfaces_files_with_null_recording_id(self, client, db_conn) -> None:
+        """Files linked to a work but not yet matched to a recording are surfaced."""
+        PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w-orphan-detail", "Orphan Work", artist_id="a-orphan")
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/orphan_detail.flac", format="flac",
+                recording_id=None, work_id="w-orphan-detail",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/works/w-orphan-detail")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == "w-orphan-detail"
+        assert len(data["recordings"]) == 1
+        rec = data["recordings"][0]
+        assert rec["id"] == "orphan:w-orphan-detail"
+        assert len(rec["files"]) == 1
+        assert rec["files"][0]["id"] == str(lf.id)
+        assert rec["files"][0]["file_path"] == "/m/orphan_detail.flac"
+
+    def test_mixes_enriched_and_orphan_files(self, client, db_conn) -> None:
+        """Work with one enriched recording and one NULL-recording file lists both."""
+        _, work, recording, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-mixed",
+            work_mbid="w-mixed",
+            recording_mbid="r-mixed",
+            file_path="/m/mixed_a.flac",
+        )
+        orphan_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/mixed_b.flac", format="mp3",
+                recording_id=None, work_id="w-mixed",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get(f"/api/v1/library/works/{work.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["recordings"]) == 2
+        rec_ids = {rec["id"] for rec in data["recordings"]}
+        assert recording.id in rec_ids
+        assert f"orphan:{work.id}" in rec_ids
+        orphan_bucket = next(r for r in data["recordings"] if r["id"].startswith("orphan:"))
+        assert len(orphan_bucket["files"]) == 1
+        assert orphan_bucket["files"][0]["id"] == str(orphan_lf.id)
+
 
 # ---------------------------------------------------------------------------
 # Tests — SetMaster / DeleteMaster
@@ -471,7 +528,12 @@ class TestSetMaster:
             recording_mbid="r-001",
             file_path="/m/a.flac",
         )
-        lf2 = PgLibraryFileRepository(db_conn).upsert(_make_file("/m/b.flac", format="mp3"))
+        lf2 = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/b.flac", format="mp3",
+                recording_id="r-001", work_id=work.id,
+            )
+        )
         db_conn.commit()
 
         client.put(
@@ -514,6 +576,38 @@ class TestSetMaster:
 
         resp = client.delete("/api/v1/library/works/w-001/master")
         assert resp.status_code == 404
+
+    def test_set_master_rejects_file_not_in_work(self, client, db_conn) -> None:
+        """preferred_file_id must belong to the target work."""
+        _, work, _, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-reject",
+            work_mbid="w-reject",
+            recording_mbid="r-reject",
+            file_path="/m/reject_a.flac",
+        )
+        # A file tied to a different work.
+        PgArtistRepository(db_conn).upsert(_make_artist("a-other"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-other", "Other", artist_id="a-other"))
+        foreign_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/foreign.flac", format="flac",
+                recording_id=None, work_id="w-other",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.put(
+            f"/api/v1/library/works/{work.id}/master",
+            json={"preferred_file_id": str(foreign_lf.id)},
+        )
+        assert resp.status_code == 422
+        assert str(foreign_lf.id) in resp.json()["detail"]
+        # Master was not persisted.
+        row = db_conn.execute(
+            "SELECT 1 FROM song_masters WHERE work_id = %s", (work.id,),
+        ).fetchone()
+        assert row is None
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +703,72 @@ class TestFormatOverrides:
         assert resp.status_code == 201
         assert resp.json()["notes"] is None
 
+    def test_create_duplicate_format_override_returns_409(
+        self, client, db_conn
+    ) -> None:
+        """Second override for the same (work_id, format_name) returns 409."""
+        _, work, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-dup",
+            work_mbid="w-dup",
+            recording_mbid="r-dup",
+            file_path="/m/dup.flac",
+        )
+
+        first = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(lf.id)},
+        )
+        assert first.status_code == 201
+
+        second = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(lf.id)},
+        )
+        assert second.status_code == 409
+        assert "flac" in second.json()["detail"]
+
+        rows = db_conn.execute(
+            "SELECT 1 FROM format_overrides WHERE work_id = %s AND format_name = %s",
+            (work.id, "flac"),
+        ).fetchall()
+        assert len(rows) == 1
+
+    def test_create_format_override_rejects_file_not_in_work(
+        self, client, db_conn
+    ) -> None:
+        """preferred_file_id must belong to the target work."""
+        _, work, _, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-reject",
+            work_mbid="w-fo-reject",
+            recording_mbid="r-fo-reject",
+            file_path="/m/fo_reject_a.flac",
+        )
+        PgArtistRepository(db_conn).upsert(_make_artist("a-fo-other"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w-fo-other", "Other", artist_id="a-fo-other")
+        )
+        foreign_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/fo_foreign.flac", format="flac",
+                recording_id=None, work_id="w-fo-other",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(foreign_lf.id)},
+        )
+        assert resp.status_code == 422
+        assert str(foreign_lf.id) in resp.json()["detail"]
+        # Override was not persisted.
+        row = db_conn.execute(
+            "SELECT 1 FROM format_overrides WHERE work_id = %s", (work.id,),
+        ).fetchone()
+        assert row is None
+
 
 # ---------------------------------------------------------------------------
 # Scan endpoint
@@ -618,8 +778,8 @@ class TestFormatOverrides:
 class TestScanLibrary:
     """POST /api/v1/library/scan endpoint tests."""
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_accepted(
         self,
         mock_settings: MagicMock,
@@ -639,8 +799,8 @@ class TestScanLibrary:
         assert body["status"] == "accepted"
         mock_task.assert_called_once_with(str(scan_dir))
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_invalid_directory(
         self,
         mock_settings: MagicMock,
@@ -660,8 +820,8 @@ class TestScanLibrary:
         assert "Invalid directory" in resp.json()["detail"]
         mock_task.assert_not_called()
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_disallowed_path(
         self,
         mock_settings: MagicMock,
@@ -682,8 +842,8 @@ class TestScanLibrary:
         assert "not in allowed" in resp.json()["detail"]
         mock_task.assert_not_called()
 
-    @patch("backend.routers.library.library_scan_task")
-    @patch("backend.routers.library.get_settings")
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
     def test_scan_empty_allowlist_permits_any(
         self,
         mock_settings: MagicMock,
@@ -700,3 +860,862 @@ class TestScanLibrary:
 
         assert resp.status_code == 202
         mock_task.assert_called_once()
+
+    @patch("backend.routers.library.scan.library_scan_task")
+    @patch("backend.routers.library.scan.get_settings")
+    def test_scan_passes_resolved_path_to_worker(
+        self,
+        mock_settings: MagicMock,
+        mock_task: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        """Raw root_path with '..' segments must be normalized before the task."""
+        scan_dir = tmp_path / "music"
+        scan_dir.mkdir()
+        mock_settings.return_value = MagicMock(library_scan_paths=[str(tmp_path)])
+
+        raw_input = str(tmp_path / "sub" / ".." / "music")
+        resolved = str(scan_dir.resolve())
+        assert raw_input != resolved
+
+        resp = client.post("/api/v1/library/scan", json={"root_path": raw_input})
+
+        assert resp.status_code == 202
+        mock_task.assert_called_once_with(resolved)
+        assert resolved in resp.json()["message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests — MergeWorks
+# ---------------------------------------------------------------------------
+
+
+def _seed_match_for_work(conn: psycopg.Connection, work_id: str) -> str:
+    """Insert a broadcast_artists -> track_identities -> matches row.
+
+    The matches row targets work_id with target_type='work'.
+    Returns the UUID of the seeded matches row as a string.
+    """
+    suffix = uuid4().hex[:8]
+    ba_id = uuid4()
+    conn.execute(
+        "INSERT INTO broadcast_artists (id, original_name, normalized_name)"
+        " VALUES (%s, %s, %s)",
+        (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
+    )
+    ti_id = uuid4()
+    conn.execute(
+        "INSERT INTO track_identities"
+        " (id, broadcast_artist_id, original_title,"
+        "  normalized_title, normalized_signature)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (
+            ti_id, ba_id, f"Seed Track {suffix}",
+            f"seed_track_{suffix}", f"seed_sig_{suffix}",
+        ),
+    )
+    match_id = uuid4()
+    conn.execute(
+        "INSERT INTO matches (id, identity_id, target_id, target_type)"
+        " VALUES (%s, %s, %s, 'work')",
+        (match_id, ti_id, work_id),
+    )
+    conn.commit()
+    return str(match_id)
+
+
+class TestMergeWorks:
+    def test_merge_basic_happy_path(self, client, db_conn) -> None:
+        """Files move from source to target and source work is deleted."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-merge",
+            work_mbid="w-target",
+            recording_mbid="r-target",
+            file_path="/m/target.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-merge",
+            work_mbid="w-source",
+            recording_mbid="r-source",
+            file_path="/m/source.flac",
+        )
+
+        resp = client.post(
+            "/api/v1/library/works/w-target/merge",
+            json={"source_work_ids": ["w-source"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["merged_file_count"] >= 1
+        assert data["deleted_work_count"] == 1
+
+        gone = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-source",)
+        ).fetchone()
+        assert gone is None
+
+    def test_merge_rewrites_matches_rows(self, client, db_conn) -> None:
+        """matches.target_id must be rewritten from source to target work.
+
+        Regression guard: the matches table stores target_type lowercased
+        ('work'), so the UPDATE must compare against TargetType.WORK.value,
+        not the class-name literal 'Work'.
+        """
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-match",
+            work_mbid="w-match-target",
+            recording_mbid="r-match-target",
+            file_path="/m/mt.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-match",
+            work_mbid="w-match-source",
+            recording_mbid="r-match-source",
+            file_path="/m/ms.flac",
+        )
+        match_id = _seed_match_for_work(db_conn, "w-match-source")
+
+        resp = client.post(
+            "/api/v1/library/works/w-match-target/merge",
+            json={"source_work_ids": ["w-match-source"]},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT target_id, target_type FROM matches WHERE id = %s",
+            (match_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["target_id"] == "w-match-target"
+        assert row["target_type"] == "work"
+
+    def test_merge_validation_errors(self, client, db_conn) -> None:
+        """Missing target returns 404; self-merge returns 422."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-val",
+            work_mbid="w-val",
+            recording_mbid="r-val",
+            file_path="/m/v.flac",
+        )
+
+        missing = client.post(
+            "/api/v1/library/works/does-not-exist/merge",
+            json={"source_work_ids": ["w-val"]},
+        )
+        assert missing.status_code == 404
+
+        self_merge = client.post(
+            "/api/v1/library/works/w-val/merge",
+            json={"source_work_ids": ["w-val"]},
+        )
+        assert self_merge.status_code == 422
+
+    def test_merge_two_sources_sharing_format_override(self, client, db_conn) -> None:
+        """Two sources with an override for the same format_name must not 500.
+
+        Regression guard for UNIQUE (work_id, format_name): the bulk UPDATE
+        that moves format_overrides onto the target used to violate the
+        constraint when two source works each had an override for the same
+        format_name (and the target didn't). One source override must win,
+        the rest must be dropped.
+        """
+        _, _, _, lf_target = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-target",
+            recording_mbid="r-fo-target",
+            file_path="/m/fom_target.flac",
+        )
+        _, _, _, lf_src_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-src-a",
+            recording_mbid="r-fo-src-a",
+            file_path="/m/fom_src_a.flac",
+        )
+        _, _, _, lf_src_b = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-merge",
+            work_mbid="w-fo-src-b",
+            recording_mbid="r-fo-src-b",
+            file_path="/m/fom_src_b.flac",
+        )
+        # Both sources have a "flac" override; target has none.
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=uuid4(),
+                work_id="w-fo-src-a",
+                format_name="flac",
+                preferred_file_id=lf_src_a.id,
+                notes="first",
+            )
+        )
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=uuid4(),
+                work_id="w-fo-src-b",
+                format_name="flac",
+                preferred_file_id=lf_src_b.id,
+                notes="second",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-fo-target/merge",
+            json={"source_work_ids": ["w-fo-src-a", "w-fo-src-b"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["deleted_work_count"] == 2
+        assert data["dropped_override_count"] == 1
+
+        rows = db_conn.execute(
+            "SELECT id, work_id FROM format_overrides WHERE format_name = %s",
+            ("flac",),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["work_id"] == "w-fo-target"
+        # lf_target is seeded but unused by the override — silence linters.
+        assert lf_target is not None
+
+    def test_merge_source_override_defers_to_target(self, client, db_conn) -> None:
+        """When target already has an override for the format, source's is dropped."""
+        _, _, _, lf_target = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-target-wins",
+            work_mbid="w-fotw-target",
+            recording_mbid="r-fotw-target",
+            file_path="/m/fotw_target.flac",
+        )
+        _, _, _, lf_src = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-target-wins",
+            work_mbid="w-fotw-src",
+            recording_mbid="r-fotw-src",
+            file_path="/m/fotw_src.flac",
+        )
+        target_override_id = uuid4()
+        src_override_id = uuid4()
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=target_override_id,
+                work_id="w-fotw-target",
+                format_name="flac",
+                preferred_file_id=lf_target.id,
+                notes="target-owned",
+            )
+        )
+        PgFormatOverrideRepository(db_conn).create(
+            FormatOverride(
+                id=src_override_id,
+                work_id="w-fotw-src",
+                format_name="flac",
+                preferred_file_id=lf_src.id,
+                notes="source-owned",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-fotw-target/merge",
+            json={"source_work_ids": ["w-fotw-src"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dropped_override_count"] == 1
+
+        rows = db_conn.execute(
+            "SELECT id FROM format_overrides WHERE format_name = %s",
+            ("flac",),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["id"] == target_override_id
+
+
+# ---------------------------------------------------------------------------
+# Tests — SplitWork
+# ---------------------------------------------------------------------------
+
+
+class TestSplitWork:
+    def test_split_basic_happy_path(self, client, db_conn) -> None:
+        """Splitting one of two files creates a new work and keeps the old."""
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-split",
+            work_mbid="w-split",
+            recording_mbid="r-split",
+            file_path="/m/split_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/split_b.flac", format="flac",
+                recording_id="r-split", work_id="w-split",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-split/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is False
+        new_work_id = data["new_work_id"]
+
+        still_there = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-split",)
+        ).fetchone()
+        assert still_there is not None
+        new_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (new_work_id,)
+        ).fetchone()
+        assert new_work is not None
+
+    def test_split_invalidates_stale_manual_master(self, client, db_conn) -> None:
+        """Manual master pointing at a split-out file must be recalculated.
+
+        Regression guard: _recalculate_song_master must verify the manual
+        master's preferred_file_id still belongs to the work after split_work
+        reassigns the file to a new work.
+        """
+        _, work, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-stale",
+            work_mbid="w-stale",
+            recording_mbid="r-stale",
+            file_path="/m/stale_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/stale_b.flac", format="flac",
+                recording_id="r-stale", work_id="w-stale",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=work.id,
+                preferred_file_id=lf_a.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (work.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf_b.id
+
+    def test_split_last_file_deletes_old_work_and_recordings(
+        self, client, db_conn
+    ) -> None:
+        """Splitting the only file from a work must cascade-clean recordings.
+
+        Regression guard: recordings.work_id REFERENCES works(id) has no
+        ON DELETE CASCADE, so leaving behind the original recording would
+        FK-violate the DELETE FROM works and surface as a 500.
+        """
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-last",
+            work_mbid="w-last",
+            recording_mbid="r-last",
+            file_path="/m/last.flac",
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-last/split",
+            json={"file_id": str(lf.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is True
+
+        old_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-last",),
+        ).fetchone()
+        assert old_work is None
+        # Original recording must have been deleted alongside the work.
+        old_rec = db_conn.execute(
+            "SELECT id FROM recordings WHERE id = %s", ("r-last",),
+        ).fetchone()
+        assert old_rec is None
+
+    def test_split_last_file_deletes_old_work_and_format_overrides(
+        self, client, db_conn
+    ) -> None:
+        """Splitting the last file from a work must cascade-clean format_overrides.
+
+        Regression guard: format_overrides.work_id REFERENCES works(id) has no
+        ON DELETE CASCADE, so leaving behind an override row would FK-violate
+        the DELETE FROM works and surface as a 500.
+        """
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-last-fo",
+            work_mbid="w-last-fo",
+            recording_mbid="r-last-fo",
+            file_path="/m/last_fo.flac",
+        )
+        db_conn.execute(
+            "INSERT INTO format_overrides (work_id, format_name, preferred_file_id)"
+            " VALUES (%s, %s, %s)",
+            ("w-last-fo", "flac", lf.id),
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-last-fo/split",
+            json={"file_id": str(lf.id)},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["old_work_deleted"] is True
+
+        gone_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-last-fo",),
+        ).fetchone()
+        assert gone_work is None
+        gone_override = db_conn.execute(
+            "SELECT id FROM format_overrides WHERE work_id = %s", ("w-last-fo",),
+        ).fetchone()
+        assert gone_override is None
+
+    def test_split_file_with_null_recording_id(self, client, db_conn) -> None:
+        """Split succeeds when the target file has work_id set but recording_id NULL.
+
+        Regression guard: the file lookup must key off library_files.work_id, not
+        the recordings join, so pre-enrichment files (recording_id IS NULL) can
+        still be split.
+        """
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-null-rec",
+            work_mbid="w-null-rec",
+            recording_mbid="r-null-rec",
+            file_path="/m/null_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/null_b.flac", format="flac",
+                recording_id=None, work_id="w-null-rec",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-null-rec/split",
+            json={"file_id": str(lf_b.id)},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["old_work_deleted"] is False
+        new_work_id = data["new_work_id"]
+
+        moved = db_conn.execute(
+            "SELECT work_id, recording_id FROM library_files WHERE id = %s",
+            (lf_b.id,),
+        ).fetchone()
+        assert moved is not None
+        assert moved["work_id"] == new_work_id
+        assert moved["recording_id"] is None
+
+        remaining = db_conn.execute(
+            "SELECT work_id FROM library_files WHERE id = %s",
+            (lf_a.id,),
+        ).fetchone()
+        assert remaining is not None
+        assert remaining["work_id"] == "w-null-rec"
+
+    def test_split_empty_check_uses_library_files_work_id(
+        self, client, db_conn
+    ) -> None:
+        """Old-work emptiness is evaluated from library_files.work_id, not recordings.
+
+        Regression guard: if the remaining file has recording_id IS NULL,
+        the old work must survive because library_files.work_id still points at it.
+        """
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-empty-check",
+            work_mbid="w-empty-check",
+            recording_mbid="r-empty-check",
+            file_path="/m/ec_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/ec_b.flac", format="flac",
+                recording_id=None, work_id="w-empty-check",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            "/api/v1/library/works/w-empty-check/split",
+            json={"file_id": str(lf_a.id)},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["old_work_deleted"] is False
+
+        still_there = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w-empty-check",)
+        ).fetchone()
+        assert still_there is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests — ReassignFileWork
+# ---------------------------------------------------------------------------
+
+
+class TestReassignFileWork:
+    def test_reassign_invalidates_stale_manual_master(self, client, db_conn) -> None:
+        """Reassigning the file the manual master points at drops the selection."""
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-reassign",
+            work_mbid="w1-reassign",
+            recording_mbid="r1-reassign",
+            file_path="/m/rs_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/rs_b.flac", format="flac",
+                recording_id="r1-reassign", work_id="w1-reassign",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-reassign", "Other Work", artist_id="a-reassign")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording("r2-reassign", "Other Recording", work_id="w2-reassign")
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/rs_c.flac", format="flac",
+                recording_id="r2-reassign", work_id="w2-reassign",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_a.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-reassign"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf_b.id
+
+    def test_reassign_preserves_valid_manual_master(self, client, db_conn) -> None:
+        """Manual master pointing at a file still in the work survives reassign."""
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-keep",
+            work_mbid="w1-keep",
+            recording_mbid="r1-keep",
+            file_path="/m/keep_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/keep_b.flac", format="flac",
+                recording_id="r1-keep", work_id="w1-keep",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-keep", "Other Work", artist_id="a-keep")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording("r2-keep", "Other Recording", work_id="w2-keep")
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/keep_c.flac", format="flac",
+                recording_id="r2-keep", work_id="w2-keep",
+            )
+        )
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_b.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-keep"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "manual"
+        assert row["preferred_file_id"] == lf_b.id
+
+    def test_reassign_last_file_deletes_old_work_and_recordings(
+        self, client, db_conn
+    ) -> None:
+        """Reassigning the only file out of a work cascade-cleans recordings.
+
+        Regression guard: when the target work already has a recording with
+        the same version_type, the old recording stays on the old work (only
+        library_files.recording_id is moved). If that leaves the old work
+        empty, DELETE FROM works would FK-violate the still-pointing recording
+        and surface as a 500.
+        """
+        # w1 has r1 with only lf_a (version_type "original").
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-last-reassign",
+            work_mbid="w1-last-reassign",
+            recording_mbid="r1-last-reassign",
+            file_path="/m/last_reassign_a.flac",
+        )
+        # w2 has r2 (same version_type "original") with its own file, so
+        # reassign will route lf_a onto r2 and leave r1 orphaned in w1.
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-last-reassign", "New Work", artist_id="a-last-reassign")
+        )
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording(
+                "r2-last-reassign", "New Recording", work_id="w2-last-reassign"
+            )
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/last_reassign_b.flac", format="flac",
+                recording_id="r2-last-reassign", work_id="w2-last-reassign",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-last-reassign"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["old_work_id"] == w1.id
+        assert data["old_work_deleted"] is True
+
+        gone_work = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (w1.id,)
+        ).fetchone()
+        assert gone_work is None
+        gone_rec = db_conn.execute(
+            "SELECT id FROM recordings WHERE id = %s", ("r1-last-reassign",)
+        ).fetchone()
+        assert gone_rec is None
+
+    def test_reassign_file_with_null_recording_id_cleans_up_old_work(
+        self, client, db_conn
+    ) -> None:
+        """Reassign identifies the old work from library_files.work_id.
+
+        Regression guard: when the file has work_id set but recording_id NULL,
+        current_work_id must still resolve via library_files (not the recordings
+        join), so the now-empty old work is deleted.
+        """
+        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w1-orphan", "Old Work", artist_id=artist.id)
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-orphan", "New Work", artist_id=artist.id)
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/orphan.flac", format="flac",
+                recording_id=None, work_id="w1-orphan",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "w2-orphan"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["old_work_id"] == "w1-orphan"
+        assert data["old_work_deleted"] is True
+
+        gone = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", ("w1-orphan",)
+        ).fetchone()
+        assert gone is None
+
+    def test_reassign_old_work_empty_check_uses_library_files_work_id(
+        self, client, db_conn
+    ) -> None:
+        """Old-work emptiness check keys off library_files.work_id.
+
+        Regression guard: if the only remaining file on the old work has
+        recording_id IS NULL, the old work must survive (the recordings-JOIN
+        emptiness check would wrongly return 0).
+        """
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-nullkeep",
+            work_mbid="w1-nullkeep",
+            recording_mbid="r1-nullkeep",
+            file_path="/m/nk_a.flac",
+        )
+        PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/nk_b.flac", format="flac",
+                recording_id=None, work_id="w1-nullkeep",
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-nullkeep", "Other Work", artist_id="a-nullkeep")
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-nullkeep"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["old_work_deleted"] is False
+
+        survived = db_conn.execute(
+            "SELECT id FROM works WHERE id = %s", (w1.id,)
+        ).fetchone()
+        assert survived is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests — _recalculate_song_master with NULL-recording files
+# ---------------------------------------------------------------------------
+
+
+class TestRecalculateSongMasterOrphans:
+    """Regression coverage: auto-master selection must consider files with
+    library_files.work_id set but recording_id IS NULL (pre-enrichment state)."""
+
+    def test_auto_master_picks_null_recording_file(self, client, db_conn) -> None:
+        """When a work's only file has recording_id NULL, auto picks it."""
+        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-auto-orphan"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w1-auto-orphan", "Old Work", artist_id=artist.id)
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-auto-orphan", "New Work", artist_id=artist.id)
+        )
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/auto_orphan.flac", format="flac",
+                recording_id=None, work_id="w1-auto-orphan",
+            )
+        )
+        db_conn.commit()
+
+        # Reassign triggers _recalculate_song_master on the destination work,
+        # which has only the orphan file after the move.
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "w2-auto-orphan"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            ("w2-auto-orphan",),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "auto"
+        assert row["preferred_file_id"] == lf.id
+
+    def test_manual_master_membership_check_allows_null_recording_file(
+        self, client, db_conn
+    ) -> None:
+        """Manual master pointing at a NULL-recording file in the same work survives.
+
+        The membership check must key off library_files.work_id; otherwise
+        the recordings-JOIN would treat the manual master as stale and
+        silently overwrite it with an auto pick.
+        """
+        _, w1, _, lf_enriched = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-manual-orphan",
+            work_mbid="w1-manual-orphan",
+            recording_mbid="r1-manual-orphan",
+            file_path="/m/manual_enriched.flac",
+        )
+        lf_orphan = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/manual_orphan.flac", format="flac",
+                recording_id=None, work_id="w1-manual-orphan",
+            )
+        )
+        # Manual master points at the orphan file.
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=w1.id,
+                preferred_file_id=lf_orphan.id,
+                selection_method=SelectionMethod.MANUAL,
+            )
+        )
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-manual-orphan", "Other Work", artist_id="a-manual-orphan")
+        )
+        db_conn.commit()
+
+        # Reassign the other (enriched) file out of w1 — this triggers a
+        # _recalculate_song_master call for w1 which must preserve the manual pick.
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_enriched.id}/work",
+            json={"work_id": "w2-manual-orphan"},
+        )
+        assert resp.status_code == 200
+
+        row = db_conn.execute(
+            "SELECT preferred_file_id, selection_method"
+            " FROM song_masters WHERE work_id = %s",
+            (w1.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["selection_method"] == "manual"
+        assert row["preferred_file_id"] == lf_orphan.id

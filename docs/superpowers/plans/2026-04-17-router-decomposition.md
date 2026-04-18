@@ -1,39 +1,131 @@
+# Router Decomposition Implementation Plan
+
+> **STATUS — HISTORICAL (AS-PLANNED):** This document captures the decomposition plan as it was written *before* implementation. It is preserved for traceability, not as live guidance. The shipped code on `feature/router-decomposition` has diverged from the snippets below in two ways that future readers should be aware of:
+>
+> 1. **Tests were not left untouched.** `tests/routers/test_library.py` has been expanded substantially during PR #1 review (regression guards for orphan files, FK cleanup on empty-work deletion, format-override validation, etc.).
+> 2. **`scan.py` hardens the path before enqueueing.** The sample snippet in Step 2 enqueues `library_scan_task(body.root_path)`; the shipped handler resolves the path (`Path(body.root_path).resolve()`), validates it against `settings.library_scan_paths`, and enqueues the resolved string. Authoritative reference: `backend/routers/library/scan.py`.
+>
+> For current behavior always read the code; treat the snippets here as the initial sketch only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal (as originally planned):** Convert `backend/routers/library.py` (1,444 lines) into a `library/` package with four focused sub-modules — scan, status, artists, and works — while leaving `v1.py` and `tests/routers/test_library.py` untouched. *(Post-implementation note: `v1.py` remained unchanged; `test_library.py` has since been extended during review — see the HISTORICAL banner above.)*
+
+**Architecture:** Python treats a directory with `__init__.py` as a package; `from backend.routers import library` will automatically resolve to `library/__init__.py`. The `__init__.py` assembles sub-routers into one `router` object that `v1.py` includes unchanged. Each sub-module owns its schemas and routes; the `_recalculate_song_master` / `_consolidate_recordings` helpers live in `works.py` alongside the routes that use them. `PATCH /files/{file_id}/work` goes in `works.py` rather than a separate `files.py` because it modifies work relationships and shares `_recalculate_song_master`.
+
+**Tech Stack:** FastAPI, psycopg (async), Python 3.11+, uv, pytest
+
+---
+
+## File Structure
+
+| Action | Path | Responsibility |
+|--------|------|----------------|
+| Delete | `backend/routers/library.py` | Replaced by package |
+| Create | `backend/routers/library/__init__.py` | Assembles sub-routers, exports `router` |
+| Create | `backend/routers/library/scan.py` | `POST /scan` + `ScanRequest` |
+| Create | `backend/routers/library/status.py` | `GET /status` + `LibraryStatus` |
+| Create | `backend/routers/library/artists.py` | `GET /artists`, `GET /artists/{artist_id}` + artist schemas |
+| Create | `backend/routers/library/works.py` | All work routes, `PATCH /files/{file_id}/work`, private helpers + work schemas |
+| No change | `backend/routers/v1.py` | Already uses `library.router` — resolves to `__init__.py` automatically |
+| No change *(at plan time)* | `tests/routers/test_library.py` | Tests use HTTP paths, no router imports. **Historical note:** extended during PR #1 review with regression tests; see the HISTORICAL banner at the top of this document. |
+
+---
+
+### Task 1: Create `library/` package and move scan, status, artists routes
+
+Python packages take precedence over same-named modules on the import path, so `backend/routers/library/` (once it has `__init__.py`) shadows `backend/routers/library.py` immediately — no intermediate state, no rename gymnastics. Create all four sub-modules fully populated, verify tests pass, then delete the old file.
+
+**Files:**
+- Create: `backend/routers/library/__init__.py`
+- Create: `backend/routers/library/scan.py`
+- Create: `backend/routers/library/status.py`
+- Create: `backend/routers/library/artists.py`
+- Create: `backend/routers/library/works.py`
+- Delete: `backend/routers/library.py`
+
+- [ ] **Step 1: Create `backend/routers/library/__init__.py`**
+
+```python
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
-from typing import Annotated, Any
-from uuid import UUID, uuid4
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from psycopg import AsyncConnection
+from backend.routers.library import artists, scan, status, works
+
+router = APIRouter()
+router.include_router(scan.router)
+router.include_router(status.router)
+router.include_router(artists.router)
+router.include_router(works.router)
+```
+
+- [ ] **Step 2: Create `backend/routers/library/scan.py`**
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.config import get_settings
-from backend.dependencies import get_current_token, get_db_connection
-from backend.domain.enums import CatalogSource
-from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
-from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
+from backend.dependencies import get_current_token
 from backend.tasks.library_scan_tasks import library_scan_task
 
 router = APIRouter()
 
-DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
-
-
-# ---------------------------------------------------------------------------
-# Schemas — scan (existing)
-# ---------------------------------------------------------------------------
 
 
 class ScanRequest(BaseModel):
     root_path: str
 
 
-# ---------------------------------------------------------------------------
-# Schemas — status
-# ---------------------------------------------------------------------------
+@router.post("/scan", status_code=status.HTTP_202_ACCEPTED)
+async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
+    """Enqueue a background library scan for the given directory."""
+    scan_path = Path(body.root_path).resolve()
+
+    settings = get_settings()
+    allowed = [Path(p).resolve() for p in settings.library_scan_paths]
+    if allowed and not any(
+        scan_path == p or scan_path.is_relative_to(p) for p in allowed
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Path not in allowed scan paths",
+        )
+
+    if not scan_path.exists() or not scan_path.is_dir():
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    # Historical note: the as-shipped handler enqueues the validated/resolved
+    # path (str(scan_path)), not body.root_path — the snippet below reflects
+    # the original plan, not current behavior. See backend/routers/library/scan.py.
+    library_scan_task(body.root_path)
+    return {"status": "accepted", "message": f"Library scan queued for {body.root_path}"}
+```
+
+- [ ] **Step 3: Create `backend/routers/library/status.py`**
+
+```python
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends
+from psycopg import AsyncConnection
+from pydantic import BaseModel
+
+from backend.dependencies import get_current_token, get_db_connection
+
+router = APIRouter()
+
+DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
+Token = Annotated[str, Depends(get_current_token)]
 
 
 class LibraryStatus(BaseModel):
@@ -43,9 +135,55 @@ class LibraryStatus(BaseModel):
     by_enrichment: dict[str, int]
 
 
-# ---------------------------------------------------------------------------
-# Schemas — artists
-# ---------------------------------------------------------------------------
+@router.get("/status", response_model=LibraryStatus)
+async def get_library_status(conn: DbConn, _token: Token) -> LibraryStatus:
+    """Return aggregate counts: total files, quarantined files, by format, by enrichment."""
+    total_cur = await conn.execute("SELECT COUNT(*) AS cnt FROM library_files")
+    total_row = await total_cur.fetchone()
+    total_files: int = total_row["cnt"] if total_row else 0
+
+    q_cur = await conn.execute("SELECT COUNT(*) AS cnt FROM library_quarantine")
+    q_row = await q_cur.fetchone()
+    quarantine_count: int = q_row["cnt"] if q_row else 0
+
+    fmt_cur = await conn.execute(
+        "SELECT format, COUNT(*) AS cnt FROM library_files GROUP BY format"
+    )
+    fmt_rows = await fmt_cur.fetchall()
+    by_format: dict[str, int] = {r["format"]: r["cnt"] for r in fmt_rows}
+
+    enr_cur = await conn.execute(
+        "SELECT enrichment_status, COUNT(*) AS cnt FROM library_files GROUP BY enrichment_status"
+    )
+    enr_rows = await enr_cur.fetchall()
+    by_enrichment: dict[str, int] = {r["enrichment_status"]: r["cnt"] for r in enr_rows}
+
+    return LibraryStatus(
+        total_files=total_files,
+        quarantine_count=quarantine_count,
+        by_format=by_format,
+        by_enrichment=by_enrichment,
+    )
+```
+
+- [ ] **Step 4: Create `backend/routers/library/artists.py`**
+
+```python
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from psycopg import AsyncConnection
+from pydantic import BaseModel
+
+from backend.dependencies import get_current_token, get_db_connection
+from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
+
+router = APIRouter()
+
+DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
+Token = Annotated[str, Depends(get_current_token)]
 
 
 class ArtistSummary(BaseModel):
@@ -64,11 +202,6 @@ class PaginatedArtists(BaseModel):
     total: int
 
 
-# ---------------------------------------------------------------------------
-# Schemas — artist detail
-# ---------------------------------------------------------------------------
-
-
 class WorkSummary(BaseModel):
     id: str
     title: str
@@ -85,6 +218,182 @@ class ArtistDetail(BaseModel):
     sort_name: str
     disambiguation: str | None
     works: list[WorkSummary]
+
+
+@router.get("/artists", response_model=PaginatedArtists)
+async def list_artists(
+    conn: DbConn,
+    _token: Token,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    search: str = Query(default=""),
+) -> PaginatedArtists:
+    """Return a paginated list of artists with work and file counts."""
+    where_clause = "WHERE LOWER(a.name) LIKE LOWER(%s)" if search else ""
+    search_param = f"%{search}%" if search else None
+
+    count_sql = f"""
+        SELECT COUNT(DISTINCT a.id) AS total
+        FROM artists a
+        {where_clause}
+    """
+    count_params: tuple[Any, ...] = (search_param,) if search else ()
+    cnt_cur = await conn.execute(count_sql, count_params)
+    cnt_row = await cnt_cur.fetchone()
+    total: int = cnt_row["total"] if cnt_row else 0
+
+    items_sql = f"""
+        SELECT
+            a.id,
+            a.name,
+            a.sort_name,
+            a.disambiguation,
+            a.mbid,
+            a.origin,
+            COUNT(DISTINCT w.id)  AS work_count,
+            COUNT(DISTINCT lf.id) AS file_count
+        FROM artists a
+        LEFT JOIN works w ON w.artist_id = a.id
+        LEFT JOIN library_files lf ON lf.work_id = w.id
+        {where_clause}
+        GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
+                 a.mbid, a.origin
+        ORDER BY a.sort_name
+        LIMIT %s OFFSET %s
+    """
+    items_params: tuple[Any, ...] = (
+        (search_param, limit, offset) if search else (limit, offset)
+    )
+
+    items_cur = await conn.execute(items_sql, items_params)
+    rows = await items_cur.fetchall()
+
+    items = [
+        ArtistSummary(
+            id=row["id"],
+            name=row["name"],
+            sort_name=row["sort_name"],
+            disambiguation=row.get("disambiguation"),
+            work_count=row["work_count"],
+            file_count=row["file_count"],
+            mbid=row.get("mbid"),
+            origin=row.get("origin", "local"),
+        )
+        for row in rows
+    ]
+    return PaginatedArtists(items=items, total=total)
+
+
+@router.get("/artists/{artist_id}", response_model=ArtistDetail)
+async def get_artist_detail(
+    artist_id: str, conn: DbConn, _token: Token
+) -> ArtistDetail:
+    """Return an artist with a summary of their works."""
+    artist_cur = await conn.execute(
+        "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",
+        (artist_id,),
+    )
+    artist_row = await artist_cur.fetchone()
+    if artist_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artist {artist_id} not found",
+        )
+
+    works_cur = await conn.execute(
+        """
+        SELECT
+            w.id,
+            w.title,
+            w.mbid,
+            w.origin,
+            COUNT(DISTINCT lf.id) AS recording_count,
+            COUNT(DISTINCT sm.id) AS master_count,
+            array_agg(DISTINCT r.version_type)
+                FILTER (WHERE r.version_type IS NOT NULL)
+                AS version_types
+        FROM works w
+        LEFT JOIN library_files lf ON lf.work_id = w.id
+        LEFT JOIN song_masters sm ON sm.work_id = w.id
+        LEFT JOIN recordings r ON r.work_id = w.id
+        WHERE w.artist_id = %s
+        GROUP BY w.id, w.title, w.mbid, w.origin
+        ORDER BY w.title
+        """,
+        (artist_id,),
+    )
+    work_rows = await works_cur.fetchall()
+
+    if not work_rows:
+        works_cur = await conn.execute(
+            """
+            SELECT
+                lf.track_title AS title,
+                COUNT(*) AS recording_count
+            FROM library_files lf
+            WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
+              AND lf.track_title IS NOT NULL
+            GROUP BY lf.track_title
+            ORDER BY lf.track_title
+            """,
+            (artist_id, artist_id),
+        )
+        work_rows = await works_cur.fetchall()
+        works = [
+            WorkSummary(
+                id=encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
+                title=row["title"] or "Unknown",
+                recording_count=row["recording_count"],
+                has_master=False,
+            )
+            for row in work_rows
+        ]
+    else:
+        works = [
+            WorkSummary(
+                id=row["id"],
+                title=row["title"],
+                recording_count=row["recording_count"],
+                has_master=row["master_count"] > 0,
+                mbid=row.get("mbid"),
+                origin=row.get("origin", "local"),
+                version_types=row.get("version_types") or [],
+            )
+            for row in work_rows
+        ]
+
+    return ArtistDetail(
+        id=artist_row["id"],
+        name=artist_row["name"],
+        sort_name=artist_row["sort_name"],
+        disambiguation=artist_row.get("disambiguation"),
+        works=works,
+    )
+```
+
+- [ ] **Step 5: Create `backend/routers/library/works.py`**
+
+This file contains all work-related routes (detail, master, format overrides, merge, split) plus `PATCH /files/{file_id}/work` (which reassigns a file to a work and calls `_recalculate_song_master`). The two private helpers live here.
+
+```python
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Any
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from psycopg import AsyncConnection
+from pydantic import BaseModel
+
+from backend.dependencies import get_current_token, get_db_connection
+from backend.domain.enums import CatalogSource
+from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+
+router = APIRouter()
+
+DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
+Token = Annotated[str, Depends(get_current_token)]
 
 
 # ---------------------------------------------------------------------------
@@ -175,253 +484,170 @@ class FormatOverrideResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Routes — existing
+# Schemas — merge / split / reassign
 # ---------------------------------------------------------------------------
 
 
-@router.post("/scan", status_code=status.HTTP_202_ACCEPTED)
-async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
-    """Enqueue a background library scan for the given directory."""
-    scan_path = Path(body.root_path).resolve()
-
-    # Validate against configured allowlist
-    settings = get_settings()
-    allowed = [Path(p).resolve() for p in settings.library_scan_paths]
-    if allowed and not any(
-        scan_path == p or scan_path.is_relative_to(p) for p in allowed
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Path not in allowed scan paths",
-        )
-
-    if not scan_path.exists() or not scan_path.is_dir():
-        raise HTTPException(status_code=400, detail="Invalid directory path")
-    library_scan_task(body.root_path)
-    return {"status": "accepted", "message": f"Library scan queued for {body.root_path}"}
+class MergeRequest(BaseModel):
+    source_work_ids: list[str]
 
 
-# ---------------------------------------------------------------------------
-# Routes — status
-# ---------------------------------------------------------------------------
+class MergeResponse(BaseModel):
+    merged_file_count: int
+    deleted_work_count: int
+    dropped_override_count: int
 
 
-@router.get("/status", response_model=LibraryStatus)
-async def get_library_status(conn: DbConn, _token: Token) -> LibraryStatus:
-    """Return aggregate counts: total files, quarantined files, by format, by enrichment."""
-    total_cur = await conn.execute("SELECT COUNT(*) AS cnt FROM library_files")
-    total_row = await total_cur.fetchone()
-    total_files: int = total_row["cnt"] if total_row else 0
+class SplitRequest(BaseModel):
+    file_id: UUID
 
-    q_cur = await conn.execute("SELECT COUNT(*) AS cnt FROM library_quarantine")
-    q_row = await q_cur.fetchone()
-    quarantine_count: int = q_row["cnt"] if q_row else 0
 
-    fmt_cur = await conn.execute(
-        "SELECT format, COUNT(*) AS cnt FROM library_files GROUP BY format"
-    )
-    fmt_rows = await fmt_cur.fetchall()
-    by_format: dict[str, int] = {r["format"]: r["cnt"] for r in fmt_rows}
+class SplitResponse(BaseModel):
+    new_work_id: str
+    old_work_deleted: bool
 
-    enr_cur = await conn.execute(
-        "SELECT enrichment_status, COUNT(*) AS cnt FROM library_files GROUP BY enrichment_status"
-    )
-    enr_rows = await enr_cur.fetchall()
-    by_enrichment: dict[str, int] = {r["enrichment_status"]: r["cnt"] for r in enr_rows}
 
-    return LibraryStatus(
-        total_files=total_files,
-        quarantine_count=quarantine_count,
-        by_format=by_format,
-        by_enrichment=by_enrichment,
-    )
+class ReassignRequest(BaseModel):
+    work_id: str
+
+
+class ReassignResponse(BaseModel):
+    old_work_id: str | None
+    old_work_deleted: bool
 
 
 # ---------------------------------------------------------------------------
-# Routes — artists (paginated)
+# Private helpers
 # ---------------------------------------------------------------------------
 
 
-@router.get("/artists", response_model=PaginatedArtists)
-async def list_artists(
-    conn: DbConn,
-    _token: Token,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    search: str = Query(default=""),
-) -> PaginatedArtists:
-    """Return a paginated list of artists with work and file counts.
+async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> None:
+    """Recalculate the auto song master for a work using async SQL.
 
-    Args:
-        conn: Async database connection.
-        _token: Auth token (validated by dependency).
-        limit: Page size (1-500, default 50).
-        offset: Number of items to skip.
-        search: Optional case-insensitive substring filter on artist name.
-
-    Returns:
-        :class:`PaginatedArtists` with items and total count.
+    Skips recalculation if a manual master already exists for the work.
+    Upserts the best-scored file as the new auto master.
     """
-    where_clause = "WHERE LOWER(a.name) LIKE LOWER(%s)" if search else ""
-    search_param = f"%{search}%" if search else None
-
-    count_sql = f"""
-        SELECT COUNT(DISTINCT a.id) AS total
-        FROM artists a
-        {where_clause}
-    """
-    count_params: tuple[Any, ...] = (search_param,) if search else ()
-    cnt_cur = await conn.execute(count_sql, count_params)
-    cnt_row = await cnt_cur.fetchone()
-    total: int = cnt_row["total"] if cnt_row else 0
-
-    items_sql = f"""
-        SELECT
-            a.id,
-            a.name,
-            a.sort_name,
-            a.disambiguation,
-            a.mbid,
-            a.origin,
-            COUNT(DISTINCT w.id)  AS work_count,
-            COUNT(DISTINCT lf.id) AS file_count
-        FROM artists a
-        LEFT JOIN works w ON w.artist_id = a.id
-        LEFT JOIN library_files lf ON lf.work_id = w.id
-        {where_clause}
-        GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
-                 a.mbid, a.origin
-        ORDER BY a.sort_name
-        LIMIT %s OFFSET %s
-    """
-    items_params: tuple[Any, ...] = (
-        (search_param, limit, offset) if search else (limit, offset)
+    sm_cur = await conn.execute(
+        "SELECT selection_method FROM song_masters WHERE work_id = %s",
+        (work_id,),
     )
+    sm_row = await sm_cur.fetchone()
+    if sm_row is not None and sm_row["selection_method"] == "manual":
+        return
 
-    items_cur = await conn.execute(items_sql, items_params)
-    rows = await items_cur.fetchall()
-
-    items = [
-        ArtistSummary(
-            id=row["id"],
-            name=row["name"],
-            sort_name=row["sort_name"],
-            disambiguation=row.get("disambiguation"),
-            work_count=row["work_count"],
-            file_count=row["file_count"],
-            mbid=row.get("mbid"),
-            origin=row.get("origin", "local"),
-        )
-        for row in rows
-    ]
-    return PaginatedArtists(items=items, total=total)
-
-
-# ---------------------------------------------------------------------------
-# Routes — artist detail
-# ---------------------------------------------------------------------------
-
-
-@router.get("/artists/{artist_id}", response_model=ArtistDetail)
-async def get_artist_detail(
-    artist_id: str, conn: DbConn, _token: Token
-) -> ArtistDetail:
-    """Return an artist with a summary of their works.
-
-    Args:
-        artist_id: The artist MBID.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        :class:`ArtistDetail` with nested work summaries.
-
-    Raises:
-        HTTPException: 404 if the artist does not exist.
-    """
-    artist_cur = await conn.execute(
-        "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",
-        (artist_id,),
-    )
-    artist_row = await artist_cur.fetchone()
-    if artist_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Artist {artist_id} not found",
-        )
-
-    # Try works table first (populated by grouping service)
-    works_cur = await conn.execute(
+    files_cur = await conn.execute(
         """
         SELECT
-            w.id,
-            w.title,
-            w.mbid,
-            w.origin,
-            COUNT(DISTINCT lf.id) AS recording_count,
-            COUNT(DISTINCT sm.id) AS master_count,
-            array_agg(DISTINCT r.version_type)
-                FILTER (WHERE r.version_type IS NOT NULL)
-                AS version_types
-        FROM works w
-        LEFT JOIN library_files lf ON lf.work_id = w.id
-        LEFT JOIN song_masters sm ON sm.work_id = w.id
-        LEFT JOIN recordings r ON r.work_id = w.id
-        WHERE w.artist_id = %s
-        GROUP BY w.id, w.title, w.mbid, w.origin
-        ORDER BY w.title
+            lf.id,
+            lf.release_status,
+            lf.release_type,
+            lf.format,
+            lf.bitrate,
+            lf.duration_ms
+        FROM library_files lf
+        JOIN recordings r ON lf.recording_id = r.id
+        WHERE r.work_id = %s
         """,
-        (artist_id,),
+        (work_id,),
     )
-    work_rows = await works_cur.fetchall()
+    file_rows = await files_cur.fetchall()
+    if not file_rows:
+        return
 
-    # Fallback: if no works rows, derive from library_files directly
-    # (handles pre-grouping state where files have artist_mbid but no work_id)
-    if not work_rows:
-        works_cur = await conn.execute(
-            """
-            SELECT
-                lf.track_title AS title,
-                COUNT(*) AS recording_count
-            FROM library_files lf
-            WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
-              AND lf.track_title IS NOT NULL
-            GROUP BY lf.track_title
-            ORDER BY lf.track_title
-            """,
-            (artist_id, artist_id),
+    release_status_score: dict[str, int] = {"promotion": 100, "official": 0}
+    release_type_score: dict[str, int] = {
+        "album": 80, "ep": 70, "single": 60,
+        "compilation": 40, "live": 30, "other": 20,
+    }
+    format_bonus: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
+
+    def _score(row: dict[str, Any]) -> tuple[int, int, int]:
+        score = 0
+        rs = row.get("release_status")
+        if rs:
+            score += release_status_score.get(rs, 0)
+        rt = row.get("release_type")
+        if rt:
+            score += release_type_score.get(rt, release_type_score["other"])
+        fmt = (row.get("format") or "").lower()
+        score += format_bonus.get(fmt, 1)
+        return score, row.get("bitrate") or 0, row.get("duration_ms") or 0
+
+    best = max(file_rows, key=_score)
+    score_val, _, _ = _score(best)
+
+    existing_id: UUID | None = None
+    if sm_row is not None:
+        id_cur = await conn.execute(
+            "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
         )
-        work_rows = await works_cur.fetchall()
-        works = [
-            WorkSummary(
-                id=encode_synthetic_work_id(artist_id, row["title"] or "unknown"),
-                title=row["title"] or "Unknown",
-                recording_count=row["recording_count"],
-                has_master=False,
-            )
-            for row in work_rows
-        ]
-    else:
-        works = [
-            WorkSummary(
-                id=row["id"],
-                title=row["title"],
-                recording_count=row["recording_count"],
-                has_master=row["master_count"] > 0,
-                mbid=row.get("mbid"),
-                origin=row.get("origin", "local"),
-                version_types=row.get("version_types") or [],
-            )
-            for row in work_rows
-        ]
+        id_row = await id_cur.fetchone()
+        if id_row:
+            existing_id = id_row["id"]
 
-    return ArtistDetail(
-        id=artist_row["id"],
-        name=artist_row["name"],
-        sort_name=artist_row["sort_name"],
-        disambiguation=artist_row.get("disambiguation"),
-        works=works,
+    master_id = existing_id if existing_id is not None else uuid4()
+    await conn.execute(
+        """
+        INSERT INTO song_masters
+            (id, work_id, preferred_file_id, selection_method, score, updated_at)
+        VALUES (%s, %s, %s, 'auto', %s, now())
+        ON CONFLICT (work_id) DO UPDATE SET
+            preferred_file_id = EXCLUDED.preferred_file_id,
+            selection_method  = 'auto',
+            score             = EXCLUDED.score,
+            updated_at        = now()
+        """,
+        (master_id, work_id, best["id"], score_val),
     )
+
+
+async def _consolidate_recordings(
+    conn: AsyncConnection[Any],
+    source_work_ids: list[str],
+    target_work_id: str,
+) -> None:
+    """Move recordings from source works to target, merging duplicates.
+
+    When a source recording has the same version_type as an existing target
+    recording, reassign files from the source recording to the target one
+    and delete the duplicate source recording. Non-conflicting recordings
+    are simply moved to the target work.
+    """
+    if not source_work_ids:
+        return
+
+    src_ph = ", ".join("%s" for _ in source_work_ids)
+
+    src_cur = await conn.execute(
+        f"SELECT id, version_type FROM recordings"
+        f" WHERE work_id IN ({src_ph})",
+        source_work_ids,
+    )
+    src_recs = await src_cur.fetchall()
+
+    for src_rec in src_recs:
+        tgt_cur = await conn.execute(
+            "SELECT id FROM recordings"
+            " WHERE work_id = %s AND version_type = %s",
+            (target_work_id, src_rec["version_type"]),
+        )
+        tgt_row = await tgt_cur.fetchone()
+
+        if tgt_row:
+            await conn.execute(
+                "UPDATE library_files SET recording_id = %s"
+                " WHERE recording_id = %s",
+                (tgt_row["id"], src_rec["id"]),
+            )
+            await conn.execute(
+                "DELETE FROM recordings WHERE id = %s",
+                (src_rec["id"],),
+            )
+        else:
+            await conn.execute(
+                "UPDATE recordings SET work_id = %s WHERE id = %s",
+                (target_work_id, src_rec["id"]),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -433,21 +659,7 @@ async def get_artist_detail(
 async def get_work_detail(
     work_id: str, conn: DbConn, _token: Token
 ) -> WorkDetail:
-    """Return a work with its recordings, files, master, and format overrides.
-
-    Args:
-        work_id: The work MBID.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        :class:`WorkDetail` with nested recording and file details.
-
-    Raises:
-        HTTPException: 404 if the work does not exist.
-    """
-    # Check if this is a synthetic ID (base64-encoded artist_id:track_title)
-    # from the fallback path in get_artist_detail, or a real works table ID.
+    """Return a work with its recordings, files, master, and format overrides."""
     synthetic = decode_synthetic_work_id(work_id)
     work_row: dict[str, Any] | None = None
     recordings: list[RecordingDetail] = []
@@ -467,7 +679,6 @@ async def get_work_detail(
             )
 
     if work_row is not None:
-        # --- Real work from works table ---
         rec_cur = await conn.execute(
             """
             SELECT
@@ -563,7 +774,6 @@ async def get_work_detail(
             for row in fo_rows
         ]
     else:
-        # --- Synthetic work: derive from library_files ---
         assert synthetic is not None
         artist_id, track_title = synthetic
 
@@ -602,7 +812,6 @@ async def get_work_detail(
             for row in file_rows
         ]
 
-        # Present as a single recording-like entry with all files
         recordings = [
             RecordingDetail(
                 id=work_id,
@@ -638,20 +847,7 @@ async def get_work_detail(
 async def set_work_master(
     work_id: str, body: SetMasterRequest, conn: DbConn, _token: Token
 ) -> SongMasterResponse:
-    """Manually set the preferred file for a work (UPSERT).
-
-    Args:
-        work_id: The work MBID.
-        body: Request body containing ``preferred_file_id``.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        The current :class:`SongMasterResponse` after upsert.
-
-    Raises:
-        HTTPException: 404 if the work does not exist.
-    """
+    """Manually set the preferred file for a work (UPSERT)."""
     work_cur = await conn.execute(
         "SELECT id FROM works WHERE id = %s", (work_id,)
     )
@@ -696,16 +892,7 @@ async def set_work_master(
 async def delete_work_master(
     work_id: str, conn: DbConn, _token: Token
 ) -> None:
-    """Remove the manual song master for a work.
-
-    Args:
-        work_id: The work MBID.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Raises:
-        HTTPException: 404 if no master exists for this work.
-    """
+    """Remove the manual song master for a work."""
     cur = await conn.execute(
         "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
     )
@@ -730,20 +917,7 @@ async def delete_work_master(
 async def create_format_override(
     work_id: str, body: CreateFormatOverrideRequest, conn: DbConn, _token: Token
 ) -> FormatOverrideResponse:
-    """Create a per-format preferred file override for a work.
-
-    Args:
-        work_id: The work MBID.
-        body: Request body with ``format_name``, ``preferred_file_id``, and optional ``notes``.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        The created :class:`FormatOverrideResponse`.
-
-    Raises:
-        HTTPException: 404 if the work does not exist.
-    """
+    """Create a per-format preferred file override for a work."""
     work_cur = await conn.execute(
         "SELECT id FROM works WHERE id = %s", (work_id,)
     )
@@ -785,17 +959,7 @@ async def create_format_override(
 async def delete_format_override(
     work_id: str, override_id: UUID, conn: DbConn, _token: Token
 ) -> None:
-    """Delete a format override by ID.
-
-    Args:
-        work_id: The work MBID (used to scope the lookup).
-        override_id: The UUID of the format override to remove.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Raises:
-        HTTPException: 404 if the override does not exist for this work.
-    """
+    """Delete a format override by ID."""
     cur = await conn.execute(
         "SELECT id FROM format_overrides WHERE id = %s AND work_id = %s",
         (override_id, work_id),
@@ -809,177 +973,8 @@ async def delete_format_override(
 
 
 # ---------------------------------------------------------------------------
-# Schemas — merge / split / reassign
-# ---------------------------------------------------------------------------
-
-
-class MergeRequest(BaseModel):
-    source_work_ids: list[str]
-
-
-class MergeResponse(BaseModel):
-    merged_file_count: int
-    deleted_work_count: int
-    dropped_override_count: int
-
-
-class SplitRequest(BaseModel):
-    file_id: UUID
-
-
-class SplitResponse(BaseModel):
-    new_work_id: str
-    old_work_deleted: bool
-
-
-class ReassignRequest(BaseModel):
-    work_id: str
-
-
-class ReassignResponse(BaseModel):
-    old_work_id: str | None
-    old_work_deleted: bool
-
-
-# ---------------------------------------------------------------------------
 # Routes — merge / split / reassign
 # ---------------------------------------------------------------------------
-
-
-async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> None:
-    """Recalculate the auto song master for a work using async SQL.
-
-    Skips recalculation if a manual master already exists for the work.
-    Upserts the best-scored file as the new auto master.
-    """
-    # Skip if a manual selection exists
-    sm_cur = await conn.execute(
-        "SELECT selection_method FROM song_masters WHERE work_id = %s",
-        (work_id,),
-    )
-    sm_row = await sm_cur.fetchone()
-    if sm_row is not None and sm_row["selection_method"] == "manual":
-        return
-
-    # Gather all files for this work via recording chain
-    files_cur = await conn.execute(
-        """
-        SELECT
-            lf.id,
-            lf.release_status,
-            lf.release_type,
-            lf.format,
-            lf.bitrate,
-            lf.duration_ms
-        FROM library_files lf
-        JOIN recordings r ON lf.recording_id = r.id
-        WHERE r.work_id = %s
-        """,
-        (work_id,),
-    )
-    file_rows = await files_cur.fetchall()
-    if not file_rows:
-        return
-
-    # Scoring constants matching master_selection_service
-    release_status_score: dict[str, int] = {"promotion": 100, "official": 0}
-    release_type_score: dict[str, int] = {
-        "album": 80, "ep": 70, "single": 60,
-        "compilation": 40, "live": 30, "other": 20,
-    }
-    format_bonus: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
-
-    def _score(row: dict[str, Any]) -> tuple[int, int, int]:
-        score = 0
-        rs = row.get("release_status")
-        if rs:
-            score += release_status_score.get(rs, 0)
-        rt = row.get("release_type")
-        if rt:
-            score += release_type_score.get(rt, release_type_score["other"])
-        fmt = (row.get("format") or "").lower()
-        score += format_bonus.get(fmt, 1)
-        return score, row.get("bitrate") or 0, row.get("duration_ms") or 0
-
-    best = max(file_rows, key=_score)
-    score_val, _, _ = _score(best)
-
-    existing_id: UUID | None = None
-    if sm_row is not None:
-        id_cur = await conn.execute(
-            "SELECT id FROM song_masters WHERE work_id = %s", (work_id,)
-        )
-        id_row = await id_cur.fetchone()
-        if id_row:
-            existing_id = id_row["id"]
-
-    master_id = existing_id if existing_id is not None else uuid4()
-    await conn.execute(
-        """
-        INSERT INTO song_masters
-            (id, work_id, preferred_file_id, selection_method, score, updated_at)
-        VALUES (%s, %s, %s, 'auto', %s, now())
-        ON CONFLICT (work_id) DO UPDATE SET
-            preferred_file_id = EXCLUDED.preferred_file_id,
-            selection_method  = 'auto',
-            score             = EXCLUDED.score,
-            updated_at        = now()
-        """,
-        (master_id, work_id, best["id"], score_val),
-    )
-
-
-async def _consolidate_recordings(
-    conn: AsyncConnection[Any],
-    source_work_ids: list[str],
-    target_work_id: str,
-) -> None:
-    """Move recordings from source works to target, merging duplicates.
-
-    When a source recording has the same version_type as an existing target
-    recording, reassign files from the source recording to the target one
-    and delete the duplicate source recording.  Non-conflicting recordings
-    are simply moved to the target work.
-    """
-    if not source_work_ids:
-        return
-
-    src_ph = ", ".join("%s" for _ in source_work_ids)
-
-    # Get all source recordings
-    src_cur = await conn.execute(
-        f"SELECT id, version_type FROM recordings"
-        f" WHERE work_id IN ({src_ph})",
-        source_work_ids,
-    )
-    src_recs = await src_cur.fetchall()
-
-    for src_rec in src_recs:
-        # Check if target already has this version_type
-        tgt_cur = await conn.execute(
-            "SELECT id FROM recordings"
-            " WHERE work_id = %s AND version_type = %s",
-            (target_work_id, src_rec["version_type"]),
-        )
-        tgt_row = await tgt_cur.fetchone()
-
-        if tgt_row:
-            # Conflict: reassign files to target recording, delete source
-            await conn.execute(
-                "UPDATE library_files SET recording_id = %s"
-                " WHERE recording_id = %s",
-                (tgt_row["id"], src_rec["id"]),
-            )
-            await conn.execute(
-                "DELETE FROM recordings WHERE id = %s",
-                (src_rec["id"],),
-            )
-        else:
-            # No conflict: move recording to target work
-            await conn.execute(
-                "UPDATE recordings SET work_id = %s WHERE id = %s",
-                (target_work_id, src_rec["id"]),
-            )
 
 
 @router.post("/works/{target_id}/merge", response_model=MergeResponse)
@@ -991,21 +986,7 @@ async def merge_works(
     Moves all files, format overrides, and recordings from source works into
     the target work, then deletes the now-empty source works. Recalculates
     the song master for the target work afterward.
-
-    Args:
-        target_id: The work to merge into.
-        body: Contains ``source_work_ids`` list.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        :class:`MergeResponse` with counts of moved files, deleted works, and dropped overrides.
-
-    Raises:
-        HTTPException: 404 if the target work does not exist.
-        HTTPException: 422 if target_id appears in source_work_ids.
     """
-    # Verify target exists
     target_cur = await conn.execute(
         "SELECT id, artist_id FROM works WHERE id = %s", (target_id,)
     )
@@ -1016,7 +997,6 @@ async def merge_works(
             detail=f"Work {target_id} not found",
         )
 
-    # Validate target not in sources
     if target_id in body.source_work_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1026,7 +1006,6 @@ async def merge_works(
     if not body.source_work_ids:
         return MergeResponse(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
 
-    # Filter to existing sources (idempotency — missing sources are no-op)
     placeholders = ", ".join("%s" for _ in body.source_work_ids)
     exist_cur = await conn.execute(
         f"SELECT id, artist_id FROM works WHERE id IN ({placeholders})",
@@ -1043,14 +1022,12 @@ async def merge_works(
 
     src_placeholders = ", ".join("%s" for _ in existing_source_ids)
 
-    # Move library_files (work_id column)
     files_cur = await conn.execute(
         f"UPDATE library_files SET work_id = %s WHERE work_id IN ({src_placeholders})",
         [target_id, *existing_source_ids],
     )
     merged_file_count = files_cur.rowcount if files_cur.rowcount is not None else 0
 
-    # Move format_overrides — drop conflicts first (unique constraint on work_id, format_name)
     conflict_cur = await conn.execute(
         f"""
         SELECT fo_src.id AS src_id
@@ -1072,16 +1049,13 @@ async def merge_works(
             conflict_ids,
         )
 
-    # Move non-conflicting overrides to target
     await conn.execute(
         f"UPDATE format_overrides SET work_id = %s WHERE work_id IN ({src_placeholders})",
         [target_id, *existing_source_ids],
     )
 
-    # Consolidate recordings: handle duplicate (work_id, version_type) pairs
     await _consolidate_recordings(conn, existing_source_ids, target_id)
 
-    # Re-link matches scoped to WORK target type
     await conn.execute(
         f"""
         UPDATE matches
@@ -1091,7 +1065,6 @@ async def merge_works(
         [target_id, *existing_source_ids],
     )
 
-    # Delete song_masters for source works, then delete source works
     await conn.execute(
         f"DELETE FROM song_masters WHERE work_id IN ({src_placeholders})",
         existing_source_ids,
@@ -1103,10 +1076,8 @@ async def merge_works(
     deleted_rows = await deleted_cur.fetchall()
     deleted_work_count = len(deleted_rows)
 
-    # Recalculate song master for target
     await _recalculate_song_master(conn, target_id)
 
-    # Orphan cleanup: delete local artists with no remaining works
     source_artist_ids = list({r["artist_id"] for r in existing_source_rows})
     for artist_id in source_artist_ids:
         if artist_id == target_row["artist_id"]:
@@ -1145,21 +1116,7 @@ async def split_work(
     Creates a new local work (same artist and title), moves the file's recording
     to the new work, creates a song master for the new work, and deletes the old
     work if it becomes empty.
-
-    Args:
-        work_id: The source work containing the file.
-        body: Contains ``file_id`` to split out.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        :class:`SplitResponse` with new work ID and whether the old work was deleted.
-
-    Raises:
-        HTTPException: 404 if the work does not exist.
-        HTTPException: 422 if the file does not belong to this work.
     """
-    # Verify work exists
     work_cur = await conn.execute(
         "SELECT id, title, artist_id FROM works WHERE id = %s", (work_id,)
     )
@@ -1170,7 +1127,6 @@ async def split_work(
             detail=f"Work {work_id} not found",
         )
 
-    # Verify file exists and belongs to this work (via recording chain)
     file_cur = await conn.execute(
         """
         SELECT lf.id, lf.recording_id
@@ -1189,7 +1145,6 @@ async def split_work(
 
     recording_id = file_row["recording_id"]
 
-    # Create new local work
     new_work_id = str(uuid4())
     await conn.execute(
         """
@@ -1199,8 +1154,6 @@ async def split_work(
         (new_work_id, work_row["title"], work_row["artist_id"]),
     )
 
-    # Create a new recording for the split file (clone from the original)
-    # instead of moving the shared recording which would affect other files.
     if recording_id is not None:
         rec_cur = await conn.execute(
             "SELECT title, version_type, duration_ms"
@@ -1222,20 +1175,17 @@ async def split_work(
                 rec_row["duration_ms"] if rec_row else None,
             ),
         )
-        # Update the split file to point to the new recording
         await conn.execute(
             "UPDATE library_files SET recording_id = %s"
             " WHERE id = %s",
             (new_rec_id, body.file_id),
         )
 
-    # Update work_id on the file itself (denormalised column)
     await conn.execute(
         "UPDATE library_files SET work_id = %s WHERE id = %s",
         (new_work_id, body.file_id),
     )
 
-    # Create song master for new work
     new_master_id = uuid4()
     await conn.execute(
         """
@@ -1246,7 +1196,6 @@ async def split_work(
         (new_master_id, new_work_id, body.file_id),
     )
 
-    # Delete old work if now empty (no files remaining)
     count_cur = await conn.execute(
         """
         SELECT COUNT(*) AS cnt
@@ -1263,7 +1212,6 @@ async def split_work(
         await conn.execute("DELETE FROM works WHERE id = %s", (work_id,))
         old_work_deleted = True
     else:
-        # Recalculate master for the old work (it lost a file)
         await _recalculate_song_master(conn, work_id)
 
     return SplitResponse(new_work_id=new_work_id, old_work_deleted=old_work_deleted)
@@ -1277,21 +1225,7 @@ async def reassign_file_work(
 
     Moves the file (and its recording) to the target work, then cleans up the
     old work if it becomes empty.
-
-    Args:
-        file_id: The UUID of the file to reassign.
-        body: Contains ``work_id`` of the target work.
-        conn: Async database connection.
-        _token: Auth token.
-
-    Returns:
-        :class:`ReassignResponse` with the old work ID and whether it was deleted.
-
-    Raises:
-        HTTPException: 404 if the file or target work does not exist.
-        HTTPException: 422 if the file is already assigned to the target work.
     """
-    # Verify file exists and get current work
     file_cur = await conn.execute(
         """
         SELECT lf.id, lf.recording_id, r.work_id AS current_work_id
@@ -1311,7 +1245,6 @@ async def reassign_file_work(
     current_work_id: str | None = file_row["current_work_id"]
     recording_id: str | None = file_row["recording_id"]
 
-    # Verify target work exists
     target_cur = await conn.execute(
         "SELECT id FROM works WHERE id = %s", (body.work_id,)
     )
@@ -1321,16 +1254,13 @@ async def reassign_file_work(
             detail=f"Work {body.work_id} not found",
         )
 
-    # Verify file not already in target work
     if current_work_id == body.work_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"File {file_id} is already assigned to work {body.work_id}",
         )
 
-    # Handle recording: if shared, create new; if not, move or merge
     if recording_id is not None:
-        # Check if other files share this recording
         share_cur = await conn.execute(
             "SELECT COUNT(*) AS cnt FROM library_files"
             " WHERE recording_id = %s AND id != %s",
@@ -1339,7 +1269,6 @@ async def reassign_file_work(
         share_row = await share_cur.fetchone()
         is_shared = share_row is not None and share_row["cnt"] > 0
 
-        # Get the recording's version_type
         rec_cur = await conn.execute(
             "SELECT title, version_type, duration_ms"
             " FROM recordings WHERE id = %s",
@@ -1348,7 +1277,6 @@ async def reassign_file_work(
         rec_row = await rec_cur.fetchone()
         rec_version = rec_row["version_type"] if rec_row else "original"
 
-        # Check if target already has this version_type
         tgt_cur = await conn.execute(
             "SELECT id FROM recordings"
             " WHERE work_id = %s AND version_type = %s",
@@ -1357,14 +1285,12 @@ async def reassign_file_work(
         tgt_rec = await tgt_cur.fetchone()
 
         if tgt_rec:
-            # Target has same version: point file at existing recording
             await conn.execute(
                 "UPDATE library_files SET recording_id = %s"
                 " WHERE id = %s",
                 (tgt_rec["id"], str(file_id)),
             )
         elif is_shared:
-            # Recording is shared: clone for this file on target work
             new_rec_id = str(uuid4())
             await conn.execute(
                 """INSERT INTO recordings
@@ -1385,22 +1311,18 @@ async def reassign_file_work(
                 (new_rec_id, str(file_id)),
             )
         else:
-            # Recording not shared: just move it
             await conn.execute(
                 "UPDATE recordings SET work_id = %s WHERE id = %s",
                 (body.work_id, recording_id),
             )
 
-    # Update denormalised work_id on the file
     await conn.execute(
         "UPDATE library_files SET work_id = %s WHERE id = %s",
         (body.work_id, file_id),
     )
 
-    # Recalculate master for the target work
     await _recalculate_song_master(conn, body.work_id)
 
-    # Handle old work cleanup
     old_work_deleted = False
     if current_work_id is not None:
         count_cur = await conn.execute(
@@ -1423,3 +1345,73 @@ async def reassign_file_work(
             await _recalculate_song_master(conn, current_work_id)
 
     return ReassignResponse(old_work_id=current_work_id, old_work_deleted=old_work_deleted)
+```
+
+- [ ] **Step 6: Run the library router tests**
+
+```bash
+uv run pytest tests/routers/test_library.py -v
+```
+
+Expected: all tests pass. If any fail, check that:
+- `backend/routers/library/__init__.py` imports all four sub-routers
+- `DbConn` and `Token` type aliases are defined in each sub-module that uses them
+- No route path was accidentally omitted from a sub-module
+
+- [ ] **Step 7: Delete the old library.py**
+
+```bash
+git rm backend/routers/library.py
+```
+
+- [ ] **Step 8: Run full fast test suite**
+
+```bash
+uv run pytest -m "not integration and not slow" -n logical
+```
+
+Expected: all fast tests pass (453 tests, 0 failures)
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add backend/routers/library/
+git commit -m "refactor(routers): decompose library.py into library/ package with resource-scoped sub-modules"
+```
+
+---
+
+### Task 2: Lint and type check
+
+**Files:** None (fixes only)
+
+- [ ] **Step 1: Fix import ordering**
+
+```bash
+uv run ruff check --fix --select I001 .
+uv run ruff format .
+```
+
+- [ ] **Step 2: Run full ruff check**
+
+```bash
+uv run ruff check .
+```
+
+Expected: 0 errors
+
+- [ ] **Step 3: Run mypy**
+
+```bash
+uv run mypy backend --strict
+```
+
+Expected: same 3 pre-existing errors as on master — two `no-any-return` in `backend/tasks/normalize_backfill_tasks.py` and one `unused-ignore` in `backend/routers/tasks.py`. No new errors.
+
+- [ ] **Step 4: Commit lint fixes if any changes were made**
+
+Only commit if ruff made changes:
+
+```bash
+git diff --quiet || git add -A && git commit -m "chore: fix import ordering after router decomposition"
+```
