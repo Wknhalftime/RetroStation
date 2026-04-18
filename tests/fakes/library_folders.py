@@ -3,8 +3,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from backend.domain.library import LibraryFolder
-from backend.repositories.library_folders import LibraryFolderRepository
 from backend.repositories.library_folder_staging import LibraryFolderHashStaging
+from backend.repositories.library_folders import LibraryFolderRepository
 
 
 class FakeLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStaging):

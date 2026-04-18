@@ -13,10 +13,10 @@ from backend.services.normalization import (
     normalize_title,
 )
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
+from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
-from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
