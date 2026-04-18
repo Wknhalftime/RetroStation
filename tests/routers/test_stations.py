@@ -64,6 +64,61 @@ def _insert_event_full(conn, playlist, artist_name="Test Artist", title="Test So
     return event
 
 
+def _bulk_insert_events(
+    conn: psycopg.Connection,
+    playlist: BroadcastPlaylist,
+    rows: list[tuple[str, str, datetime]],
+) -> None:
+    """Bulk-insert (artist, identity, event) triples for a playlist.
+
+    FK order is enforced by statement order (artists -> identities -> events);
+    each stage uses executemany. Use for >= 5-row seed loops; smaller loops
+    should continue calling _insert_event_full for readability.
+    """
+    artist_params: list[tuple] = []
+    identity_params: list[tuple] = []
+    event_params: list[tuple] = []
+    for artist_name, title, played_at in rows:
+        artist_id = uuid4()
+        identity_id = uuid4()
+        normalized_artist = artist_name.lower()
+        normalized_title = title.lower()
+        artist_params.append(
+            (artist_id, artist_name, normalized_artist, MatchStatus.PENDING.value)
+        )
+        identity_params.append(
+            (
+                identity_id, artist_id, title, normalized_title,
+                f"{normalized_artist}:{normalized_title}",
+                MatchStatus.PENDING.value,
+            )
+        )
+        event_params.append((uuid4(), identity_id, playlist.id, played_at))
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO broadcast_artists "
+            "(id, original_name, normalized_name, match_status) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (normalized_name) DO NOTHING",
+            artist_params,
+        )
+        cur.executemany(
+            "INSERT INTO track_identities "
+            "(id, broadcast_artist_id, original_title, normalized_title, "
+            " normalized_signature, match_status) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (normalized_signature) DO NOTHING",
+            identity_params,
+        )
+        cur.executemany(
+            "INSERT INTO play_events "
+            "(id, identity_id, playlist_id, played_at) "
+            "VALUES (%s, %s, %s, %s)",
+            event_params,
+        )
+    conn.commit()
+
+
 class TestListStations:
     def test_empty(self, client):
         resp = client.get("/api/v1/stations")
@@ -230,11 +285,15 @@ class TestStationEventsByDate:
     def test_pagination(self, client, db_conn):
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
-        for i in range(5):
-            _insert_event_full(
-                db_conn, playlist, f"Artist {i}", f"Song {i}",
-                played_at=datetime(2001, 3, 15, 8, i, 0, tzinfo=UTC),
-            )
+        _bulk_insert_events(
+            db_conn,
+            playlist,
+            [
+                (f"Artist {i}", f"Song {i}",
+                 datetime(2001, 3, 15, 8, i, 0, tzinfo=UTC))
+                for i in range(5)
+            ],
+        )
 
         resp = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15&limit=2&offset=0")
         assert resp.status_code == 200

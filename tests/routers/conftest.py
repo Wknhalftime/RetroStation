@@ -24,6 +24,8 @@ def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
     under pytest-xdist parallel execution.
     """
     os.environ["DATABASE_URL"] = _migrated_db_url
+    # Session fixture already migrated this DB URL; skip redundant lifespan migration.
+    os.environ["RETROSTATION_SKIP_BOOT_MIGRATIONS"] = "1"
 
     from backend.config import get_settings
 
