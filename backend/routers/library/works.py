@@ -600,11 +600,17 @@ async def create_format_override(
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
         )
 
-    existing_cur = await conn.execute(
-        "SELECT 1 FROM format_overrides WHERE work_id = %s AND format_name = %s",
-        (work_id, body.format_name),
+    override_id = uuid4()
+    insert_cur = await conn.execute(
+        """
+        INSERT INTO format_overrides (id, work_id, format_name, preferred_file_id, notes)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (work_id, format_name) DO NOTHING
+        RETURNING id
+        """,
+        (override_id, work_id, body.format_name, body.preferred_file_id, body.notes),
     )
-    if await existing_cur.fetchone() is not None:
+    if await insert_cur.fetchone() is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -612,15 +618,6 @@ async def create_format_override(
                 f"'{body.format_name}' already exists"
             ),
         )
-
-    override_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO format_overrides (id, work_id, format_name, preferred_file_id, notes)
-        VALUES (%s, %s, %s, %s, %s)
-        """,
-        (override_id, work_id, body.format_name, body.preferred_file_id, body.notes),
-    )
 
     row_cur = await conn.execute("SELECT * FROM format_overrides WHERE id = %s", (override_id,))
     row = await row_cur.fetchone()
