@@ -15,6 +15,7 @@ from typing import Any, cast
 import structlog
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketDisconnect
+from psycopg_pool import PoolTimeout, TooManyRequests
 
 from backend.config import get_settings
 from backend.db.pool import get_pool
@@ -93,3 +94,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")
+    except (PoolTimeout, TooManyRequests) as exc:
+        # DB pool saturated; HTTP routes return 503, WS analogue is 1013.
+        logger.warning(
+            "websocket_pool_saturated",
+            exception=type(exc).__name__,
+        )
+        await websocket.close(code=1013, reason="Database pool saturated")
