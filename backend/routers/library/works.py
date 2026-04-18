@@ -518,6 +518,16 @@ async def set_work_master(
             detail=f"Work {work_id} not found",
         )
 
+    file_cur = await conn.execute(
+        "SELECT 1 FROM library_files WHERE id = %s AND work_id = %s",
+        (body.preferred_file_id, work_id),
+    )
+    if await file_cur.fetchone() is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
+        )
+
     master_id = uuid4()
     await conn.execute(
         """
@@ -578,6 +588,16 @@ async def create_format_override(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Work {work_id} not found",
+        )
+
+    file_cur = await conn.execute(
+        "SELECT 1 FROM library_files WHERE id = %s AND work_id = %s",
+        (body.preferred_file_id, work_id),
+    )
+    if await file_cur.fetchone() is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
         )
 
     override_id = uuid4()

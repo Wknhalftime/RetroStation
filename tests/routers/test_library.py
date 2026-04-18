@@ -528,7 +528,12 @@ class TestSetMaster:
             recording_mbid="r-001",
             file_path="/m/a.flac",
         )
-        lf2 = PgLibraryFileRepository(db_conn).upsert(_make_file("/m/b.flac", format="mp3"))
+        lf2 = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/b.flac", format="mp3",
+                recording_id="r-001", work_id=work.id,
+            )
+        )
         db_conn.commit()
 
         client.put(
@@ -571,6 +576,38 @@ class TestSetMaster:
 
         resp = client.delete("/api/v1/library/works/w-001/master")
         assert resp.status_code == 404
+
+    def test_set_master_rejects_file_not_in_work(self, client, db_conn) -> None:
+        """preferred_file_id must belong to the target work."""
+        _, work, _, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-reject",
+            work_mbid="w-reject",
+            recording_mbid="r-reject",
+            file_path="/m/reject_a.flac",
+        )
+        # A file tied to a different work.
+        PgArtistRepository(db_conn).upsert(_make_artist("a-other"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-other", "Other", artist_id="a-other"))
+        foreign_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/foreign.flac", format="flac",
+                recording_id=None, work_id="w-other",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.put(
+            f"/api/v1/library/works/{work.id}/master",
+            json={"preferred_file_id": str(foreign_lf.id)},
+        )
+        assert resp.status_code == 422
+        assert str(foreign_lf.id) in resp.json()["detail"]
+        # Master was not persisted.
+        row = db_conn.execute(
+            "SELECT 1 FROM song_masters WHERE work_id = %s", (work.id,),
+        ).fetchone()
+        assert row is None
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +702,41 @@ class TestFormatOverrides:
         )
         assert resp.status_code == 201
         assert resp.json()["notes"] is None
+
+    def test_create_format_override_rejects_file_not_in_work(
+        self, client, db_conn
+    ) -> None:
+        """preferred_file_id must belong to the target work."""
+        _, work, _, _ = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-reject",
+            work_mbid="w-fo-reject",
+            recording_mbid="r-fo-reject",
+            file_path="/m/fo_reject_a.flac",
+        )
+        PgArtistRepository(db_conn).upsert(_make_artist("a-fo-other"))
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w-fo-other", "Other", artist_id="a-fo-other")
+        )
+        foreign_lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/fo_foreign.flac", format="flac",
+                recording_id=None, work_id="w-fo-other",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "flac", "preferred_file_id": str(foreign_lf.id)},
+        )
+        assert resp.status_code == 422
+        assert str(foreign_lf.id) in resp.json()["detail"]
+        # Override was not persisted.
+        row = db_conn.execute(
+            "SELECT 1 FROM format_overrides WHERE work_id = %s", (work.id,),
+        ).fetchone()
+        assert row is None
 
 
 # ---------------------------------------------------------------------------
