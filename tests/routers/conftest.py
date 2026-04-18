@@ -44,11 +44,16 @@ def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
 
         app.dependency_overrides[get_current_token] = _skip_auth
 
-        with TestClient(app, raise_server_exceptions=False) as c:
-            yield c
+        # Inner try guarantees app/get_settings cleanup only runs once both
+        # names are bound; the outer finally below guarantees mp.undo() runs
+        # even if an import above raises (no UnboundLocalError masking).
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                yield c
+        finally:
+            app.dependency_overrides.clear()
+            get_settings.cache_clear()
     finally:
-        app.dependency_overrides.clear()
-        get_settings.cache_clear()
         mp.undo()
 
 

@@ -34,11 +34,14 @@ def init_pool(database_url: str) -> AsyncConnectionPool:
         # worst-case memory while still absorbing realistic bursts. The
         # expected load profile is single-user self-hosted (CORS restricts
         # origin to localhost:5173) with at most ~10-20 parallel fetches
-        # per page load, and Huey workers use their own sync connections
-        # (backend.db.sync_conn), so the pool serves HTTP requests only.
-        # Requests that overflow raise psycopg_pool.TooManyRequests; the
-        # 30s `timeout` default raises psycopg_pool.PoolTimeout. Both are
-        # translated to HTTP 503 by handlers registered in backend.main.
+        # per page load. Huey workers do NOT share this pool (they use
+        # backend.db.sync_conn); consumers are the FastAPI HTTP routes
+        # and the /ws WebSocket endpoint in backend.websocket. Overflow
+        # raises psycopg_pool.TooManyRequests; the 30s `timeout` default
+        # raises psycopg_pool.PoolTimeout. HTTP handlers registered in
+        # backend.main translate both into 503 + Retry-After: 1; the
+        # websocket endpoint translates them into WS close code 1013
+        # ("Try Again Later") so browser clients can back off.
         max_waiting=100,
         open=False,  # opened explicitly in lifespan
         kwargs={"row_factory": dict_row},
