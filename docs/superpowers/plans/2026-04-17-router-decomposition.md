@@ -1,8 +1,15 @@
 # Router Decomposition Implementation Plan
 
+> **STATUS — HISTORICAL (AS-PLANNED):** This document captures the decomposition plan as it was written *before* implementation. It is preserved for traceability, not as live guidance. The shipped code on `feature/router-decomposition` has diverged from the snippets below in two ways that future readers should be aware of:
+>
+> 1. **Tests were not left untouched.** `tests/routers/test_library.py` has been expanded substantially during PR #1 review (regression guards for orphan files, FK cleanup on empty-work deletion, format-override validation, etc.).
+> 2. **`scan.py` hardens the path before enqueueing.** The sample snippet in Step 2 enqueues `library_scan_task(body.root_path)`; the shipped handler resolves the path (`Path(body.root_path).resolve()`), validates it against `settings.library_scan_paths`, and enqueues the resolved string. Authoritative reference: `backend/routers/library/scan.py`.
+>
+> For current behavior always read the code; treat the snippets here as the initial sketch only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Convert `backend/routers/library.py` (1,444 lines) into a `library/` package with four focused sub-modules — scan, status, artists, and works — while leaving `v1.py` and all tests untouched.
+**Goal (as originally planned):** Convert `backend/routers/library.py` (1,444 lines) into a `library/` package with four focused sub-modules — scan, status, artists, and works — while leaving `v1.py` and `tests/routers/test_library.py` untouched. *(Post-implementation note: `v1.py` remained unchanged; `test_library.py` has since been extended during review — see the HISTORICAL banner above.)*
 
 **Architecture:** Python treats a directory with `__init__.py` as a package; `from backend.routers import library` will automatically resolve to `library/__init__.py`. The `__init__.py` assembles sub-routers into one `router` object that `v1.py` includes unchanged. Each sub-module owns its schemas and routes; the `_recalculate_song_master` / `_consolidate_recordings` helpers live in `works.py` alongside the routes that use them. `PATCH /files/{file_id}/work` goes in `works.py` rather than a separate `files.py` because it modifies work relationships and shares `_recalculate_song_master`.
 
@@ -21,7 +28,7 @@
 | Create | `backend/routers/library/artists.py` | `GET /artists`, `GET /artists/{artist_id}` + artist schemas |
 | Create | `backend/routers/library/works.py` | All work routes, `PATCH /files/{file_id}/work`, private helpers + work schemas |
 | No change | `backend/routers/v1.py` | Already uses `library.router` — resolves to `__init__.py` automatically |
-| No change | `tests/routers/test_library.py` | Tests use HTTP paths, no router imports |
+| No change *(at plan time)* | `tests/routers/test_library.py` | Tests use HTTP paths, no router imports. **Historical note:** extended during PR #1 review with regression tests; see the HISTORICAL banner at the top of this document. |
 
 ---
 
@@ -95,6 +102,9 @@ async def scan_library(body: ScanRequest, _token: Token) -> dict[str, str]:
     if not scan_path.exists() or not scan_path.is_dir():
         raise HTTPException(status_code=400, detail="Invalid directory path")
 
+    # Historical note: the as-shipped handler enqueues the validated/resolved
+    # path (str(scan_path)), not body.root_path — the snippet below reflects
+    # the original plan, not current behavior. See backend/routers/library/scan.py.
     library_scan_task(body.root_path)
     return {"status": "accepted", "message": f"Library scan queued for {body.root_path}"}
 ```
