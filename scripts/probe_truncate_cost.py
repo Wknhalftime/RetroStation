@@ -9,12 +9,21 @@ Prints min/median/p95 (ms) for:
 Does not modify the schema. Requires `retrostation_test` DB to already be
 migrated (run `uv run pytest tests/conftest.py -q --co` once, or any
 pytest session -n0, to trigger the session-scope migration fixture).
+
+DESTRUCTIVE: this script runs TRUNCATE ... CASCADE on every domain table
+in the target database. It refuses to run unless the DB name starts with
+`retrostation_test` (the convention for pytest DBs, including per-xdist-
+worker suffixes like `retrostation_test_gw0`). If you must target a
+different database (e.g. in CI), set PROBE_CONFIRM_DESTRUCTIVE=1 to
+override the guard; NEVER set that variable in an environment that has
+access to production data.
 """
 
 from __future__ import annotations
 
 import os
 import statistics
+import sys
 import time
 
 import psycopg
@@ -23,6 +32,7 @@ URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://retrostation:retrostation-dev@localhost:5432/retrostation_test",
 )
+_TEST_DBNAME_PREFIX = "retrostation_test"
 ITERATIONS = 10
 TRUNCATE_SQL = """
     TRUNCATE play_events, track_identities, broadcast_artists,
@@ -36,6 +46,46 @@ TRUNCATE_SQL = """
              library_folder_staged_hashes, library_folders
     CASCADE
 """
+
+
+def _is_test_database(url: str) -> bool:
+    """True iff the URL's dbname starts with `retrostation_test`.
+
+    Uses psycopg's conninfo parser so both URI and keyword-value forms are
+    recognised. Any parse failure is treated as unsafe.
+    """
+    try:
+        params = psycopg.conninfo.conninfo_to_dict(url)
+    except psycopg.Error:
+        return False
+    dbname = str(params.get("dbname", ""))
+    return dbname.startswith(_TEST_DBNAME_PREFIX)
+
+
+def _assert_safe_to_run(url: str) -> None:
+    """Refuse to proceed unless the target DB is recognised as a test DB.
+
+    Override with PROBE_CONFIRM_DESTRUCTIVE=1 when the DB name is controlled
+    but differs from the default convention (e.g. in a sandboxed CI job).
+    """
+    if _is_test_database(url):
+        return
+    if os.environ.get("PROBE_CONFIRM_DESTRUCTIVE") == "1":
+        print(
+            "WARNING: probe_truncate_cost running against a non-test DB with "
+            "PROBE_CONFIRM_DESTRUCTIVE=1.",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "REFUSED: DATABASE_URL does not point at a `retrostation_test*` database.\n"
+        f"  url: {url}\n"
+        "  This script runs TRUNCATE ... CASCADE on every domain table. Refusing\n"
+        "  to proceed. If this really is a throwaway DB, set "
+        "PROBE_CONFIRM_DESTRUCTIVE=1.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def _ms(seconds: float) -> float:
@@ -71,6 +121,8 @@ def probe_truncate(url: str, n: int) -> list[float]:
 
 
 def main() -> None:
+    _assert_safe_to_run(URL)
+
     print(f"probe url: {URL}")
     print(f"iterations: {ITERATIONS}\n")
 

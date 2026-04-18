@@ -31,15 +31,14 @@ def test_mb_search_artist_cache_hit(
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        client = MusicBrainzApiClient(cache_repo)
+        with MusicBrainzApiClient(cache_repo) as client:
+            first = client.search_artist("Metallica")
+            assert any(r.get("name") == "Metallica" for r in first)
+            conn.commit()
 
-        first = client.search_artist("Metallica")
-        assert any(r.get("name") == "Metallica" for r in first)
-        conn.commit()
-
-        second = client.search_artist("Metallica")
-        assert second == first
-        conn.commit()
+            second = client.search_artist("Metallica")
+            assert second == first
+            conn.commit()
 
     assert call_count == 1  # second call served from cache, not _fetch
 
@@ -53,15 +52,14 @@ def test_mb_search_artist_real_api(migrated_db: str) -> None:
     """Integration test: real MusicBrainz API call for a known artist."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        client = MusicBrainzApiClient(cache_repo)
+        with MusicBrainzApiClient(cache_repo) as client:
+            results = client.search_artist("Metallica")
+            assert len(results) > 0
+            assert any(r.get("name") == "Metallica" for r in results)
 
-        results = client.search_artist("Metallica")
-        assert len(results) > 0
-        assert any(r.get("name") == "Metallica" for r in results)
+            conn.commit()
 
-        conn.commit()
+            results2 = client.search_artist("Metallica")
+            assert len(results2) > 0
 
-        results2 = client.search_artist("Metallica")
-        assert len(results2) > 0
-
-        conn.commit()
+            conn.commit()
