@@ -33,27 +33,56 @@ function getPercent(progressData: Record<string, unknown>): number | null {
 
 function TaskProgressRow({ task }: { task: TaskInfo }) {
   const label = getLabel(task.task_type);
-  const percent = getPercent(task.progress_data);
+  const percent = task.status === "running" ? getPercent(task.progress_data) : null;
 
   return (
-    <div className="flex items-center gap-3 px-6 py-2">
+    <div className={cn(
+      "flex items-center gap-3 px-6 py-2",
+      task.status === "completed" && "bg-green-50",
+      task.status === "failed" && "bg-red-50"
+    )}>
       <span className="flex-shrink-0">
-        <Spinner className="h-5 w-5 text-blue-500" />
+        {task.status === "running" && <Spinner className="h-5 w-5 text-blue-500" />}
+        {task.status === "completed" && <CheckCircle className="h-5 w-5 text-green-500" />}
+        {task.status === "failed" && <XCircle className="h-5 w-5 text-red-500" />}
       </span>
-      <span className="text-sm font-medium text-gray-700">{label}</span>
-      <div className="flex-1 max-w-xs">
-        <div className="h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
-          {percent !== null ? (
-            <div
-              className="h-full rounded-full bg-blue-500 transition-all duration-300"
-              style={{ width: `${percent}%` }}
-            />
-          ) : (
-            <div className="h-full w-full rounded-full bg-blue-400 animate-pulse" />
-          )}
+      <span className={cn(
+        "text-sm font-medium text-gray-700",
+        task.status === "completed" && "text-green-700",
+        task.status === "failed" && "text-red-700"
+      )}>
+        {label}
+        {task.status === "completed" && " — Done"}
+        {task.status === "failed" && " — Failed"}
+      </span>
+
+      {task.status === "failed" && task.progress_data?.error != null && (
+        <span className="text-xs text-red-600 truncate max-w-md" title={String(task.progress_data.error)}>
+          — {String(task.progress_data.error)}
+        </span>
+      )}
+
+      {task.status === "completed" && task.progress_data?.warning != null && (
+        <span className="text-xs text-amber-600 ml-1">
+          — No audio files found
+        </span>
+      )}
+
+      {task.status === "running" && (
+        <div className="flex-1 max-w-xs">
+          <div className="h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
+            {percent !== null ? (
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                style={{ width: `${percent}%` }}
+              />
+            ) : (
+              <div className="h-full w-full rounded-full bg-blue-400 animate-pulse" />
+            )}
+          </div>
         </div>
-      </div>
-      {percent !== null && (
+      )}
+      {task.status === "running" && percent !== null && (
         <span className="text-xs text-gray-500 flex-shrink-0">{percent}%</span>
       )}
     </div>
