@@ -7,6 +7,9 @@ __pycache__/
 *.pyo
 .env
 dist/
+build/
+*.egg-info/
+*.egg
 node_modules/
 frontend/dist/
 frontend/src/**/*.js
@@ -15,3 +18,12 @@ huey.db
 huey.db-shm
 huey.db-wal
 mypy_out.txt
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+*.log
