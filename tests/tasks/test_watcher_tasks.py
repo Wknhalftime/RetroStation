@@ -18,7 +18,7 @@ class TestWatcherPollNoPath:
         mock_settings.get.return_value = None  # key absent → UserSetting | None
 
         with patch("backend.tasks.library_watcher_tasks.RepositoryFactory") as mock_factory:
-            mock_factory.return_value.settings = mock_settings
+            mock_factory.return_value.user_settings = mock_settings
             with patch("backend.tasks.library_watcher_tasks.diff_tree") as mock_diff:
                 from backend.tasks.library_watcher_tasks import library_watcher_poll
                 library_watcher_poll.call_local()
@@ -35,7 +35,7 @@ class TestWatcherPollNoPath:
         mock_settings.get.return_value = UserSetting(key="local_path_prefix", value="")
 
         with patch("backend.tasks.library_watcher_tasks.RepositoryFactory") as mock_factory:
-            mock_factory.return_value.settings = mock_settings
+            mock_factory.return_value.user_settings = mock_settings
             with patch("backend.tasks.library_watcher_tasks.diff_tree") as mock_diff:
                 from backend.tasks.library_watcher_tasks import library_watcher_poll
                 library_watcher_poll.call_local()
@@ -58,7 +58,7 @@ class TestWatcherPollNoChanges:
             patch("backend.tasks.library_watcher_tasks.diff_tree", return_value=([], [])),
             patch("backend.tasks.library_watcher_tasks.library_scan_files_task") as mock_scan,
         ):
-            mock_factory.return_value.settings = mock_settings
+            mock_factory.return_value.user_settings = mock_settings
             from backend.tasks.library_watcher_tasks import library_watcher_poll
             library_watcher_poll.call_local()
             mock_scan.assert_not_called()
@@ -82,12 +82,14 @@ class TestWatcherPollUsesSettingValue:
         fake_settings = FakeUserSettingRepository(initial={"local_path_prefix": "/music"})
 
         with patch("backend.tasks.library_watcher_tasks.RepositoryFactory") as mock_factory:
-            mock_factory.return_value.settings = fake_settings
-            mock_factory.return_value.library_folders = MagicMock()
+            mock_factory.return_value.user_settings = fake_settings
+            mock_library_folders = MagicMock()
+            mock_library_folders.get_folders_with_staged_hashes.return_value = set()
+            mock_factory.return_value.library_folders = mock_library_folders
 
             from backend.tasks.library_watcher_tasks import library_watcher_poll
             library_watcher_poll.call_local()
 
             # If .value unwrap was wrong the task would have returned early;
             # reaching diff_tree proves the code path is correct.
-            mock_diff.assert_called_once_with("/music", mock_factory.return_value.library_folders)
+            mock_diff.assert_called_once_with("/music", mock_library_folders, set())

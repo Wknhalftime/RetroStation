@@ -87,6 +87,7 @@ def test_enrich_by_release_links_recording() -> None:
     count = enrich_by_release(
         _RELEASE_MBID,
         library_file_repo,
+        library_file_repo,
         recording_repo,
         work_repo,
         artist_repo,
@@ -135,6 +136,7 @@ def test_enrich_missing_release_marks_failed() -> None:
 
     count = enrich_by_release(
         _RELEASE_MBID,
+        library_file_repo,
         library_file_repo,
         recording_repo,
         work_repo,
@@ -192,6 +194,7 @@ def test_enrich_by_recording_links_file() -> None:
     count = enrich_by_recording(
         _RECORDING_MBID,
         library_file_repo,
+        library_file_repo,
         recording_repo,
         work_repo,
         artist_repo,
@@ -229,6 +232,7 @@ def test_enrich_missing_recording_marks_failed() -> None:
 
     count = enrich_by_recording(
         _RECORDING_MBID,
+        library_file_repo,
         library_file_repo,
         recording_repo,
         work_repo,

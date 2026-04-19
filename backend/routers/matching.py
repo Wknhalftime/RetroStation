@@ -210,7 +210,7 @@ async def resolve_artist(
     # Validate match_status
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "match_status must be MANUAL_MATCHED or"
                 f" MANUAL_REJECTED, got {body.match_status!r}"
@@ -219,7 +219,7 @@ async def resolve_artist(
 
     if body.match_status == MatchStatus.MANUAL_MATCHED and not body.target_artist_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="target_artist_id is required for MANUAL_MATCHED",
         )
 
@@ -319,7 +319,7 @@ async def resolve_identity(
     """
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "match_status must be MANUAL_MATCHED or"
                 f" MANUAL_REJECTED, got {body.match_status!r}"
