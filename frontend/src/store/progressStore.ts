@@ -44,8 +44,8 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
       set({
         status: "RUNNING",
         activeTask: active,
-        extraCount: Math.max(0, runningTasks.length - 1),
-        runningTasks,
+        extraCount: Math.max(0, tasks.length - 1),
+        runningTasks: tasks,
         dismissTimer: null,
       });
       return;
@@ -90,7 +90,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     }
   },
 
-  hasRunningType: (type: string) => get().runningTasks.some((t) => t.task_type === type),
+  hasRunningType: (type: string) => get().runningTasks.some((t) => t.task_type === type && t.status === "running"),
 
   dismiss: () => {
     const { dismissTimer } = get();

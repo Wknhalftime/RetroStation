@@ -56,7 +56,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # Mark stale tasks as failed
                 await conn.execute(
                     """UPDATE progress_tracking
-                       SET status = 'failed'
+                       SET status = 'failed', completed_at = now()
                        WHERE status = 'running'
                          AND updated_at < now() - (interval '1 minute' * %s)""",
                     (STALE_THRESHOLD_MINUTES,),
@@ -68,11 +68,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # green "Done" / red "Failed" beat before dismiss.
                 cur = await conn.execute(
                     """SELECT task_id, task_type, status, progress_data,
-                              started_at, updated_at
+                              started_at, updated_at, completed_at
                        FROM progress_tracking
                        WHERE status = 'running'
                           OR (status IN ('completed', 'failed')
-                              AND completed_at > now()
+                              AND coalesce(completed_at, updated_at) > now()
                                                - (interval '1 second' * %s))
                        ORDER BY started_at DESC""",
                     (TERMINAL_GRACE_SECONDS,),
@@ -93,6 +93,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "progress_data": progress_data,
                         "started_at": row["started_at"].isoformat(),
                         "updated_at": row["updated_at"].isoformat(),
+                        "completed_at": (
+                            row["completed_at"].isoformat()
+                            if row.get("completed_at")
+                            else None
+                        ),
                     }
                 )
 

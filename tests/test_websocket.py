@@ -176,9 +176,14 @@ class TestWebSocketBroadcast:
         ws_client: TestClient,
         db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
     ) -> None:
-        """Completed and failed tasks are excluded from the broadcast."""
+        """Completed and failed tasks outside the grace window are excluded."""
         _seed_task(db_conn, "ws-done", status=TaskStatus.COMPLETED)
         _seed_task(db_conn, "ws-failed", status=TaskStatus.FAILED)
+
+        db_conn.execute(
+            "UPDATE progress_tracking SET updated_at = now() - interval '10 seconds'"
+        )
+        db_conn.commit()
 
         with ws_client.websocket_connect("/ws?token=dev-token") as ws:
             data = ws.receive_json()
@@ -186,3 +191,19 @@ class TestWebSocketBroadcast:
         task_ids = [t["task_id"] for t in data["tasks"]]
         assert "ws-done" not in task_ids
         assert "ws-failed" not in task_ids
+
+    def test_completed_tasks_grace_window(
+        self,
+        ws_client: TestClient,
+        db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
+    ) -> None:
+        """Completed and failed tasks within the 5s grace window are broadcast."""
+        _seed_task(db_conn, "ws-done-recent", status=TaskStatus.COMPLETED)
+        _seed_task(db_conn, "ws-failed-recent", status=TaskStatus.FAILED)
+
+        with ws_client.websocket_connect("/ws?token=dev-token") as ws:
+            data = ws.receive_json()
+
+        task_ids = [t["task_id"] for t in data["tasks"]]
+        assert "ws-done-recent" in task_ids
+        assert "ws-failed-recent" in task_ids
