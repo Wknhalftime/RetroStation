@@ -94,6 +94,9 @@ export async function apiFetch<T>(
   });
 
   if (!res.ok) await throwForStatus(res);
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 

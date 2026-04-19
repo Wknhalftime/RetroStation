@@ -98,10 +98,24 @@ export function useUpdateStation(id: string) {
 
 export function useDeleteStation() {
   const qc = useQueryClient();
-  return useMutation<void, Error, string>({
+  return useMutation<void, Error, string, { previous: StationList | undefined }>({
     mutationFn: (id) =>
       apiFetch<void>(`/api/v1/stations/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: STATIONS_KEY });
+      const previous = qc.getQueryData<StationList>(STATIONS_KEY);
+      if (previous) {
+        qc.setQueryData<StationList>(
+          STATIONS_KEY,
+          previous.filter((s) => s.id !== id),
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.previous) qc.setQueryData(STATIONS_KEY, ctx.previous);
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: STATIONS_KEY });
     },
   });
