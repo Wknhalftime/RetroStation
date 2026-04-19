@@ -46,7 +46,7 @@ export function StationForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
       {/* call_letters */}
       <div>
         <label
