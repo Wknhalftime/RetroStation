@@ -90,7 +90,7 @@ function TaskProgressRow({ task }: { task: TaskInfo }) {
 }
 
 export function ProgressBar() {
-  const { status, activeTask, extraCount, runningTasks, dismiss } =
+  const { status, activeTask, extraCount, visibleTasks, dismiss } =
     useProgressStore();
 
   if (status === "IDLE") return null;
@@ -104,10 +104,10 @@ export function ProgressBar() {
   );
 
   if (status === "RUNNING") {
-    if (runningTasks.length === 0) return null;
+    if (visibleTasks.length === 0) return null;
     return (
       <div className={containerClasses}>
-        {runningTasks.map((task) => (
+        {visibleTasks.map((task) => (
           <TaskProgressRow key={task.task_id} task={task} />
         ))}
       </div>

@@ -7,6 +7,10 @@ interface ProgressState {
   status: ProgressStatus;
   activeTask: TaskInfo | null;
   extraCount: number;
+  // Tasks rendered by the progress bar during RUNNING, including recently
+  // terminal rows still inside the websocket grace window. Use `runningTasks`
+  // for predicates that truly mean "in-flight".
+  visibleTasks: TaskInfo[];
   runningTasks: TaskInfo[];
   dismissTimer: ReturnType<typeof setTimeout> | null;
   setTasks: (tasks: TaskInfo[]) => void;
@@ -26,6 +30,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
   status: "IDLE",
   activeTask: null,
   extraCount: 0,
+  visibleTasks: [],
   runningTasks: [],
   dismissTimer: null,
 
@@ -45,7 +50,8 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         status: "RUNNING",
         activeTask: active,
         extraCount: Math.max(0, tasks.length - 1),
-        runningTasks: tasks,
+        visibleTasks: tasks,
+        runningTasks,
         dismissTimer: null,
       });
       return;
@@ -58,6 +64,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         status: "FAILED",
         activeTask: active,
         extraCount: Math.max(0, failedTasks.length - 1),
+        visibleTasks: [],
         runningTasks: [],
         dismissTimer: null,
       });
@@ -70,12 +77,20 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         if (dismissTimer) clearTimeout(dismissTimer);
         const active = pickActiveTask(completedTasks);
         const timer = setTimeout(() => {
-          set({ status: "IDLE", activeTask: null, extraCount: 0, runningTasks: [], dismissTimer: null });
+          set({
+            status: "IDLE",
+            activeTask: null,
+            extraCount: 0,
+            visibleTasks: [],
+            runningTasks: [],
+            dismissTimer: null,
+          });
         }, 2000);
         set({
           status: "COMPLETED",
           activeTask: active,
           extraCount: Math.max(0, completedTasks.length - 1),
+          visibleTasks: [],
           runningTasks: [],
           dismissTimer: timer,
         });
@@ -86,15 +101,30 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     const { status } = get();
     if (status === "RUNNING" || status === "COMPLETED") {
       if (dismissTimer) clearTimeout(dismissTimer);
-      set({ status: "IDLE", activeTask: null, extraCount: 0, runningTasks: [], dismissTimer: null });
+      set({
+        status: "IDLE",
+        activeTask: null,
+        extraCount: 0,
+        visibleTasks: [],
+        runningTasks: [],
+        dismissTimer: null,
+      });
     }
   },
 
-  hasRunningType: (type: string) => get().runningTasks.some((t) => t.task_type === type && t.status === "running"),
+  hasRunningType: (type: string) =>
+    get().runningTasks.some((t) => t.task_type === type),
 
   dismiss: () => {
     const { dismissTimer } = get();
     if (dismissTimer) clearTimeout(dismissTimer);
-    set({ status: "IDLE", activeTask: null, extraCount: 0, runningTasks: [], dismissTimer: null });
+    set({
+      status: "IDLE",
+      activeTask: null,
+      extraCount: 0,
+      visibleTasks: [],
+      runningTasks: [],
+      dismissTimer: null,
+    });
   },
 }));
