@@ -58,7 +58,9 @@ def _make_event(*, identity: BroadcastTrackIdentity, playlist_id: object) -> Bro
     )
 
 
-def _make_file(*, file_path: str = "/music/track.flac", duration_ms: int | None = 301_000) -> LibraryFile:
+def _make_file(
+    *, file_path: str = "/music/track.flac", duration_ms: int | None = 301_000
+) -> LibraryFile:
     from backend.domain.library import AudioMetadata
     return LibraryFile(
         id=uuid4(),

@@ -39,7 +39,9 @@ def _insert_playlist(conn, station, name="show.csv"):
     return result
 
 
-def _insert_event_full(conn, playlist, artist_name="Test Artist", title="Test Song", played_at=None):
+def _insert_event_full(
+    conn, playlist, artist_name="Test Artist", title="Test Song", played_at=None
+):
     """Insert artist + identity + event. Returns the event."""
     artist = BroadcastArtist(
         id=uuid4(), original_name=artist_name,
@@ -143,7 +145,9 @@ class TestListStations:
     def test_includes_playlist_count(self, client, db_conn):
         station = _insert_station(db_conn, "KAZR-FM")
         PgBroadcastPlaylistRepository(db_conn).create(
-            BroadcastPlaylist(id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id)
+            BroadcastPlaylist(
+                id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id,
+            )
         )
         db_conn.commit()
         resp = client.get("/api/v1/stations")

@@ -76,7 +76,9 @@ def _insert_identity(
         broadcast_artist_id=artist.id,
         original_title=original_title,
         normalized_title=original_title.lower(),
-        normalized_signature=normalized_signature or f"{artist.normalized_name}:{original_title.lower()}",
+        normalized_signature=(
+            normalized_signature or f"{artist.normalized_name}:{original_title.lower()}"
+        ),
         match_status=MatchStatus.PENDING,
     )
     result = PgBroadcastTrackIdentityRepository(conn).upsert(identity)

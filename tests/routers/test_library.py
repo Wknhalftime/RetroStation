@@ -420,7 +420,9 @@ class TestWorkDetail:
     def test_recording_with_no_files(self, client, db_conn) -> None:
         PgArtistRepository(db_conn).upsert(_make_artist("a-001"))
         PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work", artist_id="a-001"))
-        PgRecordingRepository(db_conn).upsert(_make_recording("r-001", "A Recording", work_id="w-001"))
+        PgRecordingRepository(db_conn).upsert(
+            _make_recording("r-001", "A Recording", work_id="w-001")
+        )
         db_conn.commit()
 
         resp = client.get("/api/v1/library/works/w-001")

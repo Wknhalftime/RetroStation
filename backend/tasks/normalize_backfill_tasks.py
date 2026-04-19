@@ -20,12 +20,18 @@ logger = structlog.get_logger()
 BATCH_SIZE = 500
 
 
+def _coerce_str(val: Any) -> str | None:
+    if isinstance(val, list):
+        return str(val[0]) if val else None
+    return str(val) if val else None
+
+
 def _extract_artist_from_metadata(meta: dict[str, Any]) -> str | None:
     """Extract artist name from raw_metadata JSONB (handles ID3 + Vorbis)."""
     for key in ("artist", "TPE1", "albumartist", "TPE2"):
         val = meta.get(key)
         if val:
-            return val[0] if isinstance(val, list) else val
+            return _coerce_str(val)
     return None
 
 
@@ -34,7 +40,7 @@ def _extract_title_from_metadata(meta: dict[str, Any]) -> str | None:
     for key in ("title", "TIT2"):
         val = meta.get(key)
         if val:
-            return val[0] if isinstance(val, list) else val
+            return _coerce_str(val)
     return None
 
 

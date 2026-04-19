@@ -13,7 +13,7 @@ from backend.config import get_settings
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.sync_conn import connect_sync
 from backend.dependencies import get_current_token, get_db_connection
-from backend.tasks.library_enrichment_tasks import (  # type: ignore[attr-defined]
+from backend.tasks.library_enrichment_tasks import (
     library_enrichment_task as _library_enrichment_task,
 )
 

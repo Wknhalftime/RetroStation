@@ -43,7 +43,9 @@ class TestScanFolderSmartUnchanged:
         existing = _make_existing(file_path=str(folder / "track.flac"))
         file_repo.upsert(existing)
 
-        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(
+            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+        )
 
         assert result.files_written == 0
         assert result.files_skipped == 1
@@ -73,7 +75,9 @@ class TestScanFolderSmartModified:
                 format="flac",
                 enrichment_status=EnrichmentStatus.PENDING,
             )
-            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+            result = scan_folder_incrementally(
+            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+        )
 
         assert result.files_written == 1
 
@@ -97,7 +101,9 @@ class TestScanFolderSmartNew:
                 format="flac",
                 enrichment_status=EnrichmentStatus.PENDING,
             )
-            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+            result = scan_folder_incrementally(
+            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+        )
 
         assert result.files_written == 1
         f = file_repo.get_by_path(str(folder / "track.flac"))
@@ -123,7 +129,9 @@ class TestScanFolderSmartReappeared:
         )
         file_repo.upsert(existing)
 
-        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(
+            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+        )
 
         assert result.files_reappeared == 1
         f = file_repo.get_by_path(str(folder / "track.flac"))
@@ -143,7 +151,9 @@ class TestScanFolderSmartMissing:
         ghost = _make_existing(file_path=str(folder / "ghost.flac"), file_status=FileStatus.PRESENT)
         file_repo.upsert(ghost)
 
-        result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        result = scan_folder_incrementally(
+            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+        )
 
         assert result.files_missing == 1
         f = file_repo.get_by_path(str(folder / "ghost.flac"))
@@ -163,8 +173,13 @@ class TestScanFolderSmartParseFailure:
         q_repo = FakeLibraryQuarantineRepository()
 
         from mutagen._util import MutagenError
-        with patch("backend.services.library_scan_service.extract_tags", side_effect=MutagenError("bad file")):
-            result = scan_folder_incrementally(folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo)
+        with patch(
+            "backend.services.library_scan_service.extract_tags",
+            side_effect=MutagenError("bad file"),
+        ):
+            result = scan_folder_incrementally(
+                folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            )
 
         assert result.quarantined == 1
         q = q_repo.get_by_path(str(folder / "corrupt.flac"))
