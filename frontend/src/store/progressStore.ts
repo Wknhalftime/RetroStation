@@ -7,15 +7,20 @@ interface ProgressState {
   status: ProgressStatus;
   activeTask: TaskInfo | null;
   extraCount: number;
-  // Tasks rendered by the progress bar during RUNNING, including recently
-  // terminal rows still inside the websocket grace window. Use `runningTasks`
-  // for predicates that truly mean "in-flight".
+  // All tasks shown in the RUNNING progress bar (running rows plus any
+  // terminal rows still inside the WebSocket grace window). Only meaningful
+  // when status === "RUNNING". Use `runningTasks` for "is this type in-flight"
+  // predicates — it never contains terminal rows.
   visibleTasks: TaskInfo[];
   runningTasks: TaskInfo[];
+  // IDs of terminal (completed/failed) tasks currently being displayed.
+  // dismiss() reads this to know which IDs to suppress on the next WS tick,
+  // keeping it decoupled from the rendering-only visibleTasks field.
+  terminalTaskIds: string[];
   dismissTimer: ReturnType<typeof setTimeout> | null;
-  // Task IDs explicitly dismissed by the user. Filtered out of failed/completed
-  // processing in setTasks so a dismiss isn't immediately undone by the next
-  // WebSocket tick still carrying those rows inside the grace window.
+  // IDs the user has explicitly dismissed. setTasks() filters these out of
+  // terminal processing until they expire out of the WS grace window, so a
+  // dismiss() call is not immediately reversed by the next WebSocket tick.
   dismissedTaskIds: string[];
   setTasks: (tasks: TaskInfo[]) => void;
   hasRunningType: (type: string) => boolean;
@@ -36,17 +41,20 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
   extraCount: 0,
   visibleTasks: [],
   runningTasks: [],
+  terminalTaskIds: [],
   dismissTimer: null,
   dismissedTaskIds: [],
 
   setTasks: (tasks: TaskInfo[]) => {
     const { dismissTimer, dismissedTaskIds } = get();
 
-    // Prune dismissed IDs that have expired out of the WS payload entirely
-    // so we don't accumulate IDs forever.
+    // Keep only dismissed IDs still present in the WS payload; the rest have
+    // aged out of the grace window and no longer need suppressing.
     const payloadIds = new Set(tasks.map((t) => t.task_id));
-    const activeDismissed = dismissedTaskIds.filter((id) => payloadIds.has(id));
-    const dismissedSet = new Set(activeDismissed);
+    const unexpiredDismissedIds = dismissedTaskIds.filter((id) =>
+      payloadIds.has(id),
+    );
+    const dismissedSet = new Set(unexpiredDismissedIds);
 
     const runningTasks = tasks.filter((t) => t.status === "running");
     // Exclude user-dismissed tasks from terminal processing so a dismiss()
@@ -59,18 +67,23 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     );
 
     if (runningTasks.length > 0) {
-      if (dismissTimer) {
-        clearTimeout(dismissTimer);
-      }
+      if (dismissTimer) clearTimeout(dismissTimer);
       const active = pickActiveTask(runningTasks);
+      // Terminal rows still inside the grace window appear alongside running
+      // tasks in the progress bar; track their IDs for dismiss() suppression.
+      const graceWindowTerminalIds = tasks
+        .filter((t) => t.status === "failed" || t.status === "completed")
+        .filter((t) => !dismissedSet.has(t.task_id))
+        .map((t) => t.task_id);
       set({
         status: "RUNNING",
         activeTask: active,
         extraCount: Math.max(0, tasks.length - 1),
         visibleTasks: tasks,
         runningTasks,
+        terminalTaskIds: graceWindowTerminalIds,
         dismissTimer: null,
-        dismissedTaskIds: activeDismissed,
+        dismissedTaskIds: unexpiredDismissedIds,
       });
       return;
     }
@@ -82,11 +95,11 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         status: "FAILED",
         activeTask: active,
         extraCount: Math.max(0, failedTasks.length - 1),
-        // Populate visibleTasks so dismiss() can collect the IDs to suppress.
-        visibleTasks: failedTasks,
+        visibleTasks: [],
         runningTasks: [],
+        terminalTaskIds: failedTasks.map((t) => t.task_id),
         dismissTimer: null,
-        dismissedTaskIds: activeDismissed,
+        dismissedTaskIds: unexpiredDismissedIds,
       });
       return;
     }
@@ -103,6 +116,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
             extraCount: 0,
             visibleTasks: [],
             runningTasks: [],
+            terminalTaskIds: [],
             dismissTimer: null,
             dismissedTaskIds: [],
           });
@@ -113,8 +127,9 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
           extraCount: Math.max(0, completedTasks.length - 1),
           visibleTasks: [],
           runningTasks: [],
+          terminalTaskIds: completedTasks.map((t) => t.task_id),
           dismissTimer: timer,
-          dismissedTaskIds: activeDismissed,
+          dismissedTaskIds: unexpiredDismissedIds,
         });
       }
       return;
@@ -129,6 +144,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         extraCount: 0,
         visibleTasks: [],
         runningTasks: [],
+        terminalTaskIds: [],
         dismissTimer: null,
         dismissedTaskIds: [],
       });
@@ -139,20 +155,19 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     get().runningTasks.some((t) => t.task_type === type),
 
   dismiss: () => {
-    const { dismissTimer, visibleTasks } = get();
+    const { dismissTimer, terminalTaskIds } = get();
     if (dismissTimer) clearTimeout(dismissTimer);
-    // Record all currently-visible terminal task IDs so the next setTasks()
-    // tick (still carrying those rows inside the WS grace window) doesn't
-    // immediately restore the FAILED/COMPLETED state.
-    const newDismissed = visibleTasks.map((t) => t.task_id);
+    // Suppress the currently-shown terminal tasks on the next WS tick so the
+    // dismiss button doesn't feel non-functional during the grace window.
     set({
       status: "IDLE",
       activeTask: null,
       extraCount: 0,
       visibleTasks: [],
       runningTasks: [],
+      terminalTaskIds: [],
       dismissTimer: null,
-      dismissedTaskIds: newDismissed,
+      dismissedTaskIds: terminalTaskIds,
     });
   },
 }));
