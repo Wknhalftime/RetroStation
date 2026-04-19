@@ -110,7 +110,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # Query for an identity belonging to Metallica to get the title
         metallica_identities = conn.execute(
             "SELECT li.original_title FROM track_identities li "
-            "WHERE li.artist_id = %s LIMIT 5",
+            "WHERE li.broadcast_artist_id = %s LIMIT 5",
             (metallica_log_id,),
         ).fetchall()
         assert len(metallica_identities) >= 1, "No identities found for Metallica"
@@ -157,7 +157,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # --- Verify: at least one identity is AUTO_MATCHED ---
         auto_matched_rows = conn.execute(
             "SELECT count(*) AS cnt FROM track_identities "
-            "WHERE match_status = 'AUTO_MATCHED'"
+            "WHERE match_status = 'auto_matched'"
         ).fetchone()
         assert auto_matched_rows is not None
         assert auto_matched_rows["cnt"] >= 1, (
@@ -168,7 +168,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         match_row = conn.execute(
             "SELECT m.library_file_id FROM matches m "
             "JOIN track_identities li ON li.id = m.identity_id "
-            "WHERE li.match_status = 'AUTO_MATCHED' LIMIT 1"
+            "WHERE li.match_status = 'auto_matched' LIMIT 1"
         ).fetchone()
         assert match_row is not None, "No match row found for AUTO_MATCHED identity"
         assert match_row["library_file_id"] == lib_file.id

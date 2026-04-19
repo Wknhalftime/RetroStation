@@ -502,7 +502,7 @@ async def set_work_master(
     )
     if await file_cur.fetchone() is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
         )
 
@@ -574,7 +574,7 @@ async def create_format_override(
     )
     if await file_cur.fetchone() is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
         )
 
@@ -651,7 +651,7 @@ async def merge_works(
 
     if target_id in body.source_work_ids:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Target work ID must not appear in source_work_ids",
         )
 
@@ -798,7 +798,7 @@ async def split_work(
     file_row = await file_cur.fetchone()
     if file_row is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {body.file_id} does not belong to work {work_id}",
         )
 
@@ -903,7 +903,7 @@ async def reassign_file_work(
 
     if current_work_id == body.work_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {file_id} is already assigned to work {body.work_id}",
         )
 
