@@ -31,9 +31,22 @@ from backend.services.normalization import (
 
 logger = structlog.get_logger()
 
+# Minimum chardet confidence before we trust a non-UTF-8 detection. chardet
+# often reports "ascii" at confidence 1.0 for files that contain multi-byte
+# UTF-8 it simply didn't sample, so the ascii branch is rejected separately.
+_MIN_CHARDET_CONFIDENCE = 0.7
 
-class CsvDecodeError(ValueError):
+
+class IngestionError(Exception):
+    """Base class for ingestion-layer failures surfaced to callers."""
+
+
+class CsvDecodeError(IngestionError):
     """Raised when a CSV file's bytes cannot be decoded to text."""
+
+
+class DuplicatePlaylistError(IngestionError):
+    """Raised when a CSV with the same content hash has already been ingested."""
 
 
 def _decode_csv_bytes(file_bytes: bytes) -> str:
@@ -52,11 +65,22 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
     detected = chardet.detect(file_bytes)
     detected_encoding = (detected.get("encoding") or "").lower()
     confidence = detected.get("confidence") or 0.0
-    if detected_encoding and detected_encoding != "ascii" and confidence >= 0.7:
+    if (
+        detected_encoding
+        and detected_encoding != "ascii"
+        and confidence >= _MIN_CHARDET_CONFIDENCE
+    ):
         try:
-            return file_bytes.decode(detected_encoding)
+            text = file_bytes.decode(detected_encoding)
         except (UnicodeDecodeError, LookupError):
             pass
+        else:
+            logger.info(
+                "csv_decoded_non_utf8",
+                encoding=detected_encoding,
+                confidence=confidence,
+            )
+            return text
     raise CsvDecodeError(
         "Unable to decode CSV file as UTF-8 and no confident alternate encoding "
         "was detected; re-export the file as UTF-8."
@@ -94,7 +118,9 @@ def ingest_csv(
     # Check for duplicate
     existing = playlist_repo.get_by_content_hash(content_hash)
     if existing is not None:
-        raise ValueError(f"CSV already ingested as playlist {existing.id}")
+        raise DuplicatePlaylistError(
+            f"CSV already ingested as playlist {existing.id}"
+        )
 
     # Create playlist
     playlist = playlist_repo.create(BroadcastPlaylist(
