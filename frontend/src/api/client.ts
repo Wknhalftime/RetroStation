@@ -45,6 +45,13 @@ export class ServerError extends ApiError {
   }
 }
 
+export class EmptyResponseError extends ApiError {
+  constructor(status: number) {
+    super(status, `Expected JSON body but received empty response (${status})`);
+    this.name = "EmptyResponseError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Error factory
 // ---------------------------------------------------------------------------
@@ -97,13 +104,18 @@ export async function apiFetch<T>(
   return parseJsonBody<T>(res);
 }
 
+// Application-level contract: the RetroStation backend always returns a JSON
+// body for 2xx responses except 204 No Content and 205 Reset Content (which
+// have no body by HTTP spec). An empty or whitespace-only body on any other
+// 2xx is a backend/proxy regression and must surface — silently casting
+// undefined to T would launder the bug into a TypeError far from the call.
 async function parseJsonBody<T>(res: Response): Promise<T> {
-  if (res.status === 204 || res.headers.get("content-length") === "0") {
+  if (res.status === 204 || res.status === 205) {
     return undefined as T;
   }
   const text = await res.text();
   if (!text.trim()) {
-    return undefined as T;
+    throw new EmptyResponseError(res.status);
   }
   return JSON.parse(text) as T;
 }
