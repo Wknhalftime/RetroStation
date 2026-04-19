@@ -24,6 +24,7 @@ logger = structlog.get_logger()
 
 POLL_INTERVAL_SECONDS = 0.5
 STALE_THRESHOLD_MINUTES = 10
+TERMINAL_GRACE_SECONDS = 5
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -62,13 +63,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
                 await conn.commit()
 
-                # Fetch all currently running tasks
+                # Fetch running tasks plus recently-terminal rows so the
+                # client briefly sees completed/failed states for its
+                # green "Done" / red "Failed" beat before dismiss.
                 cur = await conn.execute(
                     """SELECT task_id, task_type, status, progress_data,
                               started_at, updated_at
                        FROM progress_tracking
                        WHERE status = 'running'
-                       ORDER BY started_at DESC"""
+                          OR (status IN ('completed', 'failed')
+                              AND completed_at > now()
+                                               - (interval '1 second' * %s))
+                       ORDER BY started_at DESC""",
+                    (TERMINAL_GRACE_SECONDS,),
                 )
                 rows = cast(list[dict[str, Any]], await cur.fetchall())
 
