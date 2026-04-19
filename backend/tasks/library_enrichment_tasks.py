@@ -55,7 +55,6 @@ def library_enrichment_task() -> dict[str, int]:
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
-            mb_client = MusicBrainzApiClient(cache_repo)
 
             # Pre-query both phases so counts are known for progress + start log.
             release_rows = conn.execute("""
@@ -98,77 +97,78 @@ def library_enrichment_task() -> dict[str, int]:
                 },
             ))
 
-            for release_mbid in release_mbids:
-                try:
-                    count = enrich_by_release(
-                        release_mbid,
-                        repos.library_files,
-                        repos.library_files,
-                        repos.recordings,
-                        repos.works,
-                        repos.artists,
-                        mb_client,
-                    )
-                    total_enriched += count
-                    conn.commit()
-                except Exception as exc:  # noqa: BLE001
-                    conn.rollback()
-                    total_failed += 1
-                    logger.warning(
-                        "enrich_by_release_error",
-                        release_mbid=release_mbid,
-                        error=str(exc),
-                    )
+            with MusicBrainzApiClient(cache_repo) as mb_client:
+                for release_mbid in release_mbids:
+                    try:
+                        count = enrich_by_release(
+                            release_mbid,
+                            repos.library_files,
+                            repos.library_files,
+                            repos.recordings,
+                            repos.works,
+                            repos.artists,
+                            mb_client,
+                        )
+                        total_enriched += count
+                        conn.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        conn.rollback()
+                        total_failed += 1
+                        logger.warning(
+                            "enrich_by_release_error",
+                            release_mbid=release_mbid,
+                            error=str(exc),
+                        )
 
-                processed += 1
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.LIBRARY_ENRICHMENT,
-                    status=TaskStatus.RUNNING,
-                    progress_data={
-                        "processed": processed,
-                        "total": total,
-                        "current_item": f"release:{release_mbid}",
-                    },
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                ))
+                    processed += 1
+                    progress_repo.upsert(TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.LIBRARY_ENRICHMENT,
+                        status=TaskStatus.RUNNING,
+                        progress_data={
+                            "processed": processed,
+                            "total": total,
+                            "current_item": f"release:{release_mbid}",
+                        },
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                    ))
 
-            for recording_mbid in recording_mbids:
-                try:
-                    count = enrich_by_recording(
-                        recording_mbid,
-                        repos.library_files,
-                        repos.library_files,
-                        repos.recordings,
-                        repos.works,
-                        repos.artists,
-                        mb_client,
-                    )
-                    total_enriched += count
-                    conn.commit()
-                except Exception as exc:  # noqa: BLE001
-                    conn.rollback()
-                    total_failed += 1
-                    logger.warning(
-                        "enrich_by_recording_error",
-                        recording_mbid=recording_mbid,
-                        error=str(exc),
-                    )
+                for recording_mbid in recording_mbids:
+                    try:
+                        count = enrich_by_recording(
+                            recording_mbid,
+                            repos.library_files,
+                            repos.library_files,
+                            repos.recordings,
+                            repos.works,
+                            repos.artists,
+                            mb_client,
+                        )
+                        total_enriched += count
+                        conn.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        conn.rollback()
+                        total_failed += 1
+                        logger.warning(
+                            "enrich_by_recording_error",
+                            recording_mbid=recording_mbid,
+                            error=str(exc),
+                        )
 
-                processed += 1
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.LIBRARY_ENRICHMENT,
-                    status=TaskStatus.RUNNING,
-                    progress_data={
-                        "processed": processed,
-                        "total": total,
-                        "current_item": f"recording:{recording_mbid}",
-                    },
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                ))
+                    processed += 1
+                    progress_repo.upsert(TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.LIBRARY_ENRICHMENT,
+                        status=TaskStatus.RUNNING,
+                        progress_data={
+                            "processed": processed,
+                            "total": total,
+                            "current_item": f"recording:{recording_mbid}",
+                        },
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                    ))
 
         # COMPLETED upsert after the library connection closes so the final
         # row reflects all committed work.
