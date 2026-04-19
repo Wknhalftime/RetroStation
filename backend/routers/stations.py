@@ -236,16 +236,18 @@ async def update_station(
 async def delete_station(
     station_id: UUID, conn: DbConn, _token: Token
 ) -> None:
-    """Delete a station by ID."""
-    cur = await conn.execute(
-        "SELECT id FROM stations WHERE id = %s", (station_id,)
-    )
-    row = await cur.fetchone()
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Station {station_id} not found",
-        )
+    """Permanently delete a station and all data it owns.
+
+    Cascade order (FK constraints added in migration 0018):
+      - broadcast_days for this station
+      - playlists linked to this station
+      - play_events reached via either path above
+
+    Globally shared rows (broadcast_artists, track_identities,
+    matches, artists, works, recordings) are not touched.
+    This is irreversible.
+    """
+    await _require_station(conn, station_id)
     await conn.execute("DELETE FROM stations WHERE id = %s", (station_id,))
 
 

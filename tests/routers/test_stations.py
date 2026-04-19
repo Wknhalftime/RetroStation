@@ -209,6 +209,96 @@ class TestDeleteStation:
         resp = client.delete(f"/api/v1/stations/{uuid4()}")
         assert resp.status_code == 404
 
+    def test_cascades_all_children(self, client, db_conn):
+        """Station delete must cascade via BOTH FK paths to play_events:
+        broadcast_day_id → broadcast_days → stations, AND
+        playlist_id → playlists → stations.
+
+        Two play_events rows are inserted to isolate each path:
+          - event_both: linked to the deleted station's playlist AND
+            broadcast_day — removable via either cascade.
+          - event_broadcast_only: linked to the deleted station's
+            broadcast_day but to a DIFFERENT station's playlist, so
+            the playlist cascade cannot reach it. This row's deletion
+            proves the broadcast_day_id path works independently.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        broadcast_day = PgBroadcastDayRepository(db_conn).get_or_create(
+            station.id, date(2001, 3, 15)
+        )
+        playlist = _insert_playlist(db_conn, station)
+
+        # Second station + its own playlist. This playlist will NOT be deleted
+        # when KAZR-FM is deleted, so any play_event referencing it can only
+        # be removed via the broadcast_day_id cascade.
+        other_station = _insert_station(db_conn, "KIOA-FM")
+        other_playlist = _insert_playlist(db_conn, other_station, name="other.csv")
+
+        artist = BroadcastArtist(
+            id=uuid4(), original_name="The Clash",
+            normalized_name="the clash", match_status=MatchStatus.PENDING,
+        )
+        PgBroadcastArtistRepository(db_conn).upsert(artist)
+        identity = BroadcastTrackIdentity(
+            id=uuid4(), broadcast_artist_id=artist.id,
+            original_title="London Calling", normalized_title="london calling",
+            normalized_signature="the clash:london calling",
+            match_status=MatchStatus.PENDING,
+        )
+        PgBroadcastTrackIdentityRepository(db_conn).upsert(identity)
+
+        event_both = uuid4()
+        event_broadcast_only = uuid4()
+        db_conn.execute(
+            "INSERT INTO play_events "
+            "(id, identity_id, playlist_id, broadcast_day_id, played_at) "
+            "VALUES (%s, %s, %s, %s, NOW())",
+            (event_both, identity.id, playlist.id, broadcast_day.id),
+        )
+        # broadcast_day_id points at the to-be-deleted station's calendar,
+        # but playlist_id points at the other station's playlist.
+        db_conn.execute(
+            "INSERT INTO play_events "
+            "(id, identity_id, playlist_id, broadcast_day_id, played_at) "
+            "VALUES (%s, %s, %s, %s, NOW())",
+            (event_broadcast_only, identity.id, other_playlist.id, broadcast_day.id),
+        )
+        db_conn.commit()
+
+        resp = client.delete(f"/api/v1/stations/{station.id}")
+        assert resp.status_code == 204
+
+        def _count(table: str, where: str, param) -> int:
+            row = db_conn.execute(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE {where}", (param,)  # noqa: S608
+            ).fetchone()
+            return row["n"]
+
+        assert _count("stations", "id = %s", station.id) == 0
+        assert _count("broadcast_days", "station_id = %s", station.id) == 0
+        assert _count("playlists", "station_id = %s", station.id) == 0
+        # Both play_events rows gone: one via playlist cascade, one via
+        # broadcast_day cascade (the only path that can reach it).
+        assert _count("play_events", "id = %s", event_both) == 0
+        assert _count("play_events", "id = %s", event_broadcast_only) == 0
+
+        # The other station and its playlist must be untouched.
+        assert _count("stations", "id = %s", other_station.id) == 1
+        assert _count("playlists", "id = %s", other_playlist.id) == 1
+
+        # Globally shared catalog rows must survive — they are deduped across
+        # all stations. A future migration that accidentally cascades into
+        # these tables must fail this test.
+        assert _count("broadcast_artists", "id = %s", artist.id) == 1
+        assert _count("track_identities", "id = %s", identity.id) == 1
+
+    def test_delete_twice_returns_404(self, client, db_conn):
+        station = _insert_station(db_conn, "KAZR-FM")
+        resp = client.delete(f"/api/v1/stations/{station.id}")
+        assert resp.status_code == 204
+        resp = client.delete(f"/api/v1/stations/{station.id}")
+        assert resp.status_code == 404
+
 
 class TestStationBroadcastDays:
     def test_returns_dates(self, client, db_conn):
