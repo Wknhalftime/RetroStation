@@ -8,9 +8,26 @@ def test_all_migrations_applied(migrated_db: str) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 16
+    assert len(versions) == 18
     assert versions[0].startswith("0001")
-    assert versions[15].startswith("0016")
+    assert versions[-1].startswith("0018")
+
+
+def test_station_delete_cascade_fks(migrated_db: str) -> None:
+    """Migration 0018 must make station-delete-path FKs ON DELETE CASCADE."""
+    with psycopg.connect(migrated_db) as conn:
+        rows = conn.execute("""
+            SELECT conname, confdeltype FROM pg_constraint
+            WHERE contype = 'f'
+              AND conname IN (
+                  'broadcast_days_station_id_fkey',
+                  'playlists_station_id_fkey',
+                  'play_events_broadcast_day_id_fkey'
+              )
+        """).fetchall()
+    fk_map = {r[0]: r[1] for r in rows}
+    assert len(fk_map) == 3, f"Missing FK constraints: {fk_map}"
+    assert all(v == "c" for v in fk_map.values()), f"Wrong delete action: {fk_map}"
 
 
 def test_all_expected_tables_exist(migrated_db: str) -> None:
