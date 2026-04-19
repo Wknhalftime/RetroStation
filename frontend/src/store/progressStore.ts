@@ -148,6 +148,13 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
         dismissTimer: null,
         dismissedTaskIds: [],
       });
+      return;
+    }
+
+    // No state transition fired, but dismissed IDs that are no longer in the
+    // WS payload must still be pruned so they don't linger in IDLE state.
+    if (unexpiredDismissedIds.length !== dismissedTaskIds.length) {
+      set({ dismissedTaskIds: unexpiredDismissedIds });
     }
   },
 
