@@ -107,13 +107,23 @@ export function useDeleteStation() {
       if (previous) {
         qc.setQueryData<StationList>(
           STATIONS_KEY,
-          previous.filter((s) => s.id !== id),
+          (old) => (old ? old.filter((s) => s.id !== id) : old),
         );
       }
       return { previous };
     },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.previous) qc.setQueryData(STATIONS_KEY, ctx.previous);
+    onError: (_err, id, ctx) => {
+      if (ctx?.previous) {
+        const deletedStation = ctx.previous.find((s) => s.id === id);
+        qc.setQueryData<StationList>(STATIONS_KEY, (old) => {
+          if (!old) return ctx.previous;
+          if (!deletedStation || old.some((s) => s.id === id)) return old;
+          const originalIndex = ctx.previous!.findIndex((s) => s.id === id);
+          const newList = [...old];
+          newList.splice(originalIndex, 0, deletedStation);
+          return newList;
+        });
+      }
     },
     onSettled: (_data, _error, id) => {
       void qc.invalidateQueries({ queryKey: STATIONS_KEY });
