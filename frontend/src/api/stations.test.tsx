@@ -83,6 +83,7 @@ describe("useDeleteStation", () => {
     await act(async () => {
       resolveFetch();
     });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
   it("rolls back the list to the original state when the mutation fails", async () => {
@@ -151,38 +152,34 @@ describe("useDeleteStation", () => {
     ).toBeUndefined();
   });
 
-  it("invalidates the stations list on both success and error", async () => {
+  it("invalidates the stations list on successful delete", async () => {
     const qc = makeClient();
     const s1 = makeStation("id-1", "KABC");
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
-
-    // Success path
     qc.setQueryData<StationList>(STATIONS_KEY, [s1]);
-    mockedApiFetch.mockResolvedValueOnce(undefined as never);
+    mockedApiFetch.mockResolvedValue(undefined as never);
 
-    const { result: successResult } = renderHook(() => useDeleteStation(), {
-      wrapper: wrapperFor(qc),
-    });
+    const { result } = renderHook(() => useDeleteStation(), { wrapper: wrapperFor(qc) });
     act(() => {
-      successResult.current.mutate("id-1");
+      result.current.mutate("id-1");
     });
-    await waitFor(() => expect(successResult.current.isSuccess).toBe(true));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: STATIONS_KEY });
+  });
 
-    invalidateSpy.mockClear();
-
-    // Error path
+  it("invalidates the stations list on failed delete", async () => {
+    const qc = makeClient();
+    const s1 = makeStation("id-1", "KABC");
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     qc.setQueryData<StationList>(STATIONS_KEY, [s1]);
-    mockedApiFetch.mockRejectedValueOnce(new Error("boom"));
+    mockedApiFetch.mockRejectedValue(new Error("boom"));
 
-    const { result: errorResult } = renderHook(() => useDeleteStation(), {
-      wrapper: wrapperFor(qc),
-    });
+    const { result } = renderHook(() => useDeleteStation(), { wrapper: wrapperFor(qc) });
     act(() => {
-      errorResult.current.mutate("id-1");
+      result.current.mutate("id-1");
     });
-    await waitFor(() => expect(errorResult.current.isError).toBe(true));
+    await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: STATIONS_KEY });
   });
