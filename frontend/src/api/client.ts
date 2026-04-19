@@ -104,9 +104,11 @@ export async function apiFetch<T>(
   return parseJsonBody<T>(res);
 }
 
-// 204 No Content and 205 Reset Content are the only 2xx statuses where an
-// empty body is valid by HTTP spec. Any other 2xx with an empty body is a
-// backend contract violation and must surface, not be laundered to undefined.
+// Application-level contract: the RetroStation backend always returns a JSON
+// body for 2xx responses except 204 No Content and 205 Reset Content (which
+// have no body by HTTP spec). An empty or whitespace-only body on any other
+// 2xx is a backend/proxy regression and must surface — silently casting
+// undefined to T would launder the bug into a TypeError far from the call.
 async function parseJsonBody<T>(res: Response): Promise<T> {
   if (res.status === 204 || res.status === 205) {
     return undefined as T;
