@@ -114,9 +114,11 @@ class TestWebSocketAuth:
         """
         from starlette.websockets import WebSocketDisconnect
 
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with ws_client.websocket_connect("/ws?token=wrong-token"):
-                pass  # pragma: no cover
+        with (
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            ws_client.websocket_connect("/ws?token=wrong-token"),
+        ):
+            pass  # pragma: no cover
 
         assert exc_info.value.code == 4001
 
@@ -124,9 +126,11 @@ class TestWebSocketAuth:
         """Connection with no token should be closed with code 4001."""
         from starlette.websockets import WebSocketDisconnect
 
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with ws_client.websocket_connect("/ws"):
-                pass  # pragma: no cover
+        with (
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            ws_client.websocket_connect("/ws"),
+        ):
+            pass  # pragma: no cover
 
         assert exc_info.value.code == 4001
 

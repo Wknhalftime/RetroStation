@@ -58,7 +58,10 @@ def _should_skip_debounce() -> bool:
         import time
         elapsed = time.time() - last_run
         if elapsed < DEBOUNCE_SECONDS:
-            print(f"[leann] Skipping reindex — last run {int(elapsed)}s ago (debounce {DEBOUNCE_SECONDS}s)")
+            print(
+                f"[leann] Skipping reindex — last run {int(elapsed)}s ago "
+                f"(debounce {DEBOUNCE_SECONDS}s)"
+            )
             return True
     except (ValueError, OSError):
         pass
@@ -67,11 +70,10 @@ def _should_skip_debounce() -> bool:
 
 def _record_timestamp() -> None:
     """Record the current time as last successful reindex."""
+    import contextlib
     import time
-    try:
+    with contextlib.suppress(OSError):
         TIMESTAMP_FILE.write_text(str(time.time()))
-    except OSError:
-        pass
 
 # ── Configuration ──────────────────────────────────────────────
 LEANN_ROOT = Path("D:/PythonStuff/leann")

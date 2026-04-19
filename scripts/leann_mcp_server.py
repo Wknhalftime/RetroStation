@@ -58,7 +58,11 @@ def handle_request(request):
                             "properties": {
                                 "query": {
                                     "type": "string",
-                                    "description": "Natural language search query (e.g., 'how does the matching pipeline work', 'broadcast_days queries', 'API endpoints')",
+                                    "description": (
+                                        "Natural language search query "
+                                        "(e.g., 'how does the matching pipeline work', "
+                                        "'broadcast_days queries', 'API endpoints')"
+                                    ),
                                 },
                                 "top_k": {
                                     "type": "integer",
@@ -87,7 +91,10 @@ def handle_request(request):
                 return _error_result(req_id, "query is required")
 
             if not Path(INDEX_PATH).exists():
-                return _error_result(req_id, f"Index not found at {INDEX_PATH}. Run the initial build first.")
+                return _error_result(
+                    req_id,
+                    f"Index not found at {INDEX_PATH}. Run the initial build first.",
+                )
 
             try:
                 searcher = get_searcher()

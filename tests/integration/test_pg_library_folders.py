@@ -12,7 +12,9 @@ from backend.domain.library import LibraryFolder
 def test_upsert_and_get_by_path(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFolderRepository(conn)
-        folder = LibraryFolder(id=uuid4(), name="jazz", full_path="/music/jazz", folder_hash="abc123")
+        folder = LibraryFolder(
+            id=uuid4(), name="jazz", full_path="/music/jazz", folder_hash="abc123"
+        )
         repo.upsert(folder)
         conn.commit()
         result = repo.get_by_path("/music/jazz")
@@ -24,7 +26,9 @@ def test_upsert_and_get_by_path(migrated_db: str) -> None:
 def test_upsert_updates_existing(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFolderRepository(conn)
-        folder = LibraryFolder(id=uuid4(), name="jazz", full_path="/music/jazz2", folder_hash="hash1")
+        folder = LibraryFolder(
+            id=uuid4(), name="jazz", full_path="/music/jazz2", folder_hash="hash1"
+        )
         repo.upsert(folder)
         conn.commit()
         folder.folder_hash = "hash2"
@@ -39,8 +43,12 @@ def test_get_children(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFolderRepository(conn)
         parent = LibraryFolder(id=uuid4(), name="music", full_path="/music")
-        child1 = LibraryFolder(id=uuid4(), name="jazz", full_path="/music/jazz", parent_id=parent.id)
-        child2 = LibraryFolder(id=uuid4(), name="rock", full_path="/music/rock", parent_id=parent.id)
+        child1 = LibraryFolder(
+            id=uuid4(), name="jazz", full_path="/music/jazz", parent_id=parent.id
+        )
+        child2 = LibraryFolder(
+            id=uuid4(), name="rock", full_path="/music/rock", parent_id=parent.id
+        )
         repo.upsert(parent)
         repo.upsert(child1)
         repo.upsert(child2)

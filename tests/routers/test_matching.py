@@ -69,7 +69,9 @@ def _insert_artist(
     # upsert won't persist candidates; insert directly so candidates land in JSONB column
     conn.execute(
         """
-        INSERT INTO broadcast_artists (id, original_name, normalized_name, match_status, artist_candidates)
+        INSERT INTO broadcast_artists (
+            id, original_name, normalized_name, match_status, artist_candidates
+        )
         VALUES (%s, %s, %s, %s, %s)
         """,
         (
@@ -141,7 +143,13 @@ def _seed_review_chain(
     db_conn: psycopg.Connection,
     artist_name: str = "Review Artist",
     with_candidates: bool = True,
-) -> tuple[BroadcastStation, BroadcastPlaylist, BroadcastArtist, BroadcastTrackIdentity, BroadcastPlayEvent]:
+) -> tuple[
+    BroadcastStation,
+    BroadcastPlaylist,
+    BroadcastArtist,
+    BroadcastTrackIdentity,
+    BroadcastPlayEvent,
+]:
     station = _insert_station(db_conn)
     playlist = _insert_playlist(db_conn, station)
     artist = _insert_artist(db_conn, original_name=artist_name, with_candidates=with_candidates)
@@ -377,7 +385,9 @@ class TestResolveIdentity:
         # Create an initial match row
         db_conn.execute(
             """
-            INSERT INTO matches (id, identity_id, library_file_id, target_type, confidence_score, match_tier)
+            INSERT INTO matches (
+                id, identity_id, library_file_id, target_type, confidence_score, match_tier
+            )
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (

@@ -39,7 +39,11 @@ def test_upsert_same_hash_preserves_enrichment(migrated_db: str) -> None:
             (lf.file_path,),
         )
         conn.commit()
-        lf2 = _make_file(file_path="/preserve/same_hash.flac", file_hash="hash_a", enrichment_status=EnrichmentStatus.PENDING)
+        lf2 = _make_file(
+            file_path="/preserve/same_hash.flac",
+            file_hash="hash_a",
+            enrichment_status=EnrichmentStatus.PENDING,
+        )
         repo.upsert_write_only(lf2)
         conn.commit()
         result = repo.get_by_path("/preserve/same_hash.flac")
@@ -57,7 +61,11 @@ def test_upsert_different_hash_resets_enrichment(migrated_db: str) -> None:
             (lf.file_path,),
         )
         conn.commit()
-        lf2 = _make_file(file_path="/preserve/diff_hash.flac", file_hash="new_hash", enrichment_status=EnrichmentStatus.PENDING)
+        lf2 = _make_file(
+            file_path="/preserve/diff_hash.flac",
+            file_hash="new_hash",
+            enrichment_status=EnrichmentStatus.PENDING,
+        )
         repo.upsert_write_only(lf2)
         conn.commit()
         result = repo.get_by_path("/preserve/diff_hash.flac")
