@@ -32,6 +32,38 @@ from backend.services.normalization import (
 logger = structlog.get_logger()
 
 
+class CsvDecodeError(ValueError):
+    """Raised when a CSV file's bytes cannot be decoded to text."""
+
+
+def _decode_csv_bytes(file_bytes: bytes) -> str:
+    """Decode CSV bytes via a strict ladder; never silently mangle characters.
+
+    Ladder: UTF-8 with BOM, UTF-8 strict, then chardet only when it reports a
+    non-ascii encoding with reasonable confidence. We deliberately do not fall
+    back to latin-1, because latin-1 accepts any byte sequence and would turn
+    mis-encoded UTF-8 into mojibake instead of surfacing the problem.
+    """
+    if file_bytes.startswith(b"\xef\xbb\xbf"):
+        return file_bytes.decode("utf-8-sig")
+    try:
+        return file_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    detected = chardet.detect(file_bytes)
+    detected_encoding = (detected.get("encoding") or "").lower()
+    confidence = detected.get("confidence") or 0.0
+    if detected_encoding and detected_encoding != "ascii" and confidence >= 0.7:
+        try:
+            return file_bytes.decode(detected_encoding)
+        except (UnicodeDecodeError, LookupError):
+            pass
+    raise CsvDecodeError(
+        "Unable to decode CSV file as UTF-8 and no confident alternate encoding "
+        "was detected; re-export the file as UTF-8."
+    )
+
+
 @dataclass
 class IngestionResult:
     playlist_id: str = ""
@@ -55,10 +87,7 @@ def ingest_csv(
     """Parse a CSV file and create playlist, artists, identities, events, and broadcast days."""
     result = IngestionResult()
 
-    # Detect encoding
-    detected = chardet.detect(file_bytes)
-    encoding = detected.get("encoding") or "utf-8"
-    text = file_bytes.decode(encoding)
+    text = _decode_csv_bytes(file_bytes)
 
     # Content hash for deduplication
     content_hash = hashlib.sha256(file_bytes).hexdigest()
