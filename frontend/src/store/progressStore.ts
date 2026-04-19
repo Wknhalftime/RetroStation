@@ -162,10 +162,12 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     get().runningTasks.some((t) => t.task_type === type),
 
   dismiss: () => {
-    const { dismissTimer, terminalTaskIds } = get();
+    const { dismissTimer, terminalTaskIds, dismissedTaskIds } = get();
     if (dismissTimer) clearTimeout(dismissTimer);
-    // Suppress the currently-shown terminal tasks on the next WS tick so the
-    // dismiss button doesn't feel non-functional during the grace window.
+    // Union existing dismissed IDs with the current terminal IDs. Replacing
+    // would "un-dismiss" an earlier failure that is still inside the grace
+    // window if a second failure arrives and the user dismisses again.
+    const allDismissed = [...new Set([...dismissedTaskIds, ...terminalTaskIds])];
     set({
       status: "IDLE",
       activeTask: null,
@@ -174,7 +176,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
       runningTasks: [],
       terminalTaskIds: [],
       dismissTimer: null,
-      dismissedTaskIds: terminalTaskIds,
+      dismissedTaskIds: allDismissed,
     });
   },
 }));

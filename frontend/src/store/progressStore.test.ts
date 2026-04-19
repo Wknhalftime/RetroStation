@@ -200,6 +200,27 @@ describe("dismiss()", () => {
     expect(useProgressStore.getState().status).toBe("IDLE");
   });
 
+  it("unions dismissedTaskIds on a second dismiss so earlier failures are not re-shown", () => {
+    // Task A fails → user dismisses.
+    useProgressStore.getState().setTasks([makeTask("tA", "failed")]);
+    useProgressStore.getState().dismiss();
+
+    // Task B fails while tA is still within the grace window.
+    useProgressStore.getState().setTasks([
+      makeTask("tA", "failed"),
+      makeTask("tB", "failed"),
+    ]);
+    useProgressStore.getState().dismiss();
+
+    // Both tA and tB must be suppressed — next tick must not restore FAILED.
+    useProgressStore.getState().setTasks([
+      makeTask("tA", "failed"),
+      makeTask("tB", "failed"),
+    ]);
+    expect(useProgressStore.getState().status).toBe("IDLE");
+    expect(useProgressStore.getState().dismissedTaskIds.sort()).toEqual(["tA", "tB"]);
+  });
+
   it("suppresses all failed tasks when multiple were shown at dismiss time", () => {
     useProgressStore.getState().setTasks([
       makeTask("t1", "failed"),
