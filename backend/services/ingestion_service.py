@@ -80,7 +80,9 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
                 encoding=detected_encoding,
                 confidence=confidence,
             )
-            return text
+            # chardet-labelled UTF-16-LE/BE leave the BOM in the decoded
+            # string, which would poison the first CSV header key. Strip it.
+            return text.lstrip("\ufeff")
     raise CsvDecodeError(
         "Unable to decode CSV file as UTF-8 and no confident alternate encoding "
         "was detected; re-export the file as UTF-8."
