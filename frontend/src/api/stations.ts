@@ -125,9 +125,11 @@ export function useDeleteStation() {
         });
       }
     },
-    onSettled: (_data, _error, id) => {
-      void qc.invalidateQueries({ queryKey: STATIONS_KEY });
+    onSuccess: (_data, id) => {
       qc.removeQueries({ queryKey: stationKey(id) });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: STATIONS_KEY });
     },
   });
 }
