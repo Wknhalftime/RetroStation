@@ -151,11 +151,13 @@ export function StationList() {
         onClose={() => setShowCreate(false)}
         title="Add Station"
       >
-        <StationForm
-          onSubmit={(data) => handleCreate(data as StationCreate)}
-          onCancel={() => setShowCreate(false)}
-          isPending={createMutation.isPending}
-        />
+        {showCreate && (
+          <StationForm
+            onSubmit={(data) => handleCreate(data as StationCreate)}
+            onCancel={() => setShowCreate(false)}
+            isPending={createMutation.isPending}
+          />
+        )}
       </Modal>
     </div>
   );
