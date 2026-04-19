@@ -45,6 +45,13 @@ export class ServerError extends ApiError {
   }
 }
 
+export class EmptyResponseError extends ApiError {
+  constructor(status: number) {
+    super(status, `Expected JSON body but received empty response (${status})`);
+    this.name = "EmptyResponseError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Error factory
 // ---------------------------------------------------------------------------
@@ -97,13 +104,16 @@ export async function apiFetch<T>(
   return parseJsonBody<T>(res);
 }
 
+// 204 No Content and 205 Reset Content are the only 2xx statuses where an
+// empty body is valid by HTTP spec. Any other 2xx with an empty body is a
+// backend contract violation and must surface, not be laundered to undefined.
 async function parseJsonBody<T>(res: Response): Promise<T> {
-  if (res.status === 204 || res.headers.get("content-length") === "0") {
+  if (res.status === 204 || res.status === 205) {
     return undefined as T;
   }
   const text = await res.text();
   if (!text.trim()) {
-    return undefined as T;
+    throw new EmptyResponseError(res.status);
   }
   return JSON.parse(text) as T;
 }
