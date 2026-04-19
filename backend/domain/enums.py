@@ -89,12 +89,13 @@ class CatalogSource(StrEnum):
 
 
 class TaskType(StrEnum):
-    SCAN        = "scan"
-    ENRICHMENT  = "enrichment"
-    INGESTION   = "ingestion"
-    RULES_APPLY = "rules_apply"
-    MATCHING    = "matching"
-    M3U_EXPORT  = "m3u_export"
+    SCAN               = "scan"
+    LIBRARY_ENRICHMENT = "library_enrichment"
+    MB_ENRICHMENT      = "mb_enrichment"
+    INGESTION          = "ingestion"
+    RULES_APPLY        = "rules_apply"
+    MATCHING           = "matching"
+    M3U_EXPORT         = "m3u_export"
 
 
 class TaskStatus(StrEnum):

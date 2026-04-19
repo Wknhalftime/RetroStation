@@ -13,7 +13,7 @@ from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepos
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.domain.broadcast import BroadcastStation
-from backend.services.ingestion_service import ingest_csv
+from backend.services.ingestion_service import DuplicatePlaylistError, ingest_csv
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 
@@ -73,7 +73,7 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
             broadcast_day_repo=PgBroadcastDayRepository(conn),
         )
 
-        with pytest.raises(ValueError, match="already ingested"):
+        with pytest.raises(DuplicatePlaylistError, match="already ingested"):
             ingest_csv(
                 file_bytes=unique_bytes,
                 file_name="dup-test.csv",

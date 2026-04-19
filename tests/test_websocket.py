@@ -176,9 +176,14 @@ class TestWebSocketBroadcast:
         ws_client: TestClient,
         db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
     ) -> None:
-        """Completed and failed tasks are excluded from the broadcast."""
+        """Completed and failed tasks outside the grace window are excluded."""
         _seed_task(db_conn, "ws-done", status=TaskStatus.COMPLETED)
         _seed_task(db_conn, "ws-failed", status=TaskStatus.FAILED)
+
+        db_conn.execute(
+            "UPDATE progress_tracking SET updated_at = now() - interval '10 seconds'"
+        )
+        db_conn.commit()
 
         with ws_client.websocket_connect("/ws?token=dev-token") as ws:
             data = ws.receive_json()
@@ -186,3 +191,72 @@ class TestWebSocketBroadcast:
         task_ids = [t["task_id"] for t in data["tasks"]]
         assert "ws-done" not in task_ids
         assert "ws-failed" not in task_ids
+
+    def test_completed_tasks_grace_window(
+        self,
+        ws_client: TestClient,
+        db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
+    ) -> None:
+        """Completed and failed tasks within the 5s grace window are broadcast."""
+        _seed_task(db_conn, "ws-done-recent", status=TaskStatus.COMPLETED)
+        _seed_task(db_conn, "ws-failed-recent", status=TaskStatus.FAILED)
+
+        with ws_client.websocket_connect("/ws?token=dev-token") as ws:
+            data = ws.receive_json()
+
+        task_ids = [t["task_id"] for t in data["tasks"]]
+        assert "ws-done-recent" in task_ids
+        assert "ws-failed-recent" in task_ids
+
+    def test_grace_window_uses_completed_at_when_present(
+        self,
+        ws_client: TestClient,
+        db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
+    ) -> None:
+        """Rows with non-null ``completed_at`` are filtered by that column.
+
+        The broadcast query uses ``coalesce(completed_at, updated_at)``; when
+        ``completed_at`` is set, a fresh ``updated_at`` must not keep a stale
+        terminal row visible past the grace window.
+        """
+        _seed_task(db_conn, "ws-done-old", status=TaskStatus.COMPLETED)
+
+        # completed_at is 10s ago (past the 5s grace); updated_at is fresh.
+        db_conn.execute(
+            "UPDATE progress_tracking "
+            "SET completed_at = now() - interval '10 seconds', "
+            "    updated_at = now() "
+            "WHERE task_id = 'ws-done-old'"
+        )
+        db_conn.commit()
+
+        with ws_client.websocket_connect("/ws?token=dev-token") as ws:
+            data = ws.receive_json()
+
+        task_ids = [t["task_id"] for t in data["tasks"]]
+        assert "ws-done-old" not in task_ids
+
+    def test_grace_window_includes_recent_completed_at(
+        self,
+        ws_client: TestClient,
+        db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
+    ) -> None:
+        """Rows with recent ``completed_at`` but stale ``updated_at`` broadcast."""
+        _seed_task(db_conn, "ws-done-fresh", status=TaskStatus.COMPLETED)
+
+        # completed_at is fresh (within grace); updated_at is well past it.
+        db_conn.execute(
+            "UPDATE progress_tracking "
+            "SET completed_at = now(), "
+            "    updated_at = now() - interval '30 seconds' "
+            "WHERE task_id = 'ws-done-fresh'"
+        )
+        db_conn.commit()
+
+        with ws_client.websocket_connect("/ws?token=dev-token") as ws:
+            data = ws.receive_json()
+
+        task_ids = [t["task_id"] for t in data["tasks"]]
+        assert "ws-done-fresh" in task_ids
+        task = next(t for t in data["tasks"] if t["task_id"] == "ws-done-fresh")
+        assert task["completed_at"] is not None
