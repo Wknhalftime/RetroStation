@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from uuid import UUID
 
 import psycopg
 import structlog
@@ -23,8 +24,16 @@ _DEADLOCK_BACKOFF_SECONDS = 0.5
 
 def _advisory_lock_key(station_id: str) -> str:
     # Stable per-station key; None/empty station falls back to a shared key so
-    # station-less uploads still serialize among themselves.
-    return f"ingest:{station_id or 'no-station'}"
+    # station-less uploads still serialize among themselves. Canonicalize UUID
+    # formatting so the same station never hashes to different keys because of
+    # case or hyphen differences.
+    if not station_id:
+        return "ingest:no-station"
+    try:
+        canonical = UUID(station_id).hex
+    except ValueError:
+        canonical = station_id
+    return f"ingest:{canonical}"
 
 
 def _run_ingest_once(

@@ -44,12 +44,11 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
     back to latin-1, because latin-1 accepts any byte sequence and would turn
     mis-encoded UTF-8 into mojibake instead of surfacing the problem.
     """
-    if file_bytes.startswith(b"\xef\xbb\xbf"):
-        return file_bytes.decode("utf-8-sig")
-    try:
-        return file_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        pass
+    for encoding in ("utf-8-sig", "utf-8"):
+        try:
+            return file_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
     detected = chardet.detect(file_bytes)
     detected_encoding = (detected.get("encoding") or "").lower()
     confidence = detected.get("confidence") or 0.0
