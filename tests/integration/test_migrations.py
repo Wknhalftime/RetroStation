@@ -15,19 +15,22 @@ def test_all_migrations_applied(migrated_db: str) -> None:
 
 def test_station_delete_cascade_fks(migrated_db: str) -> None:
     """Migration 0018 must make station-delete-path FKs ON DELETE CASCADE."""
+    expected = {
+        "broadcast_days_station_id_fkey",
+        "playlists_station_id_fkey",
+        "play_events_broadcast_day_id_fkey",
+    }
     with psycopg.connect(migrated_db) as conn:
         rows = conn.execute("""
             SELECT conname, confdeltype FROM pg_constraint
             WHERE contype = 'f'
-              AND conname IN (
-                  'broadcast_days_station_id_fkey',
-                  'playlists_station_id_fkey',
-                  'play_events_broadcast_day_id_fkey'
-              )
-        """).fetchall()
+              AND conname = ANY(%s)
+        """, (list(expected),)).fetchall()
     fk_map = {r[0]: r[1] for r in rows}
-    assert len(fk_map) == 3, f"Missing FK constraints: {fk_map}"
-    assert all(v == "c" for v in fk_map.values()), f"Wrong delete action: {fk_map}"
+    missing = expected - fk_map.keys()
+    assert not missing, f"Missing FK constraints: {missing}"
+    wrong = {k: v for k, v in fk_map.items() if v != "c"}
+    assert not wrong, f"Wrong delete action (expected 'c' for CASCADE): {wrong}"
 
 
 def test_all_expected_tables_exist(migrated_db: str) -> None:
