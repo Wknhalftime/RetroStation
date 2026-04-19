@@ -94,12 +94,15 @@ export async function apiFetch<T>(
   });
 
   if (!res.ok) await throwForStatus(res);
+  return parseJsonBody<T>(res);
+}
+
+async function parseJsonBody<T>(res: Response): Promise<T> {
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;
   }
-
   const text = await res.text();
-  if (!text) {
+  if (!text.trim()) {
     return undefined as T;
   }
   return JSON.parse(text) as T;
@@ -120,7 +123,7 @@ export async function apiUpload<T>(
   });
 
   if (!res.ok) await throwForStatus(res);
-  return res.json() as Promise<T>;
+  return parseJsonBody<T>(res);
 }
 
 // ---------------------------------------------------------------------------
