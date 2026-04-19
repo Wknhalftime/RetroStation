@@ -19,7 +19,6 @@ export function StationList() {
   // reopens the modal before a slow mutation resolves, the stale onSuccess
   // won't close the freshly opened modal.
   const modalSessionRef = useRef(0);
-  const submissionSessionRef = useRef(-1);
 
   const { data: stations, isLoading, isError } = useStations();
   const createMutation = useCreateStation();
@@ -31,10 +30,10 @@ export function StationList() {
   };
 
   const handleCreate = (data: StationCreate) => {
-    submissionSessionRef.current = modalSessionRef.current;
+    const currentSession = modalSessionRef.current;
     createMutation.mutate(data, {
       onSuccess: () => {
-        if (submissionSessionRef.current === modalSessionRef.current) {
+        if (currentSession === modalSessionRef.current) {
           setShowCreate(false);
         }
       },
