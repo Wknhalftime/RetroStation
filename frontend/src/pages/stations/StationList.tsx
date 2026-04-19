@@ -44,7 +44,7 @@ export function StationList() {
     e.preventDefault(); // prevent card link navigation
     if (
       window.confirm(
-        "Delete this station? This will also remove all associated playlists.",
+        "Delete this station? This permanently removes its playlists, broadcast calendar, and all play event history. This cannot be undone.",
       )
     ) {
       deleteMutation.mutate(id);
