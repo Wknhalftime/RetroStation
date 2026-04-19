@@ -115,8 +115,9 @@ export function useDeleteStation() {
     onError: (_err, _id, ctx) => {
       if (ctx?.previous) qc.setQueryData(STATIONS_KEY, ctx.previous);
     },
-    onSettled: () => {
+    onSettled: (_data, _error, id) => {
       void qc.invalidateQueries({ queryKey: STATIONS_KEY });
+      qc.removeQueries({ queryKey: stationKey(id) });
     },
   });
 }
