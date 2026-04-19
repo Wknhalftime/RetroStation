@@ -1,4 +1,7 @@
 .worktrees/
+.augment/
+.superpowers/
+docs/superpowers/
 .claude/
 .vscode/
 .venv/
