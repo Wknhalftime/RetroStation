@@ -24,9 +24,11 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
         )
 
     def create(self, event: BroadcastPlayEvent) -> BroadcastPlayEvent:
-        # Single round-trip: RETURNING yields the row on insert; on conflict
-        # (duplicate (identity_id, playlist_id, played_at)) it yields nothing
-        # and the caller-supplied `event` already carries every stored field.
+        # Happy path is one round-trip: RETURNING yields the freshly inserted
+        # row. On the rare conflict path (duplicate
+        # (identity_id, playlist_id, played_at) — e.g. repeated rows inside a
+        # CSV) we must fetch the existing row so the returned model carries
+        # the persisted `id`, not the caller's losing candidate.
         row = self._conn.execute(
             """INSERT INTO play_events
                (id, identity_id, playlist_id, played_at, broadcast_day_id)
@@ -36,7 +38,17 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
             (event.id, event.identity_id, event.playlist_id,
              event.played_at, event.broadcast_day_id),
         ).fetchone()
-        return self._row_to_model(row) if row is not None else event
+        if row is not None:
+            return self._row_to_model(row)
+        row = self._conn.execute(
+            """SELECT * FROM play_events
+               WHERE identity_id = %s AND playlist_id = %s
+                 AND played_at = %s""",
+            (event.identity_id, event.playlist_id, event.played_at),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Conflicting play_event vanished between INSERT and SELECT")
+        return self._row_to_model(row)
 
     def get_by_playlist(self, playlist_id: UUID) -> list[BroadcastPlayEvent]:
         rows = self._conn.execute(
