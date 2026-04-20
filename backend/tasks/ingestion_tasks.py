@@ -201,7 +201,12 @@ def ingestion_task(
             error_code = "duplicate_playlist"
 
         if progress_repo is not None:
-            with contextlib.suppress(psycopg.Error, OSError):
+            # Suppress Exception (not BaseException) so a best-effort FAILED
+            # write cannot mask the original ingestion exception via PEP 3134
+            # __context__ replacement. KeyboardInterrupt / SystemExit /
+            # GeneratorExit still propagate because they inherit from
+            # BaseException. Matches library_scan_task precedent.
+            with contextlib.suppress(Exception):
                 progress_repo.upsert(
                     TaskProgress(
                         task_id=task_id,
