@@ -66,10 +66,12 @@ class TestCountCsvRows:
         with pytest.raises(CsvDecodeError):
             count_csv_rows(garbage)
 
-    def test_short_row_with_missing_columns_is_skipped_not_raised(self) -> None:
-        """csv.DictReader yields None for missing columns in short rows; the
-        validity guard must treat None as empty, not crash with
-        AttributeError('NoneType' has no attribute 'strip')."""
+    def test_short_row_with_missing_columns_returns_count_without_raising(
+        self,
+    ) -> None:
+        """DictReader gives short rows a None-valued entry for missing
+        columns; the extractor must discard those cleanly rather than
+        crash on ``None.strip()``."""
         # Second data row is truncated — only has Station,Played,Artist (no Title).
         payload = (
             b"Station,Played,Artist,Title\r\n"
@@ -77,11 +79,15 @@ class TestCountCsvRows:
             b"KAZR,2005-03-02 00:02:00,Orphan_Artist\r\n"
             b"KAZR,2005-03-02 00:03:00,Another_Good,Another_Title\r\n"
         )
-        # Must return 2 (the two complete rows), not raise.
         assert count_csv_rows(payload) == 2
 
-    def test_ingest_csv_skips_short_rows_end_to_end(self) -> None:
-        """The same robustness must hold through ingest_csv, not just the helper."""
+
+class TestSkippedRowObservability:
+    """`ingest_csv` must never silently drop rows: every malformed line
+    is counted on ``IngestionResult.rows_skipped`` so operators can see
+    the gap between "lines in the file" and "events ingested"."""
+
+    def test_short_rows_are_counted_as_skipped(self) -> None:
         payload = (
             b"Station,Played,Artist,Title\r\n"
             b"KAZR,2005-03-02 00:01:00,Good_A,Good_T\r\n"
@@ -96,14 +102,10 @@ class TestCountCsvRows:
             **repos,  # type: ignore[arg-type]
         )
         assert result.rows_processed == 2
-        # Silent-data-loss prevention: skipped rows are counted, not discarded.
         assert result.rows_skipped == 1
 
-
-class TestSkippedRowObservability:
     def test_rows_skipped_counts_all_invalid_rows(self) -> None:
-        """Every row that fails _is_valid_ingest_row — whether short, blank,
-        or otherwise — increments rows_skipped."""
+        """Short, blank, and all-empty rows all count as skipped."""
         payload = (
             b"Station,Played,Artist,Title\r\n"
             b"KAZR,2005-03-02 00:01:00,Good_A,Good_T\r\n"

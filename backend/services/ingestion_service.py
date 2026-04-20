@@ -41,46 +41,39 @@ _MIN_CHARDET_CONFIDENCE = 0.7
 # between autocommit write cost and UI responsiveness.
 _PROGRESS_REPORT_INTERVAL = 100
 
+# Columns that must be non-empty for a CSV row to be ingestible.
+_REQUIRED_COLUMNS = ("Artist", "Title", "Played")
+
 
 def _extract_ingestible_row(
     raw_row: Mapping[object, object],
 ) -> dict[str, str] | None:
-    """Return a clean ``dict[str, str]`` for the row, or ``None`` if
-    the row is not ingestible.
+    """Return a stripped, string-keyed row ready for ingestion, or
+    ``None`` if the row is malformed or missing required data.
 
-    Collapses ``csv.DictReader``'s Python-specific edge cases at one
-    boundary so every downstream caller sees plain strings:
+    Collapses ``csv.DictReader``'s edge cases at a single boundary so
+    downstream code can assume plain strings:
 
-    - **Long rows** (more fields than the header): ``DictReader`` parks
-      extras under a ``None`` key with a list value via its default
-      ``restkey``. This usually indicates a misaligned line (e.g. an
-      unquoted comma inside a title), where the required columns may
-      also be shifted. Rejected outright — silent data corruption is
-      worse than silent data loss.
-    - **Short rows** (fewer fields than the header): ``DictReader``
-      fills missing keys with ``None`` via ``restval``. Required
-      columns end up empty; the validity check skips them.
-    - **Blank required fields**: any of Artist/Title/Played empty after
-      ``.strip()`` → reject.
-
-    A row the reader parsed cleanly but that fails these checks is a
-    "skip" candidate (caller increments ``rows_skipped``); a row that
-    succeeds is returned as a plain ``dict[str, str]`` ready for use.
+    - A ``None`` key (DictReader's ``restkey`` for extra columns) means
+      the line has more fields than the header — typically a misaligned
+      row, e.g. an unquoted comma inside a title. Rejected outright;
+      silent data corruption is worse than silent data loss.
+    - ``None`` values (DictReader's ``restval`` for short rows) are
+      discarded along with any non-string entries, so the returned
+      dict is ``dict[str, str]`` by construction.
+    - Any of :data:`_REQUIRED_COLUMNS` blank after ``.strip()`` →
+      reject.
     """
     if None in raw_row:
         return None
-    clean: dict[str, str] = {
-        k: v
-        for k, v in raw_row.items()
-        if isinstance(k, str) and isinstance(v, str)
+    stripped = {
+        key: value.strip()
+        for key, value in raw_row.items()
+        if isinstance(key, str) and isinstance(value, str)
     }
-    if not (
-        clean.get("Artist", "").strip()
-        and clean.get("Title", "").strip()
-        and clean.get("Played", "").strip()
-    ):
+    if not all(stripped.get(column) for column in _REQUIRED_COLUMNS):
         return None
-    return clean
+    return stripped
 
 
 class IngestionError(Exception):
@@ -227,9 +220,9 @@ def ingest_csv(
         if row is None:
             result.rows_skipped += 1
             continue
-        raw_artist = row["Artist"].strip()
-        raw_title = row["Title"].strip()
-        played_str = row["Played"].strip()
+        raw_artist = row["Artist"]
+        raw_title = row["Title"]
+        played_str = row["Played"]
 
         # Parse played_at
         played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
