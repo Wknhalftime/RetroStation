@@ -3,7 +3,9 @@
 Covers:
 - ``count_csv_rows`` (valid row count; decode error propagation).
 - ``ingest_csv`` ``on_row_processed`` contract: attempt-zero 0, cadence
-  every 100 rows, unconditional final fire.
+  every ``_PROGRESS_REPORT_INTERVAL`` rows, and a trailing final emit
+  only when the last cadence tick did not already land on the
+  terminal count (avoids duplicate emits on exact multiples / 0).
 - Counter/ingest parity: ``count_csv_rows`` and ``ingest_csv`` classify
   the same rows as "valid".
 """
@@ -177,8 +179,11 @@ class TestOnRowProcessedContract:
         )
 
         # Leading 0 = attempt-zero signal (fires once per ingest_csv call,
-        # even on the first attempt). Then 100, 200 cadence ticks. Then 250
-        # is the unconditional final fire.
+        # even on the first attempt). Then 100 and 200 are cadence ticks.
+        # 250 is the trailing final fire, emitted because the last cadence
+        # tick (200) didn't already land on the terminal count. See
+        # test_exact_multiple_of_interval_does_not_duplicate_final for the
+        # complementary case where the trailing emit is suppressed.
         assert observations == [0, 100, 200, 250]
 
     def test_terminal_value_matches_row_count(self) -> None:
