@@ -66,6 +66,37 @@ class TestCountCsvRows:
         with pytest.raises(CsvDecodeError):
             count_csv_rows(garbage)
 
+    def test_short_row_with_missing_columns_is_skipped_not_raised(self) -> None:
+        """csv.DictReader yields None for missing columns in short rows; the
+        validity guard must treat None as empty, not crash with
+        AttributeError('NoneType' has no attribute 'strip')."""
+        # Second data row is truncated — only has Station,Played,Artist (no Title).
+        payload = (
+            b"Station,Played,Artist,Title\r\n"
+            b"KAZR,2005-03-02 00:01:00,Good_Artist,Good_Title\r\n"
+            b"KAZR,2005-03-02 00:02:00,Orphan_Artist\r\n"
+            b"KAZR,2005-03-02 00:03:00,Another_Good,Another_Title\r\n"
+        )
+        # Must return 2 (the two complete rows), not raise.
+        assert count_csv_rows(payload) == 2
+
+    def test_ingest_csv_skips_short_rows_end_to_end(self) -> None:
+        """The same robustness must hold through ingest_csv, not just the helper."""
+        payload = (
+            b"Station,Played,Artist,Title\r\n"
+            b"KAZR,2005-03-02 00:01:00,Good_A,Good_T\r\n"
+            b"KAZR,2005-03-02 00:02:00,Orphan\r\n"  # short row → None fields
+            b"KAZR,2005-03-02 00:03:00,Good_B,Good_T2\r\n"
+        )
+        repos = _fresh_repos()
+        result = ingest_csv(
+            file_bytes=payload,
+            file_name="shortrow.csv",
+            station_id=str(uuid4()),
+            **repos,  # type: ignore[arg-type]
+        )
+        assert result.rows_processed == 2
+
 
 class TestOnRowProcessedContract:
     def test_fires_attempt_zero_cadence_and_final(self) -> None:

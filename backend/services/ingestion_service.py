@@ -42,16 +42,21 @@ _MIN_CHARDET_CONFIDENCE = 0.7
 _PROGRESS_REPORT_INTERVAL = 100
 
 
-def _is_valid_ingest_row(row: Mapping[str, str]) -> bool:
+def _is_valid_ingest_row(row: Mapping[str, str | None]) -> bool:
     """Single source of truth for 'is this CSV row ingestible?'.
 
     Used by both ``count_csv_rows`` and the ``ingest_csv`` row loop so the
     pre-count total and the committed count cannot drift silently.
+
+    Short rows (fewer fields than the header) yield ``None`` for missing
+    columns via ``csv.DictReader``'s default ``restval``, so the guard
+    coerces missing/None to ``""`` before stripping — a single malformed
+    line should skip the row, not abort the whole ingest.
     """
     return bool(
-        row.get("Artist", "").strip()
-        and row.get("Title", "").strip()
-        and row.get("Played", "").strip()
+        (row.get("Artist") or "").strip()
+        and (row.get("Title") or "").strip()
+        and (row.get("Played") or "").strip()
     )
 
 
