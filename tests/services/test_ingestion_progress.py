@@ -105,6 +105,41 @@ class TestOnRowProcessedContract:
         assert result.rows_processed == 137
         assert count_csv_rows(payload) == 137
 
+    def test_exact_multiple_of_interval_does_not_duplicate_final(self) -> None:
+        """When rows_processed % interval == 0, the cadence tick already
+        reported the terminal value; the final fire must NOT duplicate it."""
+        payload = _make_csv(valid_rows=200)
+        observations: list[int] = []
+        repos = _fresh_repos()
+
+        ingest_csv(
+            file_bytes=payload,
+            file_name="exact.csv",
+            station_id=str(uuid4()),
+            on_row_processed=observations.append,
+            **repos,  # type: ignore[arg-type]
+        )
+
+        # Attempt-zero, 100 cadence, 200 cadence. No trailing duplicate 200.
+        assert observations == [0, 100, 200]
+
+    def test_empty_csv_fires_only_attempt_zero(self) -> None:
+        """No valid rows → no cadence ticks → final fire must be suppressed
+        so the callback doesn't emit 0 twice."""
+        payload = _make_csv(valid_rows=0)
+        observations: list[int] = []
+        repos = _fresh_repos()
+
+        ingest_csv(
+            file_bytes=payload,
+            file_name="empty.csv",
+            station_id=str(uuid4()),
+            on_row_processed=observations.append,
+            **repos,  # type: ignore[arg-type]
+        )
+
+        assert observations == [0]
+
     def test_no_callback_does_not_crash(self) -> None:
         """Default behaviour (no callback) must be identical to pre-feature code."""
         payload = _make_csv(valid_rows=5)

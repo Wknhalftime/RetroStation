@@ -151,9 +151,11 @@ def ingest_csv(
        row loop. This resets any caller-side ``last_processed`` bookkeeping
        when ``@retry_on_deadlock`` re-enters ``ingest_csv``.
     2. **Cadence**: every ``_PROGRESS_REPORT_INTERVAL`` valid rows.
-    3. **Final**: once unconditionally after the loop, with the terminal
-       count, so a caller tracking progress reaches ``result.rows_processed``
-       even if the last row wasn't on a cadence boundary.
+    3. **Final**: once after the loop with the terminal count, **only
+       when the last cadence tick did not already land on that count**.
+       This keeps a caller tracking progress synchronized with
+       ``result.rows_processed`` without emitting a duplicate value when
+       ``rows_processed`` is 0 or an exact multiple of the interval.
 
     Implementations MUST treat ``0`` as a valid value and be idempotent
     with respect to rewound counts during a deadlock retry.
@@ -260,7 +262,14 @@ def ingest_csv(
         ):
             on_row_processed(result.rows_processed)
 
-    if on_row_processed is not None:
+    # Final fire: only when the last cadence tick did NOT already land on
+    # result.rows_processed. This includes 0 (no loop iterations, but the
+    # attempt-zero signal already sent 0) and any exact multiple of the
+    # interval. Prevents a duplicate callback emit.
+    if (
+        on_row_processed is not None
+        and result.rows_processed % _PROGRESS_REPORT_INTERVAL != 0
+    ):
         on_row_processed(result.rows_processed)
 
     logger.info(
