@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
@@ -32,7 +33,11 @@ async def upload_playlist(
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Enqueue the task (fire-and-forget)
-    ingestion_task(file_bytes, file.filename, station_id)
+    task_id = uuid.uuid4().hex
+    ingestion_task(file_bytes, file.filename, station_id, task_id)
 
-    return {"status": "accepted", "message": f"Ingestion queued for {file.filename}"}
+    return {
+        "status": "accepted",
+        "task_id": task_id,
+        "message": f"Ingestion queued for {file.filename}",
+    }

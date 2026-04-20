@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import posixpath
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -35,6 +36,44 @@ logger = structlog.get_logger()
 # often reports "ascii" at confidence 1.0 for files that contain multi-byte
 # UTF-8 it simply didn't sample, so the ascii branch is rejected separately.
 _MIN_CHARDET_CONFIDENCE = 0.7
+
+# Every Nth valid row, `ingest_csv` fires the progress callback. Trade-off
+# between autocommit write cost and UI responsiveness.
+_PROGRESS_REPORT_INTERVAL = 100
+
+# Columns that must be non-empty for a CSV row to be ingestible.
+_REQUIRED_COLUMNS = ("Artist", "Title", "Played")
+
+
+def _extract_ingestible_row(
+    raw_row: Mapping[object, object],
+) -> dict[str, str] | None:
+    """Return a stripped, string-keyed row ready for ingestion, or
+    ``None`` if the row is malformed or missing required data.
+
+    Collapses ``csv.DictReader``'s edge cases at a single boundary so
+    downstream code can assume plain strings:
+
+    - A ``None`` key (DictReader's ``restkey`` for extra columns) means
+      the line has more fields than the header — typically a misaligned
+      row, e.g. an unquoted comma inside a title. Rejected outright;
+      silent data corruption is worse than silent data loss.
+    - ``None`` values (DictReader's ``restval`` for short rows) are
+      discarded along with any non-string entries, so the returned
+      dict is ``dict[str, str]`` by construction.
+    - Any of :data:`_REQUIRED_COLUMNS` blank after ``.strip()`` →
+      reject.
+    """
+    if None in raw_row:
+        return None
+    stripped = {
+        key: value.strip()
+        for key, value in raw_row.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    if not all(stripped.get(column) for column in _REQUIRED_COLUMNS):
+        return None
+    return stripped
 
 
 class IngestionError(Exception):
@@ -89,10 +128,24 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
     )
 
 
+def count_csv_rows(file_bytes: bytes) -> int:
+    """Return the number of valid (ingestible) rows in a CSV payload.
+
+    Shares :func:`_decode_csv_bytes` with ``ingest_csv`` so encoding
+    handling is identical. Propagates :class:`CsvDecodeError` — callers
+    (the task layer) treat a decode failure as a terminal FAILED state
+    rather than silently degrading to a zero total.
+    """
+    text = _decode_csv_bytes(file_bytes)
+    reader = csv.DictReader(io.StringIO(text))
+    return sum(1 for row in reader if _extract_ingestible_row(row) is not None)
+
+
 @dataclass
 class IngestionResult:
     playlist_id: str = ""
     rows_processed: int = 0
+    rows_skipped: int = 0
     artists_created: int = 0
     identities_created: int = 0
     events_created: int = 0
@@ -108,8 +161,27 @@ def ingest_csv(
     track_identity_repo: BroadcastTrackIdentityRepository,
     play_event_repo: BroadcastPlayEventRepository,
     broadcast_day_repo: BroadcastDayRepository,
+    *,
+    on_row_processed: Callable[[int], None] | None = None,
 ) -> IngestionResult:
-    """Parse a CSV file and create playlist, artists, identities, events, and broadcast days."""
+    """Parse a CSV file and create playlist, artists, identities, events, and broadcast days.
+
+    ``on_row_processed`` receives the cumulative count of valid rows
+    processed so far. It is called at three kinds of moments:
+
+    1. **Attempt-zero**: exactly once, with ``0``, immediately before the
+       row loop. This resets any caller-side ``last_processed`` bookkeeping
+       when ``@retry_on_deadlock`` re-enters ``ingest_csv``.
+    2. **Cadence**: every ``_PROGRESS_REPORT_INTERVAL`` valid rows.
+    3. **Final**: once after the loop with the terminal count, **only
+       when the last cadence tick did not already land on that count**.
+       This keeps a caller tracking progress synchronized with
+       ``result.rows_processed`` without emitting a duplicate value when
+       ``rows_processed`` is 0 or an exact multiple of the interval.
+
+    Implementations MUST treat ``0`` as a valid value and be idempotent
+    with respect to rewound counts during a deadlock retry.
+    """
     result = IngestionResult()
 
     text = _decode_csv_bytes(file_bytes)
@@ -140,13 +212,17 @@ def ingest_csv(
     seen_signatures: dict[str, BroadcastTrackIdentity] = {}  # signature → BroadcastTrackIdentity
     seen_broadcast_dates: dict[str, BroadcastDay] = {}  # date_str → BroadcastDay
 
-    for row in reader:
-        raw_artist = row.get("Artist", "").strip()
-        raw_title = row.get("Title", "").strip()
-        played_str = row.get("Played", "").strip()
+    if on_row_processed is not None:
+        on_row_processed(0)
 
-        if not raw_artist or not raw_title or not played_str:
+    for raw_row in reader:
+        row = _extract_ingestible_row(raw_row)
+        if row is None:
+            result.rows_skipped += 1
             continue
+        raw_artist = row["Artist"]
+        raw_title = row["Title"]
+        played_str = row["Played"]
 
         # Parse played_at
         played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
@@ -204,10 +280,36 @@ def ingest_csv(
         result.events_created += 1
         result.rows_processed += 1
 
+        if (
+            on_row_processed is not None
+            and result.rows_processed % _PROGRESS_REPORT_INTERVAL == 0
+        ):
+            on_row_processed(result.rows_processed)
+
+    # Final fire: only when the last cadence tick did NOT already land on
+    # result.rows_processed. This includes 0 (no loop iterations, but the
+    # attempt-zero signal already sent 0) and any exact multiple of the
+    # interval. Prevents a duplicate callback emit.
+    if (
+        on_row_processed is not None
+        and result.rows_processed % _PROGRESS_REPORT_INTERVAL != 0
+    ):
+        on_row_processed(result.rows_processed)
+
+    if result.rows_skipped > 0:
+        logger.info(
+            "ingestion_rows_skipped",
+            playlist_id=result.playlist_id,
+            filename=file_name,
+            skipped=result.rows_skipped,
+            processed=result.rows_processed,
+        )
+
     logger.info(
         "ingestion_complete",
         playlist_id=result.playlist_id,
         rows=result.rows_processed,
+        skipped=result.rows_skipped,
         artists=result.artists_created,
         identities=result.identities_created,
         events=result.events_created,

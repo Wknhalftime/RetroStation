@@ -8,9 +8,11 @@ from backend.repositories.task_progress import TaskProgressRepository
 class FakeTaskProgressRepository(TaskProgressRepository):
     def __init__(self) -> None:
         self._data: dict[str, TaskProgress] = {}
+        self.received_upserts: list[TaskProgress] = []
 
     def upsert(self, task: TaskProgress) -> TaskProgress:
         self._data[task.task_id] = task
+        self.received_upserts.append(task)
         return task
 
     def get_by_id(self, task_id: str) -> TaskProgress | None:
