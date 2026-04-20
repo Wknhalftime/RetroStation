@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -104,14 +105,23 @@ def _run_ingest(
 
 @huey.task()  # type: ignore[untyped-decorator]
 def ingestion_task(
-    file_bytes: bytes, file_name: str, station_id: str, task_id: str
+    file_bytes: bytes,
+    file_name: str,
+    station_id: str,
+    task_id: str | None = None,
 ) -> str:
     """Ingest a CSV file with server-side progress tracking.
 
-    ``task_id`` is minted by the router so the upload response and the
-    ``progress_tracking`` row share one identity. The worker never
-    generates its own ID.
+    ``task_id`` is normally minted by the router so the upload response
+    and the ``progress_tracking`` row share one identity. It defaults
+    to a fresh UUID only to keep this signature backward-compatible
+    with the pre-progress-tracking 3-arg calls that SqliteHuey may have
+    persisted across a deploy — without the default, those queued jobs
+    would fail at execution with ``TypeError: missing 1 required
+    positional argument``. The router always passes an explicit value.
     """
+    if task_id is None:
+        task_id = uuid.uuid4().hex
     settings = get_settings()
     task_started_at = datetime.now(UTC)
     last_processed = 0

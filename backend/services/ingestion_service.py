@@ -42,29 +42,45 @@ _MIN_CHARDET_CONFIDENCE = 0.7
 _PROGRESS_REPORT_INTERVAL = 100
 
 
-def _normalize_csv_row(row: Mapping[str, str | None]) -> dict[str, str]:
-    """Collapse csv.DictReader quirks into a plain string-valued dict.
+def _extract_ingestible_row(
+    raw_row: Mapping[object, object],
+) -> dict[str, str] | None:
+    """Return a clean ``dict[str, str]`` for the row, or ``None`` if
+    the row is not ingestible.
 
-    Short rows (fewer fields than the header) yield ``None`` for missing
-    columns via ``DictReader``'s default ``restval``. Normalising that
-    to ``""`` at this single boundary means every downstream check can
-    assume plain strings, instead of each caller re-defending against
-    the adapter's Python-specific edge cases.
+    Collapses ``csv.DictReader``'s Python-specific edge cases at one
+    boundary so every downstream caller sees plain strings:
+
+    - **Long rows** (more fields than the header): ``DictReader`` parks
+      extras under a ``None`` key with a list value via its default
+      ``restkey``. This usually indicates a misaligned line (e.g. an
+      unquoted comma inside a title), where the required columns may
+      also be shifted. Rejected outright — silent data corruption is
+      worse than silent data loss.
+    - **Short rows** (fewer fields than the header): ``DictReader``
+      fills missing keys with ``None`` via ``restval``. Required
+      columns end up empty; the validity check skips them.
+    - **Blank required fields**: any of Artist/Title/Played empty after
+      ``.strip()`` → reject.
+
+    A row the reader parsed cleanly but that fails these checks is a
+    "skip" candidate (caller increments ``rows_skipped``); a row that
+    succeeds is returned as a plain ``dict[str, str]`` ready for use.
     """
-    return {key: (value or "") for key, value in row.items()}
-
-
-def _is_valid_ingest_row(row: Mapping[str, str]) -> bool:
-    """Does the row have the three required ingestible fields?
-
-    Assumes the row has already been normalised by
-    :func:`_normalize_csv_row`.
-    """
-    return bool(
-        row.get("Artist", "").strip()
-        and row.get("Title", "").strip()
-        and row.get("Played", "").strip()
-    )
+    if None in raw_row:
+        return None
+    clean: dict[str, str] = {
+        k: v
+        for k, v in raw_row.items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
+    if not (
+        clean.get("Artist", "").strip()
+        and clean.get("Title", "").strip()
+        and clean.get("Played", "").strip()
+    ):
+        return None
+    return clean
 
 
 class IngestionError(Exception):
@@ -129,7 +145,7 @@ def count_csv_rows(file_bytes: bytes) -> int:
     """
     text = _decode_csv_bytes(file_bytes)
     reader = csv.DictReader(io.StringIO(text))
-    return sum(1 for row in reader if _is_valid_ingest_row(_normalize_csv_row(row)))
+    return sum(1 for row in reader if _extract_ingestible_row(row) is not None)
 
 
 @dataclass
@@ -207,8 +223,8 @@ def ingest_csv(
         on_row_processed(0)
 
     for raw_row in reader:
-        row = _normalize_csv_row(raw_row)
-        if not _is_valid_ingest_row(row):
+        row = _extract_ingestible_row(raw_row)
+        if row is None:
             result.rows_skipped += 1
             continue
         raw_artist = row["Artist"].strip()

@@ -122,6 +122,30 @@ class TestSkippedRowObservability:
         assert result.rows_processed == 2
         assert result.rows_skipped == 3
 
+    def test_long_row_with_unquoted_comma_is_rejected_not_misaligned(self) -> None:
+        """An unquoted comma inside a field makes DictReader think the row
+        has extra columns — parking the overflow under a None key. We treat
+        that as misaligned and skip, rather than silently ingest
+        truncated Artist/Title values."""
+        payload = (
+            b"Station,Played,Artist,Title\r\n"
+            b"KAZR,2005-03-02 00:01:00,Good,Good_Title\r\n"
+            # Unquoted comma in what should be one "Artist" field:
+            b"KAZR,2005-03-02 00:02:00,Foo, Jr.,Split_Title\r\n"
+            b"KAZR,2005-03-02 00:03:00,Good2,Good_Title2\r\n"
+        )
+        repos = _fresh_repos()
+        result = ingest_csv(
+            file_bytes=payload,
+            file_name="misaligned.csv",
+            station_id=str(uuid4()),
+            **repos,  # type: ignore[arg-type]
+        )
+        assert result.rows_processed == 2
+        assert result.rows_skipped == 1
+        # Parity: count_csv_rows agrees with the real loop.
+        assert count_csv_rows(payload) == 2
+
     def test_rows_skipped_is_zero_for_clean_csv(self) -> None:
         """Happy path — no defensive bumps to rows_skipped."""
         payload = _make_csv(valid_rows=10)

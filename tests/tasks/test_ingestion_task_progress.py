@@ -304,6 +304,40 @@ class TestIngestionTaskEmbeddingDecoupling:
         assert terminal.status == TaskStatus.COMPLETED
 
 
+class TestIngestionTaskBackwardCompat:
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_missing_task_id_falls_back_to_uuid(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """A 3-arg call (pre-progress-tracking signature that SqliteHuey may
+        have persisted across a deploy) must still execute, not raise
+        TypeError. The task mints its own task_id in that case."""
+        fake_repo = FakeTaskProgressRepository()
+        repo_cls.return_value = fake_repo
+        run_ingest.return_value = _result()
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            returned_id = ingestion_task.call_local(
+                CSV_PAYLOAD, "f.csv", str(uuid4())  # no task_id
+            )
+
+        assert isinstance(returned_id, str) and len(returned_id) == 32
+        assert all(
+            u.task_id == returned_id for u in fake_repo.received_upserts
+        ), "Auto-minted task_id must be used consistently across upserts"
+
+
 class TestIngestionTaskRetryReset:
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=500)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
