@@ -39,10 +39,13 @@ def _fake_connect_sync(_url: str, *, autocommit: bool = False) -> Any:
     return conn
 
 
-def _result(playlist_id: str = "pl-1", rows: int = 2) -> IngestionResult:
+def _result(
+    playlist_id: str = "pl-1", rows: int = 2, skipped: int = 0
+) -> IngestionResult:
     return IngestionResult(
         playlist_id=playlist_id,
         rows_processed=rows,
+        rows_skipped=skipped,
         artists_created=2,
         identities_created=2,
         events_created=rows,
@@ -151,6 +154,37 @@ class TestIngestionTaskLifecycle:
         assert terminal.progress_data["total"] == 2
         assert terminal.progress_data["filename"] == "my.csv"
         assert terminal.progress_data["events_created"] == 2
+
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=5)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_completed_payload_surfaces_rows_skipped(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """Operators must see how many rows were dropped as malformed; this
+        prevents silent data loss from going unnoticed."""
+        fake_repo = FakeTaskProgressRepository()
+        repo_cls.return_value = fake_repo
+        run_ingest.return_value = _result(rows=3, skipped=2)
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "skipped.csv", str(uuid4()), "tid-sk"
+            )
+
+        terminal = fake_repo.received_upserts[-1]
+        assert terminal.status == TaskStatus.COMPLETED
+        assert terminal.progress_data["skipped"] == 2
+        assert terminal.progress_data["processed"] == 3
 
 
 class TestIngestionTaskFailurePaths:

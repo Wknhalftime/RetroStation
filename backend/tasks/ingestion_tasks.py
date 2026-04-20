@@ -38,6 +38,7 @@ def _build_completed_progress(
 ) -> dict[str, Any]:
     return {
         "processed": result.rows_processed,
+        "skipped": result.rows_skipped,
         "total": total,
         "filename": filename,
         "playlist_id": result.playlist_id,

@@ -42,21 +42,28 @@ _MIN_CHARDET_CONFIDENCE = 0.7
 _PROGRESS_REPORT_INTERVAL = 100
 
 
-def _is_valid_ingest_row(row: Mapping[str, str | None]) -> bool:
-    """Single source of truth for 'is this CSV row ingestible?'.
-
-    Used by both ``count_csv_rows`` and the ``ingest_csv`` row loop so the
-    pre-count total and the committed count cannot drift silently.
+def _normalize_csv_row(row: Mapping[str, str | None]) -> dict[str, str]:
+    """Collapse csv.DictReader quirks into a plain string-valued dict.
 
     Short rows (fewer fields than the header) yield ``None`` for missing
-    columns via ``csv.DictReader``'s default ``restval``, so the guard
-    coerces missing/None to ``""`` before stripping — a single malformed
-    line should skip the row, not abort the whole ingest.
+    columns via ``DictReader``'s default ``restval``. Normalising that
+    to ``""`` at this single boundary means every downstream check can
+    assume plain strings, instead of each caller re-defending against
+    the adapter's Python-specific edge cases.
+    """
+    return {key: (value or "") for key, value in row.items()}
+
+
+def _is_valid_ingest_row(row: Mapping[str, str]) -> bool:
+    """Does the row have the three required ingestible fields?
+
+    Assumes the row has already been normalised by
+    :func:`_normalize_csv_row`.
     """
     return bool(
-        (row.get("Artist") or "").strip()
-        and (row.get("Title") or "").strip()
-        and (row.get("Played") or "").strip()
+        row.get("Artist", "").strip()
+        and row.get("Title", "").strip()
+        and row.get("Played", "").strip()
     )
 
 
@@ -122,13 +129,14 @@ def count_csv_rows(file_bytes: bytes) -> int:
     """
     text = _decode_csv_bytes(file_bytes)
     reader = csv.DictReader(io.StringIO(text))
-    return sum(1 for row in reader if _is_valid_ingest_row(row))
+    return sum(1 for row in reader if _is_valid_ingest_row(_normalize_csv_row(row)))
 
 
 @dataclass
 class IngestionResult:
     playlist_id: str = ""
     rows_processed: int = 0
+    rows_skipped: int = 0
     artists_created: int = 0
     identities_created: int = 0
     events_created: int = 0
@@ -198,12 +206,14 @@ def ingest_csv(
     if on_row_processed is not None:
         on_row_processed(0)
 
-    for row in reader:
+    for raw_row in reader:
+        row = _normalize_csv_row(raw_row)
         if not _is_valid_ingest_row(row):
+            result.rows_skipped += 1
             continue
-        raw_artist = row.get("Artist", "").strip()
-        raw_title = row.get("Title", "").strip()
-        played_str = row.get("Played", "").strip()
+        raw_artist = row["Artist"].strip()
+        raw_title = row["Title"].strip()
+        played_str = row["Played"].strip()
 
         # Parse played_at
         played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
@@ -277,10 +287,20 @@ def ingest_csv(
     ):
         on_row_processed(result.rows_processed)
 
+    if result.rows_skipped > 0:
+        logger.info(
+            "ingestion_rows_skipped",
+            playlist_id=result.playlist_id,
+            filename=file_name,
+            skipped=result.rows_skipped,
+            processed=result.rows_processed,
+        )
+
     logger.info(
         "ingestion_complete",
         playlist_id=result.playlist_id,
         rows=result.rows_processed,
+        skipped=result.rows_skipped,
         artists=result.artists_created,
         identities=result.identities_created,
         events=result.events_created,

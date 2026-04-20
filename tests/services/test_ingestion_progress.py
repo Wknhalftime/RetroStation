@@ -96,6 +96,44 @@ class TestCountCsvRows:
             **repos,  # type: ignore[arg-type]
         )
         assert result.rows_processed == 2
+        # Silent-data-loss prevention: skipped rows are counted, not discarded.
+        assert result.rows_skipped == 1
+
+
+class TestSkippedRowObservability:
+    def test_rows_skipped_counts_all_invalid_rows(self) -> None:
+        """Every row that fails _is_valid_ingest_row — whether short, blank,
+        or otherwise — increments rows_skipped."""
+        payload = (
+            b"Station,Played,Artist,Title\r\n"
+            b"KAZR,2005-03-02 00:01:00,Good_A,Good_T\r\n"
+            b"KAZR,2005-03-02 00:02:00,,\r\n"  # blank artist+title
+            b"KAZR,2005-03-02 00:03:00,Orphan\r\n"  # short row
+            b",,,\r\n"  # all blank
+            b"KAZR,2005-03-02 00:04:00,Good_B,Good_T2\r\n"
+        )
+        repos = _fresh_repos()
+        result = ingest_csv(
+            file_bytes=payload,
+            file_name="mixed.csv",
+            station_id=str(uuid4()),
+            **repos,  # type: ignore[arg-type]
+        )
+        assert result.rows_processed == 2
+        assert result.rows_skipped == 3
+
+    def test_rows_skipped_is_zero_for_clean_csv(self) -> None:
+        """Happy path — no defensive bumps to rows_skipped."""
+        payload = _make_csv(valid_rows=10)
+        repos = _fresh_repos()
+        result = ingest_csv(
+            file_bytes=payload,
+            file_name="clean.csv",
+            station_id=str(uuid4()),
+            **repos,  # type: ignore[arg-type]
+        )
+        assert result.rows_processed == 10
+        assert result.rows_skipped == 0
 
 
 class TestOnRowProcessedContract:
