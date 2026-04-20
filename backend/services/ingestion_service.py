@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import posixpath
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -35,6 +36,23 @@ logger = structlog.get_logger()
 # often reports "ascii" at confidence 1.0 for files that contain multi-byte
 # UTF-8 it simply didn't sample, so the ascii branch is rejected separately.
 _MIN_CHARDET_CONFIDENCE = 0.7
+
+# Every Nth valid row, `ingest_csv` fires the progress callback. Trade-off
+# between autocommit write cost and UI responsiveness.
+_PROGRESS_REPORT_INTERVAL = 100
+
+
+def _is_valid_ingest_row(row: Mapping[str, str]) -> bool:
+    """Single source of truth for 'is this CSV row ingestible?'.
+
+    Used by both ``count_csv_rows`` and the ``ingest_csv`` row loop so the
+    pre-count total and the committed count cannot drift silently.
+    """
+    return bool(
+        row.get("Artist", "").strip()
+        and row.get("Title", "").strip()
+        and row.get("Played", "").strip()
+    )
 
 
 class IngestionError(Exception):
@@ -89,6 +107,19 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
     )
 
 
+def count_csv_rows(file_bytes: bytes) -> int:
+    """Return the number of valid (ingestible) rows in a CSV payload.
+
+    Shares :func:`_decode_csv_bytes` with ``ingest_csv`` so encoding
+    handling is identical. Propagates :class:`CsvDecodeError` — callers
+    (the task layer) treat a decode failure as a terminal FAILED state
+    rather than silently degrading to a zero total.
+    """
+    text = _decode_csv_bytes(file_bytes)
+    reader = csv.DictReader(io.StringIO(text))
+    return sum(1 for row in reader if _is_valid_ingest_row(row))
+
+
 @dataclass
 class IngestionResult:
     playlist_id: str = ""
@@ -108,8 +139,25 @@ def ingest_csv(
     track_identity_repo: BroadcastTrackIdentityRepository,
     play_event_repo: BroadcastPlayEventRepository,
     broadcast_day_repo: BroadcastDayRepository,
+    *,
+    on_row_processed: Callable[[int], None] | None = None,
 ) -> IngestionResult:
-    """Parse a CSV file and create playlist, artists, identities, events, and broadcast days."""
+    """Parse a CSV file and create playlist, artists, identities, events, and broadcast days.
+
+    ``on_row_processed`` receives the cumulative count of valid rows
+    processed so far. It is called at three kinds of moments:
+
+    1. **Attempt-zero**: exactly once, with ``0``, immediately before the
+       row loop. This resets any caller-side ``last_processed`` bookkeeping
+       when ``@retry_on_deadlock`` re-enters ``ingest_csv``.
+    2. **Cadence**: every ``_PROGRESS_REPORT_INTERVAL`` valid rows.
+    3. **Final**: once unconditionally after the loop, with the terminal
+       count, so a caller tracking progress reaches ``result.rows_processed``
+       even if the last row wasn't on a cadence boundary.
+
+    Implementations MUST treat ``0`` as a valid value and be idempotent
+    with respect to rewound counts during a deadlock retry.
+    """
     result = IngestionResult()
 
     text = _decode_csv_bytes(file_bytes)
@@ -140,13 +188,15 @@ def ingest_csv(
     seen_signatures: dict[str, BroadcastTrackIdentity] = {}  # signature → BroadcastTrackIdentity
     seen_broadcast_dates: dict[str, BroadcastDay] = {}  # date_str → BroadcastDay
 
+    if on_row_processed is not None:
+        on_row_processed(0)
+
     for row in reader:
+        if not _is_valid_ingest_row(row):
+            continue
         raw_artist = row.get("Artist", "").strip()
         raw_title = row.get("Title", "").strip()
         played_str = row.get("Played", "").strip()
-
-        if not raw_artist or not raw_title or not played_str:
-            continue
 
         # Parse played_at
         played_at = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
@@ -203,6 +253,15 @@ def ingest_csv(
         ))
         result.events_created += 1
         result.rows_processed += 1
+
+        if (
+            on_row_processed is not None
+            and result.rows_processed % _PROGRESS_REPORT_INTERVAL == 0
+        ):
+            on_row_processed(result.rows_processed)
+
+    if on_row_processed is not None:
+        on_row_processed(result.rows_processed)
 
     logger.info(
         "ingestion_complete",
