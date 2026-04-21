@@ -68,6 +68,53 @@ def _build_failed_progress(
     return payload
 
 
+# Transient-failure classes for progress-tracking writes. `OperationalError`
+# is the psycopg base for every connectivity/timeout subclass we care about
+# here: LockNotAvailable (lock_timeout on progress_tracking),
+# QueryCanceled (statement_timeout), DeadlockDetected, ConnectionFailure,
+# AdminShutdown / CrashShutdown, CannotConnectNow, DatabaseDropped, etc.
+# `InterfaceError` covers cursor-closed / driver-state faults. `OSError`
+# covers TCP/socket faults below the driver. Deliberately excludes
+# IntegrityError, ProgrammingError, DataError, InternalError, and
+# NotSupportedError so schema/constraint/syntax bugs surface loudly instead
+# of being logged and swallowed as "telemetry dropped".
+_PROGRESS_DROP_ERRORS: tuple[type[BaseException], ...] = (
+    psycopg.OperationalError,
+    psycopg.InterfaceError,
+    OSError,
+)
+
+
+def _safe_progress_upsert(
+    repo: PgTaskProgressRepository,
+    task_progress: TaskProgress,
+    *,
+    task_id: str,
+    lifecycle: str,
+    **extra: Any,
+) -> bool:
+    """Best-effort progress upsert. Returns True on success, False on drop.
+
+    Keeps the "telemetry must never change ingest outcome" invariant in one
+    place. Callers that need throttling (e.g. mid-run) should implement
+    their own try/except against ``_PROGRESS_DROP_ERRORS`` instead.
+    """
+    try:
+        repo.upsert(task_progress)
+        return True
+    except _PROGRESS_DROP_ERRORS as telemetry_exc:
+        logger.warning(
+            "ingestion_progress_upsert_dropped",
+            task_id=task_id,
+            lifecycle=lifecycle,
+            error=str(telemetry_exc),
+            error_type=type(telemetry_exc).__name__,
+            exc_info=True,
+            **extra,
+        )
+        return False
+
+
 @retry_on_deadlock(max_attempts=3, backoff_seconds=0.5)
 def _run_ingest(
     file_bytes: bytes,
@@ -126,6 +173,11 @@ def ingestion_task(
     task_started_at = datetime.now(UTC)
     last_processed = 0
     total_rows = 0
+    # on_row_processed fires every _PROGRESS_REPORT_INTERVAL=100 rows. A
+    # sustained progress-DB outage on a 100k-row ingest would emit ~1000
+    # warnings-with-tracebacks. Log the first drop fully, then count the
+    # rest; emit one summary on task exit.
+    mid_run_drops = 0
 
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
@@ -133,6 +185,8 @@ def ingestion_task(
     try:
         progress_conn = connect_sync(settings.database_url, autocommit=True)
         progress_repo = PgTaskProgressRepository(progress_conn)
+        # Non-optional alias so the row-callback closure doesn't need assert-narrowing.
+        repo = progress_repo
 
         total_rows = count_csv_rows(file_bytes)
 
@@ -148,21 +202,36 @@ def ingestion_task(
         )
 
         def on_row_processed(rows_processed: int) -> None:
-            nonlocal last_processed
+            nonlocal last_processed, mid_run_drops
             last_processed = rows_processed
-            assert progress_repo is not None
-            progress_repo.upsert(
-                TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.INGESTION,
-                    status=TaskStatus.RUNNING,
-                    progress_data=_build_running_progress(
-                        rows_processed, total_rows, file_name
-                    ),
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
+            # Mid-run has its own try/except (not _safe_progress_upsert) to
+            # throttle drop warnings: log only the first fully, count the
+            # rest, emit one summary in `finally`.
+            try:
+                repo.upsert(
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.INGESTION,
+                        status=TaskStatus.RUNNING,
+                        progress_data=_build_running_progress(
+                            rows_processed, total_rows, file_name
+                        ),
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                    )
                 )
-            )
+            except _PROGRESS_DROP_ERRORS as telemetry_exc:
+                if mid_run_drops == 0:
+                    logger.warning(
+                        "ingestion_progress_upsert_dropped",
+                        task_id=task_id,
+                        lifecycle="running",
+                        processed=rows_processed,
+                        error=str(telemetry_exc),
+                        error_type=type(telemetry_exc).__name__,
+                        exc_info=True,
+                    )
+                mid_run_drops += 1
 
         def on_attempt_start() -> None:
             nonlocal last_processed
@@ -176,7 +245,11 @@ def ingestion_task(
             on_attempt_start=on_attempt_start,
         )
 
-        progress_repo.upsert(
+        # Ingest transaction has already committed inside _run_ingest, so a
+        # fault writing COMPLETED must not flip the task to FAILED — that
+        # would make durable data appear lost to the operator.
+        _safe_progress_upsert(
+            progress_repo,
             TaskProgress(
                 task_id=task_id,
                 task_type=TaskType.INGESTION,
@@ -187,7 +260,10 @@ def ingestion_task(
                 started_at=task_started_at,
                 updated_at=datetime.now(UTC),
                 completed_at=datetime.now(UTC),
-            )
+            ),
+            task_id=task_id,
+            lifecycle="completed",
+            playlist_id=result.playlist_id,
         )
 
         logger.info(
@@ -212,13 +288,17 @@ def ingestion_task(
             error_code = "duplicate_playlist"
 
         if progress_repo is not None:
-            # Suppress Exception (not BaseException) so a best-effort FAILED
-            # write cannot mask the original ingestion exception via PEP 3134
-            # __context__ replacement. KeyboardInterrupt / SystemExit /
-            # GeneratorExit still propagate because they inherit from
-            # BaseException. Matches library_scan_task precedent.
-            with contextlib.suppress(Exception):
-                progress_repo.upsert(
+            # Shadow guard: we're already in the top-level error handler
+            # and `exc` is what must propagate. _safe_progress_upsert only
+            # swallows transient driver errors, so a non-transient bug
+            # (IntegrityError, ProgrammingError, etc.) would otherwise
+            # replace `exc` before the `raise` below and hide the real
+            # ingestion failure from the operator. Catch broadly here —
+            # the project rule allows bare Exception at the top-level
+            # error boundary, and that's exactly what this is.
+            try:
+                _safe_progress_upsert(
+                    progress_repo,
                     TaskProgress(
                         task_id=task_id,
                         task_type=TaskType.INGESTION,
@@ -233,7 +313,19 @@ def ingestion_task(
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                         completed_at=datetime.now(UTC),
-                    )
+                    ),
+                    task_id=task_id,
+                    lifecycle="failed",
+                    original_error=str(exc),
+                )
+            except Exception as shadow_exc:
+                logger.warning(
+                    "ingestion_progress_upsert_shadow_prevented",
+                    task_id=task_id,
+                    original_error=str(exc),
+                    shadow_error=str(shadow_exc),
+                    shadow_error_type=type(shadow_exc).__name__,
+                    exc_info=True,
                 )
         logger.warning(
             "ingestion_task_failed",
@@ -245,6 +337,12 @@ def ingestion_task(
         raise
 
     finally:
+        if mid_run_drops > 1:
+            logger.warning(
+                "ingestion_progress_upsert_dropped_summary",
+                task_id=task_id,
+                dropped=mid_run_drops,
+            )
         if progress_conn is not None:
             progress_conn.close()
 

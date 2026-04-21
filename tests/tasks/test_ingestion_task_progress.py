@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.system import TaskProgress
 from backend.services.ingestion_service import (
     CsvDecodeError,
     DuplicatePlaylistError,
@@ -380,4 +381,281 @@ class TestIngestionTaskRetryReset:
         assert terminal.status == TaskStatus.FAILED
         assert terminal.progress_data["processed"] == 0, (
             "on_attempt_start should have reset last_processed to 0"
+        )
+
+
+class _MidRunFaultRepo(FakeTaskProgressRepository):
+    """Raises psycopg.OperationalError on mid-run RUNNING upserts only.
+
+    Mid-run = status is RUNNING and progress_data["processed"] > 0. The
+    initial RUNNING (processed=0) and terminal COMPLETED/FAILED upserts
+    still succeed so the lifecycle assertions remain meaningful.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if (
+            task.status == TaskStatus.RUNNING
+            and task.progress_data.get("processed", 0) > 0
+        ):
+            self.received_upserts.append(task)
+            raise psycopg.OperationalError("simulated progress conn drop")
+        return super().upsert(task)
+
+
+class _CompletedFaultRepo(FakeTaskProgressRepository):
+    """Raises psycopg.OperationalError on the terminal COMPLETED upsert only.
+
+    The ingest transaction commits inside _run_ingest before COMPLETED is
+    written, so a telemetry fault there must not flip the task to FAILED —
+    that would make durable data appear lost to the operator.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if task.status == TaskStatus.COMPLETED:
+            self.received_upserts.append(task)
+            raise psycopg.OperationalError("simulated progress conn drop")
+        return super().upsert(task)
+
+
+class TestIngestionTaskMidRunTelemetryFault:
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=200)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_progress_conn_fault_mid_run_does_not_fail_ingestion(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """A telemetry-only fault during on_row_processed must NOT abort
+        ingestion. Without the try/except _PROGRESS_DROP_ERRORS guard on
+        the callback, psycopg.OperationalError would propagate through
+        ingest_csv and the task would terminate as FAILED, rolling back
+        valid ingestion data.
+        """
+        fault_repo = _MidRunFaultRepo()
+        repo_cls.return_value = fault_repo
+
+        def drive_callback_twice(*_args: Any, **kwargs: Any) -> IngestionResult:
+            cb = kwargs["on_row_processed"]
+            cb(100)  # first fault injection
+            cb(200)  # second — must still proceed
+            return _result(rows=200)
+
+        run_ingest.side_effect = drive_callback_twice
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-fault"
+            )
+
+        terminal = fault_repo.received_upserts[-1]
+        assert terminal.status == TaskStatus.COMPLETED, (
+            "Telemetry fault must not flip ingestion to FAILED"
+        )
+        assert terminal.progress_data["processed"] == 200
+        # Both mid-run attempts were recorded by the fault repo (as evidence
+        # the callback did fire twice) even though both upserts raised.
+        mid_run_attempts = [
+            u
+            for u in fault_repo.received_upserts
+            if u.status == TaskStatus.RUNNING
+            and u.progress_data.get("processed", 0) > 0
+        ]
+        assert len(mid_run_attempts) == 2
+
+    @patch("backend.tasks.ingestion_tasks.logger")
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=500)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_mid_run_drop_warnings_are_throttled(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+        mock_logger: MagicMock,
+    ) -> None:
+        """During a sustained outage on_row_processed could fire hundreds of
+        times per task. Only the first drop emits a full warning with
+        traceback; subsequent drops increment a counter and the finally
+        block emits one summary record.
+        """
+        fault_repo = _MidRunFaultRepo()
+        repo_cls.return_value = fault_repo
+
+        def drive_callback_many(*_args: Any, **kwargs: Any) -> IngestionResult:
+            cb = kwargs["on_row_processed"]
+            for n in (100, 200, 300, 400, 500):
+                cb(n)
+            return _result(rows=500)
+
+        run_ingest.side_effect = drive_callback_many
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-throttle"
+            )
+
+        warning_events = [
+            call.args[0]
+            for call in mock_logger.warning.call_args_list
+            if call.args
+        ]
+        # Exactly one "running" drop warning (the first), then one summary.
+        running_drops = [e for e in warning_events if e == "ingestion_progress_upsert_dropped"]
+        summaries = [
+            e for e in warning_events if e == "ingestion_progress_upsert_dropped_summary"
+        ]
+        assert len(running_drops) == 1, (
+            f"Expected 1 mid-run drop warning, got {len(running_drops)}"
+        )
+        assert len(summaries) == 1
+        summary_call = [
+            c for c in mock_logger.warning.call_args_list
+            if c.args and c.args[0] == "ingestion_progress_upsert_dropped_summary"
+        ][0]
+        assert summary_call.kwargs["dropped"] == 5
+
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_progress_conn_fault_on_completed_does_not_fail_ingestion(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """The ingest transaction commits inside _run_ingest BEFORE the
+        terminal COMPLETED upsert runs. If COMPLETED raises and is not
+        suppressed, the task terminates as FAILED even though the data is
+        already durable in the DB — an operator-facing data-loss illusion.
+        """
+        fault_repo = _CompletedFaultRepo()
+        repo_cls.return_value = fault_repo
+        run_ingest.return_value = _result()
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            # Must NOT raise — the ingest already committed.
+            returned_id = ingestion_task.call_local(
+                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-comp-fault"
+            )
+
+        assert returned_id == "tid-comp-fault"
+        # The COMPLETED attempt was recorded (evidence it fired) but raised,
+        # and the task did NOT fall into the FAILED branch.
+        statuses = [u.status for u in fault_repo.received_upserts]
+        assert TaskStatus.COMPLETED in statuses
+        assert TaskStatus.FAILED not in statuses, (
+            "Suppressed COMPLETED fault must not flip the task to FAILED"
+        )
+
+
+class _FailedShadowRepo(FakeTaskProgressRepository):
+    """Raises psycopg.IntegrityError (a non-transient, non-caught error)
+    on the terminal FAILED upsert only. Simulates a schema-drift bug in
+    the progress write while ingestion itself is already failing.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if task.status == TaskStatus.FAILED:
+            self.received_upserts.append(task)
+            raise psycopg.IntegrityError("simulated progress schema drift")
+        return super().upsert(task)
+
+
+class TestIngestionTaskFailedShadowGuard:
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_non_transient_progress_fault_in_failed_branch_does_not_shadow_original(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """We're in the outer error handler when the FAILED upsert runs.
+        A non-transient bug there (IntegrityError, ProgrammingError) is
+        outside _PROGRESS_DROP_ERRORS, so without the shadow guard it
+        would replace the original ingestion exception and the operator
+        would see the progress-write bug instead of the real failure.
+        """
+        fault_repo = _FailedShadowRepo()
+        repo_cls.return_value = fault_repo
+        original_error = RuntimeError("real ingestion boom")
+        run_ingest.side_effect = original_error
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with pytest.raises(RuntimeError, match="real ingestion boom"):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-shadow"
+            )
+
+
+class TestProgressDropErrorsCoverage:
+    """Lock in which psycopg exception subclasses _PROGRESS_DROP_ERRORS
+    must cover. If someone narrows the tuple later, these tests break and
+    force a deliberate reconsideration rather than a silent regression.
+    """
+
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            psycopg.errors.LockNotAvailable,
+            psycopg.errors.QueryCanceled,
+            psycopg.errors.DeadlockDetected,
+            psycopg.errors.ConnectionFailure,
+            psycopg.errors.AdminShutdown,
+            psycopg.errors.CannotConnectNow,
+        ],
+    )
+    def test_transient_subclass_is_caught(
+        self, exc_cls: type[psycopg.Error]
+    ) -> None:
+        from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
+
+        assert issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (
+            f"{exc_cls.__name__} should be caught by _PROGRESS_DROP_ERRORS; "
+            "narrowing the tuple would silently let telemetry faults kill "
+            "ingestion."
+        )
+
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            psycopg.IntegrityError,
+            psycopg.ProgrammingError,
+            psycopg.DataError,
+            psycopg.InternalError,
+            psycopg.NotSupportedError,
+        ],
+    )
+    def test_non_transient_subclass_is_not_caught(
+        self, exc_cls: type[psycopg.Error]
+    ) -> None:
+        from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
+
+        assert not issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (
+            f"{exc_cls.__name__} represents a bug (schema/constraint/syntax) "
+            "and must propagate, not be logged-and-swallowed as telemetry drop."
         )
