@@ -154,7 +154,7 @@ def ingestion_task(
             last_processed = rows_processed
             # Best-effort telemetry: a progress-connection fault must never
             # fail an otherwise-successful ingestion. Matches FAILED branch.
-            with contextlib.suppress(Exception):
+            try:
                 repo.upsert(
                     TaskProgress(
                         task_id=task_id,
@@ -166,6 +166,15 @@ def ingestion_task(
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                     )
+                )
+            except Exception as telemetry_exc:
+                logger.warning(
+                    "ingestion_progress_upsert_dropped",
+                    task_id=task_id,
+                    lifecycle="running",
+                    processed=rows_processed,
+                    error=str(telemetry_exc),
+                    error_type=type(telemetry_exc).__name__,
                 )
 
         def on_attempt_start() -> None:
@@ -180,19 +189,32 @@ def ingestion_task(
             on_attempt_start=on_attempt_start,
         )
 
-        progress_repo.upsert(
-            TaskProgress(
-                task_id=task_id,
-                task_type=TaskType.INGESTION,
-                status=TaskStatus.COMPLETED,
-                progress_data=_build_completed_progress(
-                    result, total_rows, file_name
-                ),
-                started_at=task_started_at,
-                updated_at=datetime.now(UTC),
-                completed_at=datetime.now(UTC),
+        # Ingest transaction has already committed inside _run_ingest, so a
+        # fault writing COMPLETED must not flip the task to FAILED — that
+        # would make durable data appear lost to the operator. Log on drop.
+        try:
+            progress_repo.upsert(
+                TaskProgress(
+                    task_id=task_id,
+                    task_type=TaskType.INGESTION,
+                    status=TaskStatus.COMPLETED,
+                    progress_data=_build_completed_progress(
+                        result, total_rows, file_name
+                    ),
+                    started_at=task_started_at,
+                    updated_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
+                )
             )
-        )
+        except Exception as telemetry_exc:
+            logger.warning(
+                "ingestion_progress_upsert_dropped",
+                task_id=task_id,
+                lifecycle="completed",
+                playlist_id=result.playlist_id,
+                error=str(telemetry_exc),
+                error_type=type(telemetry_exc).__name__,
+            )
 
         logger.info(
             "ingestion_task_complete",
@@ -221,7 +243,7 @@ def ingestion_task(
             # __context__ replacement. KeyboardInterrupt / SystemExit /
             # GeneratorExit still propagate because they inherit from
             # BaseException. Matches library_scan_task precedent.
-            with contextlib.suppress(Exception):
+            try:
                 progress_repo.upsert(
                     TaskProgress(
                         task_id=task_id,
@@ -238,6 +260,15 @@ def ingestion_task(
                         updated_at=datetime.now(UTC),
                         completed_at=datetime.now(UTC),
                     )
+                )
+            except Exception as telemetry_exc:
+                logger.warning(
+                    "ingestion_progress_upsert_dropped",
+                    task_id=task_id,
+                    lifecycle="failed",
+                    original_error=str(exc),
+                    error=str(telemetry_exc),
+                    error_type=type(telemetry_exc).__name__,
                 )
         logger.warning(
             "ingestion_task_failed",

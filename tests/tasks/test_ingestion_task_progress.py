@@ -402,6 +402,21 @@ class _MidRunFaultRepo(FakeTaskProgressRepository):
         return super().upsert(task)
 
 
+class _CompletedFaultRepo(FakeTaskProgressRepository):
+    """Raises psycopg.OperationalError on the terminal COMPLETED upsert only.
+
+    The ingest transaction commits inside _run_ingest before COMPLETED is
+    written, so a telemetry fault there must not flip the task to FAILED —
+    that would make durable data appear lost to the operator.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if task.status == TaskStatus.COMPLETED:
+            self.received_upserts.append(task)
+            raise psycopg.OperationalError("simulated progress conn drop")
+        return super().upsert(task)
+
+
 class TestIngestionTaskMidRunTelemetryFault:
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=200)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
@@ -453,3 +468,42 @@ class TestIngestionTaskMidRunTelemetryFault:
             and u.progress_data.get("processed", 0) > 0
         ]
         assert len(mid_run_attempts) == 2
+
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_progress_conn_fault_on_completed_does_not_fail_ingestion(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """The ingest transaction commits inside _run_ingest BEFORE the
+        terminal COMPLETED upsert runs. If COMPLETED raises and is not
+        suppressed, the task terminates as FAILED even though the data is
+        already durable in the DB — an operator-facing data-loss illusion.
+        """
+        fault_repo = _CompletedFaultRepo()
+        repo_cls.return_value = fault_repo
+        run_ingest.return_value = _result()
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            # Must NOT raise — the ingest already committed.
+            returned_id = ingestion_task.call_local(
+                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-comp-fault"
+            )
+
+        assert returned_id == "tid-comp-fault"
+        # The COMPLETED attempt was recorded (evidence it fired) but raised,
+        # and the task did NOT fall into the FAILED branch.
+        statuses = [u.status for u in fault_repo.received_upserts]
+        assert TaskStatus.COMPLETED in statuses
+        assert TaskStatus.FAILED not in statuses, (
+            "Suppressed COMPLETED fault must not flip the task to FAILED"
+        )
