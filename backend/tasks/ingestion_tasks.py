@@ -288,31 +288,45 @@ def ingestion_task(
             error_code = "duplicate_playlist"
 
         if progress_repo is not None:
-            # Best-effort FAILED write: a telemetry fault here cannot mask
-            # the original ingestion exception (which is already bound to
-            # `exc` and will re-raise below). _safe_progress_upsert catches
-            # only driver/IO errors so a construction bug still surfaces.
-            _safe_progress_upsert(
-                progress_repo,
-                TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.INGESTION,
-                    status=TaskStatus.FAILED,
-                    progress_data=_build_failed_progress(
-                        exc,
-                        last_processed,
-                        total_rows,
-                        file_name,
-                        error_code=error_code,
+            # Shadow guard: we're already in the top-level error handler
+            # and `exc` is what must propagate. _safe_progress_upsert only
+            # swallows transient driver errors, so a non-transient bug
+            # (IntegrityError, ProgrammingError, etc.) would otherwise
+            # replace `exc` before the `raise` below and hide the real
+            # ingestion failure from the operator. Catch broadly here —
+            # the project rule allows bare Exception at the top-level
+            # error boundary, and that's exactly what this is.
+            try:
+                _safe_progress_upsert(
+                    progress_repo,
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.INGESTION,
+                        status=TaskStatus.FAILED,
+                        progress_data=_build_failed_progress(
+                            exc,
+                            last_processed,
+                            total_rows,
+                            file_name,
+                            error_code=error_code,
+                        ),
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC),
                     ),
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                    completed_at=datetime.now(UTC),
-                ),
-                task_id=task_id,
-                lifecycle="failed",
-                original_error=str(exc),
-            )
+                    task_id=task_id,
+                    lifecycle="failed",
+                    original_error=str(exc),
+                )
+            except Exception as shadow_exc:
+                logger.warning(
+                    "ingestion_progress_upsert_shadow_prevented",
+                    task_id=task_id,
+                    original_error=str(exc),
+                    shadow_error=str(shadow_exc),
+                    shadow_error_type=type(shadow_exc).__name__,
+                    exc_info=True,
+                )
         logger.warning(
             "ingestion_task_failed",
             task_id=task_id,

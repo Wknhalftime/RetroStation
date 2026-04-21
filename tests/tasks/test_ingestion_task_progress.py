@@ -568,6 +568,50 @@ class TestIngestionTaskMidRunTelemetryFault:
         )
 
 
+class _FailedShadowRepo(FakeTaskProgressRepository):
+    """Raises psycopg.IntegrityError (a non-transient, non-caught error)
+    on the terminal FAILED upsert only. Simulates a schema-drift bug in
+    the progress write while ingestion itself is already failing.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if task.status == TaskStatus.FAILED:
+            self.received_upserts.append(task)
+            raise psycopg.IntegrityError("simulated progress schema drift")
+        return super().upsert(task)
+
+
+class TestIngestionTaskFailedShadowGuard:
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_non_transient_progress_fault_in_failed_branch_does_not_shadow_original(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """We're in the outer error handler when the FAILED upsert runs.
+        A non-transient bug there (IntegrityError, ProgrammingError) is
+        outside _PROGRESS_DROP_ERRORS, so without the shadow guard it
+        would replace the original ingestion exception and the operator
+        would see the progress-write bug instead of the real failure.
+        """
+        fault_repo = _FailedShadowRepo()
+        repo_cls.return_value = fault_repo
+        original_error = RuntimeError("real ingestion boom")
+        run_ingest.side_effect = original_error
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with pytest.raises(RuntimeError, match="real ingestion boom"):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-shadow"
+            )
+
+
 class TestProgressDropErrorsCoverage:
     """Lock in which psycopg exception subclasses _PROGRESS_DROP_ERRORS
     must cover. If someone narrows the tuple later, these tests break and
