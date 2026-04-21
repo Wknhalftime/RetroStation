@@ -126,6 +126,11 @@ def ingestion_task(
     task_started_at = datetime.now(UTC)
     last_processed = 0
     total_rows = 0
+    # on_row_processed fires every _PROGRESS_REPORT_INTERVAL=100 rows. A
+    # sustained progress-DB outage on a 100k-row ingest would emit ~1000
+    # warnings-with-tracebacks. Log the first drop fully, then count the
+    # rest; emit one summary on task exit.
+    mid_run_drops = 0
 
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
@@ -168,15 +173,18 @@ def ingestion_task(
                     )
                 )
             except Exception as telemetry_exc:
-                logger.warning(
-                    "ingestion_progress_upsert_dropped",
-                    task_id=task_id,
-                    lifecycle="running",
-                    processed=rows_processed,
-                    error=str(telemetry_exc),
-                    error_type=type(telemetry_exc).__name__,
-                    exc_info=True,
-                )
+                nonlocal mid_run_drops
+                if mid_run_drops == 0:
+                    logger.warning(
+                        "ingestion_progress_upsert_dropped",
+                        task_id=task_id,
+                        lifecycle="running",
+                        processed=rows_processed,
+                        error=str(telemetry_exc),
+                        error_type=type(telemetry_exc).__name__,
+                        exc_info=True,
+                    )
+                mid_run_drops += 1
 
         def on_attempt_start() -> None:
             nonlocal last_processed
@@ -283,6 +291,12 @@ def ingestion_task(
         raise
 
     finally:
+        if mid_run_drops > 1:
+            logger.warning(
+                "ingestion_progress_upsert_dropped_summary",
+                task_id=task_id,
+                dropped=mid_run_drops,
+            )
         if progress_conn is not None:
             progress_conn.close()
 

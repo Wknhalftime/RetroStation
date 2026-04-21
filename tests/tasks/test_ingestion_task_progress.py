@@ -469,6 +469,64 @@ class TestIngestionTaskMidRunTelemetryFault:
         ]
         assert len(mid_run_attempts) == 2
 
+    @patch("backend.tasks.ingestion_tasks.logger")
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=500)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_mid_run_drop_warnings_are_throttled(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+        mock_logger: MagicMock,
+    ) -> None:
+        """During a sustained outage on_row_processed could fire hundreds of
+        times per task. Only the first drop emits a full warning with
+        traceback; subsequent drops increment a counter and the finally
+        block emits one summary record.
+        """
+        fault_repo = _MidRunFaultRepo()
+        repo_cls.return_value = fault_repo
+
+        def drive_callback_many(*_args: Any, **kwargs: Any) -> IngestionResult:
+            cb = kwargs["on_row_processed"]
+            for n in (100, 200, 300, 400, 500):
+                cb(n)
+            return _result(rows=500)
+
+        run_ingest.side_effect = drive_callback_many
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-throttle"
+            )
+
+        warning_events = [
+            call.args[0]
+            for call in mock_logger.warning.call_args_list
+            if call.args
+        ]
+        # Exactly one "running" drop warning (the first), then one summary.
+        running_drops = [e for e in warning_events if e == "ingestion_progress_upsert_dropped"]
+        summaries = [
+            e for e in warning_events if e == "ingestion_progress_upsert_dropped_summary"
+        ]
+        assert len(running_drops) == 1, (
+            f"Expected 1 mid-run drop warning, got {len(running_drops)}"
+        )
+        assert len(summaries) == 1
+        summary_call = [
+            c for c in mock_logger.warning.call_args_list
+            if c.args and c.args[0] == "ingestion_progress_upsert_dropped_summary"
+        ][0]
+        assert summary_call.kwargs["dropped"] == 5
+
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
     @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
