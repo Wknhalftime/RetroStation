@@ -68,10 +68,16 @@ def _build_failed_progress(
     return payload
 
 
-# (psycopg.Error, OSError) covers the realistic telemetry failure modes
-# (driver errors, pool saturation, TCP/socket faults). Narrower than a bare
-# `except Exception` so a bug in TaskProgress construction still surfaces.
-_PROGRESS_DROP_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error, OSError)
+# Only the connectivity/transient subclasses of psycopg.Error, plus OSError
+# for TCP/socket faults. Deliberately excludes IntegrityError,
+# ProgrammingError, DataError, InternalError, and NotSupportedError so
+# schema/constraint/syntax bugs surface loudly instead of being logged and
+# swallowed as "telemetry dropped".
+_PROGRESS_DROP_ERRORS: tuple[type[BaseException], ...] = (
+    psycopg.OperationalError,
+    psycopg.InterfaceError,
+    OSError,
+)
 
 
 def _safe_progress_upsert(

@@ -430,9 +430,10 @@ class TestIngestionTaskMidRunTelemetryFault:
         _count: MagicMock,
     ) -> None:
         """A telemetry-only fault during on_row_processed must NOT abort
-        ingestion. Without contextlib.suppress on the callback, the
-        psycopg.OperationalError propagates through ingest_csv and the
-        task terminates as FAILED, rolling back valid ingestion data.
+        ingestion. Without the try/except _PROGRESS_DROP_ERRORS guard on
+        the callback, psycopg.OperationalError would propagate through
+        ingest_csv and the task would terminate as FAILED, rolling back
+        valid ingestion data.
         """
         fault_repo = _MidRunFaultRepo()
         repo_cls.return_value = fault_repo
