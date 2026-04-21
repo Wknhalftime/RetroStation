@@ -566,3 +566,52 @@ class TestIngestionTaskMidRunTelemetryFault:
         assert TaskStatus.FAILED not in statuses, (
             "Suppressed COMPLETED fault must not flip the task to FAILED"
         )
+
+
+class TestProgressDropErrorsCoverage:
+    """Lock in which psycopg exception subclasses _PROGRESS_DROP_ERRORS
+    must cover. If someone narrows the tuple later, these tests break and
+    force a deliberate reconsideration rather than a silent regression.
+    """
+
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            psycopg.errors.LockNotAvailable,
+            psycopg.errors.QueryCanceled,
+            psycopg.errors.DeadlockDetected,
+            psycopg.errors.ConnectionFailure,
+            psycopg.errors.AdminShutdown,
+            psycopg.errors.CannotConnectNow,
+        ],
+    )
+    def test_transient_subclass_is_caught(
+        self, exc_cls: type[psycopg.Error]
+    ) -> None:
+        from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
+
+        assert issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (
+            f"{exc_cls.__name__} should be caught by _PROGRESS_DROP_ERRORS; "
+            "narrowing the tuple would silently let telemetry faults kill "
+            "ingestion."
+        )
+
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            psycopg.IntegrityError,
+            psycopg.ProgrammingError,
+            psycopg.DataError,
+            psycopg.InternalError,
+            psycopg.NotSupportedError,
+        ],
+    )
+    def test_non_transient_subclass_is_not_caught(
+        self, exc_cls: type[psycopg.Error]
+    ) -> None:
+        from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
+
+        assert not issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (
+            f"{exc_cls.__name__} represents a bug (schema/constraint/syntax) "
+            "and must propagate, not be logged-and-swallowed as telemetry drop."
+        )

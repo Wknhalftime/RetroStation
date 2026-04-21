@@ -68,11 +68,16 @@ def _build_failed_progress(
     return payload
 
 
-# Only the connectivity/transient subclasses of psycopg.Error, plus OSError
-# for TCP/socket faults. Deliberately excludes IntegrityError,
-# ProgrammingError, DataError, InternalError, and NotSupportedError so
-# schema/constraint/syntax bugs surface loudly instead of being logged and
-# swallowed as "telemetry dropped".
+# Transient-failure classes for progress-tracking writes. `OperationalError`
+# is the psycopg base for every connectivity/timeout subclass we care about
+# here: LockNotAvailable (lock_timeout on progress_tracking),
+# QueryCanceled (statement_timeout), DeadlockDetected, ConnectionFailure,
+# AdminShutdown / CrashShutdown, CannotConnectNow, DatabaseDropped, etc.
+# `InterfaceError` covers cursor-closed / driver-state faults. `OSError`
+# covers TCP/socket faults below the driver. Deliberately excludes
+# IntegrityError, ProgrammingError, DataError, InternalError, and
+# NotSupportedError so schema/constraint/syntax bugs surface loudly instead
+# of being logged and swallowed as "telemetry dropped".
 _PROGRESS_DROP_ERRORS: tuple[type[BaseException], ...] = (
     psycopg.OperationalError,
     psycopg.InterfaceError,
