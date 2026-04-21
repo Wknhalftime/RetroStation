@@ -215,6 +215,7 @@ def ingestion_task(
                 playlist_id=result.playlist_id,
                 error=str(telemetry_exc),
                 error_type=type(telemetry_exc).__name__,
+                exc_info=True,
             )
 
         logger.info(
