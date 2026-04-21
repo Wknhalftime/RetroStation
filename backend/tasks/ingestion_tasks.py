@@ -68,6 +68,42 @@ def _build_failed_progress(
     return payload
 
 
+# (psycopg.Error, OSError) covers the realistic telemetry failure modes
+# (driver errors, pool saturation, TCP/socket faults). Narrower than a bare
+# `except Exception` so a bug in TaskProgress construction still surfaces.
+_PROGRESS_DROP_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error, OSError)
+
+
+def _safe_progress_upsert(
+    repo: PgTaskProgressRepository,
+    task_progress: TaskProgress,
+    *,
+    task_id: str,
+    lifecycle: str,
+    **extra: Any,
+) -> bool:
+    """Best-effort progress upsert. Returns True on success, False on drop.
+
+    Keeps the "telemetry must never change ingest outcome" invariant in one
+    place. Callers that need throttling (e.g. mid-run) should implement
+    their own try/except against ``_PROGRESS_DROP_ERRORS`` instead.
+    """
+    try:
+        repo.upsert(task_progress)
+        return True
+    except _PROGRESS_DROP_ERRORS as telemetry_exc:
+        logger.warning(
+            "ingestion_progress_upsert_dropped",
+            task_id=task_id,
+            lifecycle=lifecycle,
+            error=str(telemetry_exc),
+            error_type=type(telemetry_exc).__name__,
+            exc_info=True,
+            **extra,
+        )
+        return False
+
+
 @retry_on_deadlock(max_attempts=3, backoff_seconds=0.5)
 def _run_ingest(
     file_bytes: bytes,
@@ -155,10 +191,11 @@ def ingestion_task(
         )
 
         def on_row_processed(rows_processed: int) -> None:
-            nonlocal last_processed
+            nonlocal last_processed, mid_run_drops
             last_processed = rows_processed
-            # Best-effort telemetry: a progress-connection fault must never
-            # fail an otherwise-successful ingestion. Matches FAILED branch.
+            # Mid-run has its own try/except (not _safe_progress_upsert) to
+            # throttle drop warnings: log only the first fully, count the
+            # rest, emit one summary in `finally`.
             try:
                 repo.upsert(
                     TaskProgress(
@@ -172,8 +209,7 @@ def ingestion_task(
                         updated_at=datetime.now(UTC),
                     )
                 )
-            except Exception as telemetry_exc:
-                nonlocal mid_run_drops
+            except _PROGRESS_DROP_ERRORS as telemetry_exc:
                 if mid_run_drops == 0:
                     logger.warning(
                         "ingestion_progress_upsert_dropped",
@@ -200,31 +236,24 @@ def ingestion_task(
 
         # Ingest transaction has already committed inside _run_ingest, so a
         # fault writing COMPLETED must not flip the task to FAILED — that
-        # would make durable data appear lost to the operator. Log on drop.
-        try:
-            progress_repo.upsert(
-                TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.INGESTION,
-                    status=TaskStatus.COMPLETED,
-                    progress_data=_build_completed_progress(
-                        result, total_rows, file_name
-                    ),
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                    completed_at=datetime.now(UTC),
-                )
-            )
-        except Exception as telemetry_exc:
-            logger.warning(
-                "ingestion_progress_upsert_dropped",
+        # would make durable data appear lost to the operator.
+        _safe_progress_upsert(
+            progress_repo,
+            TaskProgress(
                 task_id=task_id,
-                lifecycle="completed",
-                playlist_id=result.playlist_id,
-                error=str(telemetry_exc),
-                error_type=type(telemetry_exc).__name__,
-                exc_info=True,
-            )
+                task_type=TaskType.INGESTION,
+                status=TaskStatus.COMPLETED,
+                progress_data=_build_completed_progress(
+                    result, total_rows, file_name
+                ),
+                started_at=task_started_at,
+                updated_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            ),
+            task_id=task_id,
+            lifecycle="completed",
+            playlist_id=result.playlist_id,
+        )
 
         logger.info(
             "ingestion_task_complete",
@@ -248,39 +277,31 @@ def ingestion_task(
             error_code = "duplicate_playlist"
 
         if progress_repo is not None:
-            # Suppress Exception (not BaseException) so a best-effort FAILED
-            # write cannot mask the original ingestion exception via PEP 3134
-            # __context__ replacement. KeyboardInterrupt / SystemExit /
-            # GeneratorExit still propagate because they inherit from
-            # BaseException. Matches library_scan_task precedent.
-            try:
-                progress_repo.upsert(
-                    TaskProgress(
-                        task_id=task_id,
-                        task_type=TaskType.INGESTION,
-                        status=TaskStatus.FAILED,
-                        progress_data=_build_failed_progress(
-                            exc,
-                            last_processed,
-                            total_rows,
-                            file_name,
-                            error_code=error_code,
-                        ),
-                        started_at=task_started_at,
-                        updated_at=datetime.now(UTC),
-                        completed_at=datetime.now(UTC),
-                    )
-                )
-            except Exception as telemetry_exc:
-                logger.warning(
-                    "ingestion_progress_upsert_dropped",
+            # Best-effort FAILED write: a telemetry fault here cannot mask
+            # the original ingestion exception (which is already bound to
+            # `exc` and will re-raise below). _safe_progress_upsert catches
+            # only driver/IO errors so a construction bug still surfaces.
+            _safe_progress_upsert(
+                progress_repo,
+                TaskProgress(
                     task_id=task_id,
-                    lifecycle="failed",
-                    original_error=str(exc),
-                    error=str(telemetry_exc),
-                    error_type=type(telemetry_exc).__name__,
-                    exc_info=True,
-                )
+                    task_type=TaskType.INGESTION,
+                    status=TaskStatus.FAILED,
+                    progress_data=_build_failed_progress(
+                        exc,
+                        last_processed,
+                        total_rows,
+                        file_name,
+                        error_code=error_code,
+                    ),
+                    started_at=task_started_at,
+                    updated_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
+                ),
+                task_id=task_id,
+                lifecycle="failed",
+                original_error=str(exc),
+            )
         logger.warning(
             "ingestion_task_failed",
             task_id=task_id,
