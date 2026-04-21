@@ -133,6 +133,8 @@ def ingestion_task(
     try:
         progress_conn = connect_sync(settings.database_url, autocommit=True)
         progress_repo = PgTaskProgressRepository(progress_conn)
+        # Non-optional alias so the row-callback closure doesn't need assert-narrowing.
+        repo = progress_repo
 
         total_rows = count_csv_rows(file_bytes)
 
@@ -150,19 +152,21 @@ def ingestion_task(
         def on_row_processed(rows_processed: int) -> None:
             nonlocal last_processed
             last_processed = rows_processed
-            assert progress_repo is not None
-            progress_repo.upsert(
-                TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.INGESTION,
-                    status=TaskStatus.RUNNING,
-                    progress_data=_build_running_progress(
-                        rows_processed, total_rows, file_name
-                    ),
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
+            # Best-effort telemetry: a progress-connection fault must never
+            # fail an otherwise-successful ingestion. Matches FAILED branch.
+            with contextlib.suppress(Exception):
+                repo.upsert(
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.INGESTION,
+                        status=TaskStatus.RUNNING,
+                        progress_data=_build_running_progress(
+                            rows_processed, total_rows, file_name
+                        ),
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                    )
                 )
-            )
 
         def on_attempt_start() -> None:
             nonlocal last_processed

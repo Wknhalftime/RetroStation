@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.system import TaskProgress
 from backend.services.ingestion_service import (
     CsvDecodeError,
     DuplicatePlaylistError,
@@ -381,3 +382,74 @@ class TestIngestionTaskRetryReset:
         assert terminal.progress_data["processed"] == 0, (
             "on_attempt_start should have reset last_processed to 0"
         )
+
+
+class _MidRunFaultRepo(FakeTaskProgressRepository):
+    """Raises psycopg.OperationalError on mid-run RUNNING upserts only.
+
+    Mid-run = status is RUNNING and progress_data["processed"] > 0. The
+    initial RUNNING (processed=0) and terminal COMPLETED/FAILED upserts
+    still succeed so the lifecycle assertions remain meaningful.
+    """
+
+    def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
+        if (
+            task.status == TaskStatus.RUNNING
+            and task.progress_data.get("processed", 0) > 0
+        ):
+            self.received_upserts.append(task)
+            raise psycopg.OperationalError("simulated progress conn drop")
+        return super().upsert(task)
+
+
+class TestIngestionTaskMidRunTelemetryFault:
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=200)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_progress_conn_fault_mid_run_does_not_fail_ingestion(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """A telemetry-only fault during on_row_processed must NOT abort
+        ingestion. Without contextlib.suppress on the callback, the
+        psycopg.OperationalError propagates through ingest_csv and the
+        task terminates as FAILED, rolling back valid ingestion data.
+        """
+        fault_repo = _MidRunFaultRepo()
+        repo_cls.return_value = fault_repo
+
+        def drive_callback_twice(*_args: Any, **kwargs: Any) -> IngestionResult:
+            cb = kwargs["on_row_processed"]
+            cb(100)  # first fault injection
+            cb(200)  # second — must still proceed
+            return _result(rows=200)
+
+        run_ingest.side_effect = drive_callback_twice
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with patch(
+            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
+        ):
+            ingestion_task.call_local(
+                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-fault"
+            )
+
+        terminal = fault_repo.received_upserts[-1]
+        assert terminal.status == TaskStatus.COMPLETED, (
+            "Telemetry fault must not flip ingestion to FAILED"
+        )
+        assert terminal.progress_data["processed"] == 200
+        # Both mid-run attempts were recorded by the fault repo (as evidence
+        # the callback did fire twice) even though both upserts raised.
+        mid_run_attempts = [
+            u
+            for u in fault_repo.received_upserts
+            if u.status == TaskStatus.RUNNING
+            and u.progress_data.get("processed", 0) > 0
+        ]
+        assert len(mid_run_attempts) == 2
