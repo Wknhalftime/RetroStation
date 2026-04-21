@@ -175,6 +175,7 @@ def ingestion_task(
                     processed=rows_processed,
                     error=str(telemetry_exc),
                     error_type=type(telemetry_exc).__name__,
+                    exc_info=True,
                 )
 
         def on_attempt_start() -> None:
@@ -269,6 +270,7 @@ def ingestion_task(
                     original_error=str(exc),
                     error=str(telemetry_exc),
                     error_type=type(telemetry_exc).__name__,
+                    exc_info=True,
                 )
         logger.warning(
             "ingestion_task_failed",
