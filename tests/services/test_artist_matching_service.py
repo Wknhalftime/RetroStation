@@ -355,8 +355,12 @@ def test_characterize_try_mb_match_high_score_insufficient_gap_needs_review() ->
     stored = artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    # Current behavior: canonical IS upserted even when status is NEEDS_REVIEW.
+    # Current behavior: ONLY the top MB candidate is upserted (not the runner-up),
+    # even when status is NEEDS_REVIEW. Pinning both sides so a future change that
+    # starts bulk-upserting all candidates is visible.
     assert catalog_repo.get_by_id("mbid-ozzy-a") is not None
+    assert catalog_repo.get_by_id("mbid-ozzy-b") is None
+    assert len(catalog_repo.list_all()) == 1
     # Current behavior: NO Match row on NEEDS_REVIEW from MB.
     assert match_repo.get_by_artist(artist.id) is None
 
