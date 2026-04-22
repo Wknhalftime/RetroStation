@@ -21,7 +21,11 @@ from backend.domain.broadcast import (
 )
 from backend.domain.enums import EnrichmentStatus, MatchStatus
 from backend.domain.library import LibraryFile
-from backend.routers.matching import _compute_triage_bucket
+from backend.routers.matching import (
+    QueueIdentity,
+    _artist_bucket_from_identities,
+    _compute_triage_bucket,
+)
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE
 
 # ---------------------------------------------------------------------------
@@ -484,3 +488,206 @@ class TestMatchingRun:
 )
 def test_compute_triage_bucket_boundary(score: float | None, expected: str) -> None:
     assert _compute_triage_bucket(score) == expected
+
+
+# ---------------------------------------------------------------------------
+# TestArtistBucketReduction  (pure unit — no DB required)
+# ---------------------------------------------------------------------------
+
+
+def _identity(bucket: str) -> QueueIdentity:
+    return QueueIdentity(
+        id=uuid4(),
+        original_title="x",
+        normalized_title="x",
+        match_status="needs_review",
+        match_tier=None,
+        confidence_score=None,
+        triage_bucket=bucket,  # type: ignore[arg-type]
+    )
+
+
+class TestArtistBucketReduction:
+    def test_empty_returns_blocked(self) -> None:
+        assert _artist_bucket_from_identities([]) == "blocked"
+
+    def test_any_quick_review_wins(self) -> None:
+        ids = [
+            _identity("needs_attention"),
+            _identity("quick_review"),
+            _identity("blocked"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "quick_review"
+
+    def test_needs_attention_wins_over_blocked(self) -> None:
+        ids = [_identity("blocked"), _identity("needs_attention")]
+        assert _artist_bucket_from_identities(ids) == "needs_attention"
+
+    def test_all_blocked_returns_blocked(self) -> None:
+        ids = [_identity("blocked"), _identity("blocked")]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# TestQueueResponseShape  (integration — requires DB)
+# ---------------------------------------------------------------------------
+
+
+def _insert_match_row(
+    conn: psycopg.Connection,
+    identity: BroadcastTrackIdentity,
+    confidence_score: float,
+) -> None:
+    """Insert a matches row for the given identity."""
+    conn.execute(
+        """
+        INSERT INTO matches (id, identity_id, target_type, confidence_score, match_tier)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (uuid4(), identity.id, "library_file", confidence_score, "vector"),
+    )
+    conn.commit()
+
+
+class TestQueueResponseShape:
+    def test_triage_bucket_quick_review_from_confidence(self, client, db_conn):
+        """Identity with confidence_score=72.0 → quick_review bucket."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        _insert_match_row(db_conn, identity, confidence_score=72.0)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        qi = item["identities"][0]
+        assert qi["confidence_score"] == pytest.approx(72.0, abs=1e-4)
+        assert qi["triage_bucket"] == "quick_review"
+        assert item["triage_bucket"] == "quick_review"
+
+    def test_triage_bucket_needs_attention(self, client, db_conn):
+        """Identity with confidence_score=55.0 → needs_attention bucket."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        _insert_match_row(db_conn, identity, confidence_score=55.0)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["identities"][0]["triage_bucket"] == "needs_attention"
+        assert item["triage_bucket"] == "needs_attention"
+
+    def test_triage_bucket_blocked_no_match(self, client, db_conn):
+        """Identity with no matches row → confidence_score=None → blocked."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        qi = item["identities"][0]
+        assert qi["confidence_score"] is None
+        assert qi["triage_bucket"] == "blocked"
+        assert item["triage_bucket"] == "blocked"
+
+    def test_distinct_on_prevents_row_multiplication(self, client, db_conn):
+        """DISTINCT ON: 3 matches rows for 1 identity must produce 1 identity in response."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        # Insert 3 match rows for the same identity
+        for score in (72.0, 60.0, 45.0):
+            _insert_match_row(db_conn, identity, confidence_score=score)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert len(item["identities"]) == 1
+        # Most-recent match row wins (DISTINCT ON ordered by created_at DESC NULLS LAST)
+        # All three were inserted in the same tx so exact score is driver-dependent;
+        # the important invariant is exactly one identity row.
+
+    def test_reason_code_detail_propagated(self, client, db_conn):
+        """reason_code + reason_detail appear on both identity and artist."""
+        # Insert artist with reason columns
+        db_conn.execute(
+            """
+            INSERT INTO broadcast_artists (
+                id, original_name, normalized_name, match_status,
+                reason_code, reason_detail
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                (aid := uuid4()),
+                "Reason Artist",
+                "reason artist",
+                "needs_review",
+                "no_candidates",
+                "No MusicBrainz candidates found",
+            ),
+        )
+        # Insert identity with reason columns
+        db_conn.execute(
+            """
+            INSERT INTO track_identities (
+                id, broadcast_artist_id, original_title, normalized_title,
+                normalized_signature, match_status, reason_code, reason_detail
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                uuid4(),
+                aid,
+                "Reason Song",
+                "reason song",
+                f"reason artist:reason song:{uuid4().hex}",
+                "needs_review",
+                "low_confidence",
+                "Score below threshold",
+            ),
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        item = next(i for i in items if i["original_name"] == "Reason Artist")
+        assert item["reason_code"] == "no_candidates"
+        assert item["reason_detail"] == "No MusicBrainz candidates found"
+        assert item["identities"][0]["reason_code"] == "low_confidence"
+        assert item["identities"][0]["reason_detail"] == "Score below threshold"
+
+    def test_bucket_filter_quick_review(self, client, db_conn):
+        """bucket=quick_review filters out blocked/needs_attention artists."""
+        # Artist 1: quick_review (has match at 72.0)
+        _, _, artist1, identity1, _ = _seed_review_chain(db_conn, artist_name="Artist QR")
+        _insert_match_row(db_conn, identity1, confidence_score=72.0)
+
+        # Artist 2: blocked (no match)
+        _insert_artist(db_conn, original_name="Artist Blocked")
+
+        resp = client.get("/api/v1/matching/queue?bucket=quick_review")
+        assert resp.status_code == 200
+        data = resp.json()
+        # total reflects pre-filter count; items are filtered
+        assert data["total"] == 2
+        assert len(data["items"]) == 1
+        assert data["items"][0]["triage_bucket"] == "quick_review"
+
+    def test_bucket_filter_blocked(self, client, db_conn):
+        """bucket=blocked returns only blocked artists."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        # No match → blocked
+        _insert_artist(db_conn, original_name="Also Blocked")
+
+        resp = client.get("/api/v1/matching/queue?bucket=blocked")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(i["triage_bucket"] == "blocked" for i in data["items"])
+
+    def test_existing_queue_fields_still_present(self, client, db_conn):
+        """Regression: original_name, candidates, identities.match_status still returned."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn, with_candidates=True)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["original_name"] == "Review Artist"
+        assert item["candidates"] is not None
+        assert item["identities"][0]["match_status"] == "pending"

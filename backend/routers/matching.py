@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,7 +28,10 @@ _PROTECTED_STATUSES: list[str] = [
 ]
 
 
-def _compute_triage_bucket(score: float | None) -> str:
+TriageBucket = Literal["quick_review", "needs_attention", "blocked"]
+
+
+def _compute_triage_bucket(score: float | None) -> TriageBucket:
     """Single canonical triage implementation. Import and test directly — never
     reimplement.
 
@@ -44,6 +47,25 @@ def _compute_triage_bucket(score: float | None) -> str:
     return "needs_attention"
 
 
+def _artist_bucket_from_identities(
+    identities: list[QueueIdentity],
+) -> TriageBucket:
+    """Reduce identity-level triage to an artist-level headline.
+
+    Surfaces the most actionable child: if any identity is quick_review, the
+    artist is quick_review (curator can start there). Otherwise the priority
+    is needs_attention then blocked. Empty identity list → "blocked".
+    """
+    if not identities:
+        return "blocked"
+    buckets = {i.triage_bucket for i in identities}
+    if "quick_review" in buckets:
+        return "quick_review"
+    if "needs_attention" in buckets:
+        return "needs_attention"
+    return "blocked"
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -57,6 +79,10 @@ class QueueIdentity(BaseModel):
     normalized_title: str
     match_status: str
     match_tier: str | None
+    confidence_score: float | None = None
+    triage_bucket: TriageBucket
+    reason_code: str | None = None
+    reason_detail: str | None = None
 
 
 class QueueArtist(BaseModel):
@@ -66,6 +92,9 @@ class QueueArtist(BaseModel):
     original_name: str
     normalized_name: str
     match_status: str
+    reason_code: str | None = None
+    reason_detail: str | None = None
+    triage_bucket: TriageBucket
     candidates: list[dict[str, Any]] | None
     identities: list[QueueIdentity]
 
@@ -109,17 +138,15 @@ async def get_matching_queue(
     _token: Token,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    bucket: TriageBucket | None = Query(default=None),  # noqa: B008
 ) -> MatchingQueue:
     """Return paginated artists that need curator review.
 
-    Args:
-        conn: Async database connection.
-        _token: Bearer token (auth check only).
-        limit: Maximum number of artists to return (1-500, default 50).
-        offset: Number of items to skip (default 0).
+    triage_bucket is computed per-identity from confidence_score (sourced via
+    LEFT JOIN on matches) and per-artist as the best-of-children reduction.
 
-    Returns:
-        :class:`MatchingQueue` with artist items and total count.
+    bucket filter applies AFTER triage computation in Python — SQL-side
+    filtering is not possible without materialising triage in the query.
     """
     count_cur = await conn.execute(
         "SELECT COUNT(*) AS total FROM broadcast_artists WHERE match_status = ANY(%s)",
@@ -130,7 +157,8 @@ async def get_matching_queue(
 
     artists_cur = await conn.execute(
         """
-        SELECT id, original_name, normalized_name, match_status, artist_candidates
+        SELECT id, original_name, normalized_name, match_status,
+               artist_candidates, reason_code, reason_detail
         FROM broadcast_artists
         WHERE match_status = ANY(%s)
         ORDER BY created_at
@@ -147,19 +175,24 @@ async def get_matching_queue(
 
     identities_cur = await conn.execute(
         """
-        SELECT id, broadcast_artist_id, original_title, normalized_title, match_status, match_tier
-        FROM track_identities
-        WHERE broadcast_artist_id = ANY(%s)
-        ORDER BY original_title
+        SELECT DISTINCT ON (ti.id)
+               ti.id, ti.broadcast_artist_id, ti.original_title,
+               ti.normalized_title, ti.match_status, ti.match_tier,
+               ti.reason_code, ti.reason_detail,
+               m.confidence_score
+        FROM track_identities ti
+        LEFT JOIN matches m ON m.identity_id = ti.id
+        WHERE ti.broadcast_artist_id = ANY(%s)
+        ORDER BY ti.id, m.created_at DESC NULLS LAST
         """,
         (artist_ids,),
     )
     identity_rows = await identities_cur.fetchall()
 
-    # Group identities by broadcast_artist_id in Python
     identities_by_artist: dict[UUID, list[QueueIdentity]] = {}
     for irow in identity_rows:
         aid = irow["broadcast_artist_id"]
+        cs: float | None = irow.get("confidence_score")
         identities_by_artist.setdefault(aid, []).append(
             QueueIdentity(
                 id=irow["id"],
@@ -167,6 +200,10 @@ async def get_matching_queue(
                 normalized_title=irow["normalized_title"],
                 match_status=irow["match_status"],
                 match_tier=irow.get("match_tier"),
+                confidence_score=cs,
+                triage_bucket=_compute_triage_bucket(cs),
+                reason_code=irow.get("reason_code"),
+                reason_detail=irow.get("reason_detail"),
             )
         )
 
@@ -178,17 +215,24 @@ async def get_matching_queue(
             candidates: list[dict[str, Any]] | None = json.loads(raw_candidates)
         else:
             candidates = raw_candidates
-
+        identities = identities_by_artist.get(row["id"], [])
+        artist_bucket = _artist_bucket_from_identities(identities)
         items.append(
             QueueArtist(
                 id=row["id"],
                 original_name=row["original_name"],
                 normalized_name=row["normalized_name"],
                 match_status=row["match_status"],
+                reason_code=row.get("reason_code"),
+                reason_detail=row.get("reason_detail"),
+                triage_bucket=artist_bucket,
                 candidates=candidates,
-                identities=identities_by_artist.get(row["id"], []),
+                identities=identities,
             )
         )
+
+    if bucket is not None:
+        items = [it for it in items if it.triage_bucket == bucket]
 
     return MatchingQueue(items=items, total=total)
 
