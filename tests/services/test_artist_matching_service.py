@@ -261,10 +261,19 @@ def test_characterize_try_fuzzy_match_reason_string_currently_unset() -> None:
 
     canonical = Artist(id="mbid-metallica", name="Metallica", sort_name="Metallica")
 
-    _try_fuzzy_match(
+    result = _try_fuzzy_match(
         artist, [canonical], artist_repo, match_repo,
         mb_auto_link_score=95, mb_score_gap=10,
     )
+
+    # Anchor the baseline: fuzzy must have actually run (NEEDS_REVIEW band).
+    # Without these pins the reason-field assertions below would still pass
+    # if _try_fuzzy_match regressed to a no-op that never touches status.
+    assert result is True
+    stored = artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert match_repo.get_by_artist(artist.id) is None
 
     # update_match_status was called with only (id, status) — the reason kwargs
     # default to None, and the fake stores whatever the caller passed.
