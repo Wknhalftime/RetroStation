@@ -44,6 +44,9 @@ artist_base AS (
     WHERE match_status = ANY(%s)
 ),
 identity_best AS (
+    -- Mirrors _artist_bucket_from_identities: only review-relevant identities
+    -- contribute to the artist bucket so resolved children (AUTO_MATCHED,
+    -- MANUAL_*, *_REJECTED) cannot inflate the headline.
     SELECT DISTINCT ON (ti.id)
            ti.id AS identity_id,
            ti.broadcast_artist_id,
@@ -51,6 +54,7 @@ identity_best AS (
     FROM track_identities ti
     LEFT JOIN matches m ON m.identity_id = ti.id
     WHERE ti.broadcast_artist_id IN (SELECT id FROM artist_base)
+      AND ti.match_status = ANY(%s)
     ORDER BY ti.id,
              m.confidence_score DESC NULLS LAST,
              m.created_at       DESC NULLS LAST,
@@ -97,13 +101,18 @@ def _artist_bucket_from_identities(
 ) -> TriageBucket:
     """Reduce identity-level triage to an artist-level headline.
 
-    Surfaces the most actionable child: if any identity is quick_review, the
-    artist is quick_review (curator can start there). Otherwise the priority
-    is needs_attention then blocked. Empty identity list → "blocked".
+    Only identities whose own ``match_status`` is still review-relevant
+    (PENDING / NEEDS_REVIEW) contribute to the bucket — resolved children
+    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) represent work the curator has
+    already completed and must not inflate the headline. Within the
+    review-relevant subset, the reduction surfaces the most actionable child:
+    quick_review > needs_attention > blocked. If there are no review-relevant
+    children, the artist is "blocked".
     """
-    if not identities:
+    review_relevant = [i for i in identities if i.match_status in _QUEUE_STATUSES]
+    if not review_relevant:
         return "blocked"
-    buckets = {i.triage_bucket for i in identities}
+    buckets = {i.triage_bucket for i in review_relevant}
     if "quick_review" in buckets:
         return "quick_review"
     if "needs_attention" in buckets:
@@ -209,7 +218,7 @@ async def get_matching_queue(
         ORDER BY created_at, id
         LIMIT %s OFFSET %s
         """,
-        (_QUEUE_STATUSES, bucket, bucket, limit, offset),
+        (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket, limit, offset),
     )
     artist_rows = await page_cur.fetchall()
 
@@ -221,7 +230,7 @@ async def get_matching_queue(
             SELECT COUNT(*) AS total FROM artist_bucket
             WHERE %s::text IS NULL OR bucket = %s::text
             """,
-            (_QUEUE_STATUSES, bucket, bucket),
+            (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket),
         )
         count_row = await count_cur.fetchone()
         total = count_row["total"] if count_row else 0

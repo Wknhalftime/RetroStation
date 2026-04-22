@@ -495,12 +495,12 @@ def test_compute_triage_bucket_boundary(score: float | None, expected: str) -> N
 # ---------------------------------------------------------------------------
 
 
-def _identity(bucket: str) -> QueueIdentity:
+def _identity(bucket: str, match_status: str = "needs_review") -> QueueIdentity:
     return QueueIdentity(
         id=uuid4(),
         original_title="x",
         normalized_title="x",
-        match_status="needs_review",
+        match_status=match_status,
         match_tier=None,
         confidence_score=None,
         triage_bucket=bucket,  # type: ignore[arg-type]
@@ -526,6 +526,32 @@ class TestArtistBucketReduction:
     def test_all_blocked_returns_blocked(self) -> None:
         ids = [_identity("blocked"), _identity("blocked")]
         assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_resolved_identities_do_not_inflate_bucket(self) -> None:
+        # AUTO_MATCHED + MANUAL_* + *_REJECTED children represent completed
+        # curator work and must not contaminate the artist-level headline.
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("quick_review", match_status="manual_matched"),
+            _identity("blocked", match_status="auto_rejected"),
+            _identity("blocked", match_status="needs_review"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_all_children_resolved_returns_blocked(self) -> None:
+        # No review-relevant children at all → "blocked" (same as empty list).
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("quick_review", match_status="manual_matched"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_review_relevant_identity_still_drives_bucket(self) -> None:
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("needs_attention", match_status="pending"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "needs_attention"
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +680,38 @@ class TestQueueResponseShape:
         assert item["reason_detail"] == "No MusicBrainz candidates found"
         assert item["identities"][0]["reason_code"] == "LOW_CONFIDENCE"
         assert item["identities"][0]["reason_detail"] == "Score below threshold"
+
+    def test_resolved_children_do_not_contaminate_artist_bucket(self, client, db_conn):
+        """Integration: AUTO_MATCHED identity at score 72 must not lift a
+        NEEDS_REVIEW artist to quick_review. The Python reducer and the SQL
+        CTE both need to exclude resolved children. Exercises both paths via
+        the unfiltered and bucket=blocked queries."""
+        _, _, artist, identity_review, _ = _seed_review_chain(
+            db_conn, artist_name="Mixed Children Artist"
+        )
+        # Low-score review-relevant child → blocked
+        _insert_match_row(db_conn, identity_review, confidence_score=45.0)
+        # High-score AUTO_MATCHED child (would be "quick_review" if counted)
+        identity_matched = _insert_identity(
+            db_conn, artist, original_title="Resolved Song",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_match_row(db_conn, identity_matched, confidence_score=95.0)
+
+        # Python-side bucket computation (no ?bucket=)
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = next(
+            i for i in resp.json()["items"] if i["original_name"] == "Mixed Children Artist"
+        )
+        assert item["triage_bucket"] == "blocked"
+
+        # SQL-side bucket filter (?bucket=blocked) — the artist must survive
+        # the filter, proving the SQL CTE excludes the resolved child.
+        resp_filtered = client.get("/api/v1/matching/queue?bucket=blocked")
+        assert resp_filtered.status_code == 200
+        names = [i["original_name"] for i in resp_filtered.json()["items"]]
+        assert "Mixed Children Artist" in names
 
     def test_bucket_filter_quick_review(self, client, db_conn):
         """bucket=quick_review filters out blocked/needs_attention artists."""
