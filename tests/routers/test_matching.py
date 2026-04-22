@@ -665,8 +665,8 @@ class TestQueueResponseShape:
         resp = client.get("/api/v1/matching/queue?bucket=quick_review")
         assert resp.status_code == 200
         data = resp.json()
-        # total reflects pre-filter count; items are filtered
-        assert data["total"] == 2
+        # total reflects the filtered bucket count so LIMIT/OFFSET stays coherent
+        assert data["total"] == 1
         assert len(data["items"]) == 1
         assert data["items"][0]["triage_bucket"] == "quick_review"
 
