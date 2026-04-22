@@ -25,6 +25,24 @@ class LibraryFileRepository(ABC):
     def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]: ...
 
     @abstractmethod
+    def search_by_artist_name(
+        self, normalized_name: str, limit: int = 100
+    ) -> list[LibraryFile]:
+        """Return library files whose artist name matches normalized_name by
+        substring (case-insensitive). Used by BroadcastToLocalStrategy when the
+        artist MBID is not yet confirmed. Pre-filter step — the calling strategy
+        scores with rapidfuzz.
+        """
+        ...
+
+    @abstractmethod
+    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
+        """Return the single library file whose recording_mbid matches, or None.
+        Used by ResolvedArtistMbidStrategy Step B after MB recording search.
+        """
+        ...
+
+    @abstractmethod
     def update_recording_link(
         self,
         file_id: UUID,

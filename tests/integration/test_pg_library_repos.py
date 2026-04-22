@@ -305,6 +305,64 @@ def test_create_write_only_inserts_quarantine(migrated_db: str) -> None:
         assert result.error_message == "Corrupt header"
 
 
+def _make_file_named(
+    *,
+    file_path: str,
+    artist_name: str | None,
+    recording_mbid: str | None = None,
+) -> LibraryFile:
+    return LibraryFile(
+        id=uuid4(),
+        file_path=file_path,
+        file_hash="hash-" + file_path,
+        format="mp3",
+        enrichment_status=EnrichmentStatus.PENDING,
+        audio=AudioMetadata(
+            artist_name=artist_name,
+            recording_mbid=recording_mbid,
+        ),
+    )
+
+
+def test_search_by_artist_name_pg(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        seeds = [
+            ("/p/1.mp3", "Prince", "rec-a"),
+            ("/p/2.mp3", "Prince Buster", None),
+            ("/p/3.mp3", "Madonna", None),
+        ]
+        for path, name, mbid in seeds:
+            repo.upsert(
+                _make_file_named(file_path=path, artist_name=name, recording_mbid=mbid),
+            )
+        conn.commit()
+
+        hits = repo.search_by_artist_name("prince", limit=10)
+        assert {h.audio.artist_name for h in hits} == {"Prince", "Prince Buster"}
+
+        # Limit is honored.
+        assert len(repo.search_by_artist_name("prince", limit=1)) == 1
+
+
+def test_get_by_recording_mbid_pg(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        repo.upsert(
+            _make_file_named(
+                file_path="/r/purple_rain.mp3",
+                artist_name="Prince",
+                recording_mbid="rec-purple-rain",
+            ),
+        )
+        conn.commit()
+
+        got = repo.get_by_recording_mbid("rec-purple-rain")
+        assert got is not None
+        assert got.audio.artist_name == "Prince"
+        assert repo.get_by_recording_mbid("rec-missing") is None
+
+
 def test_create_write_only_appears_in_list_all(migrated_db: str) -> None:
     """Entries from create_write_only should appear in list_all."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:

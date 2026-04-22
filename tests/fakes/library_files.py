@@ -38,6 +38,22 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.audio.artist_mbid == artist_mbid]
 
+    def search_by_artist_name(
+        self, normalized_name: str, limit: int = 100,
+    ) -> list[LibraryFile]:
+        needle = normalized_name.strip().lower()
+        hits = [
+            f for f in self._data.values()
+            if needle in (f.audio.artist_name or "").lower()
+        ]
+        return hits[:limit]
+
+    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
+        for f in self._data.values():
+            if f.audio.recording_mbid == recording_mbid:
+                return f
+        return None
+
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         return [
             f for f in self._data.values()

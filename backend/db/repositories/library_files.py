@@ -277,6 +277,27 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def search_by_artist_name(
+        self, normalized_name: str, limit: int = 100,
+    ) -> list[LibraryFile]:
+        needle = f"%{normalized_name.lower().strip()}%"
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE LOWER(TRIM(artist_name)) LIKE %s
+               LIMIT %s""",
+            (needle, limit),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
+        row = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE recording_mbid = %s
+               LIMIT 1""",
+            (recording_mbid,),
+        ).fetchone()
+        return self._row_to_model(row) if row else None
+
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
