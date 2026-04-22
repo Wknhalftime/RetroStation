@@ -600,9 +600,10 @@ class TestQueueResponseShape:
         assert resp.status_code == 200
         item = resp.json()["items"][0]
         assert len(item["identities"]) == 1
-        # Most-recent match row wins (DISTINCT ON ordered by created_at DESC NULLS LAST)
-        # All three were inserted in the same tx so exact score is driver-dependent;
-        # the important invariant is exactly one identity row.
+        # DISTINCT ON picks highest confidence_score first, then newest created_at,
+        # then highest id as a final deterministic tie-breaker. All three match rows
+        # were inserted in the same tx, so the exact winner is ordering-dependent;
+        # the important invariant here is exactly one identity row.
 
     def test_reason_code_detail_propagated(self, client, db_conn):
         """reason_code + reason_detail appear on both identity and artist."""

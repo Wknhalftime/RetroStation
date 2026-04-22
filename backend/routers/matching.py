@@ -197,7 +197,7 @@ async def get_matching_queue(
         )
         SELECT *, COUNT(*) OVER () AS _total
         FROM filtered
-        ORDER BY created_at
+        ORDER BY created_at, id
         LIMIT %s OFFSET %s
         """,
         (_QUEUE_STATUSES, bucket, bucket, limit, offset),
