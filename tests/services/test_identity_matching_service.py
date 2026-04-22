@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import pytest
+
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
@@ -196,6 +198,7 @@ def test_characterize_tier0_rule_match_empty_work_id_returns_empty_string() -> N
 #
 # Empirical rapidfuzz.ratio (both operands already normalized):
 #   "enter sandman" vs "enter sandman"        → 100.0  AUTO / MB_ID_EXACT
+#   "enter sandman" vs "enter sandmen"        → 92.31  AUTO / NORMALIZATION (80–94)
 #   "enter sandman" vs "enormous sandyman"    → 73.33  NEEDS_REVIEW band
 
 
@@ -267,6 +270,57 @@ def test_characterize_tier2_mbid_match_high_confidence_auto_matches() -> None:
     assert created.confidence_score == 100.0
 
 
+def test_characterize_tier2_mbid_match_mid_high_confidence_auto_normalization() -> None:
+    """Empirical: ratio("enter sandman", "enter sandmen") = 92.31 → 80–94 band.
+
+    Tier = NORMALIZATION (not MUSICBRAINZ_ID_EXACT), status = AUTO_MATCHED.
+    This differs from the >=95 band on tier only — pins the distinct branch so
+    PR 3/4 changes to tier/threshold selection are visible.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+
+    canonical_mbid = "mbid-metallica"
+    broadcast_artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    identity = _pending_identity(
+        artist_id=broadcast_artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    identity_repo.upsert(identity)
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandmen.flac",
+        artist_mbid=canonical_mbid,
+        track_title="Enter Sandmen",
+        work_id="work-sandmen",
+    )
+    lib_repo.upsert(lib_file)
+
+    result = _try_tier2_mbid_match(
+        identity, artist_repo, lib_repo, match_repo, identity_repo
+    )
+
+    assert result is not None
+    status, work_id = result
+    assert status == MatchStatus.AUTO_MATCHED
+    assert work_id == "work-sandmen"
+
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert stored.match_tier == MatchTier.NORMALIZATION
+
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+    assert created.match_tier == MatchTier.NORMALIZATION
+    assert created.confidence_score == pytest.approx(92.31, abs=0.01)
+
+
 def test_characterize_tier2_mbid_match_mid_confidence_needs_review() -> None:
     """Empirical: ratio("enter sandman", "enormous sandyman") = 73.33 → mid band."""
     artist_repo = FakeBroadcastArtistRepository()
@@ -312,6 +366,8 @@ def test_characterize_tier2_mbid_match_mid_confidence_needs_review() -> None:
     assert created is not None
     assert created.library_file_id == lib_file.id
     assert created.match_tier == MatchTier.NORMALIZATION
+    # Pin the empirical score so scoring drift within the same band is visible.
+    assert created.confidence_score == pytest.approx(73.33, abs=0.01)
 
 
 def test_characterize_tier2_mbid_match_no_files_returns_none() -> None:

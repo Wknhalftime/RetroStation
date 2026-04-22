@@ -197,6 +197,34 @@ def test_characterize_try_fuzzy_match_high_confidence_auto_matches() -> None:
     assert created.confidence_score == 94
 
 
+def test_characterize_try_fuzzy_match_high_score_insufficient_gap_needs_review() -> None:
+    """Both canonicals score >=95 with gap < score_gap → NEEDS_REVIEW, no Match.
+
+    Pins the `score >= auto_link_score AND gap < score_gap` branch of
+    `_apply_thresholds` on the fuzzy call path. Two identical canonical names
+    against the same query give score=100, gap=0 — firmly in this branch.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    artist = _pending_artist("Metallica")
+    artist_repo.upsert(artist)
+
+    canonical_a = Artist(id="mbid-metallica-a", name="Metallica", sort_name="Metallica")
+    canonical_b = Artist(id="mbid-metallica-b", name="Metallica", sort_name="Metallica")
+
+    result = _try_fuzzy_match(
+        artist, [canonical_a, canonical_b], artist_repo, match_repo,
+        mb_auto_link_score=95, mb_score_gap=10,
+    )
+
+    assert result is True
+    stored = artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    # Current behavior: high-score-but-ambiguous yields NO Match row.
+    assert match_repo.get_by_artist(artist.id) is None
+
+
 def test_characterize_try_fuzzy_match_mid_confidence_needs_review() -> None:
     """Score 77 → NEEDS_REVIEW band (60–79); NO Match row is written."""
     artist_repo = FakeBroadcastArtistRepository()
@@ -284,6 +312,44 @@ def test_characterize_try_mb_match_hit() -> None:
     assert created.target_type == TargetType.ARTIST
     assert created.match_tier == MatchTier.MUSICBRAINZ_API
     assert created.confidence_score == 100
+
+
+def test_characterize_try_mb_match_high_score_insufficient_gap_needs_review() -> None:
+    """Top MB candidate >= auto_link_score but gap < mb_score_gap.
+
+    Pins the distinct NEEDS_REVIEW/NORMALIZATION branch of `_apply_thresholds`
+    on the MB call path: the canonical artist IS upserted into the catalog
+    and status IS updated, but NO Match row is written. Without this pin,
+    a refactor that starts writing a Match row here would go undetected.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    catalog_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    artist = _pending_artist("OZZY OSBOURNE")
+    artist_repo.upsert(artist)
+
+    mb_client = FakeMbClient(responses={
+        "OZZY OSBOURNE": [
+            {"id": "mbid-ozzy-a", "name": "Ozzy Osbourne",
+             "sort-name": "Osbourne, Ozzy", "score": 97},
+            {"id": "mbid-ozzy-b", "name": "Ozzy Osbourne (tribute)",
+             "sort-name": "Osbourne, Ozzy", "score": 96},
+        ],
+    })
+
+    result = _try_mb_match(
+        artist, mb_client, catalog_repo, artist_repo, match_repo,
+        mb_auto_link_score=95, mb_score_gap=10,
+    )
+
+    assert result is True
+    stored = artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    # Current behavior: canonical IS upserted even when status is NEEDS_REVIEW.
+    assert catalog_repo.get_by_id("mbid-ozzy-a") is not None
+    # Current behavior: NO Match row on NEEDS_REVIEW from MB.
+    assert match_repo.get_by_artist(artist.id) is None
 
 
 def test_characterize_try_mb_match_miss() -> None:
