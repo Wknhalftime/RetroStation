@@ -3,6 +3,7 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
+from backend.services.matching_reasons import ReasonCode
 
 
 class BroadcastTrackIdentityRepository(ABC):
@@ -36,8 +37,18 @@ class BroadcastTrackIdentityRepository(ABC):
         self,
         identity_id: UUID,
         status: MatchStatus,
-        tier: MatchTier,
-    ) -> None: ...
+        tier: MatchTier | None = None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> None:
+        """Update match status plus optional reason metadata.
+
+        tier may be None when the status does not imply a classification tier
+        (e.g. NEEDS_REVIEW). reason_code / reason_detail default to None —
+        existing callers compile unchanged. Passing None explicitly clears any
+        previously-persisted reason.
+        """
+        ...
 
     @abstractmethod
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None: ...
