@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from backend.dependencies import get_current_token, get_db_connection
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.services.matching_constants import MIN_PRESENTATION_SCORE
 from backend.tasks.artist_matching_tasks import artist_matching_task
 
 router = APIRouter()
@@ -25,6 +26,22 @@ _PROTECTED_STATUSES: list[str] = [
     MatchStatus.MANUAL_MATCHED.value,
     MatchStatus.MANUAL_REJECTED.value,
 ]
+
+
+def _compute_triage_bucket(score: float | None) -> str:
+    """Single canonical triage implementation. Import and test directly — never
+    reimplement.
+
+    score < MIN_PRESENTATION_SCORE (50) is in the token_sort_ratio stopword
+    noise band for 2-5-token titles — "blocked" means "nothing useful to show."
+    Gap-confirmed mid-band items (score 55-64, gap ≥ 5) are AUTO_MATCHED inside
+    strategies and never reach this function.
+    """
+    if score is None or score < MIN_PRESENTATION_SCORE:
+        return "blocked"
+    if score >= 65:
+        return "quick_review"
+    return "needs_attention"
 
 
 # ---------------------------------------------------------------------------

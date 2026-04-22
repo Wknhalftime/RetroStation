@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
@@ -20,6 +21,8 @@ from backend.domain.broadcast import (
 )
 from backend.domain.enums import EnrichmentStatus, MatchStatus
 from backend.domain.library import LibraryFile
+from backend.routers.matching import _compute_triage_bucket
+from backend.services.matching_constants import MIN_PRESENTATION_SCORE
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -457,3 +460,27 @@ class TestMatchingRun:
         assert "count" in data
         assert isinstance(data["count"], int)
         assert data["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# TestComputeTriageBucket  (pure unit — no DB required)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [
+        (None, "blocked"),
+        (0.0, "blocked"),
+        (49.9, "blocked"),
+        (MIN_PRESENTATION_SCORE, "needs_attention"),  # 50.0 — boundary
+        (50.0, "needs_attention"),
+        (54.9, "needs_attention"),
+        (64.9, "needs_attention"),
+        (65.0, "quick_review"),                       # boundary
+        (79.9, "quick_review"),
+        (80.0, "quick_review"),
+        (99.9, "quick_review"),                       # in queue = not auto-matched
+    ],
+)
+def test_compute_triage_bucket_boundary(score: float | None, expected: str) -> None:
+    assert _compute_triage_bucket(score) == expected
