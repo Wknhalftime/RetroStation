@@ -54,7 +54,36 @@ class MusicBrainzClientProtocol(Protocol):
 
 
 class MusicBrainzApiClient:
-    """MusicBrainz API client with caching, rate limiting, and exponential-backoff retry."""
+    """MusicBrainz API client with caching, rate limiting, and exponential-backoff retry.
+
+    Threading contract
+    ------------------
+    This client is designed for **cross-thread sequential** use, not concurrent
+    use. It is safe for the instance (and its backing resources) to be touched
+    from different threads as long as at most one thread uses it at a time.
+
+    The contract is:
+
+    - Calls from the Huey sync worker (single thread).
+    - Calls from FastAPI sync generator dependencies whose setup, yielded body,
+      and teardown may each land on a different anyio threadpool worker, and
+      whose handlers may further dispatch the call through ``asyncio.to_thread``.
+
+    This holds today because:
+
+    - ``psycopg`` (v3) sync ``Connection`` objects have no thread-local state
+      and their operations are protected by an internal lock, so serial use
+      across threads is supported.
+    - ``httpx.Client`` is documented as safe to share across threads.
+
+    If a future change swaps either backing resource for a driver that enforces
+    a creator-thread check or relies on thread-local state (stdlib ``sqlite3``
+    with ``check_same_thread=True``, some ODBC drivers, etc.), the call sites
+    in ``backend/dependencies.py::get_mb_client`` and
+    ``backend/tasks/artist_matching_tasks.py`` must be revisited — either by
+    pinning the client to a single thread, or by constructing a fresh client
+    per thread.
+    """
 
     def __init__(self, cache_repo: MusicBrainzCacheRepository) -> None:
         self._cache = cache_repo
