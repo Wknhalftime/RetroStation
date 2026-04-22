@@ -283,6 +283,10 @@ async def get_matching_queue(
             )
         )
 
+    # DISTINCT ON pins SQL ordering to ti.id; restore display-friendly order here.
+    for child_list in identities_by_artist.values():
+        child_list.sort(key=lambda i: i.original_title)
+
     items: list[QueueArtist] = []
     for row in artist_rows:
         raw_candidates = row.get("artist_candidates")

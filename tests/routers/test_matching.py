@@ -619,7 +619,7 @@ class TestQueueResponseShape:
                 "Reason Artist",
                 "reason artist",
                 "needs_review",
-                "no_candidates",
+                "NO_CANDIDATES",
                 "No MusicBrainz candidates found",
             ),
         )
@@ -638,7 +638,7 @@ class TestQueueResponseShape:
                 "reason song",
                 f"reason artist:reason song:{uuid4().hex}",
                 "needs_review",
-                "low_confidence",
+                "LOW_CONFIDENCE",
                 "Score below threshold",
             ),
         )
@@ -648,9 +648,9 @@ class TestQueueResponseShape:
         assert resp.status_code == 200
         items = resp.json()["items"]
         item = next(i for i in items if i["original_name"] == "Reason Artist")
-        assert item["reason_code"] == "no_candidates"
+        assert item["reason_code"] == "NO_CANDIDATES"
         assert item["reason_detail"] == "No MusicBrainz candidates found"
-        assert item["identities"][0]["reason_code"] == "low_confidence"
+        assert item["identities"][0]["reason_code"] == "LOW_CONFIDENCE"
         assert item["identities"][0]["reason_detail"] == "Score below threshold"
 
     def test_bucket_filter_quick_review(self, client, db_conn):
