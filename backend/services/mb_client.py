@@ -51,6 +51,9 @@ class MusicBrainzClientProtocol(Protocol):
     def search_artist(self, name: str) -> list[MbArtistResult]: ...
     def lookup_release(self, mbid: str) -> MbRelease | None: ...
     def lookup_recording(self, mbid: str) -> MbRecording | None: ...
+    def search_recording(
+        self, artist_mbid: str, title: str, limit: int = 10
+    ) -> list[MbRecording]: ...
 
 
 class MusicBrainzApiClient:
@@ -149,6 +152,53 @@ class MusicBrainzApiClient:
         artists = cast(list[MbArtistResult], response_payload.get("artists", []))
         logger.info("mb_api_search", name=name, results=len(artists))
         return artists
+
+    def search_recording(
+        self, artist_mbid: str, title: str, limit: int = 10
+    ) -> list[MbRecording]:
+        """Search MusicBrainz for recordings by artist MBID and title.
+
+        Results are cached in the local MusicBrainz cache as a transparent
+        read-through side-effect. This is intentional (cache-aside pattern).
+        """
+        cache_key = f"recording-search:{artist_mbid}:{title.lower()}"
+
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None:
+            logger.debug("mb_cache_hit", cache_key=cache_key)
+            return cast(
+                list[MbRecording], cached_entry.response_data.get("recordings", [])
+            )
+
+        response = self._fetch(
+            f"{_MUSICBRAINZ_API}/recording/",
+            {
+                "query": f"arid:{artist_mbid} AND recording:{title}",
+                "fmt": "json",
+                "limit": str(limit),
+            },
+        )
+        response_payload: dict[str, object] = response.json()
+
+        now = datetime.now(tz=UTC)
+        self._cache.set(MusicBrainzCache(
+            id=uuid4(),
+            cache_key=cache_key,
+            entity_type="recording-search",
+            entity_mbid="",
+            response_data=dict(response_payload),
+            cached_at=now,
+            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
+        ))
+
+        recordings = cast(list[MbRecording], response_payload.get("recordings", []))
+        logger.info(
+            "mb_api_search_recording",
+            artist_mbid=artist_mbid,
+            title=title,
+            results=len(recordings),
+        )
+        return recordings
 
     def lookup_release(self, mbid: str) -> MbRelease | None:
         """Fetch a release by MBID, including recordings, artist-credits, and release-groups.
