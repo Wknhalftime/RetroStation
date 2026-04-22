@@ -691,3 +691,69 @@ class TestQueueResponseShape:
         assert item["original_name"] == "Review Artist"
         assert item["candidates"] is not None
         assert item["identities"][0]["match_status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# TestSearchMbArtists  (unit — FakeMbClient injected via dependency_overrides)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchMbArtists:
+    """Tests for GET /api/v1/matching/mb-artists.
+
+    Uses FakeMbClient injected via dependency_overrides so no real MusicBrainz
+    network calls or sync DB connections are made.
+    """
+
+    def _override_mb(self, app: object, fake: object) -> None:
+        from backend.dependencies import get_mb_client
+        from backend.main import app as fastapi_app  # type: ignore[attr-defined]
+
+        def _fake_mb() -> object:
+            yield fake
+
+        fastapi_app.dependency_overrides[get_mb_client] = _fake_mb  # type: ignore[attr-defined]
+
+    def _clear_mb(self) -> None:
+        from backend.dependencies import get_mb_client
+        from backend.main import app as fastapi_app  # type: ignore[attr-defined]
+
+        fastapi_app.dependency_overrides.pop(get_mb_client, None)  # type: ignore[attr-defined]
+
+    def test_mb_artists_endpoint_returns_items(self, client) -> None:
+        """Stub MB client returns 2 artists; response JSON has items list."""
+        from tests.fakes.mb_client import FakeMbClient
+
+        fake = FakeMbClient(
+            responses={
+                "The Beatles": [
+                    {"id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d", "name": "The Beatles",
+                     "sort-name": "Beatles, The", "score": 100},
+                    {"id": "fake-id-2", "name": "Beatles Cover Band",
+                     "sort-name": "Beatles Cover Band", "score": 72},
+                ]
+            }
+        )
+        self._override_mb(None, fake)
+        try:
+            resp = client.get("/api/v1/matching/mb-artists?query=The+Beatles")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "items" in data
+            assert len(data["items"]) == 2
+            assert data["items"][0]["id"] == "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d"
+            assert data["items"][0]["name"] == "The Beatles"
+            assert data["items"][1]["score"] == 72
+        finally:
+            self._clear_mb()
+
+    def test_mb_artists_requires_non_empty_query(self, client) -> None:
+        """Empty query string → 422 Unprocessable Entity."""
+        resp = client.get("/api/v1/matching/mb-artists?query=")
+        assert resp.status_code == 422
+
+    def test_mb_artists_max_length(self, client) -> None:
+        """Query longer than 100 characters → 422 Unprocessable Entity."""
+        long_query = "a" * 101
+        resp = client.get(f"/api/v1/matching/mb-artists?query={long_query}")
+        assert resp.status_code == 422

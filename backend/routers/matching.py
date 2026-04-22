@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
@@ -8,15 +9,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_token, get_db_connection
+from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE
+from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
 
 router = APIRouter()
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
+MbClient = Annotated[MusicBrainzClientProtocol, Depends(get_mb_client)]
 
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
@@ -485,3 +488,33 @@ async def run_matching(
         "message": f"Artist matching queued for {count} playlist(s)",
         "count": count,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /mb-artists
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mb-artists")
+async def search_mb_artists(
+    _token: Token,
+    mb_client: MbClient,
+    query: str = Query(min_length=1, max_length=100),
+) -> dict[str, Any]:
+    """Search MusicBrainz for artists matching query string.
+
+    Proxies to MusicBrainzApiClient.search_artist() with local cache
+    (read-through via PgMusicBrainzCacheRepository). Used by the frontend
+    when no automated candidates exist (PR 5 — ArtistPanel "Search
+    MusicBrainz" empty-state CTA).
+
+    Wiring rationale: MusicBrainzApiClient is fully synchronous (httpx.Client
+    + sync psycopg).  The endpoint injects it via a sync generator dependency
+    (get_mb_client) that opens a dedicated sync psycopg connection — identical
+    to the Huey task pattern (artist_matching_tasks.py).  The search call is
+    dispatched to a thread pool via asyncio.to_thread so it does not block the
+    event loop.  The dependency itself opens/closes the connection around the
+    request lifetime.
+    """
+    items = await asyncio.to_thread(mb_client.search_artist, query)
+    return {"items": items}
