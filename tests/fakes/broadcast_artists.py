@@ -30,6 +30,9 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
     def get_by_id(self, artist_id: UUID) -> BroadcastArtist | None:
         return self._data.get(artist_id)
 
+    def get_by_ids(self, ids: list[UUID]) -> list[BroadcastArtist]:
+        return [self._data[i] for i in ids if i in self._data]
+
     def get_by_normalized_name(
         self, normalized_name: str
     ) -> BroadcastArtist | None:

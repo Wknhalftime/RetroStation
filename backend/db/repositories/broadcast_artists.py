@@ -51,6 +51,15 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
+    def get_by_ids(self, ids: list[UUID]) -> list[BroadcastArtist]:
+        if not ids:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM broadcast_artists WHERE id = ANY(%s)",
+            (ids,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def get_by_normalized_name(self, normalized_name: str) -> BroadcastArtist | None:
         row = self._conn.execute(
             "SELECT * FROM broadcast_artists WHERE normalized_name = %s",
