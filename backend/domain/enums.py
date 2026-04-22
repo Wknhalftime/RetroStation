@@ -11,12 +11,14 @@ class MatchStatus(StrEnum):
 
 
 class MatchTier(StrEnum):
-    MUSICBRAINZ_ID_EXACT = "musicbrainz_id_exact"
-    NORMALIZATION        = "normalization"
-    VECTOR               = "vector"
-    MUSICBRAINZ_API      = "musicbrainz_api"
-    MANUAL               = "manual"
-    UNCLASSIFIED         = "unclassified"
+    MUSICBRAINZ_ID_EXACT  = "musicbrainz_id_exact"
+    MUSICBRAINZ_ID_SEARCH = "musicbrainz_id_search"
+    LOCAL_FILE_FUZZY      = "local_file_fuzzy"
+    NORMALIZATION         = "normalization"
+    VECTOR                = "vector"
+    MUSICBRAINZ_API       = "musicbrainz_api"
+    MANUAL                = "manual"
+    UNCLASSIFIED          = "unclassified"
 
 
 class TargetType(StrEnum):
