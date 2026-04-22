@@ -9,6 +9,7 @@ from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
+from backend.services.matching_reasons import ReasonCode
 
 
 class PgBroadcastArtistRepository(BroadcastArtistRepository):
@@ -89,10 +90,18 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
+    def update_match_status(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> None:
         self._conn.execute(
-            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
-            (status.value, artist_id),
+            """UPDATE broadcast_artists
+               SET match_status = %s, reason_code = %s, reason_detail = %s
+               WHERE id = %s""",
+            (status.value, reason_code, reason_detail, artist_id),
         )
 
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:

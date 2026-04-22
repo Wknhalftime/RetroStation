@@ -3,6 +3,7 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus
+from backend.services.matching_reasons import ReasonCode
 
 
 class BroadcastArtistRepository(ABC):
@@ -33,9 +34,22 @@ class BroadcastArtistRepository(ABC):
         ...
 
     @abstractmethod
-    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
-        """Update match status. The artist table has no tier column; tier is
-        recorded only on the match row itself, which the caller creates separately."""
+    def update_match_status(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> None:
+        """Update match status plus optional reason metadata.
+
+        The artist table has no tier column; tier is recorded only on the match
+        row itself, which the caller creates separately.
+
+        reason_code / reason_detail default to None — existing callers compile
+        unchanged. Strategies populate these in PR 3/PR 4. Passing None
+        explicitly clears any previously-persisted reason.
+        """
         ...
 
     @abstractmethod
