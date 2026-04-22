@@ -177,6 +177,11 @@ def test_characterize_tier0_rule_match_empty_work_id_returns_empty_string() -> N
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
     assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+    assert created.confidence_score == 100.0
+    assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
 
 
 # ---------------------------------------------------------------------------
@@ -360,15 +365,31 @@ def test_characterize_tier2_mbid_match_reason_string_currently_unset() -> None:
     )
     identity_repo.upsert(identity)
 
-    lib_repo.upsert(_lib_file(
+    lib_file = _lib_file(
         "/music/metallica/enormous_sandyman.flac",
         artist_mbid=canonical_mbid,
         track_title="Enormous Sandyman",
-    ))
+    )
+    lib_repo.upsert(lib_file)
 
-    _try_tier2_mbid_match(
+    result = _try_tier2_mbid_match(
         identity, artist_repo, lib_repo, match_repo, identity_repo
     )
+
+    # Anchor the baseline: tier-2 must have actually run (NEEDS_REVIEW band)
+    # and produced side effects. Without these pins, this test would silently
+    # pass if tier-2 regressed to a no-op returning None.
+    assert result is not None
+    status, _work_id = result
+    assert status == MatchStatus.NEEDS_REVIEW
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.match_tier == MatchTier.NORMALIZATION
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+    assert created.match_tier == MatchTier.NORMALIZATION
 
     assert identity_repo._reason_codes.get(identity.id) is None
     assert identity_repo._reason_details.get(identity.id) is None
