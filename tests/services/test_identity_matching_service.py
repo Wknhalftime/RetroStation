@@ -186,6 +186,99 @@ def test_characterize_tier0_rule_match_empty_work_id_returns_empty_string() -> N
     assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
 
 
+def test_characterize_tier0_rule_match_hit_returns_recording_id_when_no_work_id() -> None:
+    """Lib file has no work_id but has recording_id → returns recording_id.
+
+    Distinct from the empty-string branch: when work_id is absent, the caller
+    receives recording_id as the match "handle". Pin this to lock the
+    work_id → recording_id → "" fallback chain.
+    """
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid="mbid-metallica",
+        track_title="Enter Sandman",
+        recording_id="rec-enter-sandman",
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=uuid4(),
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    identity_repo.upsert(identity)
+
+    rule = MappingRule(
+        id=uuid4(),
+        source_pattern=identity.normalized_signature,
+        target_type=TargetType.LIBRARY_FILE,
+        target_id=lib_file.file_path,
+        priority=10,
+    )
+
+    result = _try_tier0_rule_match(
+        identity, [rule], lib_repo, match_repo, identity_repo
+    )
+
+    assert result == "rec-enter-sandman"
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+
+
+def test_characterize_tier0_rule_match_target_id_as_uuid_uses_get_by_id() -> None:
+    """rule.target_id is a valid UUID string → UUID(…) succeeds, get_by_id path runs.
+
+    The service attempts `UUID(rule.target_id)` first and only falls back to
+    `get_by_path` on ValueError. This test pins the UUID branch so a refactor
+    that drops get_by_id support (or swaps the try/except direction) is
+    visible. The existing hit/empty tests exercise the path-fallback branch.
+    """
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid="mbid-metallica",
+        track_title="Enter Sandman",
+        work_id="work-enter-sandman",
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=uuid4(),
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    identity_repo.upsert(identity)
+
+    rule = MappingRule(
+        id=uuid4(),
+        source_pattern=identity.normalized_signature,
+        target_type=TargetType.LIBRARY_FILE,
+        target_id=str(lib_file.id),  # UUID string, not a file path
+        priority=10,
+    )
+
+    result = _try_tier0_rule_match(
+        identity, [rule], lib_repo, match_repo, identity_repo
+    )
+
+    assert result == "work-enter-sandman"
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+
+
 # ---------------------------------------------------------------------------
 # _try_tier2_mbid_match
 # ---------------------------------------------------------------------------
@@ -268,6 +361,47 @@ def test_characterize_tier2_mbid_match_high_confidence_auto_matches() -> None:
     assert created.library_file_id == lib_file.id
     assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
     assert created.confidence_score == 100.0
+
+
+def test_characterize_tier2_mbid_match_recording_id_fallback_when_no_work_id() -> None:
+    """AUTO band, work_id absent, recording_id present → returns recording_id.
+
+    Pins the work_id → recording_id fallback in the AUTO branch of
+    _try_tier2_mbid_match. Without this, a refactor that stops falling back
+    to recording_id would only be visible through downstream failures.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+
+    canonical_mbid = "mbid-metallica"
+    broadcast_artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    identity = _pending_identity(
+        artist_id=broadcast_artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    identity_repo.upsert(identity)
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid=canonical_mbid,
+        track_title="Enter Sandman",
+        recording_id="rec-enter-sandman",
+        # No work_id.
+    )
+    lib_repo.upsert(lib_file)
+
+    result = _try_tier2_mbid_match(
+        identity, artist_repo, lib_repo, match_repo, identity_repo
+    )
+
+    assert result is not None
+    status, work_id = result
+    assert status == MatchStatus.AUTO_MATCHED
+    assert work_id == "rec-enter-sandman"
 
 
 def test_characterize_tier2_mbid_match_mid_high_confidence_auto_normalization() -> None:
