@@ -68,7 +68,7 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         self,
         identity_id: UUID,
         status: MatchStatus,
-        tier: MatchTier | None = None,
+        tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
     ) -> None:

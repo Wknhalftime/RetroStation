@@ -37,15 +37,16 @@ class BroadcastTrackIdentityRepository(ABC):
         self,
         identity_id: UUID,
         status: MatchStatus,
-        tier: MatchTier | None = None,
+        tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
     ) -> None:
         """Update match status plus optional reason metadata.
 
-        tier may be None when the status does not imply a classification tier
-        (e.g. NEEDS_REVIEW). reason_code / reason_detail default to None —
-        existing callers compile unchanged. Passing None explicitly clears any
+        tier is required to be passed explicitly — even as None — so callers
+        make a conscious choice for statuses like AUTO_MATCHED that require a
+        tier and cannot silently null it by omitting the argument. reason_code
+        / reason_detail default to None; passing None explicitly clears any
         previously-persisted reason.
         """
         ...

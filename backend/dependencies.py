@@ -32,8 +32,10 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
     """Yield a MusicBrainzApiClient backed by a fresh sync connection.
 
     Opens a dedicated sync psycopg connection (same pattern as Huey tasks)
-    so the sync MB client and sync cache repository can share it.  The
-    connection is committed and closed after the request completes.
+    so the sync MB client and sync cache repository can share it.  On
+    successful request handling the connection is committed; on exception
+    the connection is rolled back so partial cache writes from a failed
+    `/mb-artists` request never persist.
     """
     from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
     from backend.db.sync_conn import connect_sync
@@ -43,5 +45,10 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
         connect_sync(settings.database_url) as conn,
         MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as client,
     ):
-        yield client
-        conn.commit()
+        try:
+            yield client
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()

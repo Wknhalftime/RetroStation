@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
-from backend.services.matching_constants import MIN_PRESENTATION_SCORE
+from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
 
@@ -31,6 +31,48 @@ _PROTECTED_STATUSES: list[str] = [
 ]
 
 
+# Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
+# bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
+# count all reference the same filtered set. Thresholds come from
+# matching_constants (single source of truth); the f-string interpolates trusted
+# module-level ints, never user input.
+_QUEUE_BUCKET_CTE = f"""
+artist_base AS (
+    SELECT id, original_name, normalized_name, match_status,
+           artist_candidates, reason_code, reason_detail, created_at
+    FROM broadcast_artists
+    WHERE match_status = ANY(%s)
+),
+identity_best AS (
+    SELECT DISTINCT ON (ti.id)
+           ti.id AS identity_id,
+           ti.broadcast_artist_id,
+           m.confidence_score
+    FROM track_identities ti
+    LEFT JOIN matches m ON m.identity_id = ti.id
+    WHERE ti.broadcast_artist_id IN (SELECT id FROM artist_base)
+    ORDER BY ti.id,
+             m.confidence_score DESC NULLS LAST,
+             m.created_at       DESC NULLS LAST,
+             m.id               DESC NULLS LAST
+),
+artist_bucket AS (
+    SELECT a.id,
+           CASE
+               WHEN bool_or(ib.confidence_score >= {QUICK_REVIEW_MIN_SCORE})
+                   THEN 'quick_review'
+               WHEN bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
+                            AND ib.confidence_score < {QUICK_REVIEW_MIN_SCORE})
+                   THEN 'needs_attention'
+               ELSE 'blocked'
+           END AS bucket
+    FROM artist_base a
+    LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
+    GROUP BY a.id
+)
+"""
+
+
 TriageBucket = Literal["quick_review", "needs_attention", "blocked"]
 
 
@@ -38,14 +80,14 @@ def _compute_triage_bucket(score: float | None) -> TriageBucket:
     """Single canonical triage implementation. Import and test directly — never
     reimplement.
 
-    score < MIN_PRESENTATION_SCORE (50) is in the token_sort_ratio stopword
-    noise band for 2-5-token titles — "blocked" means "nothing useful to show."
+    score < MIN_PRESENTATION_SCORE is in the token_sort_ratio stopword noise
+    band for 2-5-token titles — "blocked" means "nothing useful to show."
     Gap-confirmed mid-band items (score 55-64, gap ≥ 5) are AUTO_MATCHED inside
     strategies and never reach this function.
     """
     if score is None or score < MIN_PRESENTATION_SCORE:
         return "blocked"
-    if score >= 65:
+    if score >= QUICK_REVIEW_MIN_SCORE:
         return "quick_review"
     return "needs_attention"
 
@@ -151,42 +193,9 @@ async def get_matching_queue(
     The bucket filter (when supplied) is materialised in SQL via a CTE so that
     LIMIT/OFFSET pagination and `total` both reflect the filtered set.
     """
-    # The CTE mirrors _compute_triage_bucket / _artist_bucket_from_identities:
-    # identity bucket = blocked if score NULL or < 50; quick_review if >= 65;
-    # else needs_attention. artist bucket = best-of-children priority order.
     page_cur = await conn.execute(
-        """
-        WITH artist_base AS (
-            SELECT id, original_name, normalized_name, match_status,
-                   artist_candidates, reason_code, reason_detail, created_at
-            FROM broadcast_artists
-            WHERE match_status = ANY(%s)
-        ),
-        identity_best AS (
-            SELECT DISTINCT ON (ti.id)
-                   ti.id AS identity_id,
-                   ti.broadcast_artist_id,
-                   m.confidence_score
-            FROM track_identities ti
-            LEFT JOIN matches m ON m.identity_id = ti.id
-            WHERE ti.broadcast_artist_id IN (SELECT id FROM artist_base)
-            ORDER BY ti.id,
-                     m.confidence_score DESC NULLS LAST,
-                     m.created_at       DESC NULLS LAST,
-                     m.id               DESC NULLS LAST
-        ),
-        artist_bucket AS (
-            SELECT a.id,
-                   CASE
-                       WHEN bool_or(ib.confidence_score >= 65) THEN 'quick_review'
-                       WHEN bool_or(ib.confidence_score >= 50
-                                    AND ib.confidence_score < 65) THEN 'needs_attention'
-                       ELSE 'blocked'
-                   END AS bucket
-            FROM artist_base a
-            LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
-            GROUP BY a.id
-        ),
+        f"""
+        WITH {_QUEUE_BUCKET_CTE},
         filtered AS (
             SELECT a.id, a.original_name, a.normalized_name, a.match_status,
                    a.artist_candidates, a.reason_code, a.reason_detail,
@@ -207,33 +216,8 @@ async def get_matching_queue(
     if not artist_rows:
         # No rows on this page — issue a standalone count for accurate total.
         count_cur = await conn.execute(
-            """
-            WITH artist_base AS (
-                SELECT id FROM broadcast_artists WHERE match_status = ANY(%s)
-            ),
-            identity_best AS (
-                SELECT DISTINCT ON (ti.id)
-                       ti.broadcast_artist_id, m.confidence_score
-                FROM track_identities ti
-                LEFT JOIN matches m ON m.identity_id = ti.id
-                WHERE ti.broadcast_artist_id IN (SELECT id FROM artist_base)
-                ORDER BY ti.id,
-                         m.confidence_score DESC NULLS LAST,
-                         m.created_at       DESC NULLS LAST,
-                         m.id               DESC NULLS LAST
-            ),
-            artist_bucket AS (
-                SELECT a.id,
-                       CASE
-                           WHEN bool_or(ib.confidence_score >= 65) THEN 'quick_review'
-                           WHEN bool_or(ib.confidence_score >= 50
-                                        AND ib.confidence_score < 65) THEN 'needs_attention'
-                           ELSE 'blocked'
-                       END AS bucket
-                FROM artist_base a
-                LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
-                GROUP BY a.id
-            )
+            f"""
+            WITH {_QUEUE_BUCKET_CTE}
             SELECT COUNT(*) AS total FROM artist_bucket
             WHERE %s::text IS NULL OR bucket = %s::text
             """,

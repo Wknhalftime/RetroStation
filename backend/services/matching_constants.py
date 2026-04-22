@@ -12,3 +12,6 @@ MID_BAND_LOWER: int = 55
 MID_BAND_UPPER: int = 64
 MID_BAND_GAP_THRESHOLD: int = 5
 MIN_PRESENTATION_SCORE: int = 50
+# Triage boundary: identities with confidence ≥ this render as "quick_review".
+# Below this (but ≥ MIN_PRESENTATION_SCORE) they render as "needs_attention".
+QUICK_REVIEW_MIN_SCORE: int = 65

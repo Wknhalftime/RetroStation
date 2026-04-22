@@ -590,9 +590,12 @@ class TestQueueResponseShape:
         assert item["triage_bucket"] == "blocked"
 
     def test_distinct_on_prevents_row_multiplication(self, client, db_conn):
-        """DISTINCT ON: 3 matches rows for 1 identity must produce 1 identity in response."""
+        """DISTINCT ON: 3 matches rows for 1 identity must produce 1 identity with
+        the highest-confidence row selected."""
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
-        # Insert 3 match rows for the same identity
+        # _insert_match_row commits each row, so these three match rows have
+        # distinct created_at timestamps; the DISTINCT ON primary key is
+        # confidence_score DESC, so 72.0 wins deterministically.
         for score in (72.0, 60.0, 45.0):
             _insert_match_row(db_conn, identity, confidence_score=score)
 
@@ -600,10 +603,8 @@ class TestQueueResponseShape:
         assert resp.status_code == 200
         item = resp.json()["items"][0]
         assert len(item["identities"]) == 1
-        # DISTINCT ON picks highest confidence_score first, then newest created_at,
-        # then highest id as a final deterministic tie-breaker. All three match rows
-        # were inserted in the same tx, so the exact winner is ordering-dependent;
-        # the important invariant here is exactly one identity row.
+        assert item["identities"][0]["confidence_score"] == 72.0
+        assert item["identities"][0]["triage_bucket"] == "quick_review"
 
     def test_reason_code_detail_propagated(self, client, db_conn):
         """reason_code + reason_detail appear on both identity and artist."""
