@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID, uuid4
 
 import structlog
-from rapidfuzz import fuzz
 from rapidfuzz.fuzz import token_sort_ratio
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
@@ -32,7 +31,6 @@ from backend.services.matching_reasons import (
 )
 from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
-from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
 
@@ -139,6 +137,30 @@ def _score_candidates(
         reason_code=rc,
         reason_detail=rd,
     )
+
+
+def _with_work_id(
+    result: IdentityMatchResult,
+    candidates: list[LibraryFile],
+) -> IdentityMatchResult:
+    """Return a copy of result with work_id populated from the matched file.
+
+    Preserves the legacy Tier 2 (``_try_tier2_mbid_match``) behavior where an
+    AUTO_MATCHED result surfaces ``best_file.work_id or best_file.recording_id``
+    so downstream master-selection recalculation has a work handle. Caller must
+    pass the same candidate list used by ``_score_candidates`` so the lookup
+    by ``library_file_id`` stays consistent.
+    """
+    if result.library_file_id is None:
+        return result
+    match_file = next(
+        (f for f in candidates if f.id == result.library_file_id),
+        None,
+    )
+    if match_file is None:
+        return result
+    work_id = match_file.work_id or match_file.recording_id or ""
+    return replace(result, work_id=work_id)
 
 
 class IdentityMappingRuleStrategy:
@@ -255,7 +277,7 @@ class ResolvedArtistMbidStrategy:
                 high_threshold=self._high_threshold,
             )
             if local_result.status == MatchStatus.AUTO_MATCHED:
-                return local_result
+                return _with_work_id(local_result, candidate_files)
             # Step B escalation.
             mb_result = self._mb_recording_search(mbid, identity)
             if mb_result is not None:
@@ -296,12 +318,15 @@ class ResolvedArtistMbidStrategy:
                 continue
             lib_file = self._library_file_repo.get_by_recording_mbid(rec_id)
             if lib_file is not None:
-                return _score_candidates(
+                result = _score_candidates(
                     identity.normalized_title,
                     [lib_file],
                     tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
                     high_threshold=self._high_threshold,
                 )
+                if result.status == MatchStatus.AUTO_MATCHED:
+                    return _with_work_id(result, [lib_file])
+                return result
         return None
 
 
@@ -355,131 +380,26 @@ class BroadcastToLocalStrategy:
         )
 
 
-def _try_tier0_rule_match(
-    identity: BroadcastTrackIdentity,
-    rules: list[MappingRule],
-    library_file_repo: LibraryFileRepository,
-    match_repo: MatchRepository,
-    track_identity_repo: BroadcastTrackIdentityRepository,
-) -> str | None:
-    """Apply mapping rules.
+class IdentityMatchingEngine:
+    """Iterates strategies in order; returns first non-None result.
 
-    Returns the matched work_id (or empty string if matched but no work_id exists)
-    when a rule hit occurs, or None when no rule matched.
+    No persistence — the service function (match_identities_for_playlist)
+    owns all DB writes.
     """
-    normalized_sig = identity.normalized_signature
-    for rule in rules:
-        if rule.target_type != TargetType.LIBRARY_FILE:
-            continue
-        if not rule_matches(rule.source_pattern, normalized_sig):
-            continue
-        # Rule hit: look up the library file by target_id (file path or UUID)
-        try:
-            lib_file = library_file_repo.get_by_id(UUID(rule.target_id))
-        except ValueError:
-            lib_file = library_file_repo.get_by_path(rule.target_id)
-        if lib_file is None:
-            continue
-        match_repo.create(Match(
-            id=uuid4(),
-            identity_id=identity.id,
-            library_file_id=lib_file.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-        ))
-        track_identity_repo.update_match_status(
-            identity.id, MatchStatus.AUTO_MATCHED, MatchTier.MUSICBRAINZ_ID_EXACT
-        )
-        logger.debug(
-            "identity_tier0_matched",
-            identity_id=str(identity.id),
-            rule_id=str(rule.id),
-        )
-        if lib_file.work_id:
-            return lib_file.work_id
-        elif lib_file.recording_id:
-            return lib_file.recording_id
-        return ""
-    return None
 
+    def __init__(self, strategies: list[IdentityMatchingStrategy]) -> None:
+        self._strategies = strategies
 
-def _try_tier2_mbid_match(
-    identity: BroadcastTrackIdentity,
-    broadcast_artist_repo: BroadcastArtistRepository,
-    library_file_repo: LibraryFileRepository,
-    match_repo: MatchRepository,
-    track_identity_repo: BroadcastTrackIdentityRepository,
-) -> tuple[MatchStatus, str | None] | None:
-    """MBID-graph match.
-
-    Returns a (status, work_id) tuple when a match was recorded (work_id may be
-    None when the matched file carries neither work_id nor recording_id), or None
-    when no match was found.
-    """
-    broadcast_artist = broadcast_artist_repo.get_by_id(identity.broadcast_artist_id)
-    canonical_artist_mbid: str | None = None
-    if broadcast_artist is not None:
-        artist_match = match_repo.get_by_artist(broadcast_artist.id)
-        if artist_match is not None:
-            canonical_artist_mbid = artist_match.target_id
-
-    if not canonical_artist_mbid:
+    def resolve(
+        self,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+    ) -> IdentityMatchResult | None:
+        for strategy in self._strategies:
+            result = strategy.apply(identity, artist)
+            if result is not None:
+                return result
         return None
-
-    candidate_files = library_file_repo.get_by_artist_mbid(canonical_artist_mbid)
-    if not candidate_files:
-        return None
-
-    normalized_identity_title = normalize_title(identity.original_title)
-    best_score = 0.0
-    best_file = None
-    for lib_file in candidate_files:
-        if lib_file.audio.track_title:
-            normalized_lib_title = normalize_title(lib_file.audio.track_title)
-        else:
-            continue
-        score = fuzz.ratio(normalized_identity_title, normalized_lib_title)
-        if score > best_score:
-            best_score = score
-            best_file = lib_file
-
-    if best_file is None or best_score < 60:
-        return None
-
-    if best_score >= 95:
-        status = MatchStatus.AUTO_MATCHED
-        tier = MatchTier.MUSICBRAINZ_ID_EXACT
-    elif best_score >= 80:
-        status = MatchStatus.AUTO_MATCHED
-        tier = MatchTier.NORMALIZATION
-    else:
-        # 60–79 → NEEDS_REVIEW
-        status = MatchStatus.NEEDS_REVIEW
-        tier = MatchTier.NORMALIZATION
-
-    match_repo.create(Match(
-        id=uuid4(),
-        identity_id=identity.id,
-        library_file_id=best_file.id,
-        confidence_score=best_score,
-        match_tier=tier,
-    ))
-    track_identity_repo.update_match_status(identity.id, status, tier)
-
-    work_id: str | None = None
-    if status == MatchStatus.AUTO_MATCHED:
-        if best_file.work_id:
-            work_id = best_file.work_id
-        elif best_file.recording_id:
-            work_id = best_file.recording_id
-        logger.debug(
-            "identity_tier2_matched",
-            identity_id=str(identity.id),
-            score=best_score,
-            tier=tier,
-        )
-
-    return status, work_id
 
 
 def match_identities_for_playlist(
@@ -489,60 +409,95 @@ def match_identities_for_playlist(
     match_repo: MatchRepository,
     library_file_repo: LibraryFileRepository,
     rules_repo: MappingRuleRepository,
+    mb_client: MusicBrainzClientProtocol,
+    high_threshold: int = 80,
 ) -> list[str]:
-    """Run identity matching for all pending identities in this playlist.
+    """Resolve pending identities for a playlist.
 
-    Tiers:
-      0 — Global mapping rules (LIBRARY_FILE target_type)
-      2 — MBID graph: artist MBID confirmed → rapidfuzz title match
-      Fallback — NEEDS_REVIEW / UNKNOWN
+    Strategy order: mapping rules → MBID fast path (with internal MB recording
+    search) → fuzzy fallback. Persistence lives here, not in strategies.
 
-    Returns:
-        List of work_ids (recording.work_id) for newly AUTO_MATCHED identities,
-        for downstream master selection recalculation.
+    Returns list of work_ids for newly AUTO_MATCHED identities so the caller
+    can trigger downstream master-selection recalculation. This return
+    contract is preserved from the legacy implementation.
     """
     pending = track_identity_repo.get_pending_for_playlist(playlist_id)
-
     if not pending:
         logger.info("no_pending_identities", playlist_id=str(playlist_id))
         return []
 
     rules = rules_repo.list_ordered()
 
+    # Resolve artists up-front to avoid N+1 queries inside the loop.
+    artist_ids = [identity.broadcast_artist_id for identity in pending]
+    artists_by_id = {
+        a.id: a for a in broadcast_artist_repo.get_by_ids(artist_ids)
+    }
+
+    engine = IdentityMatchingEngine([
+        IdentityMappingRuleStrategy(rules, library_file_repo),
+        ResolvedArtistMbidStrategy(
+            library_file_repo, match_repo, mb_client, high_threshold
+        ),
+        BroadcastToLocalStrategy(library_file_repo, high_threshold),
+    ])
+
     auto_matched = 0
     needs_review = 0
     work_ids: list[str] = []
 
     for identity in pending:
-        # --- Tier 0: Global mapping rules (LIBRARY_FILE target) ---
-        tier0_work_id = _try_tier0_rule_match(
-            identity, rules, library_file_repo, match_repo, track_identity_repo
-        )
-        if tier0_work_id is not None:
-            if tier0_work_id:
-                work_ids.append(tier0_work_id)
-            auto_matched += 1
+        artist = artists_by_id.get(identity.broadcast_artist_id)
+        if artist is None:
+            logger.warning(
+                "orphaned_identity_skipped",
+                identity_id=str(identity.id),
+                missing_artist_id=str(identity.broadcast_artist_id),
+            )
             continue
 
-        # --- Tier 2: MBID graph ---
-        tier2_result = _try_tier2_mbid_match(
-            identity, broadcast_artist_repo, library_file_repo, match_repo, track_identity_repo
-        )
-        if tier2_result is not None:
-            tier2_status, tier2_work_id = tier2_result
-            if tier2_status == MatchStatus.AUTO_MATCHED:
-                auto_matched += 1
-                if tier2_work_id:
-                    work_ids.append(tier2_work_id)
-            else:
-                needs_review += 1
+        result = engine.resolve(identity, artist)
+
+        if result is None:
+            # Engine exhausted all strategies. Should not happen given the
+            # strategies' defensive exhaustiveness, but persist NEEDS_REVIEW so
+            # the identity is surfaced rather than stuck PENDING.
+            track_identity_repo.update_match_status(
+                identity.id,
+                MatchStatus.NEEDS_REVIEW,
+                MatchTier.UNCLASSIFIED,
+                reason_code=ReasonCode.NO_CANDIDATES,
+                reason_detail=(
+                    "All matching strategies exhausted — no result produced"
+                ),
+            )
+            needs_review += 1
             continue
 
-        # --- Fallback: NEEDS_REVIEW / UNKNOWN ---
         track_identity_repo.update_match_status(
-            identity.id, MatchStatus.NEEDS_REVIEW, MatchTier.UNCLASSIFIED
+            identity.id,
+            result.status,
+            result.tier,
+            reason_code=result.reason_code,
+            reason_detail=result.reason_detail,
         )
-        needs_review += 1
+
+        if (
+            result.status == MatchStatus.AUTO_MATCHED
+            and result.library_file_id is not None
+        ):
+            match_repo.create(Match(
+                id=uuid4(),
+                identity_id=identity.id,
+                library_file_id=result.library_file_id,
+                confidence_score=result.confidence_score,
+                match_tier=result.tier,
+            ))
+            auto_matched += 1
+            if result.work_id:
+                work_ids.append(result.work_id)
+        else:
+            needs_review += 1
 
     logger.info(
         "identity_matching_complete",

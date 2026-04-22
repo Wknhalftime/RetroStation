@@ -17,6 +17,7 @@ from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRep
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
+from tests.fakes.mb_client import FakeMbClient
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,6 +129,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
         match_repo=match_repo,
         library_file_repo=library_file_repo,
         rules_repo=rules_repo,
+        mb_client=FakeMbClient(),
     )
 
     # Identity should be AUTO_MATCHED
@@ -140,7 +142,10 @@ def test_tier2_mbid_graph_exact_match() -> None:
     identity_match = match_repo.get_by_identity(identity.id)
     assert identity_match is not None
     assert identity_match.library_file_id == lib_file.id
-    assert identity_match.confidence_score >= 95
+    # PR 3 switched scoring from fuzz.ratio to token_sort_ratio with case-
+    # preserving normalization: "enter sandman" vs "Enter Sandman" scores
+    # ~84.6 rather than 100. Still AUTO_MATCHED (>=80 with clear gap).
+    assert identity_match.confidence_score >= 80
 
     # recording_id should be in returned work_ids
     assert "rec-enter-sandman" in work_ids
@@ -180,12 +185,15 @@ def test_no_library_files_falls_to_needs_review() -> None:
         match_repo=match_repo,
         library_file_repo=library_file_repo,
         rules_repo=rules_repo,
+        mb_client=FakeMbClient(),
     )
 
     updated_identity = track_identity_repo.get_by_id(identity.id)
     assert updated_identity is not None
     assert updated_identity.match_status == MatchStatus.NEEDS_REVIEW
-    assert updated_identity.match_tier == MatchTier.UNCLASSIFIED
+    # PR 3: tier now reflects the path taken (ResolvedArtistMbidStrategy ran
+    # against a resolved artist with no local files) rather than UNCLASSIFIED.
+    assert updated_identity.match_tier == MatchTier.MUSICBRAINZ_ID_SEARCH
 
     # No Match row created
     assert match_repo.get_by_identity(identity.id) is None

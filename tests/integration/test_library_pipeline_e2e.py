@@ -151,6 +151,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             match_repo=PgMatchRepository(conn),
             library_file_repo=PgLibraryFileRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
+            mb_client=fake_mb,
         )
         conn.commit()
 

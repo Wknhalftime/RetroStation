@@ -26,17 +26,21 @@ def identity_matching_task(playlist_id: str) -> None:
         from backend.db.repositories.library_files import PgLibraryFileRepository
         from backend.db.repositories.mapping_rules import PgMappingRuleRepository
         from backend.db.repositories.matches import PgMatchRepository
+        from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
         from backend.db.repositories.recordings import PgRecordingRepository
         from backend.db.repositories.song_masters import PgSongMasterRepository
+        from backend.services.mb_client import MusicBrainzApiClient
 
-        work_ids = match_identities_for_playlist(
-            playlist_id=UUID(playlist_id),
-            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
-            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            match_repo=PgMatchRepository(conn),
-            library_file_repo=PgLibraryFileRepository(conn),
-            rules_repo=PgMappingRuleRepository(conn),
-        )
+        with MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as mb_client:
+            work_ids = match_identities_for_playlist(
+                playlist_id=UUID(playlist_id),
+                track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+                broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+                match_repo=PgMatchRepository(conn),
+                library_file_repo=PgLibraryFileRepository(conn),
+                rules_repo=PgMappingRuleRepository(conn),
+                mb_client=mb_client,
+            )
         conn.commit()
 
         # Recalculate song masters for any newly matched work IDs
