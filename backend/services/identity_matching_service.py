@@ -6,17 +6,32 @@ from uuid import UUID, uuid4
 
 import structlog
 from rapidfuzz import fuzz
+from rapidfuzz.fuzz import token_sort_ratio
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.library import LibraryFile
 from backend.domain.matching import MappingRule, Match
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
-from backend.services.matching_reasons import ReasonCode
-from backend.services.matching_utils import rule_matches
+from backend.services.matching_constants import (
+    MB_AUTO_LINK_SCORE,
+    MB_SCORE_GAP,
+    MID_BAND_GAP_THRESHOLD,
+    MID_BAND_LOWER,
+    MID_BAND_UPPER,
+    MIN_PRESENTATION_SCORE,
+)
+from backend.services.matching_reasons import (
+    ReasonCode,
+    format_ambiguous_gap,
+    format_low_confidence,
+)
+from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
+from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
@@ -55,6 +70,289 @@ class IdentityMatchingStrategy(Protocol):
         identity: BroadcastTrackIdentity,
         artist: BroadcastArtist,
     ) -> IdentityMatchResult | None: ...
+
+
+def _score_candidates(
+    broadcast_title: str,
+    candidates: list[LibraryFile],
+    tier: MatchTier,
+    high_threshold: int,
+) -> IdentityMatchResult:
+    """Score candidates against broadcast_title; return best-match result.
+
+    Normalises both sides with normalize_title_for_scoring() before
+    token_sort_ratio. Single-candidate case: gap = 100 (no competition).
+    library_file_id is ALWAYS populated with best_file.id — never None.
+    Caller must ensure candidates is non-empty.
+    """
+    assert candidates, "caller must have ensured candidates is non-empty"
+    norm_bc = normalize_title_for_scoring(broadcast_title)
+    scored: list[tuple[float, LibraryFile]] = sorted(
+        (
+            (
+                float(
+                    token_sort_ratio(
+                        norm_bc,
+                        normalize_title_for_scoring(f.audio.track_title or ""),
+                    )
+                ),
+                f,
+            )
+            for f in candidates
+        ),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    top_score, best = scored[0]
+    gap: float = (top_score - scored[1][0]) if len(scored) > 1 else 100.0
+
+    rc: ReasonCode | None
+    rd: str | None
+    auto_match = (
+        top_score >= MB_AUTO_LINK_SCORE
+        or (top_score >= high_threshold and gap >= MB_SCORE_GAP)
+        or (
+            MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
+            and gap >= MID_BAND_GAP_THRESHOLD
+        )
+    )
+    if auto_match:
+        status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
+    elif top_score >= MIN_PRESENTATION_SCORE:
+        status = MatchStatus.NEEDS_REVIEW
+        if top_score >= high_threshold:
+            rc = ReasonCode.AMBIGUOUS_GAP
+            rd = format_ambiguous_gap(gap, MB_SCORE_GAP)
+        else:
+            rc = ReasonCode.LOW_CONFIDENCE
+            rd = format_low_confidence(top_score)
+    else:
+        status = MatchStatus.NEEDS_REVIEW
+        rc = ReasonCode.LOW_CONFIDENCE
+        rd = format_low_confidence(top_score)
+
+    return IdentityMatchResult(
+        status=status,
+        tier=tier,
+        confidence_score=top_score,
+        library_file_id=best.id,
+        reason_code=rc,
+        reason_detail=rd,
+    )
+
+
+class IdentityMappingRuleStrategy:
+    """Tier 0 — global mapping rule override.
+
+    Returns AUTO_MATCHED when a rule's source_pattern matches the identity's
+    normalized_signature AND resolves to a real LibraryFile. Rule overrides
+    always win over algorithmic matching.
+    """
+
+    def __init__(
+        self,
+        rules: list[MappingRule],
+        library_file_repo: LibraryFileRepository,
+    ) -> None:
+        self._rules = rules
+        self._library_file_repo = library_file_repo
+
+    def apply(
+        self,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+    ) -> IdentityMatchResult | None:
+        sig = identity.normalized_signature
+        for rule in self._rules:
+            if rule.target_type != TargetType.LIBRARY_FILE:
+                continue
+            if not rule_matches(rule.source_pattern, sig):
+                continue
+            try:
+                lib_file = self._library_file_repo.get_by_id(UUID(rule.target_id))
+            except ValueError:
+                lib_file = self._library_file_repo.get_by_path(rule.target_id)
+            if lib_file is None:
+                continue
+            return IdentityMatchResult(
+                status=MatchStatus.AUTO_MATCHED,
+                tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+                confidence_score=100.0,
+                library_file_id=lib_file.id,
+                work_id=lib_file.work_id or lib_file.recording_id or "",
+            )
+        return None
+
+
+class ResolvedArtistMbidStrategy:
+    """Tier 1 — fused MBID fast path.
+
+    Step A: local library lookup by artist MBID (no API call).
+    Step B: MB recording search (1 API call) — fires internally when Step A
+            is inconclusive (mid-confidence) or finds no local files.
+
+    Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
+    the gate, apply() ALWAYS returns a non-None result. Returning None for a
+    resolved artist would strand the identity because Tier 2 also gates on
+    unresolved artists.
+    """
+
+    def __init__(
+        self,
+        library_file_repo: LibraryFileRepository,
+        match_repo: MatchRepository,
+        mb_client: MusicBrainzClientProtocol,
+        high_threshold: int = 80,
+    ) -> None:
+        self._library_file_repo = library_file_repo
+        self._match_repo = match_repo
+        self._mb_client = mb_client
+        self._high_threshold = high_threshold
+
+    def apply(
+        self,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+    ) -> IdentityMatchResult | None:
+        if artist.match_status not in {
+            MatchStatus.AUTO_MATCHED,
+            MatchStatus.MANUAL_MATCHED,
+        }:
+            return None
+
+        artist_match = self._match_repo.get_by_artist(artist.id)
+        if artist_match is None:
+            return IdentityMatchResult(
+                status=MatchStatus.NEEDS_REVIEW,
+                tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+                confidence_score=0.0,
+                library_file_id=None,
+                reason_code=ReasonCode.MISSING_MATCH_RECORD,
+                reason_detail=(
+                    "Artist is resolved but no match record found "
+                    "— data inconsistency"
+                ),
+            )
+
+        mbid = artist_match.target_id
+        if mbid is None:
+            return IdentityMatchResult(
+                status=MatchStatus.NEEDS_REVIEW,
+                tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+                confidence_score=0.0,
+                library_file_id=None,
+                reason_code=ReasonCode.MISSING_MATCH_RECORD,
+                reason_detail="Artist match row has no target_id (MBID)",
+            )
+
+        # Step A — local library lookup.
+        candidate_files = self._library_file_repo.get_by_artist_mbid(mbid)
+        if candidate_files:
+            local_result = _score_candidates(
+                identity.normalized_title,
+                candidate_files,
+                tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+                high_threshold=self._high_threshold,
+            )
+            if local_result.status == MatchStatus.AUTO_MATCHED:
+                return local_result
+            # Step B escalation.
+            mb_result = self._mb_recording_search(mbid, identity)
+            if mb_result is not None:
+                return mb_result
+            return local_result
+
+        mb_result = self._mb_recording_search(mbid, identity)
+        if mb_result is not None:
+            return mb_result
+
+        return IdentityMatchResult(
+            status=MatchStatus.NEEDS_REVIEW,
+            tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+            confidence_score=0.0,
+            library_file_id=None,
+            reason_code=ReasonCode.NO_LOCAL_FILES,
+            reason_detail=(
+                "Artist MBID confirmed but no matching local recording found"
+            ),
+        )
+
+    def _mb_recording_search(
+        self,
+        mbid: str,
+        identity: BroadcastTrackIdentity,
+    ) -> IdentityMatchResult | None:
+        """Return a scored result if any MB recording maps to a local file.
+
+        Returns None otherwise; caller converts None into a concrete blocked
+        result.
+        """
+        recordings = self._mb_client.search_recording(
+            artist_mbid=mbid, title=identity.normalized_title
+        )
+        for rec in recordings:
+            rec_id = rec.get("id")
+            if rec_id is None:
+                continue
+            lib_file = self._library_file_repo.get_by_recording_mbid(rec_id)
+            if lib_file is not None:
+                return _score_candidates(
+                    identity.normalized_title,
+                    [lib_file],
+                    tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+                    high_threshold=self._high_threshold,
+                )
+        return None
+
+
+class BroadcastToLocalStrategy:
+    """Tier 2 — fuzzy fallback when artist MBID is not yet confirmed.
+
+    Never fires for resolved artists — Tier 1 always returns a concrete result
+    for resolved artists, so the engine never reaches Tier 2 in that case.
+    The gate below is a defensive guard.
+    """
+
+    def __init__(
+        self,
+        library_file_repo: LibraryFileRepository,
+        high_threshold: int = 80,
+    ) -> None:
+        self._library_file_repo = library_file_repo
+        self._high_threshold = high_threshold
+
+    def apply(
+        self,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+    ) -> IdentityMatchResult | None:
+        if artist.match_status in {
+            MatchStatus.AUTO_MATCHED,
+            MatchStatus.MANUAL_MATCHED,
+        }:
+            return None
+
+        candidate_files = self._library_file_repo.search_by_artist_name(
+            artist.normalized_name
+        )
+        if not candidate_files:
+            return IdentityMatchResult(
+                status=MatchStatus.NEEDS_REVIEW,
+                tier=MatchTier.LOCAL_FILE_FUZZY,
+                confidence_score=0.0,
+                library_file_id=None,
+                reason_code=ReasonCode.NO_CANDIDATES,
+                reason_detail=(
+                    f"No library files found for artist "
+                    f"'{artist.normalized_name}'"
+                ),
+            )
+        return _score_candidates(
+            identity.normalized_title,
+            candidate_files,
+            tier=MatchTier.LOCAL_FILE_FUZZY,
+            high_threshold=self._high_threshold,
+        )
 
 
 def _try_tier0_rule_match(
