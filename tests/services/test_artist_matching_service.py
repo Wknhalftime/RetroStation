@@ -193,8 +193,11 @@ def test_characterize_try_fuzzy_match_high_confidence_auto_matches() -> None:
     assert created.target_id == "mbid-metallica"
     assert created.target_type == TargetType.ARTIST
     assert created.match_tier == MatchTier.NORMALIZATION
-    # int(94.117...) == 94; stored on the Match as-is.
+    # int(94.117...) == 94; stored on the Match as-is. Pin both value AND type:
+    # the Match field is declared `float`, but the service currently stores an
+    # int. `== 94` alone passes for 94.0; `type(...) is int` locks the cast.
     assert created.confidence_score == 94
+    assert type(created.confidence_score) is int
 
 
 def test_characterize_try_fuzzy_match_high_score_insufficient_gap_needs_review() -> None:

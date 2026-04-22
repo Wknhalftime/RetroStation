@@ -232,6 +232,11 @@ def test_characterize_tier0_rule_match_hit_returns_recording_id_when_no_work_id(
     created = match_repo.get_by_identity(identity.id)
     assert created is not None
     assert created.library_file_id == lib_file.id
+    # Match metadata matches the other tier-0 hit tests: tier-0 always writes
+    # MUSICBRAINZ_ID_EXACT at score 100.0, regardless of which fallback
+    # (work_id / recording_id / "") the return value takes.
+    assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    assert created.confidence_score == 100.0
 
 
 def test_characterize_tier0_rule_match_target_id_as_uuid_uses_get_by_id() -> None:
@@ -402,6 +407,18 @@ def test_characterize_tier2_mbid_match_recording_id_fallback_when_no_work_id() -
     status, work_id = result
     assert status == MatchStatus.AUTO_MATCHED
     assert work_id == "rec-enter-sandman"
+
+    # Anchor side effects: a regression that returns the right tuple but stops
+    # persisting the status update / Match row would otherwise pass.
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    created = match_repo.get_by_identity(identity.id)
+    assert created is not None
+    assert created.library_file_id == lib_file.id
+    assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    assert created.confidence_score == 100.0
 
 
 def test_characterize_tier2_mbid_match_mid_high_confidence_auto_normalization() -> None:
