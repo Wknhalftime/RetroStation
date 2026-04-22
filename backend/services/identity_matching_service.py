@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID, uuid4
 
 import structlog
 from rapidfuzz import fuzz
 
-from backend.domain.broadcast import BroadcastTrackIdentity
+from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.domain.matching import MappingRule, Match
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
@@ -13,10 +15,46 @@ from backend.repositories.broadcast_track_identities import BroadcastTrackIdenti
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.services.matching_reasons import ReasonCode
 from backend.services.matching_utils import rule_matches
 from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class IdentityMatchResult:
+    """Immutable result returned by an IdentityMatchingStrategy.
+
+    Strategies produce values; the service function owns all persistence.
+    library_file_id is None ONLY when no candidate exists at all
+    (reason_code in {NO_LOCAL_FILES, MISSING_MATCH_RECORD, NO_CANDIDATES}); the
+    _score_candidates helper always populates it with best_file.id. triage_bucket
+    is NOT on this dataclass — the router computes it from confidence_score.
+    """
+
+    status: MatchStatus
+    tier: MatchTier
+    confidence_score: float
+    library_file_id: UUID | None
+    work_id: str | None = None
+    reason_code: ReasonCode | None = None
+    reason_detail: str | None = None
+
+
+class IdentityMatchingStrategy(Protocol):
+    """One resolution tier for a BroadcastTrackIdentity.
+
+    apply() takes both (identity, artist) so strategies do not refetch the
+    artist. This differs from ArtistMatchingStrategy.apply(broadcast_artist)
+    intentionally; the two Protocols cannot be merged.
+    """
+
+    def apply(
+        self,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+    ) -> IdentityMatchResult | None: ...
 
 
 def _try_tier0_rule_match(
