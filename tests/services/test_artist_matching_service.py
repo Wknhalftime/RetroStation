@@ -19,6 +19,7 @@ from backend.services.artist_matching_service import (
     _try_mb_match,
     _try_rule_match,
 )
+from backend.services.matching_constants import MB_AUTO_LINK_SCORE, MB_SCORE_GAP
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
@@ -153,12 +154,15 @@ def test_characterize_try_exact_match_miss_returns_false() -> None:
 # _try_fuzzy_match
 # ---------------------------------------------------------------------------
 #
-# Score thresholds (see _apply_thresholds in artist_matching_service.py):
-#   score >= auto_link_score (95) AND gap >= score_gap (10)  → AUTO_MATCHED
-#   score >= auto_link_score (95) AND gap <  score_gap (10)  → NEEDS_REVIEW
-#   score >= 80                                               → AUTO_MATCHED
-#   score >= 60                                               → NEEDS_REVIEW
-#   else                                                      → return None/None
+# Score thresholds (see _apply_thresholds in artist_matching_service.py).
+# Values come from backend.services.matching_constants (single source of truth):
+#   MB_AUTO_LINK_SCORE = 95, MB_SCORE_GAP = 10.
+#
+#   score >= auto_link_score AND gap >= score_gap  → AUTO_MATCHED
+#   score >= auto_link_score AND gap <  score_gap  → NEEDS_REVIEW
+#   score >= 80                                    → AUTO_MATCHED
+#   score >= 60                                    → NEEDS_REVIEW
+#   else                                           → return None/None
 #
 # Empirical rapidfuzz.token_sort_ratio results (both operands already
 # normalized — see normalize_artist):
@@ -181,7 +185,7 @@ def test_characterize_try_fuzzy_match_high_confidence_auto_matches() -> None:
 
     result = _try_fuzzy_match(
         artist, [canonical], artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is True
@@ -193,11 +197,11 @@ def test_characterize_try_fuzzy_match_high_confidence_auto_matches() -> None:
     assert created.target_id == "mbid-metallica"
     assert created.target_type == TargetType.ARTIST
     assert created.match_tier == MatchTier.NORMALIZATION
-    # int(94.117...) == 94; stored on the Match as-is. Pin both value AND type:
-    # the Match field is declared `float`, but the service currently stores an
-    # int. `== 94` alone passes for 94.0; `type(...) is int` locks the cast.
+    # int(94.117...) == 94; stored on the Match as-is. `Match.confidence_score`
+    # is typed float and persisted as REAL, so the value survives the int-cast
+    # but the Python type does not after a DB round-trip. Don't pin `type is int` —
+    # that would make the test diverge from production-observable behavior.
     assert created.confidence_score == 94
-    assert type(created.confidence_score) is int
 
 
 def test_characterize_try_fuzzy_match_high_score_insufficient_gap_needs_review() -> None:
@@ -217,7 +221,7 @@ def test_characterize_try_fuzzy_match_high_score_insufficient_gap_needs_review()
 
     result = _try_fuzzy_match(
         artist, [canonical_a, canonical_b], artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is True
@@ -239,7 +243,7 @@ def test_characterize_try_fuzzy_match_mid_confidence_needs_review() -> None:
 
     result = _try_fuzzy_match(
         artist, [canonical], artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is True
@@ -266,7 +270,7 @@ def test_characterize_try_fuzzy_match_reason_string_currently_unset() -> None:
 
     result = _try_fuzzy_match(
         artist, [canonical], artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     # Anchor the baseline: fuzzy must have actually run (NEEDS_REVIEW band).
@@ -309,7 +313,7 @@ def test_characterize_try_mb_match_hit() -> None:
 
     result = _try_mb_match(
         artist, mb_client, catalog_repo, artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is True
@@ -351,7 +355,7 @@ def test_characterize_try_mb_match_high_score_insufficient_gap_needs_review() ->
 
     result = _try_mb_match(
         artist, mb_client, catalog_repo, artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is True
@@ -379,7 +383,7 @@ def test_characterize_try_mb_match_miss() -> None:
 
     result = _try_mb_match(
         artist, mb_client, catalog_repo, artist_repo, match_repo,
-        mb_auto_link_score=95, mb_score_gap=10,
+        mb_auto_link_score=MB_AUTO_LINK_SCORE, mb_score_gap=MB_SCORE_GAP,
     )
 
     assert result is False
