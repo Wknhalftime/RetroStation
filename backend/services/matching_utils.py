@@ -38,3 +38,28 @@ def find_rule_match(
         if rule_matches(rule.source_pattern, normalized_value):
             return rule
     return None
+
+
+_STRIP_SUFFIXES = re.compile(
+    r"\s*[\(\[](live|remix|edit|radio edit|acoustic|extended|extended mix|"
+    r"remaster(?:ed)?|remastered version|original mix|club mix|instrumental|"
+    r"reprise|single version|album version)\s*[\)\]]",
+    re.IGNORECASE,
+)
+
+_STRIP_FEAT = re.compile(
+    r"\s*[\(\[]?(?:feat(?:uring)?|ft)\.?\s+[^\)\]]+[\)\]]?",
+    re.IGNORECASE,
+)
+
+
+def normalize_title_for_scoring(title: str) -> str:
+    """Strip broadcast/library title to canonical core before fuzzy scoring.
+
+    Removes (Live), (Remix), (Edit), (Radio Edit), (Acoustic), feat. clauses,
+    and common variant suffixes. Applied to BOTH sides of every fuzzy comparison.
+    Result: "Song Title (Live)" vs "Song Title" -> 100, not 75.
+    """
+    t = _STRIP_FEAT.sub("", title)
+    t = _STRIP_SUFFIXES.sub("", t)
+    return t.strip()
