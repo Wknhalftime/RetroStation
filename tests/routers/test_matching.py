@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
@@ -20,6 +21,12 @@ from backend.domain.broadcast import (
 )
 from backend.domain.enums import EnrichmentStatus, MatchStatus
 from backend.domain.library import LibraryFile
+from backend.routers.matching import (
+    QueueIdentity,
+    _artist_bucket_from_identities,
+    _compute_triage_bucket,
+)
+from backend.services.matching_constants import MIN_PRESENTATION_SCORE
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -457,3 +464,356 @@ class TestMatchingRun:
         assert "count" in data
         assert isinstance(data["count"], int)
         assert data["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# TestComputeTriageBucket  (pure unit — no DB required)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [
+        (None, "blocked"),
+        (0.0, "blocked"),
+        (49.9, "blocked"),
+        (MIN_PRESENTATION_SCORE, "needs_attention"),  # 50.0 — boundary
+        (50.0, "needs_attention"),
+        (54.9, "needs_attention"),
+        (64.9, "needs_attention"),
+        (65.0, "quick_review"),                       # boundary
+        (79.9, "quick_review"),
+        (80.0, "quick_review"),
+        (99.9, "quick_review"),                       # in queue = not auto-matched
+    ],
+)
+def test_compute_triage_bucket_boundary(score: float | None, expected: str) -> None:
+    assert _compute_triage_bucket(score) == expected
+
+
+# ---------------------------------------------------------------------------
+# TestArtistBucketReduction  (pure unit — no DB required)
+# ---------------------------------------------------------------------------
+
+
+def _identity(bucket: str, match_status: str = "needs_review") -> QueueIdentity:
+    return QueueIdentity(
+        id=uuid4(),
+        original_title="x",
+        normalized_title="x",
+        match_status=match_status,
+        match_tier=None,
+        confidence_score=None,
+        triage_bucket=bucket,  # type: ignore[arg-type]
+    )
+
+
+class TestArtistBucketReduction:
+    def test_empty_returns_blocked(self) -> None:
+        assert _artist_bucket_from_identities([]) == "blocked"
+
+    def test_any_quick_review_wins(self) -> None:
+        ids = [
+            _identity("needs_attention"),
+            _identity("quick_review"),
+            _identity("blocked"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "quick_review"
+
+    def test_needs_attention_wins_over_blocked(self) -> None:
+        ids = [_identity("blocked"), _identity("needs_attention")]
+        assert _artist_bucket_from_identities(ids) == "needs_attention"
+
+    def test_all_blocked_returns_blocked(self) -> None:
+        ids = [_identity("blocked"), _identity("blocked")]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_resolved_identities_do_not_inflate_bucket(self) -> None:
+        # AUTO_MATCHED + MANUAL_* + *_REJECTED children represent completed
+        # curator work and must not contaminate the artist-level headline.
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("quick_review", match_status="manual_matched"),
+            _identity("blocked", match_status="auto_rejected"),
+            _identity("blocked", match_status="needs_review"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_all_children_resolved_returns_blocked(self) -> None:
+        # No review-relevant children at all → "blocked" (same as empty list).
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("quick_review", match_status="manual_matched"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "blocked"
+
+    def test_review_relevant_identity_still_drives_bucket(self) -> None:
+        ids = [
+            _identity("quick_review", match_status="auto_matched"),
+            _identity("needs_attention", match_status="pending"),
+        ]
+        assert _artist_bucket_from_identities(ids) == "needs_attention"
+
+
+# ---------------------------------------------------------------------------
+# TestQueueResponseShape  (integration — requires DB)
+# ---------------------------------------------------------------------------
+
+
+def _insert_match_row(
+    conn: psycopg.Connection,
+    identity: BroadcastTrackIdentity,
+    confidence_score: float,
+) -> None:
+    """Insert a matches row for the given identity."""
+    conn.execute(
+        """
+        INSERT INTO matches (id, identity_id, target_type, confidence_score, match_tier)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (uuid4(), identity.id, "library_file", confidence_score, "vector"),
+    )
+    conn.commit()
+
+
+class TestQueueResponseShape:
+    def test_triage_bucket_quick_review_from_confidence(self, client, db_conn):
+        """Identity with confidence_score=72.0 → quick_review bucket."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        _insert_match_row(db_conn, identity, confidence_score=72.0)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        qi = item["identities"][0]
+        assert qi["confidence_score"] == pytest.approx(72.0, abs=1e-4)
+        assert qi["triage_bucket"] == "quick_review"
+        assert item["triage_bucket"] == "quick_review"
+
+    def test_triage_bucket_needs_attention(self, client, db_conn):
+        """Identity with confidence_score=55.0 → needs_attention bucket."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        _insert_match_row(db_conn, identity, confidence_score=55.0)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["identities"][0]["triage_bucket"] == "needs_attention"
+        assert item["triage_bucket"] == "needs_attention"
+
+    def test_triage_bucket_blocked_no_match(self, client, db_conn):
+        """Identity with no matches row → confidence_score=None → blocked."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        qi = item["identities"][0]
+        assert qi["confidence_score"] is None
+        assert qi["triage_bucket"] == "blocked"
+        assert item["triage_bucket"] == "blocked"
+
+    def test_distinct_on_prevents_row_multiplication(self, client, db_conn):
+        """DISTINCT ON: 3 matches rows for 1 identity must produce 1 identity with
+        the highest-confidence row selected."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        # _insert_match_row commits each row, so these three match rows have
+        # distinct created_at timestamps; the DISTINCT ON primary key is
+        # confidence_score DESC, so 72.0 wins deterministically.
+        for score in (72.0, 60.0, 45.0):
+            _insert_match_row(db_conn, identity, confidence_score=score)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert len(item["identities"]) == 1
+        assert item["identities"][0]["confidence_score"] == 72.0
+        assert item["identities"][0]["triage_bucket"] == "quick_review"
+
+    def test_reason_code_detail_propagated(self, client, db_conn):
+        """reason_code + reason_detail appear on both identity and artist."""
+        # Insert artist with reason columns
+        db_conn.execute(
+            """
+            INSERT INTO broadcast_artists (
+                id, original_name, normalized_name, match_status,
+                reason_code, reason_detail
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                (aid := uuid4()),
+                "Reason Artist",
+                "reason artist",
+                "needs_review",
+                "NO_CANDIDATES",
+                "No MusicBrainz candidates found",
+            ),
+        )
+        # Insert identity with reason columns
+        db_conn.execute(
+            """
+            INSERT INTO track_identities (
+                id, broadcast_artist_id, original_title, normalized_title,
+                normalized_signature, match_status, reason_code, reason_detail
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                uuid4(),
+                aid,
+                "Reason Song",
+                "reason song",
+                f"reason artist:reason song:{uuid4().hex}",
+                "needs_review",
+                "LOW_CONFIDENCE",
+                "Score below threshold",
+            ),
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        item = next(i for i in items if i["original_name"] == "Reason Artist")
+        assert item["reason_code"] == "NO_CANDIDATES"
+        assert item["reason_detail"] == "No MusicBrainz candidates found"
+        assert item["identities"][0]["reason_code"] == "LOW_CONFIDENCE"
+        assert item["identities"][0]["reason_detail"] == "Score below threshold"
+
+    def test_resolved_children_do_not_contaminate_artist_bucket(self, client, db_conn):
+        """Integration: AUTO_MATCHED identity at score 72 must not lift a
+        NEEDS_REVIEW artist to quick_review. The Python reducer and the SQL
+        CTE both need to exclude resolved children. Exercises both paths via
+        the unfiltered and bucket=blocked queries."""
+        _, _, artist, identity_review, _ = _seed_review_chain(
+            db_conn, artist_name="Mixed Children Artist"
+        )
+        # Low-score review-relevant child → blocked
+        _insert_match_row(db_conn, identity_review, confidence_score=45.0)
+        # High-score AUTO_MATCHED child (would be "quick_review" if counted)
+        identity_matched = _insert_identity(
+            db_conn, artist, original_title="Resolved Song",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_match_row(db_conn, identity_matched, confidence_score=95.0)
+
+        # Python-side bucket computation (no ?bucket=)
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = next(
+            i for i in resp.json()["items"] if i["original_name"] == "Mixed Children Artist"
+        )
+        assert item["triage_bucket"] == "blocked"
+
+        # SQL-side bucket filter (?bucket=blocked) — the artist must survive
+        # the filter, proving the SQL CTE excludes the resolved child.
+        resp_filtered = client.get("/api/v1/matching/queue?bucket=blocked")
+        assert resp_filtered.status_code == 200
+        names = [i["original_name"] for i in resp_filtered.json()["items"]]
+        assert "Mixed Children Artist" in names
+
+    def test_bucket_filter_quick_review(self, client, db_conn):
+        """bucket=quick_review filters out blocked/needs_attention artists."""
+        # Artist 1: quick_review (has match at 72.0)
+        _, _, artist1, identity1, _ = _seed_review_chain(db_conn, artist_name="Artist QR")
+        _insert_match_row(db_conn, identity1, confidence_score=72.0)
+
+        # Artist 2: blocked (no match)
+        _insert_artist(db_conn, original_name="Artist Blocked")
+
+        resp = client.get("/api/v1/matching/queue?bucket=quick_review")
+        assert resp.status_code == 200
+        data = resp.json()
+        # total reflects the filtered bucket count so LIMIT/OFFSET stays coherent
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["triage_bucket"] == "quick_review"
+
+    def test_bucket_filter_blocked(self, client, db_conn):
+        """bucket=blocked returns only blocked artists."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        # No match → blocked
+        _insert_artist(db_conn, original_name="Also Blocked")
+
+        resp = client.get("/api/v1/matching/queue?bucket=blocked")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(i["triage_bucket"] == "blocked" for i in data["items"])
+
+    def test_existing_queue_fields_still_present(self, client, db_conn):
+        """Regression: original_name, candidates, identities.match_status still returned."""
+        _, _, artist, identity, _ = _seed_review_chain(db_conn, with_candidates=True)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["original_name"] == "Review Artist"
+        assert item["candidates"] is not None
+        assert item["identities"][0]["match_status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# TestSearchMbArtists  (unit — FakeMbClient injected via dependency_overrides)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchMbArtists:
+    """Tests for GET /api/v1/matching/mb-artists.
+
+    Uses FakeMbClient injected via dependency_overrides so no real MusicBrainz
+    network calls or sync DB connections are made.
+    """
+
+    def _override_mb(self, app: object, fake: object) -> None:
+        from backend.dependencies import get_mb_client
+        from backend.main import app as fastapi_app  # type: ignore[attr-defined]
+
+        def _fake_mb() -> object:
+            yield fake
+
+        fastapi_app.dependency_overrides[get_mb_client] = _fake_mb  # type: ignore[attr-defined]
+
+    def _clear_mb(self) -> None:
+        from backend.dependencies import get_mb_client
+        from backend.main import app as fastapi_app  # type: ignore[attr-defined]
+
+        fastapi_app.dependency_overrides.pop(get_mb_client, None)  # type: ignore[attr-defined]
+
+    def test_mb_artists_endpoint_returns_items(self, client) -> None:
+        """Stub MB client returns 2 artists; response JSON has items list."""
+        from tests.fakes.mb_client import FakeMbClient
+
+        fake = FakeMbClient(
+            responses={
+                "The Beatles": [
+                    {"id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d", "name": "The Beatles",
+                     "sort-name": "Beatles, The", "score": 100},
+                    {"id": "fake-id-2", "name": "Beatles Cover Band",
+                     "sort-name": "Beatles Cover Band", "score": 72},
+                ]
+            }
+        )
+        self._override_mb(None, fake)
+        try:
+            resp = client.get("/api/v1/matching/mb-artists?query=The+Beatles")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "items" in data
+            assert len(data["items"]) == 2
+            assert data["items"][0]["id"] == "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d"
+            assert data["items"][0]["name"] == "The Beatles"
+            assert data["items"][1]["score"] == 72
+        finally:
+            self._clear_mb()
+
+    def test_mb_artists_requires_non_empty_query(self, client) -> None:
+        """Empty query string → 422 Unprocessable Entity."""
+        resp = client.get("/api/v1/matching/mb-artists?query=")
+        assert resp.status_code == 422
+
+    def test_mb_artists_max_length(self, client) -> None:
+        """Query longer than 100 characters → 422 Unprocessable Entity."""
+        long_query = "a" * 101
+        resp = client.get(f"/api/v1/matching/mb-artists?query={long_query}")
+        assert resp.status_code == 422

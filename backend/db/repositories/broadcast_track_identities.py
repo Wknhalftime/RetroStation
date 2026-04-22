@@ -9,6 +9,7 @@ from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
+from backend.services.matching_reasons import ReasonCode
 
 
 class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -103,13 +104,20 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         return [self._row_to_model(r) for r in rows]
 
     def update_match_status(
-        self, identity_id: UUID, status: MatchStatus, tier: MatchTier
+        self,
+        identity_id: UUID,
+        status: MatchStatus,
+        tier: MatchTier | None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
     ) -> None:
         self._conn.execute(
             """UPDATE track_identities
-               SET match_status = %s, match_tier = %s
+               SET match_status = %s, match_tier = %s,
+                   reason_code = %s, reason_detail = %s
                WHERE id = %s""",
-            (status.value, tier.value, identity_id),
+            (status.value, tier.value if tier is not None else None,
+             reason_code, reason_detail, identity_id),
         )
 
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:

@@ -18,7 +18,8 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import MatchStatus
+from backend.domain.enums import MatchStatus, MatchTier
+from backend.services.matching_reasons import ReasonCode
 
 
 def test_broadcast_artist_upsert_and_conflict(migrated_db: str) -> None:
@@ -167,4 +168,130 @@ def test_play_event_create_returns_persisted_row_on_conflict(migrated_db: str) -
         ).fetchone()
         assert count is not None
         assert count["n"] == 1
+        conn.commit()
+
+
+def test_broadcast_artist_update_match_status_persists_reason_columns(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgBroadcastArtistRepository(conn)
+        a = BroadcastArtist(id=uuid4(), original_name="PRINCE", normalized_name="prince")
+        created = repo.upsert(a)
+        repo.update_match_status(
+            created.id,
+            MatchStatus.NEEDS_REVIEW,
+            reason_code=ReasonCode.LOW_CONFIDENCE,
+            reason_detail="Score 65% — below confidence threshold",
+        )
+        cur = conn.execute(
+            "SELECT reason_code, reason_detail FROM broadcast_artists WHERE id = %s",
+            (created.id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row["reason_code"] == "LOW_CONFIDENCE"
+        assert row["reason_detail"] == "Score 65% — below confidence threshold"
+        conn.commit()
+
+
+def test_broadcast_artist_update_match_status_clears_reason_when_not_passed(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgBroadcastArtistRepository(conn)
+        a = BroadcastArtist(id=uuid4(), original_name="MADONNA", normalized_name="madonna")
+        created = repo.upsert(a)
+        # First: set a reason
+        repo.update_match_status(
+            created.id,
+            MatchStatus.NEEDS_REVIEW,
+            reason_code=ReasonCode.LOW_CONFIDENCE,
+            reason_detail="Score 65%",
+        )
+        # Second: transition without reason — should CLEAR the stale reason
+        repo.update_match_status(created.id, MatchStatus.AUTO_MATCHED)
+        cur = conn.execute(
+            "SELECT reason_code, reason_detail FROM broadcast_artists WHERE id = %s",
+            (created.id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row["reason_code"] is None
+        assert row["reason_detail"] is None
+        conn.commit()
+
+
+def test_track_identity_update_match_status_persists_reason_columns(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        artist_repo = PgBroadcastArtistRepository(conn)
+        identity_repo = PgBroadcastTrackIdentityRepository(conn)
+        artist = artist_repo.upsert(
+            BroadcastArtist(id=uuid4(), original_name="BOWIE", normalized_name="bowie")
+        )
+        identity = identity_repo.upsert(BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Heroes",
+            normalized_title="heroes",
+            normalized_signature="bowie00heroes00bowie00heroes0000",
+        ))
+        identity_repo.update_match_status(
+            identity.id,
+            MatchStatus.NEEDS_REVIEW,
+            tier=None,
+            reason_code=ReasonCode.NO_LOCAL_FILES,
+            reason_detail="Artist MBID confirmed but no matching local recording found",
+        )
+        cur = conn.execute(
+            "SELECT reason_code, reason_detail FROM track_identities WHERE id = %s",
+            (identity.id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row["reason_code"] == "NO_LOCAL_FILES"
+        assert row["reason_detail"] == "Artist MBID confirmed but no matching local recording found"
+        conn.commit()
+
+
+def test_track_identity_update_match_status_clears_reason_when_not_passed(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        artist_repo = PgBroadcastArtistRepository(conn)
+        identity_repo = PgBroadcastTrackIdentityRepository(conn)
+        artist = artist_repo.upsert(
+            BroadcastArtist(
+                id=uuid4(), original_name="KATE BUSH", normalized_name="kate bush"
+            )
+        )
+        identity = identity_repo.upsert(BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Running Up That Hill",
+            normalized_title="running up that hill",
+            normalized_signature="katebush0running0katebush0runnin",
+        ))
+        identity_repo.update_match_status(
+            identity.id,
+            MatchStatus.NEEDS_REVIEW,
+            tier=None,
+            reason_code=ReasonCode.LOW_CONFIDENCE,
+            reason_detail="Score 72%",
+        )
+        identity_repo.update_match_status(
+            identity.id,
+            MatchStatus.AUTO_MATCHED,
+            tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+        )
+        cur = conn.execute(
+            "SELECT reason_code, reason_detail FROM track_identities WHERE id = %s",
+            (identity.id,),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row["reason_code"] is None
+        assert row["reason_detail"] is None
         conn.commit()

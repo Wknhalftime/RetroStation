@@ -3,6 +3,7 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
+from backend.services.matching_reasons import ReasonCode
 
 
 class BroadcastTrackIdentityRepository(ABC):
@@ -36,8 +37,19 @@ class BroadcastTrackIdentityRepository(ABC):
         self,
         identity_id: UUID,
         status: MatchStatus,
-        tier: MatchTier,
-    ) -> None: ...
+        tier: MatchTier | None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> None:
+        """Update match status plus optional reason metadata.
+
+        tier is required to be passed explicitly — even as None — so callers
+        make a conscious choice for statuses like AUTO_MATCHED that require a
+        tier and cannot silently null it by omitting the argument. reason_code
+        / reason_detail default to None; passing None explicitly clears any
+        previously-persisted reason.
+        """
+        ...
 
     @abstractmethod
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None: ...

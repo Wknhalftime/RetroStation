@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_token, get_db_connection
+from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
+from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
 
 router = APIRouter()
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
+MbClient = Annotated[MusicBrainzClientProtocol, Depends(get_mb_client)]
 
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
@@ -25,6 +29,95 @@ _PROTECTED_STATUSES: list[str] = [
     MatchStatus.MANUAL_MATCHED.value,
     MatchStatus.MANUAL_REJECTED.value,
 ]
+
+
+# Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
+# bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
+# count all reference the same filtered set. Thresholds come from
+# matching_constants (single source of truth); the f-string interpolates trusted
+# module-level ints, never user input.
+_QUEUE_BUCKET_CTE = f"""
+artist_base AS (
+    SELECT id, original_name, normalized_name, match_status,
+           artist_candidates, reason_code, reason_detail, created_at
+    FROM broadcast_artists
+    WHERE match_status = ANY(%s)
+),
+identity_best AS (
+    -- Mirrors _artist_bucket_from_identities: only review-relevant identities
+    -- contribute to the artist bucket so resolved children (AUTO_MATCHED,
+    -- MANUAL_*, *_REJECTED) cannot inflate the headline.
+    SELECT DISTINCT ON (ti.id)
+           ti.id AS identity_id,
+           ti.broadcast_artist_id,
+           m.confidence_score
+    FROM track_identities ti
+    LEFT JOIN matches m ON m.identity_id = ti.id
+    WHERE ti.broadcast_artist_id IN (SELECT id FROM artist_base)
+      AND ti.match_status = ANY(%s)
+    ORDER BY ti.id,
+             m.confidence_score DESC NULLS LAST,
+             m.created_at       DESC NULLS LAST,
+             m.id               DESC NULLS LAST
+),
+artist_bucket AS (
+    SELECT a.id,
+           CASE
+               WHEN bool_or(ib.confidence_score >= {QUICK_REVIEW_MIN_SCORE})
+                   THEN 'quick_review'
+               WHEN bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
+                            AND ib.confidence_score < {QUICK_REVIEW_MIN_SCORE})
+                   THEN 'needs_attention'
+               ELSE 'blocked'
+           END AS bucket
+    FROM artist_base a
+    LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
+    GROUP BY a.id
+)
+"""
+
+
+TriageBucket = Literal["quick_review", "needs_attention", "blocked"]
+
+
+def _compute_triage_bucket(score: float | None) -> TriageBucket:
+    """Single canonical triage implementation. Import and test directly — never
+    reimplement.
+
+    score < MIN_PRESENTATION_SCORE is in the token_sort_ratio stopword noise
+    band for 2-5-token titles — "blocked" means "nothing useful to show."
+    Gap-confirmed mid-band items (score 55-64, gap ≥ 5) are AUTO_MATCHED inside
+    strategies and never reach this function.
+    """
+    if score is None or score < MIN_PRESENTATION_SCORE:
+        return "blocked"
+    if score >= QUICK_REVIEW_MIN_SCORE:
+        return "quick_review"
+    return "needs_attention"
+
+
+def _artist_bucket_from_identities(
+    identities: list[QueueIdentity],
+) -> TriageBucket:
+    """Reduce identity-level triage to an artist-level headline.
+
+    Only identities whose own ``match_status`` is still review-relevant
+    (PENDING / NEEDS_REVIEW) contribute to the bucket — resolved children
+    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) represent work the curator has
+    already completed and must not inflate the headline. Within the
+    review-relevant subset, the reduction surfaces the most actionable child:
+    quick_review > needs_attention > blocked. If there are no review-relevant
+    children, the artist is "blocked".
+    """
+    review_relevant = [i for i in identities if i.match_status in _QUEUE_STATUSES]
+    if not review_relevant:
+        return "blocked"
+    buckets = {i.triage_bucket for i in review_relevant}
+    if "quick_review" in buckets:
+        return "quick_review"
+    if "needs_attention" in buckets:
+        return "needs_attention"
+    return "blocked"
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +133,10 @@ class QueueIdentity(BaseModel):
     normalized_title: str
     match_status: str
     match_tier: str | None
+    confidence_score: float | None = None
+    triage_bucket: TriageBucket
+    reason_code: str | None = None
+    reason_detail: str | None = None
 
 
 class QueueArtist(BaseModel):
@@ -49,6 +146,9 @@ class QueueArtist(BaseModel):
     original_name: str
     normalized_name: str
     match_status: str
+    reason_code: str | None = None
+    reason_detail: str | None = None
+    triage_bucket: TriageBucket
     candidates: list[dict[str, Any]] | None
     identities: list[QueueIdentity]
 
@@ -92,57 +192,76 @@ async def get_matching_queue(
     _token: Token,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    bucket: TriageBucket | None = Query(default=None),  # noqa: B008
 ) -> MatchingQueue:
     """Return paginated artists that need curator review.
 
-    Args:
-        conn: Async database connection.
-        _token: Bearer token (auth check only).
-        limit: Maximum number of artists to return (1-500, default 50).
-        offset: Number of items to skip (default 0).
+    triage_bucket is computed per-identity from confidence_score (sourced via
+    LEFT JOIN on matches) and per-artist as the best-of-children reduction.
 
-    Returns:
-        :class:`MatchingQueue` with artist items and total count.
+    The bucket filter (when supplied) is materialised in SQL via a CTE so that
+    LIMIT/OFFSET pagination and `total` both reflect the filtered set.
     """
-    count_cur = await conn.execute(
-        "SELECT COUNT(*) AS total FROM broadcast_artists WHERE match_status = ANY(%s)",
-        (_QUEUE_STATUSES,),
-    )
-    count_row = await count_cur.fetchone()
-    total: int = count_row["total"] if count_row else 0
-
-    artists_cur = await conn.execute(
-        """
-        SELECT id, original_name, normalized_name, match_status, artist_candidates
-        FROM broadcast_artists
-        WHERE match_status = ANY(%s)
-        ORDER BY created_at
+    page_cur = await conn.execute(
+        f"""
+        WITH {_QUEUE_BUCKET_CTE},
+        filtered AS (
+            SELECT a.id, a.original_name, a.normalized_name, a.match_status,
+                   a.artist_candidates, a.reason_code, a.reason_detail,
+                   a.created_at, ab.bucket
+            FROM artist_base a
+            JOIN artist_bucket ab ON ab.id = a.id
+            WHERE %s::text IS NULL OR ab.bucket = %s::text
+        )
+        SELECT *, COUNT(*) OVER () AS _total
+        FROM filtered
+        ORDER BY created_at, id
         LIMIT %s OFFSET %s
         """,
-        (_QUEUE_STATUSES, limit, offset),
+        (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket, limit, offset),
     )
-    artist_rows = await artists_cur.fetchall()
+    artist_rows = await page_cur.fetchall()
 
     if not artist_rows:
+        # No rows on this page — issue a standalone count for accurate total.
+        count_cur = await conn.execute(
+            f"""
+            WITH {_QUEUE_BUCKET_CTE}
+            SELECT COUNT(*) AS total FROM artist_bucket
+            WHERE %s::text IS NULL OR bucket = %s::text
+            """,
+            (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket),
+        )
+        count_row = await count_cur.fetchone()
+        total = count_row["total"] if count_row else 0
         return MatchingQueue(items=[], total=total)
 
+    total = artist_rows[0]["_total"]
     artist_ids = [row["id"] for row in artist_rows]
 
     identities_cur = await conn.execute(
         """
-        SELECT id, broadcast_artist_id, original_title, normalized_title, match_status, match_tier
-        FROM track_identities
-        WHERE broadcast_artist_id = ANY(%s)
-        ORDER BY original_title
+        SELECT DISTINCT ON (ti.id)
+               ti.id, ti.broadcast_artist_id, ti.original_title,
+               ti.normalized_title, ti.match_status, ti.match_tier,
+               ti.reason_code, ti.reason_detail,
+               m.confidence_score
+        FROM track_identities ti
+        LEFT JOIN matches m ON m.identity_id = ti.id
+        WHERE ti.broadcast_artist_id = ANY(%s)
+        ORDER BY ti.id,
+                 m.confidence_score DESC NULLS LAST,
+                 m.created_at       DESC NULLS LAST,
+                 m.id               DESC NULLS LAST
         """,
         (artist_ids,),
     )
     identity_rows = await identities_cur.fetchall()
 
-    # Group identities by broadcast_artist_id in Python
     identities_by_artist: dict[UUID, list[QueueIdentity]] = {}
     for irow in identity_rows:
         aid = irow["broadcast_artist_id"]
+        cs: float | None = irow.get("confidence_score")
         identities_by_artist.setdefault(aid, []).append(
             QueueIdentity(
                 id=irow["id"],
@@ -150,8 +269,16 @@ async def get_matching_queue(
                 normalized_title=irow["normalized_title"],
                 match_status=irow["match_status"],
                 match_tier=irow.get("match_tier"),
+                confidence_score=cs,
+                triage_bucket=_compute_triage_bucket(cs),
+                reason_code=irow.get("reason_code"),
+                reason_detail=irow.get("reason_detail"),
             )
         )
+
+    # DISTINCT ON pins SQL ordering to ti.id; restore display-friendly order here.
+    for child_list in identities_by_artist.values():
+        child_list.sort(key=lambda i: i.original_title)
 
     items: list[QueueArtist] = []
     for row in artist_rows:
@@ -161,15 +288,19 @@ async def get_matching_queue(
             candidates: list[dict[str, Any]] | None = json.loads(raw_candidates)
         else:
             candidates = raw_candidates
-
+        identities = identities_by_artist.get(row["id"], [])
+        artist_bucket = _artist_bucket_from_identities(identities)
         items.append(
             QueueArtist(
                 id=row["id"],
                 original_name=row["original_name"],
                 normalized_name=row["normalized_name"],
                 match_status=row["match_status"],
+                reason_code=row.get("reason_code"),
+                reason_detail=row.get("reason_detail"),
+                triage_bucket=artist_bucket,
                 candidates=candidates,
-                identities=identities_by_artist.get(row["id"], []),
+                identities=identities,
             )
         )
 
@@ -424,3 +555,33 @@ async def run_matching(
         "message": f"Artist matching queued for {count} playlist(s)",
         "count": count,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /mb-artists
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mb-artists")
+async def search_mb_artists(
+    _token: Token,
+    mb_client: MbClient,
+    query: str = Query(min_length=1, max_length=100),
+) -> dict[str, Any]:
+    """Search MusicBrainz for artists matching query string.
+
+    Proxies to MusicBrainzApiClient.search_artist() with local cache
+    (read-through via PgMusicBrainzCacheRepository). Used by the frontend
+    when no automated candidates exist (PR 5 — ArtistPanel "Search
+    MusicBrainz" empty-state CTA).
+
+    Wiring rationale: MusicBrainzApiClient is fully synchronous (httpx.Client
+    + sync psycopg).  The endpoint injects it via a sync generator dependency
+    (get_mb_client) that opens a dedicated sync psycopg connection — identical
+    to the Huey task pattern (artist_matching_tasks.py).  The search call is
+    dispatched to a thread pool via asyncio.to_thread so it does not block the
+    event loop.  The dependency itself opens/closes the connection around the
+    request lifetime.
+    """
+    items = await asyncio.to_thread(mb_client.search_artist, query)
+    return {"items": items}

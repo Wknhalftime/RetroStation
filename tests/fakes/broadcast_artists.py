@@ -3,6 +3,7 @@ from uuid import UUID
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
+from backend.services.matching_reasons import ReasonCode
 
 
 class FakeBroadcastArtistRepository(BroadcastArtistRepository):
@@ -10,6 +11,8 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
         self._data: dict[UUID, BroadcastArtist] = {}
         # playlist_id -> set of artist_ids (simulates the JOIN through play_events)
         self._playlist_artists: dict[UUID, set[UUID]] = {}
+        self._reason_codes: dict[UUID, ReasonCode | None] = {}
+        self._reason_details: dict[UUID, str | None] = {}
 
     def register_playlist_artist(
         self, playlist_id: UUID, artist_id: UUID
@@ -59,9 +62,21 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
             if a.id in ids and a.embedding is None
         ]
 
-    def update_match_status(self, artist_id: UUID, status: MatchStatus) -> None:
-        if artist := self._data.get(artist_id):
-            artist.match_status = status
+    def update_match_status(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> None:
+        current = self._data.get(artist_id)
+        if current is None:
+            return
+        from dataclasses import replace
+        self._data[artist_id] = replace(current, match_status=status)
+        # Unconditionally overwrite — mirrors Pg UPDATE semantics.
+        self._reason_codes[artist_id] = reason_code
+        self._reason_details[artist_id] = reason_detail
 
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         if artist := self._data.get(artist_id):

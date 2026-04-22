@@ -3,12 +3,15 @@ from uuid import UUID
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
+from backend.services.matching_reasons import ReasonCode
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, BroadcastTrackIdentity] = {}
         self._playlist_identities: dict[UUID, set[UUID]] = {}
+        self._reason_codes: dict[UUID, ReasonCode | None] = {}
+        self._reason_details: dict[UUID, str | None] = {}
 
     def register_playlist_identity(
         self, playlist_id: UUID, identity_id: UUID
@@ -62,11 +65,21 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         ]
 
     def update_match_status(
-        self, identity_id: UUID, status: MatchStatus, tier: MatchTier
+        self,
+        identity_id: UUID,
+        status: MatchStatus,
+        tier: MatchTier | None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
     ) -> None:
-        if identity := self._data.get(identity_id):
-            identity.match_status = status
-            identity.match_tier = tier
+        identity = self._data.get(identity_id)
+        if identity is None:
+            return
+        identity.match_status = status
+        identity.match_tier = tier
+        # Unconditionally overwrite — mirrors Pg UPDATE semantics.
+        self._reason_codes[identity_id] = reason_code
+        self._reason_details[identity_id] = reason_detail
 
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
         if identity := self._data.get(identity_id):
