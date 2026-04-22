@@ -36,6 +36,11 @@ class TestFormatLowConfidence:
     def test_zero(self) -> None:
         assert format_low_confidence(0.0) == "Score 0% \u2014 below confidence threshold"
 
+    def test_half_rounds_up_not_bankers(self) -> None:
+        # Locks in round-half-up; f"{:.0f}" would render 72.5 as 72 (banker's).
+        assert format_low_confidence(72.5) == "Score 73% \u2014 below confidence threshold"
+        assert format_low_confidence(73.5) == "Score 74% \u2014 below confidence threshold"
+
 
 class TestFormatAmbiguousGap:
     def test_typical(self) -> None:

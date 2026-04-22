@@ -9,6 +9,7 @@ queried by telemetry, and asserted in characterization tests.
 """
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 
 
@@ -21,9 +22,19 @@ class ReasonCode(StrEnum):
     MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
 
 
+def _round_half_up(value: float) -> int:
+    # f"{x:.0f}" uses banker's rounding (72.5 -> 72). Curator-facing percentages
+    # should round half away from zero. Scores/gaps are non-negative so
+    # floor(x + 0.5) is sufficient.
+    return math.floor(value + 0.5)
+
+
 def format_low_confidence(score: float) -> str:
-    return f"Score {score:.0f}% \u2014 below confidence threshold"
+    return f"Score {_round_half_up(score)}% \u2014 below confidence threshold"
 
 
 def format_ambiguous_gap(gap: float, threshold: float) -> str:
-    return f"Top candidates within {gap:.0f} points (gap < {threshold:.0f} required)"
+    return (
+        f"Top candidates within {_round_half_up(gap)} points "
+        f"(gap < {_round_half_up(threshold)} required)"
+    )
