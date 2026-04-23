@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from backend.domain.enums import TaskStatus, TaskType
@@ -110,7 +111,11 @@ class TestLibraryEnrichmentProgress:
         _repo_cls: MagicMock,
         _mb_cls: MagicMock,
     ) -> None:
-        mock_enrich_release.side_effect = [RuntimeError("boom"), 1]
+        # Use a realistic transient-failure type that the task is designed
+        # to catch (httpx.HTTPError). A bare RuntimeError now correctly
+        # propagates per the narrowed exception handler — only expected
+        # MB/DB/parse failures are treated as per-item retriable.
+        mock_enrich_release.side_effect = [httpx.HTTPError("boom"), 1]
         mock_connect.side_effect = _fake_connect_factory(
             release_rows=[{"release_mbid": "r1"}, {"release_mbid": "r2"}],
             recording_rows=[],

@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import psycopg
 import structlog
 from huey import crontab  # type: ignore[import-untyped]
 
@@ -163,7 +164,11 @@ def library_scan_files_task(
                                     grouping.recording_id,
                                     EnrichmentStatus.PENDING,
                                 )
-                    except Exception:  # noqa: BLE001
+                    # Narrow to expected per-file failure modes; mirror
+                    # library_scan_tasks.py's grouping loop. Logic bugs
+                    # propagate to the task boundary instead of being
+                    # logged per-file and continuing.
+                    except (psycopg.Error, ValueError, OSError):
                         logger.warning(
                             "watcher_grouping_failed",
                             file_id=str(lf.id),

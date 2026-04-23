@@ -4,6 +4,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 import psycopg
 import structlog
 
@@ -19,6 +20,19 @@ from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
+
+# Per-item failure modes we expect from MB enrichment calls:
+# - httpx.HTTPError: transient network failure / rate limiting / 5xx.
+# - psycopg.Error: DB connectivity / constraint violation on a single write.
+# - ValueError: malformed MB payload that `.get()` / `int()` converts raise on.
+# Logic bugs (KeyError, AttributeError, TypeError) deliberately propagate to
+# the task's outer boundary so they surface in crash logs instead of being
+# silently logged per-item and continuing with a half-processed batch.
+_PER_ITEM_RETRIABLE_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.HTTPError,
+    psycopg.Error,
+    ValueError,
+)
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -106,7 +120,7 @@ def mb_enrichment_task() -> dict[str, int]:
                         repos.artists.mark_enhanced(artist.id)
                         artists_done += 1
                         logger.info("mb_artist_enhanced", mbid=artist.id, name=artist.name)
-                    except Exception as exc:  # noqa: BLE001
+                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
                         error_msg = str(exc)
                         repos.artists.mark_enhancement_failed(artist.id, error_msg)
                         artists_failed += 1
@@ -143,7 +157,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     repos.works.mark_enhanced(work.id)
                     works_done += 1
                     logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
-                except Exception as exc:  # noqa: BLE001
+                except _PER_ITEM_RETRIABLE_ERRORS as exc:
                     logger.warning(
                         "mb_work_enhancement_failed",
                         mbid=work.id,
@@ -190,7 +204,7 @@ def mb_enrichment_task() -> dict[str, int]:
                             mbid=recording.id,
                             title=recording.title,
                         )
-                    except Exception as exc:  # noqa: BLE001
+                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
                         logger.warning(
                             "mb_recording_enhancement_failed",
                             mbid=recording.id,

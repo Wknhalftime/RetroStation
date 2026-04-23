@@ -170,7 +170,12 @@ def _run_scan(
                 if grouping_pending >= chunk_size:
                     library_conn.commit()
                     grouping_pending = 0
-        except Exception as exc:  # noqa: BLE001
+        # Narrow to failure modes we expect per-file: DB errors for any
+        # repo write, ValueError from malformed metadata, OSError if a
+        # downstream tagger touches the file. Logic bugs (KeyError,
+        # AttributeError, TypeError) propagate to the task boundary so
+        # they surface instead of silently logging and continuing.
+        except (psycopg.Error, ValueError, OSError) as exc:
             logger.warning(
                 "grouping_failed",
                 file_id=str(lf.id),
