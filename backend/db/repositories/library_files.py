@@ -285,13 +285,20 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         stripped = normalized_name.lower().strip()
         if not stripped:
             return []
-        needle = f"%{stripped}%"
+        # Escape LIKE metacharacters in the user-supplied needle so an artist
+        # name literally containing `%` or `_` (e.g. "50%") doesn't silently
+        # become a wildcard that pulls in unrelated rows. ESCAPE '\' pairs with
+        # the explicit backslash escapes below.
+        escaped = (
+            stripped.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        needle = f"%{escaped}%"
         # Prefer exact artist-name matches first, then a stable tie-breaker so
         # the LIMIT is deterministic and (for prolific artists) the best
         # candidates are more likely to survive the cap.
         rows = self._conn.execute(
-            """SELECT * FROM library_files
-               WHERE LOWER(TRIM(artist_name)) LIKE %s
+            r"""SELECT * FROM library_files
+               WHERE LOWER(TRIM(artist_name)) LIKE %s ESCAPE '\'
                ORDER BY (LOWER(TRIM(artist_name)) = %s) DESC, id ASC
                LIMIT %s""",
             (needle, stripped, limit),

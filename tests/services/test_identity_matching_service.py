@@ -292,9 +292,11 @@ def test_match_identities_no_pending_returns_empty() -> None:
 
 
 def test_match_identities_skips_orphaned_identity_without_artist() -> None:
-    """Identity whose broadcast_artist_id has no BroadcastArtist row → skipped.
+    """Identity whose broadcast_artist_id has no BroadcastArtist row.
 
-    No crash, no Match row, and a warning is logged (not asserted here).
+    Persists a terminal NEEDS_REVIEW with ORPHANED_IDENTITY reason so the
+    orphan surfaces in review tooling instead of being reprocessed forever.
+    No match row is created (no library_file candidate exists).
     """
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
@@ -323,6 +325,8 @@ def test_match_identities_skips_orphaned_identity_without_artist() -> None:
     assert work_ids == []
     stored = identity_repo.get_by_id(identity.id)
     assert stored is not None
-    # Orphan skipped: status remains PENDING (no side effect).
-    assert stored.match_status == MatchStatus.PENDING
+    # Orphan is surfaced as NEEDS_REVIEW so review tooling can see it.
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.match_tier == MatchTier.UNCLASSIFIED
+    assert identity_repo._reason_codes.get(identity.id) is not None
     assert match_repo.get_by_identity(identity.id) is None

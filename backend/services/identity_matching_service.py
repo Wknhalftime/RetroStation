@@ -83,7 +83,10 @@ def _score_candidates(
     library_file_id is ALWAYS populated with best_file.id — never None.
     Caller must ensure candidates is non-empty.
     """
-    assert candidates, "caller must have ensured candidates is non-empty"
+    if not candidates:
+        # `assert` is stripped under `python -O`; use a real guard so an
+        # upstream bug surfaces as a ValueError, not a later IndexError.
+        raise ValueError("_score_candidates requires at least one candidate")
     norm_bc = normalize_title_for_scoring(broadcast_title)
     scored: list[tuple[float, LibraryFile]] = sorted(
         (
@@ -454,11 +457,24 @@ def match_identities_for_playlist(
     for identity in pending:
         artist = artists_by_id.get(identity.broadcast_artist_id)
         if artist is None:
+            # Persist a terminal NEEDS_REVIEW so the orphan surfaces in review
+            # tooling and stops getting reprocessed on every matching run.
             logger.warning(
-                "orphaned_identity_skipped",
+                "orphaned_identity_marked_for_review",
                 identity_id=str(identity.id),
                 missing_artist_id=str(identity.broadcast_artist_id),
             )
+            track_identity_repo.update_match_status(
+                identity.id,
+                MatchStatus.NEEDS_REVIEW,
+                MatchTier.UNCLASSIFIED,
+                reason_code=ReasonCode.ORPHANED_IDENTITY,
+                reason_detail=(
+                    f"No broadcast_artist row for id "
+                    f"{identity.broadcast_artist_id}"
+                ),
+            )
+            needs_review += 1
             continue
 
         result = engine.resolve(identity, artist)

@@ -171,7 +171,9 @@ class MusicBrainzApiClient:
         Results are cached in the local MusicBrainz cache as a transparent
         read-through side-effect. This is intentional (cache-aside pattern).
         """
-        cache_key = f"recording-search:{artist_mbid}:{title.lower()}"
+        # `limit` is part of the cache key so a later call asking for more
+        # results doesn't reuse a truncated response from an earlier call.
+        cache_key = f"recording-search:{artist_mbid}:{title.lower()}:{limit}"
 
         cached_entry = self._cache.get(cache_key)
         if cached_entry is not None:
