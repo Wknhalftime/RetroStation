@@ -174,8 +174,13 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
     mb = FakeMbClient()
     artist = _artist()
     _seed_artist_match(match_repo, artist.id, "mbid-m")
+    # Title matches identity exactly so score = 100 — exercises the
+    # unconditional MB_AUTO_LINK_SCORE gate, independent of competitor
+    # presence. Previous casing mismatch ("Enter Sandman" vs "enter
+    # sandman") scored ~85 and relied on the now-removed synthetic-gap
+    # auto-match for lone candidates.
     lib_repo.upsert(_lib_file(
-        "/m/es.flac", track_title="Enter Sandman", artist_mbid="mbid-m", work_id="w-es",
+        "/m/es.flac", track_title="enter sandman", artist_mbid="mbid-m", work_id="w-es",
     ))
 
     strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
@@ -296,9 +301,11 @@ def test_tier2_gates_on_resolved_artist_returns_none() -> None:
 
 def test_tier2_high_confidence_auto_matched() -> None:
     lib_repo = FakeLibraryFileRepository()
+    # Exact title match so score = 100 — clears the unconditional
+    # MB_AUTO_LINK_SCORE gate without depending on has_competitor.
     hit = _lib_file(
         "/m/es.flac",
-        track_title="Enter Sandman",
+        track_title="enter sandman",
         artist_name="metallica",
     )
     lib_repo.upsert(hit)
@@ -345,3 +352,60 @@ def test_tier2_mid_confidence_needs_review_with_low_confidence_reason() -> None:
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
     assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+# ---------------------------------------------------------------------------
+# Lone-candidate high-band guard (correctness review follow-up)
+# ---------------------------------------------------------------------------
+
+
+def test_tier2_lone_candidate_high_band_needs_review_not_auto() -> None:
+    """BroadcastToLocalStrategy must NOT auto-match when a single library
+    file scores above high_threshold (80) but below MB_AUTO_LINK_SCORE (95).
+    Without has_competitor on the high_threshold+gap clause, synthesized
+    gap=100 would falsely trigger auto-match for a lone result.
+    """
+    artist = _artist(status=MatchStatus.PENDING)
+    identity = _identity(
+        artist.id, title="enter sandman", signature="metallica|enter sandman",
+    )
+    # Score ~90 vs "enter sandman" — above 80, below 95.
+    lib_repo = FakeLibraryFileRepository()
+    lib_repo.upsert(
+        _lib_file(
+            "/m.flac", track_title="Enter Sandmen",  # one-letter diff -> ~92
+            artist_name="metallica",
+        )
+    )
+
+    strat = BroadcastToLocalStrategy(lib_repo, high_threshold=80)
+    result = strat.apply(identity, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    # Reason is LOW_CONFIDENCE, not AMBIGUOUS_GAP — no peer for ambiguity.
+    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_tier2_lone_candidate_above_auto_link_still_auto_matches() -> None:
+    """The unconditional-AUTO gate (>= 95) intentionally allows lone
+    matches through. This test pins the asymmetry so the guard can't be
+    over-applied to the top band in a later refactor.
+    """
+    artist = _artist(status=MatchStatus.PENDING)
+    identity = _identity(
+        artist.id, title="enter sandman", signature="metallica|enter sandman",
+    )
+    lib_repo = FakeLibraryFileRepository()
+    # Exact title match -> score 100
+    lib_repo.upsert(
+        _lib_file(
+            "/m.flac", track_title="enter sandman", artist_name="metallica",
+        )
+    )
+
+    strat = BroadcastToLocalStrategy(lib_repo, high_threshold=80)
+    result = strat.apply(identity, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED

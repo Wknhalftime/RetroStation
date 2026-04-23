@@ -33,6 +33,7 @@ from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
+from backend.services.normalization import normalize_title
 from tests.fakes.mb_client import FakeMbClient
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
@@ -128,6 +129,10 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         )
         PgRecordingRepository(conn).upsert(recording)
 
+        # Use the normalized title on the library file so fuzzy scoring
+        # against identity.normalized_title is an exact match (score = 100).
+        # This exercises the unconditional MB_AUTO_LINK_SCORE gate so the
+        # lone-candidate has_competitor guard doesn't intervene.
         lib_file = LibraryFile(
             id=uuid4(),
             file_path=f"/music/metallica/{target_title.lower().replace(' ', '_')}.flac",
@@ -137,7 +142,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             recording_id=recording_mbid,
             audio=AudioMetadata(
                 artist_mbid="mbid-metallica-lib",
-                track_title=target_title,
+                track_title=normalize_title(target_title),
             ),
         )
         PgLibraryFileRepository(conn).upsert(lib_file)

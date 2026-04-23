@@ -22,7 +22,6 @@ from backend.services.matching_constants import (
     MID_BAND_GAP_THRESHOLD,
     MID_BAND_LOWER,
     MID_BAND_UPPER,
-    MIN_PRESENTATION_SCORE,
 )
 from backend.services.matching_reasons import (
     ReasonCode,
@@ -116,12 +115,20 @@ def _score_candidates(
 
     rc: ReasonCode | None
     rd: str | None
-    # Mid-band clause requires real competitive separation, so it only fires when
-    # at least one other candidate was scored — a lone mid-band candidate
-    # (gap synthesized to 100) must fall to NEEDS_REVIEW, not AUTO_MATCHED.
+    # Both gap-dependent auto-match clauses require `has_competitor`: when
+    # there is no real second candidate, gap is synthesized to 100 and a
+    # lone result at score 85 would otherwise auto-match via the
+    # high_threshold+gap path — exactly the "too permissive" failure the
+    # mid-band guard prevents. The MB_AUTO_LINK_SCORE (>= 95) path is
+    # unguarded because at that confidence a token match is effectively a
+    # literal identity and a lone result is still trustworthy.
     auto_match = (
         top_score >= MB_AUTO_LINK_SCORE
-        or (top_score >= high_threshold and gap >= MB_SCORE_GAP)
+        or (
+            has_competitor
+            and top_score >= high_threshold
+            and gap >= MB_SCORE_GAP
+        )
         or (
             has_competitor
             and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
@@ -130,14 +137,13 @@ def _score_candidates(
     )
     if auto_match:
         status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
-    elif top_score >= MIN_PRESENTATION_SCORE:
+    elif has_competitor and top_score >= high_threshold:
+        # AMBIGUOUS_GAP only applies when a real peer is close on score.
+        # Lone candidates (synthetic gap=100) fall through to LOW_CONFIDENCE
+        # so the "within 100 points" message never renders.
         status = MatchStatus.NEEDS_REVIEW
-        if top_score >= high_threshold:
-            rc = ReasonCode.AMBIGUOUS_GAP
-            rd = format_ambiguous_gap(gap, MB_SCORE_GAP)
-        else:
-            rc = ReasonCode.LOW_CONFIDENCE
-            rd = format_low_confidence(top_score)
+        rc = ReasonCode.AMBIGUOUS_GAP
+        rd = format_ambiguous_gap(gap, MB_SCORE_GAP)
     else:
         status = MatchStatus.NEEDS_REVIEW
         rc = ReasonCode.LOW_CONFIDENCE
