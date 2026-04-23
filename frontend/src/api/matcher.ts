@@ -1,6 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/api/client'
-import type { MatchingQueue, ArtistResolution, IdentityResolution, ResolveResult } from '@/lib/schemas/matcher'
+import type {
+  MatchingQueue,
+  ArtistResolution,
+  IdentityResolution,
+  ResolveResult,
+  MbArtistResult,
+} from '@/lib/schemas/matcher'
 
 // ---------------------------------------------------------------------------
 // Query keys
@@ -62,6 +68,25 @@ export function useResolveIdentity() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matching'] })
     },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// MusicBrainz artist search
+// ---------------------------------------------------------------------------
+
+export function useMbArtistSearch(query: string) {
+  return useQuery<MbArtistResult[]>({
+    queryKey: ['mb-artist-search', query],
+    queryFn: async () => {
+      if (!query.trim()) return []
+      const body = await apiFetch<{ items: MbArtistResult[] }>(
+        `/api/v1/matching/mb-artists?query=${encodeURIComponent(query)}`,
+      )
+      return body.items
+    },
+    enabled: query.trim().length > 0,
+    staleTime: 30_000,
   })
 }
 

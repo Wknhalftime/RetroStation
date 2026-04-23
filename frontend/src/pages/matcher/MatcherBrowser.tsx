@@ -5,11 +5,16 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { MatchStatusBadge } from '@/components/ui/Badge'
 import { cn } from '@/lib/utils'
-import { useMatchingQueue, useRerunMatching, useResolveIdentity } from '@/api/matcher'
+import {
+  useMatchingQueue,
+  useRerunMatching,
+  useResolveArtist,
+  useResolveIdentity,
+} from '@/api/matcher'
 import { ArtistPanel } from '@/components/domain/matcher/ArtistPanel'
 import { TitlePanel } from '@/components/domain/matcher/TitlePanel'
 import { SearchSlideOver } from '@/components/domain/matcher/SearchSlideOver'
-import type { QueueArtist } from '@/lib/schemas/matcher'
+import type { MbArtistResult, QueueArtist } from '@/lib/schemas/matcher'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,16 +30,24 @@ interface LibraryFile {
 // MatcherBrowser
 // ---------------------------------------------------------------------------
 
+const PAGE_SIZE = 25
+
 export function MatcherBrowser() {
-  const { data, isLoading, isError } = useMatchingQueue(50, 0)
+  const [page, setPage] = useState(1)
+  const offset = (page - 1) * PAGE_SIZE
+  const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset)
   const rerunMatching = useRerunMatching()
   const resolveIdentity = useResolveIdentity()
+  const resolveArtist = useResolveArtist()
 
   const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null)
   const [slideOverOpen, setSlideOverOpen] = useState(false)
   const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null)
+  const [mbSearchOpen, setMbSearchOpen] = useState(false)
 
   const artists: QueueArtist[] = data?.items ?? []
+  const total: number = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   function handleFileSearch(identityId: string) {
     setActiveIdentityId(identityId)
@@ -50,15 +63,26 @@ export function MatcherBrowser() {
     setActiveIdentityId(null)
   }
 
+  function handleMbArtistSelect(mb: MbArtistResult) {
+    if (!selectedArtist) return
+    resolveArtist.mutate({
+      id: selectedArtist.id,
+      resolution: { match_status: 'manual_matched', target_artist_id: mb.id },
+    })
+    setMbSearchOpen(false)
+  }
+
   function handleRerun() {
-    rerunMatching.mutate()
+    rerunMatching.mutate(undefined, {
+      onSuccess: () => setPage(1),
+    })
   }
 
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Matcher"
-        description="Resolve artist and title matches from the queue."
+        title="Resolution Center"
+        description="Link broadcast log names to MusicBrainz artists and local library files."
         actions={
           <button
             onClick={handleRerun}
@@ -95,13 +119,13 @@ export function MatcherBrowser() {
       {!isLoading && !isError && artists.length > 0 && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left — artist list */}
-          <aside className="w-80 shrink-0 overflow-y-auto rounded-lg border border-gray-200 bg-white">
+          <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
             <div className="border-b border-gray-100 px-4 py-2">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
                 Artists ({artists.length})
               </p>
             </div>
-            <ul>
+            <ul className="flex-1 overflow-y-auto">
               {artists.map((artist) => (
                 <li key={artist.id}>
                   <button
@@ -122,13 +146,35 @@ export function MatcherBrowser() {
                 </li>
               ))}
             </ul>
+            <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="text-xs text-gray-500 disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs text-gray-400">
+                Page {page} of {totalPages} ({total} total)
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="text-xs text-gray-500 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
           </aside>
 
           {/* Right — panels */}
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {selectedArtist ? (
               <>
-                <ArtistPanel artist={selectedArtist} />
+                <ArtistPanel
+                  artist={selectedArtist}
+                  onSearchMusicBrainz={() => setMbSearchOpen(true)}
+                />
                 <TitlePanel
                   artist={selectedArtist}
                   onFileSearch={handleFileSearch}
@@ -155,6 +201,13 @@ export function MatcherBrowser() {
             : null
         }
         onSelectFile={handleFileSelect}
+      />
+
+      <SearchSlideOver
+        open={mbSearchOpen}
+        onClose={() => setMbSearchOpen(false)}
+        mode="mb-artist"
+        onSelectMbArtist={handleMbArtistSelect}
       />
     </div>
   )

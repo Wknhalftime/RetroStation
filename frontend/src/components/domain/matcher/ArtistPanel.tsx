@@ -5,9 +5,10 @@ import type { MatchCandidate } from '@/lib/schemas/matches'
 
 interface ArtistPanelProps {
   artist: QueueArtist
+  onSearchMusicBrainz?: () => void
 }
 
-export function ArtistPanel({ artist }: ArtistPanelProps) {
+export function ArtistPanel({ artist, onSearchMusicBrainz }: ArtistPanelProps) {
   const resolveArtist = useResolveArtist()
 
   function handleAccept(candidate: MatchCandidate) {
@@ -65,6 +66,12 @@ export function ArtistPanel({ artist }: ArtistPanelProps) {
         <MatchStatusBadge status={artist.match_status} className="shrink-0" />
       </div>
 
+      {(artist.reason_detail || artist.reason_code) && (
+        <p className="mt-1 mb-3 text-xs text-amber-600">
+          ⚠ {artist.reason_detail ?? artist.reason_code}
+        </p>
+      )}
+
       {/* Candidates */}
       {candidates.length > 0 ? (
         <div className="mb-4 space-y-2">
@@ -100,7 +107,19 @@ export function ArtistPanel({ artist }: ArtistPanelProps) {
           ))}
         </div>
       ) : (
-        <p className="mb-4 text-sm text-gray-400">No candidates available.</p>
+        <div className="mb-4">
+          <p className="mb-2 text-sm text-gray-400">
+            No candidates found automatically.
+          </p>
+          {onSearchMusicBrainz && (
+            <button
+              onClick={onSearchMusicBrainz}
+              className="rounded bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+            >
+              Search MusicBrainz…
+            </button>
+          )}
+        </div>
       )}
 
       {/* Reject */}

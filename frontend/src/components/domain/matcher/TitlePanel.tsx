@@ -61,9 +61,16 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
                   <p className="truncate text-sm font-medium text-gray-800">
                     {identity.original_title}
                   </p>
-                  {identity.match_tier && (
+                  {(identity.match_tier || identity.confidence_score != null) && (
                     <p className="text-xs text-gray-400">
-                      Tier: {identity.match_tier}
+                      {identity.match_tier && `Tier: ${identity.match_tier}`}
+                      {identity.confidence_score != null &&
+                        ` · Score: ${identity.confidence_score.toFixed(0)}%`}
+                    </p>
+                  )}
+                  {(identity.reason_detail || identity.reason_code) && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      ⚠ {identity.reason_detail ?? identity.reason_code}
                     </p>
                   )}
                 </div>

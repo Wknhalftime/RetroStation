@@ -1,6 +1,18 @@
 import { z } from 'zod'
 
 // ---------------------------------------------------------------------------
+// Triage Bucket
+// ---------------------------------------------------------------------------
+
+export const TriageBucketSchema = z.enum([
+  'quick_review',
+  'needs_attention',
+  'blocked',
+])
+
+export type TriageBucket = z.infer<typeof TriageBucketSchema>
+
+// ---------------------------------------------------------------------------
 // Queue Identity
 // ---------------------------------------------------------------------------
 
@@ -10,6 +22,10 @@ export const QueueIdentitySchema = z.object({
   normalized_title: z.string(),
   match_status: z.string(),
   match_tier: z.string().nullable(),
+  confidence_score: z.number().nullable().optional(),
+  triage_bucket: TriageBucketSchema,
+  reason_code: z.string().nullable().optional(),
+  reason_detail: z.string().nullable().optional(),
 })
 
 export type QueueIdentity = z.infer<typeof QueueIdentitySchema>
@@ -23,6 +39,9 @@ export const QueueArtistSchema = z.object({
   original_name: z.string(),
   normalized_name: z.string(),
   match_status: z.string(),
+  reason_code: z.string().nullable().optional(),
+  reason_detail: z.string().nullable().optional(),
+  triage_bucket: TriageBucketSchema,
   candidates: z.array(z.record(z.unknown()).nullable()),
   identities: z.array(QueueIdentitySchema),
 })
@@ -72,3 +91,16 @@ export const ResolveResultSchema = z.object({
 })
 
 export type ResolveResult = z.infer<typeof ResolveResultSchema>
+
+// ---------------------------------------------------------------------------
+// MusicBrainz Artist Search Result
+// ---------------------------------------------------------------------------
+
+export const MbArtistResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  score: z.number(),
+  disambiguation: z.string().optional().default(''),
+})
+
+export type MbArtistResult = z.infer<typeof MbArtistResultSchema>

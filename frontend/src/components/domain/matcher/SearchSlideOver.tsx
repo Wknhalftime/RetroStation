@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/api/client'
 import { Spinner } from '@/components/ui/Spinner'
+import { useMbArtistSearch } from '@/api/matcher'
+import type { MbArtistResult } from '@/lib/schemas/matcher'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,7 +22,7 @@ interface LibraryFile {
   title?: string | null
 }
 
-type SearchMode = 'artist' | 'file'
+type SearchMode = 'artist' | 'file' | 'mb-artist'
 
 interface SearchSlideOverProps {
   open: boolean
@@ -29,6 +31,7 @@ interface SearchSlideOverProps {
   restrictArtistMbid?: string | null
   onSelectArtist?: (artist: LibraryArtist) => void
   onSelectFile?: (file: LibraryFile) => void
+  onSelectMbArtist?: (mb: MbArtistResult) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -42,6 +45,7 @@ export function SearchSlideOver({
   restrictArtistMbid,
   onSelectArtist,
   onSelectFile,
+  onSelectMbArtist,
 }: SearchSlideOverProps) {
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -50,6 +54,10 @@ export function SearchSlideOver({
   const [error, setError] = useState<string | null>(null)
   const [restrictToArtist, setRestrictToArtist] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // MusicBrainz artist search — active only when mode === 'mb-artist'.
+  const mbSearch = useMbArtistSearch(mode === 'mb-artist' ? debouncedQuery : '')
+  const mbResults: MbArtistResult[] = mbSearch.data ?? []
 
   // Focus input when opened
   useEffect(() => {
@@ -70,6 +78,11 @@ export function SearchSlideOver({
 
   // Fetch results when debounced query changes
   useEffect(() => {
+    // mb-artist mode is served by useMbArtistSearch; skip the library fetch.
+    if (mode === 'mb-artist') {
+      return
+    }
+
     if (!debouncedQuery.trim()) {
       setResults([])
       return
@@ -177,12 +190,22 @@ export function SearchSlideOver({
           'fixed right-0 top-0 z-50 flex h-full w-96 flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200',
           open ? 'translate-x-0' : 'translate-x-full',
         )}
-        aria-label={mode === 'artist' ? 'Search artists' : 'Search files'}
+        aria-label={
+          mode === 'artist'
+            ? 'Search artists'
+            : mode === 'mb-artist'
+              ? 'Search MusicBrainz artists'
+              : 'Search files'
+        }
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <h2 className="text-base font-semibold text-gray-900">
-            {mode === 'artist' ? 'Find Artist' : 'Find File'}
+            {mode === 'artist'
+              ? 'Find Artist'
+              : mode === 'mb-artist'
+                ? 'Find Artist on MusicBrainz'
+                : 'Find File'}
           </h2>
           <button
             onClick={onClose}
@@ -200,7 +223,13 @@ export function SearchSlideOver({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={mode === 'artist' ? 'Search artists…' : 'Search files…'}
+            placeholder={
+              mode === 'artist'
+                ? 'Search artists…'
+                : mode === 'mb-artist'
+                  ? 'Search MusicBrainz…'
+                  : 'Search files…'
+            }
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
 
@@ -220,21 +249,72 @@ export function SearchSlideOver({
 
         {/* Results */}
         <div className="flex-1 overflow-y-auto px-3 py-2">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <Spinner className="h-6 w-6 text-gray-400" />
-            </div>
-          )}
-          {error && !loading && (
-            <p className="px-1 py-4 text-sm text-red-500">{error}</p>
-          )}
-          {!loading && !error && results.length === 0 && debouncedQuery && (
-            <p className="px-1 py-4 text-sm text-gray-400">No results found.</p>
-          )}
-          {!loading && !error && results.length > 0 && (
-            <div className="space-y-0.5">
-              {results.map((item, idx) => renderResult(item, idx))}
-            </div>
+          {mode === 'mb-artist' ? (
+            <>
+              {mbSearch.isLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <Spinner className="h-6 w-6 text-gray-400" />
+                </div>
+              )}
+              {mbSearch.isError && !mbSearch.isLoading && (
+                <p className="px-1 py-4 text-sm text-red-500">
+                  {mbSearch.error instanceof Error
+                    ? mbSearch.error.message
+                    : 'Search failed'}
+                </p>
+              )}
+              {!mbSearch.isLoading &&
+                !mbSearch.isError &&
+                mbResults.length === 0 &&
+                debouncedQuery && (
+                  <p className="px-1 py-4 text-sm text-gray-400">
+                    No results found.
+                  </p>
+                )}
+              {!mbSearch.isLoading && !mbSearch.isError && mbResults.length > 0 && (
+                <div className="space-y-0.5">
+                  {mbResults.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        onSelectMbArtist?.(item)
+                        onClose()
+                      }}
+                      className="w-full rounded-md px-3 py-2 text-left hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <p className="truncate text-sm font-medium text-gray-800">
+                        {item.name}
+                      </p>
+                      {item.disambiguation && (
+                        <p className="truncate text-xs text-gray-400">
+                          {item.disambiguation}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-400">Score: {item.score}%</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {loading && (
+                <div className="flex items-center justify-center py-8">
+                  <Spinner className="h-6 w-6 text-gray-400" />
+                </div>
+              )}
+              {error && !loading && (
+                <p className="px-1 py-4 text-sm text-red-500">{error}</p>
+              )}
+              {!loading && !error && results.length === 0 && debouncedQuery && (
+                <p className="px-1 py-4 text-sm text-gray-400">No results found.</p>
+              )}
+              {!loading && !error && results.length > 0 && (
+                <div className="space-y-0.5">
+                  {results.map((item, idx) => renderResult(item, idx))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </aside>

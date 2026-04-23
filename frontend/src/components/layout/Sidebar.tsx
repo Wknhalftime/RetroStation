@@ -12,7 +12,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/stations", label: "Stations", icon: Radio },
   { to: "/library", label: "Library", icon: Library },
-  { to: "/matcher", label: "Matcher", icon: GitCompare },
+  { to: "/matcher", label: "Resolution Center", icon: GitCompare },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
