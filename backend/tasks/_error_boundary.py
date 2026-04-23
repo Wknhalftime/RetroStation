@@ -18,7 +18,6 @@ task shares the same reporting shape.
 """
 from __future__ import annotations
 
-import contextlib
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -105,7 +104,11 @@ def _report_failure(
             progress_repo = PgTaskProgressRepository(telemetry_conn)
             sys_log_repo = PgSystemLogRepository(telemetry_conn)
 
-            with contextlib.suppress(Exception):
+            # Each write is guarded independently so a progress-row failure
+            # doesn't block the system-log entry (and vice versa). Failures
+            # are logged so the UI's "stuck in RUNNING" state is diagnosable
+            # rather than silent.
+            try:
                 progress_repo.upsert(TaskProgress(
                     task_id=task_id,
                     task_type=task_type,
@@ -115,7 +118,16 @@ def _report_failure(
                     updated_at=now,
                     completed_at=now,
                 ))
-            with contextlib.suppress(Exception):
+            except Exception as progress_exc:  # noqa: BLE001
+                logger.warning(
+                    "task_failure_progress_write_failed",
+                    task_id=task_id,
+                    task_type=task_type.value,
+                    primary_error=error_message,
+                    telemetry_error=str(progress_exc),
+                )
+
+            try:
                 sys_log_repo.create(SystemLog(
                     category=log_category,
                     level=LogLevel.ERROR,
@@ -123,12 +135,20 @@ def _report_failure(
                     trace_id=task_id,
                     details={"error": error_message},
                 ))
+            except Exception as syslog_exc:  # noqa: BLE001
+                logger.warning(
+                    "task_failure_systemlog_write_failed",
+                    task_id=task_id,
+                    task_type=task_type.value,
+                    primary_error=error_message,
+                    telemetry_error=str(syslog_exc),
+                )
     except Exception as telemetry_exc:  # noqa: BLE001
-        # Telemetry-of-error failed — log via structlog and continue to
-        # re-raise the primary exception. Do not let reporting errors mask
-        # the real failure.
+        # Outer boundary: the telemetry connection itself failed. Log via
+        # structlog and continue to re-raise the primary exception so the
+        # real failure isn't masked.
         logger.warning(
-            "task_failure_telemetry_write_failed",
+            "task_failure_telemetry_connect_failed",
             task_id=task_id,
             task_type=task_type.value,
             primary_error=error_message,

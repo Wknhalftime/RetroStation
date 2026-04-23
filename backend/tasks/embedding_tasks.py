@@ -25,9 +25,12 @@ def embedding_task(playlist_id: str) -> None:
     row + ERROR SystemLog before re-raising to Huey.
     """
     settings = get_settings()
-    pid = UUID(playlist_id)
 
     with task_failure_telemetry(TaskType.LIBRARY_ENRICHMENT, LogCategory.ENRICHMENT) as task_id:
+        # UUID parsing inside the boundary so a malformed playlist_id raises
+        # into the telemetry handler instead of bypassing it.
+        pid = UUID(playlist_id)
+
         with connect_sync(settings.database_url) as conn:
             artist_repo = PgBroadcastArtistRepository(conn)
             identity_repo = PgBroadcastTrackIdentityRepository(conn)

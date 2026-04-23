@@ -106,3 +106,35 @@ def test_task_failure_telemetry_caller_supplied_task_id(
         ).fetchone()
         assert row is not None
         assert row["status"] == TaskStatus.FAILED.value
+
+
+def test_task_failure_telemetry_catches_uuid_parse_errors(
+    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: UUID parsing INSIDE the boundary must be caught. Review
+    PR#21 noted that evaluating UUID(playlist_id) before entering the
+    context bypassed the FAILED row — this test pins the fix.
+    """
+    _with_temp_settings_db_url(migrated_db, monkeypatch)
+    supplied = "uuid-regression-trace"
+
+    with (
+        pytest.raises(ValueError),
+        task_failure_telemetry(
+            TaskType.LIBRARY_ENRICHMENT,
+            LogCategory.ENRICHMENT,
+            task_id=supplied,
+        ),
+    ):
+        from uuid import UUID
+        UUID("not-a-valid-uuid")  # raises ValueError
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        row = conn.execute(
+            "SELECT status FROM progress_tracking WHERE task_id = %s", (supplied,),
+        ).fetchone()
+        assert row is not None
+        assert row["status"] == TaskStatus.FAILED.value
