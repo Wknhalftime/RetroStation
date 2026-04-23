@@ -308,7 +308,10 @@ export function SearchSlideOver({
               {error && !loading && (
                 <p className="px-1 py-4 text-sm text-red-500">{error}</p>
               )}
-              {!loading && !error && results.length === 0 && debouncedQuery && (
+              {/* Gate on trimmed query so whitespace-only input doesn't
+                  show a false-negative empty state — mirrors the mb-artist
+                  branch below. */}
+              {!loading && !error && results.length === 0 && debouncedQuery.trim() && (
                 <p className="px-1 py-4 text-sm text-gray-400">No results found.</p>
               )}
               {!loading && !error && results.length > 0 && (
