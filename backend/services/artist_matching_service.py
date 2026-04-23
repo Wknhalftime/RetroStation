@@ -84,6 +84,7 @@ def _decide_artist_zone(
     high_threshold: int,
     score_gap: int,
     has_competitor: bool,
+    mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
 ) -> tuple[MatchStatus, ReasonCode | None, str | None]:
     """Four-zone decision from matching_constants. Shared between
     NormalizationStrategy and MusicBrainzApiStrategy to avoid duplication
@@ -94,9 +95,12 @@ def _decide_artist_zone(
     where second=0), so the mid-band clause must NOT auto-match a lone
     candidate. This matches the guard in
     `identity_matching_service._score_candidates`.
+
+    `mb_auto_link_score` is operator-tunable (from settings); defaults to the
+    module constant. This is the unconditional-AUTO gate (gap irrelevant).
     """
     auto_match = (
-        top_score >= MB_AUTO_LINK_SCORE
+        top_score >= mb_auto_link_score
         or (top_score >= high_threshold and gap >= score_gap)
         or (
             has_competitor
@@ -159,10 +163,12 @@ class NormalizationStrategy:
         all_canonical: list[Artist],
         high_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
+        mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
     ) -> None:
         self._all_canonical = all_canonical
         self._high_threshold = high_threshold
         self._gap = mb_score_gap
+        self._mb_auto_link_score = mb_auto_link_score
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
         if not self._all_canonical:
@@ -190,13 +196,16 @@ class NormalizationStrategy:
         if not with_mbid:
             return None
 
+        # Sort key: (score DESC, mbid ASC) for deterministic tie-breaking.
+        # Without the mbid secondary key, two canonicals with identical fuzzy
+        # scores would be ordered by DB iteration order, making best/gap
+        # non-deterministic across runs.
         scored: list[tuple[float, Artist]] = sorted(
             (
                 (float(fuzz.token_sort_ratio(target, normalize_artist(c.name))), c)
                 for c in with_mbid
             ),
-            key=lambda x: x[0],
-            reverse=True,
+            key=lambda x: (-x[0], x[1].mbid or ""),
         )
         top_score, best = scored[0]
         # Noise floor: if the best fuzzy score is below MIN_PRESENTATION_SCORE,
@@ -208,7 +217,8 @@ class NormalizationStrategy:
         gap = (top_score - scored[1][0]) if has_competitor else 100.0
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor
+            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            mb_auto_link_score=self._mb_auto_link_score,
         )
         assert best.mbid is not None  # guaranteed by the with_mbid filter above
         return ArtistMatchResult(
@@ -235,11 +245,13 @@ class MusicBrainzApiStrategy:
         artist_repo: ArtistCatalogRepository,
         high_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
+        mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
     ) -> None:
         self._mb = mb_client
         self._catalog = artist_repo
         self._high_threshold = high_threshold
         self._gap = mb_score_gap
+        self._mb_auto_link_score = mb_auto_link_score
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
         results = self._mb.search_artist(broadcast_artist.original_name)
@@ -252,7 +264,10 @@ class MusicBrainzApiStrategy:
         if not candidates:
             return None
 
-        candidates.sort(key=lambda r: r.get("score", 0), reverse=True)
+        # Sort key: (score DESC, id ASC) for deterministic tie-breaking across
+        # runs. MB API typically returns score-sorted results but does not
+        # guarantee ordering among equal-scored candidates.
+        candidates.sort(key=lambda r: (-r.get("score", 0), r.get("id", "")))
         best = candidates[0]
         has_competitor = len(candidates) > 1
         second = candidates[1].get("score", 0) if has_competitor else 0
@@ -260,7 +275,8 @@ class MusicBrainzApiStrategy:
         gap = float(best.get("score", 0) - second)
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor
+            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            mb_auto_link_score=self._mb_auto_link_score,
         )
 
         # Preserve legacy side effect: cache the MB result into the local
@@ -315,6 +331,7 @@ def match_artists_for_playlist(
     mb_client: MusicBrainzClientProtocol,
     high_threshold: int = 80,
     mb_score_gap: int = MB_SCORE_GAP,
+    mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
 ) -> None:
     """Resolve PENDING artists for a playlist. Strategy order:
     mapping rules -> normalization (exact + fuzzy local catalog) -> MusicBrainz API.
@@ -332,8 +349,12 @@ def match_artists_for_playlist(
 
     engine = ArtistMatchingEngine([
         MappingRuleStrategy(rules),
-        NormalizationStrategy(all_canonical, high_threshold, mb_score_gap),
-        MusicBrainzApiStrategy(mb_client, artist_repo, high_threshold, mb_score_gap),
+        NormalizationStrategy(
+            all_canonical, high_threshold, mb_score_gap, mb_auto_link_score
+        ),
+        MusicBrainzApiStrategy(
+            mb_client, artist_repo, high_threshold, mb_score_gap, mb_auto_link_score
+        ),
     ])
 
     for broadcast_artist in pending:

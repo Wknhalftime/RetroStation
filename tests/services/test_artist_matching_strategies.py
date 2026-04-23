@@ -17,6 +17,7 @@ from backend.services.artist_matching_service import (
     MusicBrainzApiStrategy,
     NormalizationStrategy,
 )
+from backend.services.matching_constants import MB_SCORE_GAP
 from backend.services.matching_reasons import ReasonCode
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
@@ -447,3 +448,89 @@ def test_mb_strategy_auto_matched_upserts_via_upsert_musicbrainz_artist() -> Non
         "normalized_name": normalize_artist("Metallica"),
         "disambiguation": "US metal band",
     }
+
+
+# ---------------------------------------------------------------------------
+# Determinism + operator configurability (review round 4)
+# ---------------------------------------------------------------------------
+
+
+def test_normalization_fuzzy_ties_break_deterministically_by_mbid() -> None:
+    """Two distinct canonicals that fuzzy-score identically vs the target:
+    the winner must be the one with the lower mbid string (stable tie-break),
+    regardless of input order. Uses names that don't normalize to the target
+    (so the exact-hit short-circuit doesn't fire).
+    """
+    # "Metalica" and "Metallicka" both fuzzy-score against "metallica"; when
+    # tokens are single-word, token_sort_ratio falls back to levenshtein
+    # ratio — both typo variants produce similar but distinct scores. Use
+    # two synonyms that token-sort to identical character sets.
+    # "A B" and "B A" produce the same token_sort_ratio.
+    a = _canonical("Alpha Beta", mbid="mbid-zzz")
+    b = _canonical("Beta Alpha", mbid="mbid-aaa")
+    broadcast = _broadcast_artist(normalized="alpha beta gamma")
+
+    result_ab = NormalizationStrategy(
+        [a, b], high_threshold=80, mb_score_gap=MB_SCORE_GAP
+    ).apply(broadcast)
+    result_ba = NormalizationStrategy(
+        [b, a], high_threshold=80, mb_score_gap=MB_SCORE_GAP
+    ).apply(broadcast)
+
+    assert result_ab is not None and result_ba is not None
+    # Both orderings pick the same winner — the lower mbid when scores tie.
+    assert result_ab.target_id == result_ba.target_id == "mbid-aaa"
+
+
+def test_mb_strategy_ties_break_deterministically_by_id() -> None:
+    fake = FakeMbClient(
+        responses={
+            "Metallica": [
+                {"id": "mbid-zzz", "name": "Metallica", "score": 95},
+                {"id": "mbid-aaa", "name": "Metallica", "score": 95},
+            ]
+        }
+    )
+    repo = FakeArtistRepository()
+    strat = MusicBrainzApiStrategy(fake, repo, high_threshold=80, mb_score_gap=MB_SCORE_GAP)
+    result = strat.apply(_broadcast_artist(original="Metallica", normalized="metallica"))
+    assert result is not None
+    # Lower id wins the tie-break.
+    assert result.target_id == "mbid-aaa"
+
+
+def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
+    """Operator can make AUTO harder to achieve by raising mb_auto_link_score.
+    Use two candidates with a small gap so the unconditional-AUTO gate
+    (mb_auto_link_score) is the decisive clause — the high_threshold+gap
+    clause is blocked by the small gap, so the override is observable.
+    """
+    responses = {
+        "Metallica": [
+            {"id": "mbid-a", "name": "Metallica", "score": 95},
+            {"id": "mbid-b", "name": "Metallika", "score": 90},  # gap=5 < MB_SCORE_GAP(10)
+        ]
+    }
+
+    # Default: score 95 clears the unconditional MB_AUTO_LINK_SCORE gate.
+    default_result = MusicBrainzApiStrategy(
+        FakeMbClient(responses=responses),
+        FakeArtistRepository(),
+        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+    ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
+    assert default_result is not None
+    assert default_result.status == MatchStatus.AUTO_MATCHED
+
+    # Override: raise the gate to 98. Score 95 no longer clears it; the
+    # high_threshold+gap clause is blocked by gap=5 < score_gap(10);
+    # mid-band clause doesn't fire (score 95 is above the band). Falls to
+    # NEEDS_REVIEW with AMBIGUOUS_GAP reason.
+    overridden = MusicBrainzApiStrategy(
+        FakeMbClient(responses=responses),
+        FakeArtistRepository(),
+        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        mb_auto_link_score=98,
+    ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
+    assert overridden is not None
+    assert overridden.status == MatchStatus.NEEDS_REVIEW
+    assert overridden.reason_code == ReasonCode.AMBIGUOUS_GAP

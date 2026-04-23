@@ -42,6 +42,7 @@ def artist_matching_task(playlist_id: str) -> None:
             rules_repo=PgMappingRuleRepository(conn),
             mb_client=MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)),
             mb_score_gap=settings.mb_score_gap,
+            mb_auto_link_score=settings.mb_auto_link_score,
         )
         conn.commit()
 
