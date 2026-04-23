@@ -161,21 +161,31 @@ class NormalizationStrategy:
             return None
 
         target = broadcast_artist.normalized_name
-        # Exact pass
+        # Exact pass — only MBID-bearing canonicals are usable downstream by
+        # the identity-tier MBID-graph lookup (get_by_artist_mbid(target_id)).
+        # A local-only canonical (mbid=None) must fall through so the engine
+        # can reach MusicBrainzApiStrategy.
         for c in self._all_canonical:
+            if c.mbid is None:
+                continue
             if normalize_artist(c.name) == target:
                 return ArtistMatchResult(
                     status=MatchStatus.AUTO_MATCHED,
                     tier=MatchTier.NORMALIZATION,
                     confidence_score=100.0,
-                    target_id=c.id,
+                    target_id=c.mbid,
                 )
 
-        # Fuzzy pass
+        # Fuzzy pass — restrict to MBID-bearing canonicals. If none exist,
+        # fall through so MusicBrainzApiStrategy can try.
+        with_mbid = [c for c in self._all_canonical if c.mbid is not None]
+        if not with_mbid:
+            return None
+
         scored: list[tuple[float, Artist]] = sorted(
             (
                 (float(fuzz.token_sort_ratio(target, normalize_artist(c.name))), c)
-                for c in self._all_canonical
+                for c in with_mbid
             ),
             key=lambda x: x[0],
             reverse=True,
@@ -192,11 +202,12 @@ class NormalizationStrategy:
         status, rc, rd = _decide_artist_zone(
             top_score, gap, self._high_threshold, self._gap, has_competitor
         )
+        assert best.mbid is not None  # guaranteed by the with_mbid filter above
         return ArtistMatchResult(
             status=status,
             tier=MatchTier.NORMALIZATION,
             confidence_score=top_score,
-            target_id=best.id,
+            target_id=best.mbid,
             reason_code=rc,
             reason_detail=rd,
         )
@@ -244,15 +255,19 @@ class MusicBrainzApiStrategy:
             top_score, gap, self._high_threshold, self._gap, has_competitor
         )
 
-        # Preserve legacy side effect: upsert MB result into local catalog on
-        # AUTO_MATCHED so subsequent NormalizationStrategy runs can hit locally.
+        # Preserve legacy side effect: cache the MB result into the local
+        # catalog on AUTO_MATCHED so later NormalizationStrategy runs can
+        # hit locally. Use upsert_musicbrainz_artist so mbid / origin /
+        # normalized_name are populated — the generic upsert leaves them
+        # NULL / LOCAL, which breaks later lookups keyed on those columns.
         if status == MatchStatus.AUTO_MATCHED:
-            self._catalog.upsert(Artist(
-                id=best["id"],
+            self._catalog.upsert_musicbrainz_artist(
+                mbid=best["id"],
                 name=best["name"],
                 sort_name=best.get("sort-name", best["name"]),
+                normalized_name=normalize_artist(best["name"]),
                 disambiguation=best.get("disambiguation"),
-            ))
+            )
 
         return ArtistMatchResult(
             status=status,

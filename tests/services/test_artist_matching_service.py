@@ -99,7 +99,14 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    artist_repo.upsert(Artist(id="mbid-metallica", name="Metallica", sort_name="Metallica"))
+    # mbid must be populated: NormalizationStrategy filters out mbid=None
+    # canonicals since Match.target_id is consumed as an MBID downstream.
+    artist_repo.upsert(Artist(
+        id="mbid-metallica",
+        name="Metallica",
+        sort_name="Metallica",
+        mbid="mbid-metallica",
+    ))
     artist = _pending_artist("METALLICA", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -135,7 +142,12 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    artist_repo.upsert(Artist(id="mbid-metallica", name="Metallica", sort_name="Metallica"))
+    artist_repo.upsert(Artist(
+        id="mbid-metallica",
+        name="Metallica",
+        sort_name="Metallica",
+        mbid="mbid-metallica",
+    ))
     artist = _pending_artist("Metalikka", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(

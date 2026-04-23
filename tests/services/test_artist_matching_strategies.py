@@ -18,6 +18,7 @@ from backend.services.artist_matching_service import (
     NormalizationStrategy,
 )
 from backend.services.matching_reasons import ReasonCode
+from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.mb_client import FakeMbClient
 
@@ -37,11 +38,20 @@ def _broadcast_artist(
     )
 
 
-def _canonical(name: str, artist_id: str | None = None) -> Artist:
+def _canonical(
+    name: str,
+    artist_id: str | None = None,
+    mbid: str | None = "__auto__",
+) -> Artist:
+    # Default mbid is a synthesized MBID-like string so canonicals are
+    # downstream-usable by the MBID-graph identity tier. Pass `mbid=None`
+    # explicitly to model a local-only row.
+    resolved_mbid = f"mbid-{name}" if mbid == "__auto__" else mbid
     return Artist(
         id=artist_id or str(uuid4()),
         name=name,
         sort_name=name,
+        mbid=resolved_mbid,
     )
 
 
@@ -90,7 +100,7 @@ def test_mapping_rule_skips_non_artist_target_type() -> None:
 
 
 def test_normalization_exact_hit_auto_matches() -> None:
-    canonical = _canonical("Metallica")
+    canonical = _canonical("Metallica", mbid="mbid-metallica-xxx")
     strategy = NormalizationStrategy(all_canonical=[canonical])
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
@@ -98,7 +108,8 @@ def test_normalization_exact_hit_auto_matches() -> None:
     assert result.status == MatchStatus.AUTO_MATCHED
     assert result.tier == MatchTier.NORMALIZATION
     assert result.confidence_score == 100.0
-    assert result.target_id == canonical.id
+    # target_id is the MBID (not the local UUID) so the MBID-graph identity tier works.
+    assert result.target_id == "mbid-metallica-xxx"
     assert result.reason_code is None
 
 
@@ -120,7 +131,7 @@ def test_normalization_high_score_with_gap_auto_matches() -> None:
     # High score + large gap → AUTO_MATCHED
     assert result.status == MatchStatus.AUTO_MATCHED
     assert result.tier == MatchTier.NORMALIZATION
-    assert result.target_id == best.id
+    assert result.target_id == best.mbid
     assert result.confidence_score >= 90
 
 
@@ -224,7 +235,7 @@ def test_normalization_score_90_with_gap_auto_matches_via_high_threshold() -> No
 
     assert result is not None
     assert result.status == MatchStatus.AUTO_MATCHED
-    assert result.target_id == best.id
+    assert result.target_id == best.mbid
     # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95)
     # — so the AUTO decision came through the high_threshold+gap branch.
     assert result.confidence_score < 95
@@ -261,11 +272,16 @@ def test_mb_strategy_high_score_auto_matches() -> None:
     assert result.target_id == mb_id
     assert result.confidence_score == 100
     assert result.reason_code is None
-    # Side-effect: MB result persisted to local catalog on AUTO_MATCHED.
+    # Side-effect: MB result persisted to local catalog on AUTO_MATCHED via
+    # upsert_musicbrainz_artist (NOT the generic upsert), so mbid/origin/
+    # normalized_name are populated — required by later identity-tier lookups
+    # keyed on artist mbid or normalized_name.
     stored = repo.get_by_id(mb_id)
     assert stored is not None
     assert stored.name == "Metallica"
     assert stored.disambiguation == "US metal band"
+    assert stored.mbid == mb_id
+    assert stored.normalized_name == normalize_artist("Metallica")
 
 
 def test_mb_strategy_no_results_returns_none() -> None:
@@ -305,3 +321,129 @@ def test_mb_strategy_mid_score_needs_review_without_upsert() -> None:
     assert result.target_id == "mbid-top"
     # NEEDS_REVIEW path must not touch local catalog.
     assert repo.list_all() == []
+
+
+# ---------------------------------------------------------------------------
+# Review fix #A: Match.target_id must be an MBID, not a local UUID.
+# NormalizationStrategy must filter out canonicals with mbid=None (they cannot
+# be used downstream by ResolvedArtistMbidStrategy which feeds
+# library_file_repo.get_by_artist_mbid()).
+# ---------------------------------------------------------------------------
+
+
+def test_normalization_exact_hit_without_mbid_falls_through() -> None:
+    """Exact-name canonical with mbid=None must NOT auto-match — it has no
+    MBID so the identity-tier MBID-graph lookup would break silently."""
+    canonical = _canonical("Prince", artist_id="local-uuid-1", mbid=None)
+    strategy = NormalizationStrategy(all_canonical=[canonical])
+    result = strategy.apply(_broadcast_artist("Prince", "prince"))
+
+    assert result is None
+
+
+def test_normalization_exact_hit_with_mbid_returns_mbid_as_target_id() -> None:
+    """Exact-name canonical WITH mbid returns target_id=c.mbid (not c.id)."""
+    canonical = _canonical("Prince", artist_id="local-uuid-1", mbid="mbid-prince-xxx")
+    strategy = NormalizationStrategy(all_canonical=[canonical])
+    result = strategy.apply(_broadcast_artist("Prince", "prince"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.tier == MatchTier.NORMALIZATION
+    assert result.target_id == "mbid-prince-xxx"
+    assert result.target_id != canonical.id
+
+
+def test_normalization_fuzzy_filters_out_canonicals_without_mbid() -> None:
+    """Fuzzy pass must skip canonicals with mbid=None even if they would
+    otherwise out-score the mbid-bearing ones."""
+    no_mbid_winner = _canonical("metallica", mbid=None)  # exact would score highest
+    mbid_runner_up = _canonical("metallic", mbid="mbid-metallic-ok")
+    strategy = NormalizationStrategy(
+        all_canonical=[no_mbid_winner, mbid_runner_up],
+        high_threshold=80,
+        mb_score_gap=10,
+    )
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is not None
+    # Exact pass skips mbid=None; with only one mbid-bearing candidate left,
+    # fuzzy AUTO_MATCHes it (no competitor check — gap synthesized to 100).
+    assert result.target_id == "mbid-metallic-ok"
+    # Sanity: the local UUID of the no-mbid canonical must NEVER appear.
+    assert result.target_id != no_mbid_winner.id
+
+
+def test_normalization_all_candidates_lack_mbid_returns_none() -> None:
+    """If every canonical lacks an mbid, both exact and fuzzy passes fall
+    through so the engine can reach MusicBrainzApiStrategy."""
+    c1 = _canonical("Metallica", mbid=None)
+    c2 = _canonical("Metallic", mbid=None)
+    strategy = NormalizationStrategy(all_canonical=[c1, c2])
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Review fix #B: MusicBrainzApiStrategy must use upsert_musicbrainz_artist so
+# mbid/origin/normalized_name are populated (the generic upsert leaves them
+# NULL / LOCAL).
+# ---------------------------------------------------------------------------
+
+
+def test_mb_strategy_auto_matched_upserts_via_upsert_musicbrainz_artist() -> None:
+    """AUTO_MATCHED must call upsert_musicbrainz_artist with mbid, name,
+    sort_name, normalized_name (computed via normalize_artist), and
+    disambiguation — NOT the generic .upsert()."""
+    calls_generic: list[Artist] = []
+    calls_mb: list[dict[str, object]] = []
+
+    repo = FakeArtistRepository()
+    original_upsert = repo.upsert
+    original_upsert_mb = repo.upsert_musicbrainz_artist
+
+    def spy_upsert(artist: Artist) -> Artist:
+        calls_generic.append(artist)
+        return original_upsert(artist)
+
+    def spy_upsert_mb(
+        mbid: str,
+        name: str,
+        sort_name: str,
+        normalized_name: str,
+        disambiguation: str | None = None,
+    ) -> str:
+        calls_mb.append({
+            "mbid": mbid,
+            "name": name,
+            "sort_name": sort_name,
+            "normalized_name": normalized_name,
+            "disambiguation": disambiguation,
+        })
+        return original_upsert_mb(mbid, name, sort_name, normalized_name, disambiguation)
+
+    repo.upsert = spy_upsert  # type: ignore[method-assign]
+    repo.upsert_musicbrainz_artist = spy_upsert_mb  # type: ignore[method-assign]
+
+    mb = FakeMbClient(responses={"Metallica": [
+        {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica",
+         "disambiguation": "US metal band", "score": 100},
+    ]})
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo)
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    # target_id is still the MBID from the MB payload, NOT the upsert return.
+    assert result.target_id == "mbid-m"
+
+    assert calls_generic == []
+    assert len(calls_mb) == 1
+    assert calls_mb[0] == {
+        "mbid": "mbid-m",
+        "name": "Metallica",
+        "sort_name": "Metallica",
+        "normalized_name": normalize_artist("Metallica"),
+        "disambiguation": "US metal band",
+    }
