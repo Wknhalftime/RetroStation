@@ -280,7 +280,12 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
     def search_by_artist_name(
         self, normalized_name: str, limit: int = 100,
     ) -> list[LibraryFile]:
-        needle = f"%{normalized_name.lower().strip()}%"
+        # Empty needle would become "%%" and match every row, poisoning the
+        # fuzzy tier with unrelated candidates. Reject up-front.
+        stripped = normalized_name.lower().strip()
+        if not stripped:
+            return []
+        needle = f"%{stripped}%"
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE LOWER(TRIM(artist_name)) LIKE %s

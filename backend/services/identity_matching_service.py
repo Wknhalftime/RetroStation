@@ -482,10 +482,10 @@ def match_identities_for_playlist(
             reason_detail=result.reason_detail,
         )
 
-        if (
-            result.status == MatchStatus.AUTO_MATCHED
-            and result.library_file_id is not None
-        ):
+        # Persist a matches row whenever a best candidate was scored — including
+        # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
+        # the real confidence_score/triage_bucket instead of NULL/"blocked".
+        if result.library_file_id is not None:
             match_repo.create(Match(
                 id=uuid4(),
                 identity_id=identity.id,
@@ -493,6 +493,8 @@ def match_identities_for_playlist(
                 confidence_score=result.confidence_score,
                 match_tier=result.tier,
             ))
+
+        if result.status == MatchStatus.AUTO_MATCHED:
             auto_matched += 1
             if result.work_id:
                 work_ids.append(result.work_id)

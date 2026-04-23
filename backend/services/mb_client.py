@@ -37,6 +37,16 @@ def _rate_limit() -> None:
         _last_request_time = time.monotonic()
 
 
+# Lucene special characters that must be escaped inside a query term.
+# See https://musicbrainz.org/doc/MusicBrainz_API/Search#Lucene_Search_Syntax.
+_LUCENE_SPECIALS = r'+-&|!(){}[]^"~*?:\/'
+
+
+def _lucene_escape(value: str) -> str:
+    """Escape Lucene special characters so a user string is a literal term."""
+    return "".join(("\\" + ch) if ch in _LUCENE_SPECIALS else ch for ch in value)
+
+
 def _is_transient_mb_error(exc: BaseException) -> bool:
     """Return True for HTTP errors that are transient and worth retrying (429, 5xx)."""
     return (
@@ -173,7 +183,10 @@ class MusicBrainzApiClient:
         response = self._fetch(
             f"{_MUSICBRAINZ_API}/recording/",
             {
-                "query": f"arid:{artist_mbid} AND recording:{title}",
+                "query": (
+                    f"arid:{_lucene_escape(artist_mbid)} "
+                    f'AND recording:"{_lucene_escape(title)}"'
+                ),
                 "fmt": "json",
                 "limit": str(limit),
             },

@@ -42,6 +42,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         self, normalized_name: str, limit: int = 100,
     ) -> list[LibraryFile]:
         needle = normalized_name.strip().lower()
+        if not needle:
+            return []
         hits = [
             f for f in self._data.values()
             if needle in (f.audio.artist_name or "").lower()
