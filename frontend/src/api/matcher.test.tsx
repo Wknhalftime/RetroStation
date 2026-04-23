@@ -89,4 +89,32 @@ describe('useMbArtistSearch', () => {
       { id: 'mbid-1', name: 'Prince', score: 100, disambiguation: '' },
     ])
   })
+
+  it('defaults items to [] when the envelope omits the field', async () => {
+    // Schema coerces missing `items` to [] so useQuery<MbArtistResult[]>
+    // never surfaces `undefined` to consumers that assume an array.
+    mockedApiFetch.mockResolvedValue({})
+    const qc = makeClient()
+    const { result } = renderHook(() => useMbArtistSearch('prince'), {
+      wrapper: wrapperFor(qc),
+    })
+    await waitFor(() => {
+      expect(result.current.data).toBeDefined()
+    })
+    expect(result.current.data).toEqual([])
+  })
+
+  it('applies the disambiguation default when the field is missing', async () => {
+    mockedApiFetch.mockResolvedValue({
+      items: [{ id: 'mbid-1', name: 'Prince', score: 100 }],
+    })
+    const qc = makeClient()
+    const { result } = renderHook(() => useMbArtistSearch('prince'), {
+      wrapper: wrapperFor(qc),
+    })
+    await waitFor(() => {
+      expect(result.current.data).toBeDefined()
+    })
+    expect(result.current.data?.[0]?.disambiguation).toBe('')
+  })
 })

@@ -107,3 +107,13 @@ export const MbArtistResultSchema = z.object({
 })
 
 export type MbArtistResult = z.infer<typeof MbArtistResultSchema>
+
+// Envelope returned by GET /api/v1/matching/mb-artists. Defaults `items` to
+// `[]` so a malformed response (missing field, null) never yields undefined
+// at the call site — critical because `useQuery<MbArtistResult[]>` typing
+// promises an array.
+export const MbArtistSearchResponseSchema = z.object({
+  items: z.array(MbArtistResultSchema).default([]),
+})
+
+export type MbArtistSearchResponse = z.infer<typeof MbArtistSearchResponseSchema>

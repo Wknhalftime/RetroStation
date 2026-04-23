@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/api/client'
+import { MbArtistSearchResponseSchema } from '@/lib/schemas/matcher'
 import type {
   MatchingQueue,
   ArtistResolution,
@@ -82,10 +83,16 @@ export function useMbArtistSearch(query: string) {
   return useQuery<MbArtistResult[]>({
     queryKey: ['mb-artist-search', trimmed],
     queryFn: async () => {
-      const body = await apiFetch<{ items: MbArtistResult[] }>(
+      const raw = await apiFetch<unknown>(
         `/api/v1/matching/mb-artists?query=${encodeURIComponent(trimmed)}`,
       )
-      return body.items
+      // Parse through the Zod schema so:
+      // - `items` defaults to [] if the envelope is missing the field,
+      //   honouring the useQuery<MbArtistResult[]> contract.
+      // - `disambiguation` defaults to '' per MbArtistResultSchema.
+      // - malformed rows surface as a clear ZodError instead of silent
+      //   downstream runtime failures.
+      return MbArtistSearchResponseSchema.parse(raw).items
     },
     enabled: trimmed.length > 0,
     staleTime: 30_000,
