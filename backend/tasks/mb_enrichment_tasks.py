@@ -107,6 +107,10 @@ def mb_enrichment_task() -> dict[str, int]:
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
                 for artist in pending_artists:
+                    # Commit per item so a later item's failure never rolls
+                    # back earlier successful mark_enhanced writes. The
+                    # phase-level commit at the end of the loop became a
+                    # no-op and was removed.
                     try:
                         results = mb_client.search_artist(artist.name)
                         match = next(
@@ -118,18 +122,29 @@ def mb_enrichment_task() -> dict[str, int]:
                                 (match["disambiguation"], artist.id),
                             )
                         repos.artists.mark_enhanced(artist.id)
+                        conn.commit()
                         artists_done += 1
                         logger.info("mb_artist_enhanced", mbid=artist.id, name=artist.name)
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        # On a psycopg.Error the connection is left in an
-                        # aborted-transaction state — the mark_enhancement_failed
-                        # write below (and the outer conn.commit()) would raise
-                        # InFailedSqlTransaction. Roll back before any further
-                        # query so per-item failure logging can continue.
-                        if isinstance(exc, psycopg.Error):
-                            conn.rollback()
+                        # Rollback only discards THIS item's partial writes —
+                        # previous items are already committed. On any
+                        # psycopg.Error the transaction is aborted and the
+                        # rollback is required before any further query.
+                        conn.rollback()
                         error_msg = str(exc)
-                        repos.artists.mark_enhancement_failed(artist.id, error_msg)
+                        # mark_enhancement_failed in its own transaction so a
+                        # write failure here doesn't cascade into the next
+                        # item's savepoint state.
+                        try:
+                            repos.artists.mark_enhancement_failed(artist.id, error_msg)
+                            conn.commit()
+                        except psycopg.Error:
+                            conn.rollback()
+                            logger.warning(
+                                "mb_artist_mark_failed_write_failed",
+                                mbid=artist.id,
+                                primary_error=error_msg,
+                            )
                         artists_failed += 1
                         logger.warning(
                             "mb_artist_enhancement_failed",
@@ -153,22 +168,20 @@ def mb_enrichment_task() -> dict[str, int]:
                         updated_at=datetime.now(UTC),
                     ))
 
-            conn.commit()
-
         # -------------------------------------------------------------- works
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
 
             for work in pending_works:
+                # Per-item commit: a single work's failure never rolls back
+                # previously successful mark_enhanced writes in this phase.
                 try:
                     repos.works.mark_enhanced(work.id)
+                    conn.commit()
                     works_done += 1
                     logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
                 except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                    # Rollback on DB errors so the outer conn.commit() at end
-                    # of the works loop doesn't fail on an aborted transaction.
-                    if isinstance(exc, psycopg.Error):
-                        conn.rollback()
+                    conn.rollback()
                     logger.warning(
                         "mb_work_enhancement_failed",
                         mbid=work.id,
@@ -190,8 +203,8 @@ def mb_enrichment_task() -> dict[str, int]:
                     started_at=task_started_at,
                     updated_at=datetime.now(UTC),
                 ))
-
-            conn.commit()
+            # No phase-level commit — per-item commits already flushed each
+            # successful mark_enhanced write independently.
 
         # --------------------------------------------------------- recordings
         with connect_sync(settings.database_url) as conn:
@@ -199,6 +212,8 @@ def mb_enrichment_task() -> dict[str, int]:
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
                 for recording in pending_recordings:
+                    # Per-item commit: a single recording's failure never
+                    # rolls back previously successful enhancements.
                     try:
                         data = mb_client.lookup_recording(recording.id)
                         if data and recording.duration_ms is None:
@@ -209,6 +224,7 @@ def mb_enrichment_task() -> dict[str, int]:
                                     (int(length_ms), recording.id),
                                 )
                         repos.recordings.mark_enhanced(recording.id)
+                        conn.commit()
                         recordings_done += 1
                         logger.info(
                             "mb_recording_enhanced",
@@ -216,11 +232,7 @@ def mb_enrichment_task() -> dict[str, int]:
                             title=recording.title,
                         )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        # Rollback on DB errors so the outer conn.commit() at
-                        # end of the recordings loop doesn't fail on an
-                        # aborted transaction.
-                        if isinstance(exc, psycopg.Error):
-                            conn.rollback()
+                        conn.rollback()
                         logger.warning(
                             "mb_recording_enhancement_failed",
                             mbid=recording.id,

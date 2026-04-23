@@ -145,6 +145,12 @@ def library_scan_files_task(
                 for lf in folder_files:
                     if lf.work_id is not None:
                         continue
+                    # Per-file commit so a single file's failure never rolls
+                    # back previously successful grouping writes in this
+                    # folder. Narrow to expected per-file failure modes;
+                    # mirrors library_scan_tasks.py's grouping loop. Logic
+                    # bugs propagate to the task boundary instead of being
+                    # logged per-file and continuing.
                     try:
                         grouping = assign_work(
                             lf,
@@ -164,23 +170,14 @@ def library_scan_files_task(
                                     grouping.recording_id,
                                     EnrichmentStatus.PENDING,
                                 )
-                    # Narrow to expected per-file failure modes; mirror
-                    # library_scan_tasks.py's grouping loop. Logic bugs
-                    # propagate to the task boundary instead of being
-                    # logged per-file and continuing.
-                    except (psycopg.Error, ValueError, OSError) as exc:
-                        # Rollback on DB errors so the library_conn.commit()
-                        # below doesn't fail on an aborted transaction —
-                        # mirrors the pattern in library_scan_tasks.py's
-                        # grouping loop.
-                        if isinstance(exc, psycopg.Error):
-                            library_conn.rollback()
+                        library_conn.commit()
+                    except (psycopg.Error, ValueError, OSError):
+                        library_conn.rollback()
                         logger.warning(
                             "watcher_grouping_failed",
                             file_id=str(lf.id),
                             exc_info=True,
                         )
-                library_conn.commit()
 
             progress_repo.upsert(
                 TaskProgress(
