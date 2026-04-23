@@ -318,7 +318,7 @@ def ingestion_task(
                     lifecycle="failed",
                     original_error=str(exc),
                 )
-            except Exception as shadow_exc:
+            except Exception as shadow_exc:  # noqa: BLE001
                 logger.warning(
                     "ingestion_progress_upsert_shadow_prevented",
                     task_id=task_id,
