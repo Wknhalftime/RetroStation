@@ -42,7 +42,10 @@ export const QueueArtistSchema = z.object({
   reason_code: z.string().nullable().optional(),
   reason_detail: z.string().nullable().optional(),
   triage_bucket: TriageBucketSchema,
-  candidates: z.array(z.record(z.unknown()).nullable()),
+  // Backend returns `candidates: list[...] | None`; null arrives as `null`
+  // on the wire when no MB search has been run yet. Accept both the null
+  // and the array form so schema parsing doesn't reject legitimate rows.
+  candidates: z.array(z.record(z.unknown()).nullable()).nullable(),
   identities: z.array(QueueIdentitySchema),
 })
 

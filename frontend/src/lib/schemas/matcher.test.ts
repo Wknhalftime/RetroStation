@@ -50,6 +50,19 @@ describe('QueueArtistSchema', () => {
     })
     expect(parsed.reason_code).toBe('LOW_CONFIDENCE')
   })
+
+  it('accepts null candidates (backend returns null pre-MB-search)', () => {
+    const parsed = QueueArtistSchema.parse({
+      id: '00000000-0000-0000-0000-000000000003',
+      original_name: 'Prince',
+      normalized_name: 'prince',
+      match_status: 'pending',
+      triage_bucket: 'blocked',
+      candidates: null,
+      identities: [],
+    })
+    expect(parsed.candidates).toBeNull()
+  })
 })
 
 describe('MbArtistResultSchema', () => {

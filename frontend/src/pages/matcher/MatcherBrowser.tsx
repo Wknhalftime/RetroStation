@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -59,6 +59,17 @@ export function MatcherBrowser() {
   const artists: QueueArtist[] = data?.items ?? []
   const total: number = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Clamp page when `total` shrinks (after resolutions / re-runs). Without
+  // this, a curator who is on page 3 when enough items resolve to fit on
+  // page 1 gets stuck fetching offset=50 and sees items=[] even though
+  // total>0 — which would wrongly trigger the "queue empty" state.
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+      setSelectedArtist(null)
+    }
+  }, [page, totalPages])
 
   function handleFileSearch(identityId: string) {
     setActiveIdentityId(identityId)
@@ -123,7 +134,7 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && artists.length === 0 && (
+      {!isLoading && !isError && total === 0 && (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             title="Queue is empty"
@@ -132,7 +143,7 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && artists.length > 0 && (
+      {!isLoading && !isError && total > 0 && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left — artist list */}
           <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
