@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -81,13 +81,20 @@ def _score_candidates(
     Normalises both sides with normalize_title_for_scoring() before
     token_sort_ratio. Single-candidate case: gap = 100 (no competition).
     library_file_id is ALWAYS populated with best_file.id — never None.
-    Caller must ensure candidates is non-empty.
+    work_id is populated from best_file (work_id or recording_id) so every
+    strategy returning from this helper exposes a downstream master-selection
+    handle without remembering to wire it in. Ties on score break by
+    library_file id for determinism across runs. Caller must ensure
+    candidates is non-empty.
     """
     if not candidates:
         # `assert` is stripped under `python -O`; use a real guard so an
         # upstream bug surfaces as a ValueError, not a later IndexError.
         raise ValueError("_score_candidates requires at least one candidate")
     norm_bc = normalize_title_for_scoring(broadcast_title)
+    # Sort by score DESC, then by library_file id ASC so duplicate-score ties
+    # are resolved deterministically. Without the tie-breaker, input order
+    # (often non-deterministic from SQL) would decide the match.
     scored: list[tuple[float, LibraryFile]] = sorted(
         (
             (
@@ -101,8 +108,7 @@ def _score_candidates(
             )
             for f in candidates
         ),
-        key=lambda x: x[0],
-        reverse=True,
+        key=lambda x: (-x[0], str(x[1].id)),
     )
     top_score, best = scored[0]
     has_competitor = len(scored) > 1
@@ -142,33 +148,10 @@ def _score_candidates(
         tier=tier,
         confidence_score=top_score,
         library_file_id=best.id,
+        work_id=best.work_id or best.recording_id or "",
         reason_code=rc,
         reason_detail=rd,
     )
-
-
-def _with_work_id(
-    result: IdentityMatchResult,
-    candidates: list[LibraryFile],
-) -> IdentityMatchResult:
-    """Return a copy of result with work_id populated from the matched file.
-
-    Preserves the legacy Tier 2 (``_try_tier2_mbid_match``) behavior where an
-    AUTO_MATCHED result surfaces ``best_file.work_id or best_file.recording_id``
-    so downstream master-selection recalculation has a work handle. Caller must
-    pass the same candidate list used by ``_score_candidates`` so the lookup
-    by ``library_file_id`` stays consistent.
-    """
-    if result.library_file_id is None:
-        return result
-    match_file = next(
-        (f for f in candidates if f.id == result.library_file_id),
-        None,
-    )
-    if match_file is None:
-        return result
-    work_id = match_file.work_id or match_file.recording_id or ""
-    return replace(result, work_id=work_id)
 
 
 class IdentityMappingRuleStrategy:
@@ -264,15 +247,18 @@ class ResolvedArtistMbidStrategy:
                 ),
             )
 
-        mbid = artist_match.target_id
-        if mbid is None:
+        mbid = (artist_match.target_id or "").strip()
+        if not mbid:
+            # Guard against None AND empty/whitespace-only target_id — data
+            # inconsistency could yield "" which `is None` misses, and an
+            # empty MBID would poison both the local lookup and MB query.
             return IdentityMatchResult(
                 status=MatchStatus.NEEDS_REVIEW,
                 tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
                 confidence_score=0.0,
                 library_file_id=None,
                 reason_code=ReasonCode.MISSING_MATCH_RECORD,
-                reason_detail="Artist match row has no target_id (MBID)",
+                reason_detail="Artist match row has no valid target_id (MBID)",
             )
 
         # Step A — local library lookup.
@@ -285,7 +271,7 @@ class ResolvedArtistMbidStrategy:
                 high_threshold=self._high_threshold,
             )
             if local_result.status == MatchStatus.AUTO_MATCHED:
-                return _with_work_id(local_result, candidate_files)
+                return local_result
             # Step B escalation.
             mb_result = self._mb_recording_search(mbid, identity)
             if mb_result is not None:
@@ -312,30 +298,38 @@ class ResolvedArtistMbidStrategy:
         mbid: str,
         identity: BroadcastTrackIdentity,
     ) -> IdentityMatchResult | None:
-        """Return a scored result if any MB recording maps to a local file.
+        """Return the best-scored local file across ALL matching MB recordings.
 
-        Returns None otherwise; caller converts None into a concrete blocked
-        result.
+        Collects candidates from every MB recording that resolves to a local
+        file, then scores them together — so a later recording that scores
+        better than an earlier one is still chosen. Returns None only when
+        no MB recording maps to any local file.
         """
         recordings = self._mb_client.search_recording(
             artist_mbid=mbid, title=identity.normalized_title
         )
+        # Collect ALL local files across recordings before scoring.
+        # Deduplicate by library-file id since the same file can legitimately
+        # appear under multiple recording MBIDs (e.g., merged recordings).
+        seen: set[UUID] = set()
+        all_candidates: list[LibraryFile] = []
         for rec in recordings:
             rec_id = rec.get("id")
             if rec_id is None:
                 continue
-            lib_files = self._library_file_repo.get_by_recording_mbid(rec_id)
-            if lib_files:
-                result = _score_candidates(
-                    identity.normalized_title,
-                    lib_files,
-                    tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
-                    high_threshold=self._high_threshold,
-                )
-                if result.status == MatchStatus.AUTO_MATCHED:
-                    return _with_work_id(result, lib_files)
-                return result
-        return None
+            for lib_file in self._library_file_repo.get_by_recording_mbid(rec_id):
+                if lib_file.id in seen:
+                    continue
+                seen.add(lib_file.id)
+                all_candidates.append(lib_file)
+        if not all_candidates:
+            return None
+        return _score_candidates(
+            identity.normalized_title,
+            all_candidates,
+            tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+            high_threshold=self._high_threshold,
+        )
 
 
 class BroadcastToLocalStrategy:
