@@ -8,6 +8,8 @@ against the actual repo implementations.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
@@ -16,21 +18,32 @@ from backend.tasks._error_boundary import task_failure_telemetry
 pytestmark = pytest.mark.integration
 
 
-def _with_temp_settings_db_url(migrated_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point `get_settings()` at the migrated test DB so the helper's
-    internal `connect_sync(settings.database_url)` writes to the right DB.
+@pytest.fixture
+def settings_db_url(
+    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
+    """Point `get_settings()` at the migrated test DB for the duration of
+    one test. Clears the lru_cache both on entry AND on teardown — the
+    second clear prevents a leaked Settings instance (still holding the
+    test DB URL) from polluting later tests once monkeypatch restores
+    the env var.
     """
     from backend.config import get_settings
 
-    get_settings.cache_clear()  # reset the lru_cache so env change is seen
+    get_settings.cache_clear()
     monkeypatch.setenv("DATABASE_URL", migrated_db)
     get_settings.cache_clear()
+    try:
+        yield migrated_db
+    finally:
+        # After monkeypatch rolls back DATABASE_URL, force the next call
+        # to get_settings() to rebuild from the restored environment.
+        get_settings.cache_clear()
 
 
 def test_task_failure_telemetry_writes_failed_row_and_reraises(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+    migrated_db: str, settings_db_url: str
 ) -> None:
-    _with_temp_settings_db_url(migrated_db, monkeypatch)
 
     with (
         pytest.raises(RuntimeError, match="deliberate"),
@@ -61,10 +74,8 @@ def test_task_failure_telemetry_writes_failed_row_and_reraises(
 
 
 def test_task_failure_telemetry_no_writes_on_success(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+    migrated_db: str, settings_db_url: str
 ) -> None:
-    _with_temp_settings_db_url(migrated_db, monkeypatch)
-
     with task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id:
         pass  # no exception
 
@@ -83,9 +94,8 @@ def test_task_failure_telemetry_no_writes_on_success(
 
 
 def test_task_failure_telemetry_caller_supplied_task_id(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+    migrated_db: str, settings_db_url: str
 ) -> None:
-    _with_temp_settings_db_url(migrated_db, monkeypatch)
     supplied = "my-explicit-trace-id"
 
     with (
@@ -109,13 +119,12 @@ def test_task_failure_telemetry_caller_supplied_task_id(
 
 
 def test_task_failure_telemetry_catches_uuid_parse_errors(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+    migrated_db: str, settings_db_url: str
 ) -> None:
     """Regression: UUID parsing INSIDE the boundary must be caught. Review
     PR#21 noted that evaluating UUID(playlist_id) before entering the
     context bypassed the FAILED row — this test pins the fix.
     """
-    _with_temp_settings_db_url(migrated_db, monkeypatch)
     supplied = "uuid-regression-trace"
 
     with (
