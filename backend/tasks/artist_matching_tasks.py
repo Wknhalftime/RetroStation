@@ -32,7 +32,14 @@ def artist_matching_task(playlist_id: str) -> None:
     settings = get_settings()
 
     with task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id:
-        with connect_sync(settings.database_url) as conn:
+        with (
+            connect_sync(settings.database_url) as conn,
+            MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as mb_client,
+        ):
+            # `with MusicBrainzApiClient(...)` is required — the client owns an
+            # httpx.Client that only closes in __exit__. Without the context
+            # manager a long-lived Huey worker leaks HTTP connections across
+            # task runs.
             match_artists_for_playlist(
                 playlist_id=UUID(playlist_id),
                 broadcast_artist_repo=PgBroadcastArtistRepository(conn),
@@ -40,7 +47,7 @@ def artist_matching_task(playlist_id: str) -> None:
                 artist_repo=PgArtistRepository(conn),
                 match_repo=PgMatchRepository(conn),
                 rules_repo=PgMappingRuleRepository(conn),
-                mb_client=MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)),
+                mb_client=mb_client,
                 mb_score_gap=settings.mb_score_gap,
                 mb_auto_link_score=settings.mb_auto_link_score,
             )
