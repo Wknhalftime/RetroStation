@@ -16,6 +16,13 @@ class BroadcastArtistRepository(ABC):
     def get_by_id(self, artist_id: UUID) -> BroadcastArtist | None: ...
 
     @abstractmethod
+    def get_by_ids(self, ids: list[UUID]) -> list[BroadcastArtist]:
+        """Batch fetch artists by ID. Missing IDs are silently omitted (not raised).
+        Empty input returns empty list without hitting the DB.
+        """
+        ...
+
+    @abstractmethod
     def get_by_normalized_name(self, normalized_name: str) -> BroadcastArtist | None: ...
 
     @abstractmethod

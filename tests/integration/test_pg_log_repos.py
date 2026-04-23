@@ -295,3 +295,23 @@ def test_track_identity_update_match_status_clears_reason_when_not_passed(
         assert row["reason_code"] is None
         assert row["reason_detail"] is None
         conn.commit()
+
+
+def test_broadcast_artist_get_by_ids(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgBroadcastArtistRepository(conn)
+        a1 = repo.upsert(
+            BroadcastArtist(id=uuid4(), original_name="PRINCE", normalized_name="prince_batch")
+        )
+        a2 = repo.upsert(
+            BroadcastArtist(
+                id=uuid4(), original_name="MADONNA", normalized_name="madonna_batch"
+            )
+        )
+        _ = repo.upsert(
+            BroadcastArtist(id=uuid4(), original_name="BOWIE", normalized_name="bowie_batch")
+        )
+        out = repo.get_by_ids([a1.id, a2.id])
+        assert {a.id for a in out} == {a1.id, a2.id}
+        assert repo.get_by_ids([]) == []
+        conn.commit()

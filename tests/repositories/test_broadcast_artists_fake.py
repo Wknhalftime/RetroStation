@@ -23,6 +23,15 @@ def _seed(repo: FakeBroadcastArtistRepository) -> BroadcastArtist:
     return a
 
 
+def _seed_named(repo: FakeBroadcastArtistRepository, name: str) -> BroadcastArtist:
+    a = BroadcastArtist(
+        id=uuid4(),
+        original_name=name,
+        normalized_name=name.lower().strip(),
+    )
+    return repo.upsert(a)
+
+
 def test_update_match_status_accepts_reason_code_and_detail() -> None:
     repo = FakeBroadcastArtistRepository()
     artist = _seed(repo)
@@ -62,3 +71,24 @@ def test_update_match_status_clears_previous_reason_when_none_passed() -> None:
     repo.update_match_status(artist.id, MatchStatus.AUTO_MATCHED)  # clears
     assert repo._reason_codes[artist.id] is None
     assert repo._reason_details[artist.id] is None
+
+
+def test_get_by_ids_returns_requested_subset() -> None:
+    repo = FakeBroadcastArtistRepository()
+    a1 = _seed_named(repo, "Prince")
+    _seed_named(repo, "Madonna")
+    a3 = _seed_named(repo, "Bowie")
+    out = repo.get_by_ids([a1.id, a3.id])
+    assert {a.id for a in out} == {a1.id, a3.id}
+
+
+def test_get_by_ids_empty_input_returns_empty_list() -> None:
+    repo = FakeBroadcastArtistRepository()
+    assert repo.get_by_ids([]) == []
+
+
+def test_get_by_ids_missing_ids_silently_omitted() -> None:
+    repo = FakeBroadcastArtistRepository()
+    a1 = _seed_named(repo, "Prince")
+    out = repo.get_by_ids([a1.id, uuid4()])
+    assert len(out) == 1 and out[0].id == a1.id

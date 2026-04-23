@@ -277,6 +277,46 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def search_by_artist_name(
+        self, normalized_name: str, limit: int = 100,
+    ) -> list[LibraryFile]:
+        # Empty needle would become "%%" and match every row, poisoning the
+        # fuzzy tier with unrelated candidates. Reject up-front.
+        stripped = normalized_name.lower().strip()
+        if not stripped:
+            return []
+        # Escape LIKE metacharacters in the user-supplied needle so an artist
+        # name literally containing `%` or `_` (e.g. "50%") doesn't silently
+        # become a wildcard that pulls in unrelated rows. ESCAPE '\' pairs with
+        # the explicit backslash escapes below.
+        escaped = (
+            stripped.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        needle = f"%{escaped}%"
+        # Prefer exact artist-name matches first, then a stable tie-breaker so
+        # the LIMIT is deterministic and (for prolific artists) the best
+        # candidates are more likely to survive the cap.
+        rows = self._conn.execute(
+            r"""SELECT * FROM library_files
+               WHERE LOWER(TRIM(artist_name)) LIKE %s ESCAPE '\'
+               ORDER BY (LOWER(TRIM(artist_name)) = %s) DESC, id ASC
+               LIMIT %s""",
+            (needle, stripped, limit),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
+        # recording_mbid is not unique in library_files (multiple encodes of the
+        # same recording are legitimate). Return all hits so the caller can
+        # disambiguate by title scoring instead of getting an arbitrary row.
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE recording_mbid = %s
+               ORDER BY id ASC""",
+            (recording_mbid,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
