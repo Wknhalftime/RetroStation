@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from dataclasses import dataclass
+from typing import NamedTuple, Protocol
 from uuid import UUID, uuid4
 
 import structlog
@@ -15,12 +16,234 @@ from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.services.matching_constants import (
+    MB_AUTO_LINK_SCORE,
+    MB_SCORE_GAP,
+    MID_BAND_GAP_THRESHOLD,
+    MID_BAND_LOWER,
+    MID_BAND_UPPER,
+    MIN_PRESENTATION_SCORE,
+)
+from backend.services.matching_reasons import (
+    ReasonCode,
+    format_ambiguous_gap,
+    format_low_confidence,
+)
 from backend.services.matching_utils import rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import normalize_artist
 
 logger = structlog.get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Strategy pattern — PR 4 Tasks 1-4.
+# Legacy `_try_*` functions below remain in place until Task 5 removes them.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ArtistMatchResult:
+    """Immutable result returned by an ArtistMatchingStrategy.
+
+    Strategies produce values; they do not persist. target_id is an MBID for
+    catalog/MB matches, or a canonical artist UUID for normalization hits.
+    reason_code / reason_detail are None for AUTO_MATCHED; populated for
+    NEEDS_REVIEW using the stable ReasonCode vocabulary.
+    """
+
+    status: MatchStatus
+    tier: MatchTier
+    confidence_score: float
+    target_id: str
+    reason_code: ReasonCode | None = None
+    reason_detail: str | None = None
+
+
+class ArtistMatchingStrategy(Protocol):
+    """One resolution tier for a BroadcastArtist."""
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None: ...
+
+
+def _decide_artist_zone(
+    top_score: float,
+    gap: float,
+    high_threshold: int,
+    score_gap: int,
+) -> tuple[MatchStatus, ReasonCode | None, str | None]:
+    """Four-zone decision from matching_constants. Shared between
+    NormalizationStrategy and MusicBrainzApiStrategy to avoid duplication
+    while keeping each strategy's structure flat and readable.
+    """
+    auto_match = (
+        top_score >= MB_AUTO_LINK_SCORE
+        or (top_score >= high_threshold and gap >= score_gap)
+        or (
+            MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
+            and gap >= MID_BAND_GAP_THRESHOLD
+        )
+    )
+    if auto_match:
+        return MatchStatus.AUTO_MATCHED, None, None
+    if top_score >= MIN_PRESENTATION_SCORE:
+        if top_score >= high_threshold:
+            return (
+                MatchStatus.NEEDS_REVIEW,
+                ReasonCode.AMBIGUOUS_GAP,
+                format_ambiguous_gap(gap, float(score_gap)),
+            )
+        return (
+            MatchStatus.NEEDS_REVIEW,
+            ReasonCode.LOW_CONFIDENCE,
+            format_low_confidence(top_score),
+        )
+    return (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LOW_CONFIDENCE,
+        format_low_confidence(top_score),
+    )
+
+
+class MappingRuleStrategy:
+    """Global mapping-rule override for artists."""
+
+    def __init__(self, rules: list[MappingRule]) -> None:
+        self._rules = rules
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        for rule in self._rules:
+            if rule.target_type != TargetType.ARTIST:
+                continue
+            if not rule_matches(rule.source_pattern, broadcast_artist.normalized_name):
+                continue
+            return ArtistMatchResult(
+                status=MatchStatus.AUTO_MATCHED,
+                tier=MatchTier.MANUAL,
+                confidence_score=100.0,
+                target_id=rule.target_id,
+            )
+        return None
+
+
+class NormalizationStrategy:
+    """Local canonical catalog match — exact normalized-name hit or fuzzy.
+
+    Exact hit produces score=100 immediately (no rapidfuzz needed). Otherwise
+    rapidfuzz.token_sort_ratio against each canonical name. Applies the
+    four-zone threshold logic from matching_constants.
+    """
+
+    def __init__(
+        self,
+        all_canonical: list[Artist],
+        mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+        mb_score_gap: int = MB_SCORE_GAP,
+    ) -> None:
+        self._all_canonical = all_canonical
+        self._high = mb_auto_link_score
+        self._gap = mb_score_gap
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        if not self._all_canonical:
+            return None
+
+        target = broadcast_artist.normalized_name
+        # Exact pass
+        for c in self._all_canonical:
+            if normalize_artist(c.name) == target:
+                return ArtistMatchResult(
+                    status=MatchStatus.AUTO_MATCHED,
+                    tier=MatchTier.NORMALIZATION,
+                    confidence_score=100.0,
+                    target_id=c.id,
+                )
+
+        # Fuzzy pass
+        scored: list[tuple[float, Artist]] = sorted(
+            (
+                (float(fuzz.token_sort_ratio(target, normalize_artist(c.name))), c)
+                for c in self._all_canonical
+            ),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        top_score, best = scored[0]
+        gap = (top_score - scored[1][0]) if len(scored) > 1 else 100.0
+
+        status, rc, rd = _decide_artist_zone(
+            top_score, gap, self._high, self._gap
+        )
+        return ArtistMatchResult(
+            status=status,
+            tier=MatchTier.NORMALIZATION,
+            confidence_score=top_score,
+            target_id=best.id,
+            reason_code=rc,
+            reason_detail=rd,
+        )
+
+
+class MusicBrainzApiStrategy:
+    """Final artist tier — query MusicBrainz. Caches AUTO_MATCHED results to
+    local artist catalog so subsequent NormalizationStrategy runs hit locally.
+
+    Preserves the legacy _try_mb_match side effect: on AUTO_MATCHED, upserts
+    the MB result into the local Artist catalog.
+    """
+
+    _MIN_CANDIDATE_SCORE = 60  # legacy threshold; candidates below this are noise
+
+    def __init__(
+        self,
+        mb_client: MusicBrainzClientProtocol,
+        artist_repo: ArtistCatalogRepository,
+        mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+        mb_score_gap: int = MB_SCORE_GAP,
+    ) -> None:
+        self._mb = mb_client
+        self._catalog = artist_repo
+        self._high = mb_auto_link_score
+        self._gap = mb_score_gap
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        results = self._mb.search_artist(broadcast_artist.original_name)
+        if not results:
+            return None
+
+        candidates: list[MbArtistResult] = [
+            r for r in results if r.get("score", 0) >= self._MIN_CANDIDATE_SCORE
+        ]
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda r: r.get("score", 0), reverse=True)
+        best = candidates[0]
+        second = candidates[1].get("score", 0) if len(candidates) > 1 else 0
+        top_score = float(best.get("score", 0))
+        gap = float(best.get("score", 0) - second)
+
+        status, rc, rd = _decide_artist_zone(top_score, gap, self._high, self._gap)
+
+        # Preserve legacy side effect: upsert MB result into local catalog on
+        # AUTO_MATCHED so subsequent NormalizationStrategy runs can hit locally.
+        if status == MatchStatus.AUTO_MATCHED:
+            self._catalog.upsert(Artist(
+                id=best["id"],
+                name=best["name"],
+                sort_name=best.get("sort-name", best["name"]),
+                disambiguation=best.get("disambiguation"),
+            ))
+
+        return ArtistMatchResult(
+            status=status,
+            tier=MatchTier.MUSICBRAINZ_API,
+            confidence_score=top_score,
+            target_id=best["id"],
+            reason_code=rc,
+            reason_detail=rd,
+        )
 
 
 class _Candidate(NamedTuple):
