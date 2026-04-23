@@ -76,16 +76,18 @@ export function useResolveIdentity() {
 // ---------------------------------------------------------------------------
 
 export function useMbArtistSearch(query: string) {
+  // Normalize on trim so that "prince", "prince ", and "  prince" resolve
+  // to the same cache entry and issue a single request per unique term.
+  const trimmed = query.trim()
   return useQuery<MbArtistResult[]>({
-    queryKey: ['mb-artist-search', query],
+    queryKey: ['mb-artist-search', trimmed],
     queryFn: async () => {
-      if (!query.trim()) return []
       const body = await apiFetch<{ items: MbArtistResult[] }>(
-        `/api/v1/matching/mb-artists?query=${encodeURIComponent(query)}`,
+        `/api/v1/matching/mb-artists?query=${encodeURIComponent(trimmed)}`,
       )
       return body.items
     },
-    enabled: query.trim().length > 0,
+    enabled: trimmed.length > 0,
     staleTime: 30_000,
   })
 }

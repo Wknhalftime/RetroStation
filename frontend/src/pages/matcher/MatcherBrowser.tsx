@@ -34,6 +34,17 @@ const PAGE_SIZE = 25
 
 export function MatcherBrowser() {
   const [page, setPage] = useState(1)
+
+  // Switching pages can scroll the selected artist off-screen (the right-side
+  // panels would otherwise keep acting on an artist not shown in the list).
+  // Centralize page changes through this helper so the selection clears.
+  const goToPage = (updater: (prev: number) => number) => {
+    setPage((prev) => {
+      const next = updater(prev)
+      if (next !== prev) setSelectedArtist(null)
+      return next
+    })
+  }
   const offset = (page - 1) * PAGE_SIZE
   const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset)
   const rerunMatching = useRerunMatching()
@@ -74,7 +85,12 @@ export function MatcherBrowser() {
 
   function handleRerun() {
     rerunMatching.mutate(undefined, {
-      onSuccess: () => setPage(1),
+      onSuccess: () => {
+        // Re-run can reshuffle the queue — clear the selection so the right
+        // panels don't act on a stale artist that may no longer exist.
+        setPage(1)
+        setSelectedArtist(null)
+      },
     })
   }
 
@@ -148,7 +164,7 @@ export function MatcherBrowser() {
             </ul>
             <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
               <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() => goToPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
                 className="text-xs text-gray-500 disabled:opacity-40"
               >
@@ -158,7 +174,7 @@ export function MatcherBrowser() {
                 Page {page} of {totalPages} ({total} total)
               </span>
               <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => goToPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
                 className="text-xs text-gray-500 disabled:opacity-40"
               >

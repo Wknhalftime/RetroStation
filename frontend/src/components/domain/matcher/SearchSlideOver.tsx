@@ -263,10 +263,12 @@ export function SearchSlideOver({
                     : 'Search failed'}
                 </p>
               )}
+              {/* Gate on trimmed query so "   " doesn't show a false-negative
+                  empty state when no search actually ran. */}
               {!mbSearch.isLoading &&
                 !mbSearch.isError &&
                 mbResults.length === 0 &&
-                debouncedQuery && (
+                debouncedQuery.trim() && (
                   <p className="px-1 py-4 text-sm text-gray-400">
                     No results found.
                   </p>

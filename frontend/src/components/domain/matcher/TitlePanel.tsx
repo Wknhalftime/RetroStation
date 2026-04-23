@@ -61,18 +61,33 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
                   <p className="truncate text-sm font-medium text-gray-800">
                     {identity.original_title}
                   </p>
-                  {(identity.match_tier || identity.confidence_score != null) && (
-                    <p className="text-xs text-gray-400">
-                      {identity.match_tier && `Tier: ${identity.match_tier}`}
-                      {identity.confidence_score != null &&
-                        ` · Score: ${identity.confidence_score.toFixed(0)}%`}
-                    </p>
-                  )}
-                  {(identity.reason_detail || identity.reason_code) && (
-                    <p className="mt-1 text-xs text-amber-600">
-                      ⚠ {identity.reason_detail ?? identity.reason_code}
-                    </p>
-                  )}
+                  {(() => {
+                    // Build segments so "· Score" never appears as the first
+                    // visible token when match_tier is missing.
+                    const segments: string[] = []
+                    if (identity.match_tier) {
+                      segments.push(`Tier: ${identity.match_tier}`)
+                    }
+                    if (identity.confidence_score != null) {
+                      segments.push(
+                        `Score: ${identity.confidence_score.toFixed(0)}%`,
+                      )
+                    }
+                    return segments.length > 0 ? (
+                      <p className="text-xs text-gray-400">
+                        {segments.join(' · ')}
+                      </p>
+                    ) : null
+                  })()}
+                  {(() => {
+                    const reasonText =
+                      identity.reason_detail || identity.reason_code
+                    return reasonText ? (
+                      <p className="mt-1 text-xs text-amber-600">
+                        ⚠ {reasonText}
+                      </p>
+                    ) : null
+                  })()}
                 </div>
                 <MatchStatusBadge
                   status={identity.match_status}

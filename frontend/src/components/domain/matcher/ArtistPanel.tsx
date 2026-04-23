@@ -66,11 +66,15 @@ export function ArtistPanel({ artist, onSearchMusicBrainz }: ArtistPanelProps) {
         <MatchStatusBadge status={artist.match_status} className="shrink-0" />
       </div>
 
-      {(artist.reason_detail || artist.reason_code) && (
-        <p className="mt-1 mb-3 text-xs text-amber-600">
-          ⚠ {artist.reason_detail ?? artist.reason_code}
-        </p>
-      )}
+      {/* Prefer the human-formatted detail; fall back to the stable code.
+          Use a truthiness check on each so an empty-string reason_detail
+          doesn't render as a blank amber line when reason_code is present. */}
+      {(() => {
+        const reasonText = artist.reason_detail || artist.reason_code
+        return reasonText ? (
+          <p className="mt-1 mb-3 text-xs text-amber-600">⚠ {reasonText}</p>
+        ) : null
+      })()}
 
       {/* Candidates */}
       {candidates.length > 0 ? (
