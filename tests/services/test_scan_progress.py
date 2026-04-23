@@ -105,10 +105,10 @@ class TestScanDirectoryProgress:
 class TestLibraryScanTaskProgress:
     """Tests for library_scan_task progress tracking lifecycle."""
 
-    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_running_record_exists_before_scan_starts(
-        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+        self, mock_scan: MagicMock, mock_connect_sync: MagicMock
     ) -> None:
         """Verify RUNNING is written before scan_directory is called."""
         from backend.tasks.library_scan_tasks import library_scan_task
@@ -137,7 +137,7 @@ class TestLibraryScanTaskProgress:
                 return mock_autocommit_conn
             return mock_data_conn
 
-        mock_psycopg.connect.side_effect = connect_side_effect
+        mock_connect_sync.side_effect = connect_side_effect
 
         with patch(
             "backend.tasks.library_scan_tasks.PgTaskProgressRepository",
@@ -155,10 +155,10 @@ class TestLibraryScanTaskProgress:
         assert records[0].status == TaskStatus.COMPLETED
         assert records[0].task_type == TaskType.SCAN
 
-    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_marks_failed_on_scan_exception(
-        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+        self, mock_scan: MagicMock, mock_connect_sync: MagicMock
     ) -> None:
         from backend.tasks.library_scan_tasks import library_scan_task
 
@@ -166,7 +166,7 @@ class TestLibraryScanTaskProgress:
         mock_scan.side_effect = RuntimeError("disk error")
 
         mock_autocommit_conn = MagicMock()
-        mock_psycopg.connect.return_value = mock_autocommit_conn
+        mock_connect_sync.return_value = mock_autocommit_conn
 
         with (
             patch(
@@ -182,10 +182,10 @@ class TestLibraryScanTaskProgress:
         assert records[0].status == TaskStatus.FAILED
         assert "disk error" in records[0].progress_data.get("error", "")
 
-    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_progress_data_has_processed_and_total(
-        self, mock_scan: MagicMock, mock_psycopg: MagicMock
+        self, mock_scan: MagicMock, mock_connect_sync: MagicMock
     ) -> None:
         from backend.tasks.library_scan_tasks import library_scan_task
 
@@ -202,7 +202,7 @@ class TestLibraryScanTaskProgress:
                 return mock_autocommit_conn
             return mock_data_conn
 
-        mock_psycopg.connect.side_effect = connect_side_effect
+        mock_connect_sync.side_effect = connect_side_effect
 
         with patch(
             "backend.tasks.library_scan_tasks.PgTaskProgressRepository",

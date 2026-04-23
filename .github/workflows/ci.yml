@@ -61,18 +61,4 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --all-extras
-      # A handful of tests (e.g. tests/services/test_scan_progress.py) mock the
-      # psycopg import on their task module but the task calls connect_sync()
-      # against settings.database_url, which is the un-suffixed base DB that
-      # per-worker fixtures never migrate. Apply migrations once here so those
-      # leaky tests see the schema the way local dev implicitly does.
-      - name: Migrate base test database
-        run: |
-          uv run python -c "
-          import psycopg
-          from backend.db.migrations import run_migrations
-          with psycopg.connect('${{ env.DATABASE_URL }}') as conn:
-              run_migrations(conn)
-              conn.commit()
-          "
       - run: uv run pytest --cov=backend --cov-branch --cov-fail-under=80

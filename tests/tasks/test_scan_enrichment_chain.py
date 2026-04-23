@@ -5,15 +5,15 @@ from unittest.mock import MagicMock, patch
 
 
 class TestScanEnrichmentChain:
-    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
     def test_chains_enrichment_when_files_written(
         self,
         mock_progress_repo_cls: MagicMock,
-        mock_psycopg: MagicMock,
+        mock_connect_sync: MagicMock,
     ) -> None:
         mock_conn = MagicMock()
-        mock_psycopg.connect.return_value = mock_conn
+        mock_connect_sync.return_value = mock_conn
         mock_progress_repo_cls.return_value = MagicMock()
 
         with patch("backend.tasks.library_scan_tasks._run_scan") as mock_run:
@@ -26,15 +26,15 @@ class TestScanEnrichmentChain:
                 library_scan_task.call_local("/music")
                 mock_enrich.assert_called_once()
 
-    @patch("backend.tasks.library_scan_tasks.psycopg")
+    @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
     def test_no_enrichment_when_zero_files(
         self,
         mock_progress_repo_cls: MagicMock,
-        mock_psycopg: MagicMock,
+        mock_connect_sync: MagicMock,
     ) -> None:
         mock_conn = MagicMock()
-        mock_psycopg.connect.return_value = mock_conn
+        mock_connect_sync.return_value = mock_conn
         mock_progress_repo_cls.return_value = MagicMock()
 
         with patch("backend.tasks.library_scan_tasks._run_scan") as mock_run:
