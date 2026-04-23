@@ -4,6 +4,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 import psycopg
 import structlog
 
@@ -21,6 +22,16 @@ from backend.services.library_enrichment_service import (
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
+
+# Per-item failure modes we expect from library enrichment calls:
+# enrich_by_release / enrich_by_recording call mb_client (network + JSON
+# decode) and write to Pg. Narrow the catch so logic bugs (KeyError,
+# AttributeError, TypeError) still propagate to the task boundary.
+_PER_ITEM_RETRIABLE_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.HTTPError,
+    psycopg.Error,
+    ValueError,
+)
 
 logger = structlog.get_logger()
 
@@ -111,7 +122,7 @@ def library_enrichment_task() -> dict[str, int]:
                         )
                         total_enriched += count
                         conn.commit()
-                    except Exception as exc:  # noqa: BLE001
+                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
                         conn.rollback()
                         total_failed += 1
                         logger.warning(
@@ -147,7 +158,7 @@ def library_enrichment_task() -> dict[str, int]:
                         )
                         total_enriched += count
                         conn.commit()
-                    except Exception as exc:  # noqa: BLE001
+                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
                         conn.rollback()
                         total_failed += 1
                         logger.warning(
