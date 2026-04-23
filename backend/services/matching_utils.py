@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from backend.domain.matching import MappingRule
-    from backend.repositories.mapping_rules import MappingRuleRepository
 
 
 def rule_matches(source_pattern: str, normalized_value: str) -> bool:
@@ -27,17 +22,6 @@ def rule_matches(source_pattern: str, normalized_value: str) -> bool:
         return bool(re.fullmatch(source_pattern, normalized_value))
     except re.error:
         return False
-
-
-def find_rule_match(
-    normalized_value: str,
-    rules_repo: MappingRuleRepository,
-) -> MappingRule | None:
-    """Return the first rule whose pattern matches normalized_value, or None."""
-    for rule in rules_repo.list_ordered():
-        if rule_matches(rule.source_pattern, normalized_value):
-            return rule
-    return None
 
 
 _STRIP_SUFFIXES = re.compile(
