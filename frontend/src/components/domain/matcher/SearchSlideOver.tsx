@@ -55,8 +55,15 @@ export function SearchSlideOver({
   const [restrictToArtist, setRestrictToArtist] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // MusicBrainz artist search — active only when mode === 'mb-artist'.
-  const mbSearch = useMbArtistSearch(mode === 'mb-artist' ? debouncedQuery : '')
+  // MusicBrainz artist search — active only when the slide-over is open AND
+  // the mode is 'mb-artist'. Gating on `open` prevents React Query from
+  // refetching in the background while the panel is closed (e.g. on window
+  // focus or reconnect). Passing '' also guarantees no stale request fires
+  // during the brief first-render window before the [open] reset effect
+  // clears `debouncedQuery`.
+  const mbSearch = useMbArtistSearch(
+    open && mode === 'mb-artist' ? debouncedQuery : '',
+  )
   const mbResults: MbArtistResult[] = mbSearch.data ?? []
 
   // Focus input when opened

@@ -15,6 +15,7 @@ import { ArtistPanel } from '@/components/domain/matcher/ArtistPanel'
 import { TitlePanel } from '@/components/domain/matcher/TitlePanel'
 import { SearchSlideOver } from '@/components/domain/matcher/SearchSlideOver'
 import type { MbArtistResult, QueueArtist } from '@/lib/schemas/matcher'
+import { firstCandidateMbid } from '@/lib/matcher/candidates'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,6 +56,13 @@ export function MatcherBrowser() {
   const [slideOverOpen, setSlideOverOpen] = useState(false)
   const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null)
   const [mbSearchOpen, setMbSearchOpen] = useState(false)
+  // Captures the artist ID at the moment the curator opens MB search.
+  // Without this, switching the queue selection while the slide-over is open
+  // would apply the chosen MB artist to a DIFFERENT queue artist than the
+  // one the search was initiated for — silent data corruption.
+  const [mbSearchTargetArtistId, setMbSearchTargetArtistId] = useState<
+    string | null
+  >(null)
 
   const artists: QueueArtist[] = data?.items ?? []
   const total: number = data?.total ?? 0
@@ -85,13 +93,27 @@ export function MatcherBrowser() {
     setActiveIdentityId(null)
   }
 
-  function handleMbArtistSelect(mb: MbArtistResult) {
+  function handleOpenMbSearch() {
     if (!selectedArtist) return
+    setMbSearchTargetArtistId(selectedArtist.id)
+    setMbSearchOpen(true)
+  }
+
+  function handleCloseMbSearch() {
+    setMbSearchOpen(false)
+    setMbSearchTargetArtistId(null)
+  }
+
+  function handleMbArtistSelect(mb: MbArtistResult) {
+    // Use the artist ID captured at search-open time, not the current
+    // `selectedArtist`. The curator may have navigated to a different
+    // queue artist while the slide-over was open.
+    if (!mbSearchTargetArtistId) return
     resolveArtist.mutate({
-      id: selectedArtist.id,
+      id: mbSearchTargetArtistId,
       resolution: { match_status: 'manual_matched', target_artist_id: mb.id },
     })
-    setMbSearchOpen(false)
+    handleCloseMbSearch()
   }
 
   function handleRerun() {
@@ -200,7 +222,7 @@ export function MatcherBrowser() {
               <>
                 <ArtistPanel
                   artist={selectedArtist}
-                  onSearchMusicBrainz={() => setMbSearchOpen(true)}
+                  onSearchMusicBrainz={handleOpenMbSearch}
                 />
                 <TitlePanel
                   artist={selectedArtist}
@@ -222,17 +244,13 @@ export function MatcherBrowser() {
         open={slideOverOpen}
         onClose={() => setSlideOverOpen(false)}
         mode="file"
-        restrictArtistMbid={
-          selectedArtist?.candidates?.[0] != null
-            ? (selectedArtist.candidates[0] as Record<string, unknown>)['mbid'] as string | null
-            : null
-        }
+        restrictArtistMbid={firstCandidateMbid(selectedArtist)}
         onSelectFile={handleFileSelect}
       />
 
       <SearchSlideOver
         open={mbSearchOpen}
-        onClose={() => setMbSearchOpen(false)}
+        onClose={handleCloseMbSearch}
         mode="mb-artist"
         onSelectMbArtist={handleMbArtistSelect}
       />
