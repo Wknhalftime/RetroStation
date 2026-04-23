@@ -1,6 +1,22 @@
 from rapidfuzz.fuzz import token_sort_ratio
 
-from backend.services.matching_utils import normalize_title_for_scoring
+from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
+
+
+class TestRuleMatches:
+    def test_exact_string_match(self) -> None:
+        assert rule_matches("prince", "prince") is True
+
+    def test_regex_match(self) -> None:
+        assert rule_matches(r"prince.*", "prince and the revolution") is True
+
+    def test_miss(self) -> None:
+        assert rule_matches("prince", "madonna") is False
+
+    def test_invalid_regex_returns_false_without_raising(self) -> None:
+        # Unbalanced parenthesis: invalid regex. Must not raise re.error.
+        assert rule_matches("prince(", "prince(") is True  # exact match short-circuits
+        assert rule_matches("prince(", "prince") is False  # falls to re.error path
 
 
 class TestNormalizeTitleForScoring:
