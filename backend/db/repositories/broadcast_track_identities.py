@@ -78,17 +78,16 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def get_pending_for_playlist(
         self, playlist_id: UUID
     ) -> list[BroadcastTrackIdentity]:
+        # No filter on broadcast_artists.match_status: BroadcastToLocalStrategy
+        # handles the unresolved-artist path (artist PENDING/NEEDS_REVIEW) and
+        # gating the SQL on AUTO/MANUAL artists would strand those identities
+        # with no matching path ever running in production.
         rows = self._conn.execute(
             """SELECT DISTINCT li.* FROM track_identities li
                JOIN play_events le ON le.identity_id = li.id
-               JOIN broadcast_artists la
-                   ON la.id = li.broadcast_artist_id
                WHERE le.playlist_id = %s
-                 AND li.match_status = %s
-                 AND la.match_status IN (%s, %s)""",
-            (playlist_id, MatchStatus.PENDING.value,
-             MatchStatus.AUTO_MATCHED.value,
-             MatchStatus.MANUAL_MATCHED.value),
+                 AND li.match_status = %s""",
+            (playlist_id, MatchStatus.PENDING.value),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

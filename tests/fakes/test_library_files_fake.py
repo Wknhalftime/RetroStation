@@ -47,10 +47,18 @@ def test_get_by_recording_mbid_hit() -> None:
     f = _file("Prince", recording_mbid="rec-123")
     repo.upsert(f)
     got = repo.get_by_recording_mbid("rec-123")
-    assert got is not None
-    assert got.audio.recording_mbid == "rec-123"
+    assert len(got) == 1
+    assert got[0].audio.recording_mbid == "rec-123"
 
 
-def test_get_by_recording_mbid_miss_returns_none() -> None:
+def test_get_by_recording_mbid_miss_returns_empty() -> None:
     repo = FakeLibraryFileRepository()
-    assert repo.get_by_recording_mbid("rec-missing") is None
+    assert repo.get_by_recording_mbid("rec-missing") == []
+
+
+def test_get_by_recording_mbid_returns_all_duplicates() -> None:
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_file("Prince", recording_mbid="rec-dup"))
+    repo.upsert(_file("Prince", recording_mbid="rec-dup"))
+    got = repo.get_by_recording_mbid("rec-dup")
+    assert len(got) == 2

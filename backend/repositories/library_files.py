@@ -36,9 +36,11 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
-        """Return the single library file whose recording_mbid matches, or None.
+    def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
+        """Return all library files whose recording_mbid matches.
         Used by ResolvedArtistMbidStrategy Step B after MB recording search.
+        Multiple rows are possible (e.g., different encodes of the same
+        recording); caller scores and picks the best.
         """
         ...
 

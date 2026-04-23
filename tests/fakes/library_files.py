@@ -50,11 +50,11 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         ]
         return hits[:limit]
 
-    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
-        for f in self._data.values():
-            if f.audio.recording_mbid == recording_mbid:
-                return f
-        return None
+    def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
+        return [
+            f for f in self._data.values()
+            if f.audio.recording_mbid == recording_mbid
+        ]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         return [

@@ -102,15 +102,20 @@ def _score_candidates(
         reverse=True,
     )
     top_score, best = scored[0]
-    gap: float = (top_score - scored[1][0]) if len(scored) > 1 else 100.0
+    has_competitor = len(scored) > 1
+    gap: float = (top_score - scored[1][0]) if has_competitor else 100.0
 
     rc: ReasonCode | None
     rd: str | None
+    # Mid-band clause requires real competitive separation, so it only fires when
+    # at least one other candidate was scored — a lone mid-band candidate
+    # (gap synthesized to 100) must fall to NEEDS_REVIEW, not AUTO_MATCHED.
     auto_match = (
         top_score >= MB_AUTO_LINK_SCORE
         or (top_score >= high_threshold and gap >= MB_SCORE_GAP)
         or (
-            MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
+            has_competitor
+            and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
             and gap >= MID_BAND_GAP_THRESHOLD
         )
     )
@@ -316,16 +321,16 @@ class ResolvedArtistMbidStrategy:
             rec_id = rec.get("id")
             if rec_id is None:
                 continue
-            lib_file = self._library_file_repo.get_by_recording_mbid(rec_id)
-            if lib_file is not None:
+            lib_files = self._library_file_repo.get_by_recording_mbid(rec_id)
+            if lib_files:
                 result = _score_candidates(
                     identity.normalized_title,
-                    [lib_file],
+                    lib_files,
                     tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
                     high_threshold=self._high_threshold,
                 )
                 if result.status == MatchStatus.AUTO_MATCHED:
-                    return _with_work_id(result, [lib_file])
+                    return _with_work_id(result, lib_files)
                 return result
         return None
 

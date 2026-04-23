@@ -286,22 +286,29 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         if not stripped:
             return []
         needle = f"%{stripped}%"
+        # Prefer exact artist-name matches first, then a stable tie-breaker so
+        # the LIMIT is deterministic and (for prolific artists) the best
+        # candidates are more likely to survive the cap.
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE LOWER(TRIM(artist_name)) LIKE %s
+               ORDER BY (LOWER(TRIM(artist_name)) = %s) DESC, id ASC
                LIMIT %s""",
-            (needle, limit),
+            (needle, stripped, limit),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def get_by_recording_mbid(self, recording_mbid: str) -> LibraryFile | None:
-        row = self._conn.execute(
+    def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
+        # recording_mbid is not unique in library_files (multiple encodes of the
+        # same recording are legitimate). Return all hits so the caller can
+        # disambiguate by title scoring instead of getting an arbitrary row.
+        rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE recording_mbid = %s
-               LIMIT 1""",
+               ORDER BY id ASC""",
             (recording_mbid,),
-        ).fetchone()
-        return self._row_to_model(row) if row else None
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         rows = self._conn.execute(

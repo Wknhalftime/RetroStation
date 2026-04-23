@@ -358,9 +358,9 @@ def test_get_by_recording_mbid_pg(migrated_db: str) -> None:
         conn.commit()
 
         got = repo.get_by_recording_mbid("rec-purple-rain")
-        assert got is not None
-        assert got.audio.artist_name == "Prince"
-        assert repo.get_by_recording_mbid("rec-missing") is None
+        assert len(got) == 1
+        assert got[0].audio.artist_name == "Prince"
+        assert repo.get_by_recording_mbid("rec-missing") == []
 
 
 def test_create_write_only_appears_in_list_all(migrated_db: str) -> None:
