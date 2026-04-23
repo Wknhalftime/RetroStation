@@ -1,12 +1,19 @@
+import os
+
 from huey import SqliteHuey  # type: ignore[import-untyped]
 
 from backend.config import get_settings
 from backend.logging_config import configure_logging
 
+# Per-worker file under pytest-xdist so parallel workers don't collide on the
+# same SQLite lock. In prod PYTEST_XDIST_WORKER is unset → "huey.db" as before.
+_worker = os.environ.get("PYTEST_XDIST_WORKER")
+_huey_filename = f"huey_{_worker}.db" if _worker else "huey.db"
+
 # Single-worker SQLite backend (WAL mode); sufficient for this single-user tool.
 # results=False because all tasks are fire-and-forget (no .get() calls).
 # Replace with RedisHuey for multi-worker or multi-user deployments.
-huey = SqliteHuey(filename="huey.db", results=False)
+huey = SqliteHuey(filename=_huey_filename, results=False)
 
 # Ensure structured logging is configured in the worker process.
 # The FastAPI server calls configure_logging() in its lifespan, but the
