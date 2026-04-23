@@ -40,9 +40,12 @@ logger = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
 # Strategy pattern (PR 4).
-# Strategies produce ArtistMatchResult values; persistence lives in the
-# service function (match_artists_for_playlist). The engine walks strategies
-# in order and returns the first non-None result.
+# Strategies produce ArtistMatchResult values; the service function
+# (match_artists_for_playlist) owns all broadcast_artists / matches writes.
+# Exception: MusicBrainzApiStrategy promotes MB results into the local artist
+# catalog via upsert_musicbrainz_artist on AUTO_MATCHED — this is a deliberate
+# read-through cache side effect so future NormalizationStrategy runs can hit
+# locally. The engine walks strategies in order and returns the first non-None.
 # ---------------------------------------------------------------------------
 
 
@@ -50,8 +53,13 @@ logger = structlog.get_logger()
 class ArtistMatchResult:
     """Immutable result returned by an ArtistMatchingStrategy.
 
-    Strategies produce values; they do not persist. target_id is an MBID for
-    catalog/MB matches, or a canonical artist UUID for normalization hits.
+    target_id is always the artist MBID — required by the downstream MBID-graph
+    identity tier (ResolvedArtistMbidStrategy), which calls
+    library_file_repo.get_by_artist_mbid(Match.target_id). NormalizationStrategy
+    filters out canonicals without an mbid to uphold this contract;
+    MusicBrainzApiStrategy uses the MB API's id; MappingRuleStrategy relies on
+    rules storing MBIDs by convention.
+
     reason_code / reason_detail are None for AUTO_MATCHED; populated for
     NEEDS_REVIEW using the stable ReasonCode vocabulary.
     """
