@@ -8,6 +8,9 @@ inline checks. See `docs/superpowers/plans/2026-04-22-resolution-center-visibili
 
 MB_AUTO_LINK_SCORE: int = 95
 MB_SCORE_GAP: int = 10
+# Floor for MusicBrainz search results considered as match candidates at all.
+# Below this score, results are treated as noise and discarded before zoning.
+MB_MIN_CANDIDATE_SCORE: int = 60
 MID_BAND_LOWER: int = 55
 MID_BAND_UPPER: int = 64
 MID_BAND_GAP_THRESHOLD: int = 5

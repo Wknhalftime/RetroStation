@@ -22,7 +22,7 @@ from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import match_artists_for_playlist
-from backend.services.matching_constants import MB_AUTO_LINK_SCORE, MB_SCORE_GAP
+from backend.services.matching_constants import MB_SCORE_GAP
 from backend.services.matching_reasons import ReasonCode
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
@@ -146,7 +146,6 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
         match_repo=match_repo,
         rules_repo=FakeMappingRuleRepository(),
         mb_client=FakeMbClient(),
-        mb_auto_link_score=MB_AUTO_LINK_SCORE,
         mb_score_gap=MB_SCORE_GAP,
     )
 

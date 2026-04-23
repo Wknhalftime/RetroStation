@@ -111,7 +111,7 @@ def test_normalization_high_score_with_gap_auto_matches() -> None:
     # "high_threshold + gap" branch rather than the MB_AUTO_LINK_SCORE bypass.
     strategy = NormalizationStrategy(
         all_canonical=[best, other],
-        mb_auto_link_score=80,
+        high_threshold=80,
         mb_score_gap=10,
     )
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
@@ -131,7 +131,7 @@ def test_normalization_gap_insufficient_needs_review_ambiguous_gap() -> None:
     c2 = _canonical("metallicca")
     strategy = NormalizationStrategy(
         all_canonical=[c1, c2],
-        mb_auto_link_score=80,
+        high_threshold=80,
         mb_score_gap=50,  # force gap insufficiency
     )
     result = strategy.apply(_broadcast_artist("Metalica", "metalica"))
@@ -160,6 +160,83 @@ def test_normalization_low_score_needs_review_low_confidence() -> None:
 def test_normalization_empty_canonical_returns_none() -> None:
     strategy = NormalizationStrategy(all_canonical=[])
     assert strategy.apply(_broadcast_artist()) is None
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (mirrors identity side: has_competitor, noise floor fall-through,
+# separate high_threshold vs MB_AUTO_LINK_SCORE).
+# ---------------------------------------------------------------------------
+
+
+def test_normalization_lone_candidate_below_mid_band_needs_review_not_auto() -> None:
+    """Issue #1: a SINGLE canonical scoring in the MID_BAND (55-64) must
+    NEEDS_REVIEW, not AUTO_MATCH, because gap=100 is synthetic (no competitor)."""
+    # Pick a canonical that fuzzy-scores in MID_BAND (55-64) against the broadcast.
+    # "heavy metal" vs "metal" -> ~62.5 (inside MID_BAND), gap synthesized to 100.
+    only = _canonical("heavy metal")
+    strategy = NormalizationStrategy(all_canonical=[only])
+    result = strategy.apply(_broadcast_artist("Metal", "metal"))
+
+    assert result is not None
+    # Top score is in MID_BAND but there's no real competitor: must NOT auto-match.
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_mb_lone_candidate_mid_band_needs_review_not_auto() -> None:
+    """Issue #1: a SINGLE MB candidate scoring in MID_BAND must NEEDS_REVIEW,
+    not AUTO_MATCH, because second=0 makes gap=top_score (no real competitor)."""
+    mb = FakeMbClient(responses={"Foo": [
+        {"id": "mbid-only", "name": "Foo Bar", "score": 62},
+    ]})
+    repo = FakeArtistRepository()
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo)
+    result = strategy.apply(_broadcast_artist("Foo", "foo"))
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    # Must not upsert — only AUTO_MATCHED triggers the side effect.
+    assert repo.list_all() == []
+
+
+def test_normalization_below_noise_floor_falls_through_to_next_strategy() -> None:
+    """Issue #2: canonicals exist but all fuzzy scores < MIN_PRESENTATION_SCORE
+    (50) → apply() returns None so the engine can reach MusicBrainzApi."""
+    # These names share almost nothing with "xyzzyqq" — scores will be well below 50.
+    c1 = _canonical("metallica")
+    c2 = _canonical("radiohead")
+    strategy = NormalizationStrategy(all_canonical=[c1, c2])
+    result = strategy.apply(_broadcast_artist("Xyzzyqq", "xyzzyqq"))
+
+    assert result is None
+
+
+def test_normalization_score_90_with_gap_auto_matches_via_high_threshold() -> None:
+    """Issue #3: a score of ~90-94 with sufficient gap must AUTO_MATCH via the
+    high_threshold(80)+gap(10) band. Previously broken because both ctor params
+    were conflated to MB_AUTO_LINK_SCORE=95, so 90 < 95 forced NEEDS_REVIEW."""
+    best = _canonical("metallic")  # fuzzy ~94 against "metallica"
+    other = _canonical("radiohead")  # far away — gap is large
+    # Rely on DEFAULT ctor (no kwargs) so we're testing the default separation
+    # of high_threshold=80 vs MB_AUTO_LINK_SCORE=95.
+    strategy = NormalizationStrategy(all_canonical=[best, other])
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.target_id == best.id
+    # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95)
+    # — so the AUTO decision came through the high_threshold+gap branch.
+    assert result.confidence_score < 95
+
+
+def test_mb_min_candidate_score_constant_lives_in_matching_constants() -> None:
+    """Issue #4: MB_MIN_CANDIDATE_SCORE moved from class-level constant to
+    matching_constants so all thresholds share one source of truth."""
+    from backend.services import matching_constants
+
+    assert hasattr(matching_constants, "MB_MIN_CANDIDATE_SCORE")
+    assert matching_constants.MB_MIN_CANDIDATE_SCORE == 60
 
 
 # ---------------------------------------------------------------------------
