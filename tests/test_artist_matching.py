@@ -45,9 +45,12 @@ def test_tier1_exact_match() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    # Seed canonical artist
+    # Seed canonical artist — mbid must be populated so
+    # NormalizationStrategy will emit an MBID as Match.target_id (consumed
+    # downstream by the identity-tier MBID-graph lookup).
     artist_repo.upsert(Artist(
         id="mbid-metallica", name="Metallica", sort_name="Metallica",
+        mbid="mbid-metallica",
     ))
 
     _make_pending_artist("METALLICA", broadcast_artist_repo, playlist_id)
