@@ -121,6 +121,13 @@ def mb_enrichment_task() -> dict[str, int]:
                         artists_done += 1
                         logger.info("mb_artist_enhanced", mbid=artist.id, name=artist.name)
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                        # On a psycopg.Error the connection is left in an
+                        # aborted-transaction state — the mark_enhancement_failed
+                        # write below (and the outer conn.commit()) would raise
+                        # InFailedSqlTransaction. Roll back before any further
+                        # query so per-item failure logging can continue.
+                        if isinstance(exc, psycopg.Error):
+                            conn.rollback()
                         error_msg = str(exc)
                         repos.artists.mark_enhancement_failed(artist.id, error_msg)
                         artists_failed += 1
@@ -158,6 +165,10 @@ def mb_enrichment_task() -> dict[str, int]:
                     works_done += 1
                     logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
                 except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                    # Rollback on DB errors so the outer conn.commit() at end
+                    # of the works loop doesn't fail on an aborted transaction.
+                    if isinstance(exc, psycopg.Error):
+                        conn.rollback()
                     logger.warning(
                         "mb_work_enhancement_failed",
                         mbid=work.id,
@@ -205,6 +216,11 @@ def mb_enrichment_task() -> dict[str, int]:
                             title=recording.title,
                         )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                        # Rollback on DB errors so the outer conn.commit() at
+                        # end of the recordings loop doesn't fail on an
+                        # aborted transaction.
+                        if isinstance(exc, psycopg.Error):
+                            conn.rollback()
                         logger.warning(
                             "mb_recording_enhancement_failed",
                             mbid=recording.id,

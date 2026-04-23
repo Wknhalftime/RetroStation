@@ -168,7 +168,13 @@ def library_scan_files_task(
                     # library_scan_tasks.py's grouping loop. Logic bugs
                     # propagate to the task boundary instead of being
                     # logged per-file and continuing.
-                    except (psycopg.Error, ValueError, OSError):
+                    except (psycopg.Error, ValueError, OSError) as exc:
+                        # Rollback on DB errors so the library_conn.commit()
+                        # below doesn't fail on an aborted transaction —
+                        # mirrors the pattern in library_scan_tasks.py's
+                        # grouping loop.
+                        if isinstance(exc, psycopg.Error):
+                            library_conn.rollback()
                         logger.warning(
                             "watcher_grouping_failed",
                             file_id=str(lf.id),
