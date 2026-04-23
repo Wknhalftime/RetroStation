@@ -175,12 +175,17 @@ def mb_enrichment_task() -> dict[str, int]:
             for work in pending_works:
                 # Per-item commit: a single work's failure never rolls back
                 # previously successful mark_enhanced writes in this phase.
+                # This phase does only a DB UPDATE — no MB calls, no JSON
+                # parsing — so the catch is scoped to psycopg.Error only.
+                # httpx/ValueError can't arise here, and catching them
+                # would mask logic bugs (KeyError, AttributeError) that
+                # would reach this block from the mark_enhanced call path.
                 try:
                     repos.works.mark_enhanced(work.id)
                     conn.commit()
                     works_done += 1
                     logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
-                except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                except psycopg.Error as exc:
                     conn.rollback()
                     logger.warning(
                         "mb_work_enhancement_failed",
