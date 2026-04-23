@@ -93,7 +93,11 @@ def test_tier2_mbid_graph_exact_match() -> None:
 
     artist_name = "Metallica"
     canonical_mbid = "mbid-metallica"
-    track_title = "Enter Sandman"
+    # Lowercase matches the normalized_title so score = 100 clears the
+    # unconditional MB_AUTO_LINK_SCORE gate. Mixed-case "Enter Sandman"
+    # scored ~85 and relied on the now-removed synthetic-gap auto-match
+    # for lone candidates.
+    track_title = "enter sandman"
 
     broadcast_artist = _setup_artist_with_match(
         artist_name, canonical_mbid, broadcast_artist_repo, match_repo

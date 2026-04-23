@@ -534,3 +534,73 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     assert overridden is not None
     assert overridden.status == MatchStatus.NEEDS_REVIEW
     assert overridden.reason_code == ReasonCode.AMBIGUOUS_GAP
+
+
+# ---------------------------------------------------------------------------
+# Lone-candidate high-band guard (correctness review follow-up)
+# ---------------------------------------------------------------------------
+
+
+def test_normalization_lone_candidate_high_band_needs_review_not_auto() -> None:
+    """A lone canonical with score >= high_threshold must NOT auto-match.
+
+    Without the `has_competitor` guard on the high_threshold+gap clause,
+    a single canonical with synthesized gap=100 would pass the auto-match
+    test silently. A single match at any score below the unconditional-AUTO
+    gate (95) is genuinely unverifiable, so it belongs in NEEDS_REVIEW.
+    """
+    # "metalica" vs "metallica" scores ~94 — above high_threshold (80),
+    # below MB_AUTO_LINK_SCORE (95).
+    bc = _broadcast_artist(normalized="metalica")
+    only = _canonical("Metallica", mbid="mbid-metallica-xxx")
+
+    result = NormalizationStrategy(
+        [only], high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+    ).apply(bc)
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    # Reason must be LOW_CONFIDENCE, not AMBIGUOUS_GAP — there's no peer
+    # to be ambiguous with, so the "within N points" message would be
+    # nonsensical if rendered.
+    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_mb_lone_candidate_high_band_needs_review_not_auto() -> None:
+    """Same guard for the MusicBrainz strategy: a lone MB result at score 90
+    must not auto-match via the synthesized gap = top_score - 0 = 90 path.
+    """
+    fake = FakeMbClient(
+        responses={
+            "Metallica": [{"id": "mbid-m", "name": "Metallica", "score": 90}],
+        }
+    )
+    result = MusicBrainzApiStrategy(
+        fake, FakeArtistRepository(),
+        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+    ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
+    """The unconditional-AUTO gate (MB_AUTO_LINK_SCORE, 95) intentionally
+    does NOT require has_competitor. At >= 95 a token match is effectively
+    a literal identity — a lone result at that confidence is still safe to
+    auto-link. This test pins that behavior so the guard can't be
+    over-applied in a later refactor.
+    """
+    fake = FakeMbClient(
+        responses={
+            "Metallica": [{"id": "mbid-m", "name": "Metallica", "score": 98}],
+        }
+    )
+    result = MusicBrainzApiStrategy(
+        fake, FakeArtistRepository(),
+        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+    ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED

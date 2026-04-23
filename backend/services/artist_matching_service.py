@@ -90,18 +90,27 @@ def _decide_artist_zone(
     NormalizationStrategy and MusicBrainzApiStrategy to avoid duplication
     while keeping each strategy's structure flat and readable.
 
-    `has_competitor` mirrors the identity side: when there is no real
-    second candidate, gap is synthesized (100 locally, or top_score for MB
-    where second=0), so the mid-band clause must NOT auto-match a lone
-    candidate. This matches the guard in
-    `identity_matching_service._score_candidates`.
+    `has_competitor` guards BOTH gap-dependent auto-match clauses: when
+    there is no real second candidate, gap is synthesized (100 locally,
+    or top_score for MB where second=0). Without the guard, a lone
+    candidate at score 85 would auto-match via the high_threshold+gap
+    clause (synthetic gap >> MB_SCORE_GAP), which is exactly the "too
+    permissive" bug the mid-band guard was added to prevent. Apply the
+    same guard on both gap-based clauses so a lone candidate always
+    needs human review, regardless of the band.
 
     `mb_auto_link_score` is operator-tunable (from settings); defaults to the
-    module constant. This is the unconditional-AUTO gate (gap irrelevant).
+    module constant. This is the unconditional-AUTO gate (gap irrelevant,
+    no competitor check — at >= 95 score the token match is effectively
+    a literal identity and a lone result is still trustworthy).
     """
     auto_match = (
         top_score >= mb_auto_link_score
-        or (top_score >= high_threshold and gap >= score_gap)
+        or (
+            has_competitor
+            and top_score >= high_threshold
+            and gap >= score_gap
+        )
         or (
             has_competitor
             and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
@@ -110,17 +119,16 @@ def _decide_artist_zone(
     )
     if auto_match:
         return MatchStatus.AUTO_MATCHED, None, None
-    if top_score >= MIN_PRESENTATION_SCORE:
-        if top_score >= high_threshold:
-            return (
-                MatchStatus.NEEDS_REVIEW,
-                ReasonCode.AMBIGUOUS_GAP,
-                format_ambiguous_gap(gap, float(score_gap)),
-            )
+    # AMBIGUOUS_GAP only applies when there's a real peer that's close on
+    # score. A lone candidate (has_competitor=False) with synthetic gap=100
+    # is NOT ambiguous — there's nobody to be ambiguous with. Report it as
+    # LOW_CONFIDENCE so format_ambiguous_gap's "top candidates within 100
+    # points" message never renders.
+    if has_competitor and top_score >= high_threshold:
         return (
             MatchStatus.NEEDS_REVIEW,
-            ReasonCode.LOW_CONFIDENCE,
-            format_low_confidence(top_score),
+            ReasonCode.AMBIGUOUS_GAP,
+            format_ambiguous_gap(gap, float(score_gap)),
         )
     return (
         MatchStatus.NEEDS_REVIEW,

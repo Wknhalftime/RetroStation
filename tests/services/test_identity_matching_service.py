@@ -188,7 +188,11 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
     lib_file = _lib_file(
         "/music/metallica/enter_sandman.flac",
         artist_mbid=canonical_mbid,
-        track_title="Enter Sandman",
+        # Lowercase matches the normalized_title so score = 100 — the
+        # unconditional MB_AUTO_LINK_SCORE gate carries lone candidates
+        # regardless of has_competitor. Previous "Enter Sandman" scored
+        # ~85 and relied on the now-removed synthetic-gap auto-match.
+        track_title="enter sandman",
         work_id="work-enter-sandman",
     )
     lib_repo.upsert(lib_file)
