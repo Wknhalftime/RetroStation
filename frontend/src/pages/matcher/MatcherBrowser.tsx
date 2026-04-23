@@ -1,15 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 import { MatchStatusBadge } from '@/components/ui/Badge'
 import { cn } from '@/lib/utils'
-import { useMatchingQueue, useRerunMatching, useResolveIdentity } from '@/api/matcher'
+import {
+  useMatchingQueue,
+  useRerunMatching,
+  useResolveArtist,
+  useResolveIdentity,
+} from '@/api/matcher'
 import { ArtistPanel } from '@/components/domain/matcher/ArtistPanel'
 import { TitlePanel } from '@/components/domain/matcher/TitlePanel'
 import { SearchSlideOver } from '@/components/domain/matcher/SearchSlideOver'
-import type { QueueArtist } from '@/lib/schemas/matcher'
+import type { MbArtistResult, QueueArtist } from '@/lib/schemas/matcher'
+import { firstCandidateMbid } from '@/lib/matcher/candidates'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,16 +31,53 @@ interface LibraryFile {
 // MatcherBrowser
 // ---------------------------------------------------------------------------
 
+const PAGE_SIZE = 25
+
 export function MatcherBrowser() {
-  const { data, isLoading, isError } = useMatchingQueue(50, 0)
+  const [page, setPage] = useState(1)
+
+  // Switching pages can scroll the selected artist off-screen (the right-side
+  // panels would otherwise keep acting on an artist not shown in the list).
+  // Centralize page changes through this helper so the selection clears.
+  const goToPage = (updater: (prev: number) => number) => {
+    setPage((prev) => {
+      const next = updater(prev)
+      if (next !== prev) setSelectedArtist(null)
+      return next
+    })
+  }
+  const offset = (page - 1) * PAGE_SIZE
+  const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset)
   const rerunMatching = useRerunMatching()
   const resolveIdentity = useResolveIdentity()
+  const resolveArtist = useResolveArtist()
 
   const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null)
   const [slideOverOpen, setSlideOverOpen] = useState(false)
   const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null)
+  const [mbSearchOpen, setMbSearchOpen] = useState(false)
+  // Captures the artist ID at the moment the curator opens MB search.
+  // Without this, switching the queue selection while the slide-over is open
+  // would apply the chosen MB artist to a DIFFERENT queue artist than the
+  // one the search was initiated for — silent data corruption.
+  const [mbSearchTargetArtistId, setMbSearchTargetArtistId] = useState<
+    string | null
+  >(null)
 
   const artists: QueueArtist[] = data?.items ?? []
+  const total: number = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Clamp page when `total` shrinks (after resolutions / re-runs). Without
+  // this, a curator who is on page 3 when enough items resolve to fit on
+  // page 1 gets stuck fetching offset=50 and sees items=[] even though
+  // total>0 — which would wrongly trigger the "queue empty" state.
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+      setSelectedArtist(null)
+    }
+  }, [page, totalPages])
 
   function handleFileSearch(identityId: string) {
     setActiveIdentityId(identityId)
@@ -50,15 +93,45 @@ export function MatcherBrowser() {
     setActiveIdentityId(null)
   }
 
+  function handleOpenMbSearch() {
+    if (!selectedArtist) return
+    setMbSearchTargetArtistId(selectedArtist.id)
+    setMbSearchOpen(true)
+  }
+
+  function handleCloseMbSearch() {
+    setMbSearchOpen(false)
+    setMbSearchTargetArtistId(null)
+  }
+
+  function handleMbArtistSelect(mb: MbArtistResult) {
+    // Use the artist ID captured at search-open time, not the current
+    // `selectedArtist`. The curator may have navigated to a different
+    // queue artist while the slide-over was open.
+    if (!mbSearchTargetArtistId) return
+    resolveArtist.mutate({
+      id: mbSearchTargetArtistId,
+      resolution: { match_status: 'manual_matched', target_artist_id: mb.id },
+    })
+    handleCloseMbSearch()
+  }
+
   function handleRerun() {
-    rerunMatching.mutate()
+    rerunMatching.mutate(undefined, {
+      onSuccess: () => {
+        // Re-run can reshuffle the queue — clear the selection so the right
+        // panels don't act on a stale artist that may no longer exist.
+        setPage(1)
+        setSelectedArtist(null)
+      },
+    })
   }
 
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Matcher"
-        description="Resolve artist and title matches from the queue."
+        title="Resolution Center"
+        description="Link broadcast log names to MusicBrainz artists and local library files."
         actions={
           <button
             onClick={handleRerun}
@@ -83,7 +156,7 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && artists.length === 0 && (
+      {!isLoading && !isError && total === 0 && (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             title="Queue is empty"
@@ -92,16 +165,16 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && artists.length > 0 && (
+      {!isLoading && !isError && total > 0 && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left — artist list */}
-          <aside className="w-80 shrink-0 overflow-y-auto rounded-lg border border-gray-200 bg-white">
+          <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
             <div className="border-b border-gray-100 px-4 py-2">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
                 Artists ({artists.length})
               </p>
             </div>
-            <ul>
+            <ul className="flex-1 overflow-y-auto">
               {artists.map((artist) => (
                 <li key={artist.id}>
                   <button
@@ -122,13 +195,35 @@ export function MatcherBrowser() {
                 </li>
               ))}
             </ul>
+            <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
+              <button
+                onClick={() => goToPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="text-xs text-gray-500 disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs text-gray-400">
+                Page {page} of {totalPages} ({total} total)
+              </span>
+              <button
+                onClick={() => goToPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="text-xs text-gray-500 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
           </aside>
 
           {/* Right — panels */}
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {selectedArtist ? (
               <>
-                <ArtistPanel artist={selectedArtist} />
+                <ArtistPanel
+                  artist={selectedArtist}
+                  onSearchMusicBrainz={handleOpenMbSearch}
+                />
                 <TitlePanel
                   artist={selectedArtist}
                   onFileSearch={handleFileSearch}
@@ -149,12 +244,15 @@ export function MatcherBrowser() {
         open={slideOverOpen}
         onClose={() => setSlideOverOpen(false)}
         mode="file"
-        restrictArtistMbid={
-          selectedArtist?.candidates?.[0] != null
-            ? (selectedArtist.candidates[0] as Record<string, unknown>)['mbid'] as string | null
-            : null
-        }
+        restrictArtistMbid={firstCandidateMbid(selectedArtist)}
         onSelectFile={handleFileSelect}
+      />
+
+      <SearchSlideOver
+        open={mbSearchOpen}
+        onClose={handleCloseMbSearch}
+        mode="mb-artist"
+        onSelectMbArtist={handleMbArtistSelect}
       />
     </div>
   )

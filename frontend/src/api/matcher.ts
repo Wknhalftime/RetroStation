@@ -1,6 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/api/client'
-import type { MatchingQueue, ArtistResolution, IdentityResolution, ResolveResult } from '@/lib/schemas/matcher'
+import { MbArtistSearchResponseSchema } from '@/lib/schemas/matcher'
+import type {
+  MatchingQueue,
+  ArtistResolution,
+  IdentityResolution,
+  ResolveResult,
+  MbArtistResult,
+} from '@/lib/schemas/matcher'
 
 // ---------------------------------------------------------------------------
 // Query keys
@@ -62,6 +69,33 @@ export function useResolveIdentity() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matching'] })
     },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// MusicBrainz artist search
+// ---------------------------------------------------------------------------
+
+export function useMbArtistSearch(query: string) {
+  // Normalize on trim so that "prince", "prince ", and "  prince" resolve
+  // to the same cache entry and issue a single request per unique term.
+  const trimmed = query.trim()
+  return useQuery<MbArtistResult[]>({
+    queryKey: ['mb-artist-search', trimmed],
+    queryFn: async () => {
+      const raw = await apiFetch<unknown>(
+        `/api/v1/matching/mb-artists?query=${encodeURIComponent(trimmed)}`,
+      )
+      // Parse through the Zod schema so:
+      // - `items` defaults to [] if the envelope is missing the field,
+      //   honouring the useQuery<MbArtistResult[]> contract.
+      // - `disambiguation` defaults to '' per MbArtistResultSchema.
+      // - malformed rows surface as a clear ZodError instead of silent
+      //   downstream runtime failures.
+      return MbArtistSearchResponseSchema.parse(raw).items
+    },
+    enabled: trimmed.length > 0,
+    staleTime: 30_000,
   })
 }
 
