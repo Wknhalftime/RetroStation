@@ -33,13 +33,22 @@ beforeEach(() => {
 })
 
 describe('SearchSlideOver mb-artist mode', () => {
-  it('does not fetch when slide-over is closed', async () => {
-    render(
-      <SearchSlideOver open={false} onClose={vi.fn()} mode="mb-artist" />,
-      { wrapper: wrapperFor(makeClient()) },
-    )
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(mockedApiFetch).not.toHaveBeenCalled()
+  it('does not fetch when slide-over is closed', () => {
+    // The component debounces input at 300ms and React Query schedules
+    // fetches on enabled-key change. Fake timers advance past both so a
+    // missing `open` gate would deterministically produce a fetch — if
+    // no fetch happens here after the timer advance, the gate is solid.
+    vi.useFakeTimers()
+    try {
+      render(
+        <SearchSlideOver open={false} onClose={vi.fn()} mode="mb-artist" />,
+        { wrapper: wrapperFor(makeClient()) },
+      )
+      vi.advanceTimersByTime(500)
+      expect(mockedApiFetch).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('routes search through the mb-artists endpoint when open', async () => {
@@ -106,15 +115,23 @@ describe('SearchSlideOver mb-artist mode', () => {
 
   it('gates the "No results found" empty-state on trimmed query', async () => {
     mockedApiFetch.mockResolvedValue({ items: [] })
-    render(
-      <SearchSlideOver open={true} onClose={vi.fn()} mode="mb-artist" />,
-      { wrapper: wrapperFor(makeClient()) },
-    )
-    const input = screen.getByRole('searchbox')
-    // Whitespace-only input must NOT show the empty state.
-    fireEvent.change(input, { target: { value: '   ' } })
-    await new Promise((resolve) => setTimeout(resolve, 350))
-    expect(screen.queryByText('No results found.')).toBeNull()
+    // Fake timers so we can deterministically advance past the 300ms
+    // input debounce and assert no empty state (and no fetch) ever
+    // fires for whitespace-only input.
+    vi.useFakeTimers()
+    try {
+      render(
+        <SearchSlideOver open={true} onClose={vi.fn()} mode="mb-artist" />,
+        { wrapper: wrapperFor(makeClient()) },
+      )
+      const input = screen.getByRole('searchbox')
+      fireEvent.change(input, { target: { value: '   ' } })
+      await vi.advanceTimersByTimeAsync(500)
+      expect(screen.queryByText('No results found.')).toBeNull()
+      expect(mockedApiFetch).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes on Escape key', () => {

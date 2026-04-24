@@ -83,8 +83,14 @@ describe('MatcherBrowser rendering', () => {
   it('does NOT show "Queue is empty" when total > 0 even if items is empty (off-range page simulation)', async () => {
     mockedApiFetch.mockResolvedValue({ items: [], total: 10 })
     render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) })
-    // Give React Query a tick to settle.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // Wait for the query to resolve via a positive signal (the first
+    // apiFetch call) rather than a fixed setTimeout — otherwise a fast
+    // test run could assert before the query even fires and pass by
+    // accident. Once the fetch has been made and React has committed
+    // the render, the empty-state check is deterministic.
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalled()
+    })
     expect(screen.queryByText(/Queue is empty/i)).toBeNull()
   })
 })
