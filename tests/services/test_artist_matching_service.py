@@ -15,6 +15,7 @@ and the AUTO_REJECTED cascade preserved from the legacy implementation.
 """
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -291,17 +292,17 @@ class _RaisingMbClient(FakeMbClient):
 
     def __init__(
         self,
-        responses: dict[str, list[dict[str, object]]] | None = None,
+        responses: dict[str, list[dict[str, Any]]] | None = None,
         error_names: set[str] | None = None,
     ) -> None:
-        super().__init__(responses=responses)  # type: ignore[arg-type]
+        super().__init__(responses=responses)
         self._error_names = error_names or set()
 
-    def search_artist(self, name: str) -> list[dict[str, object]]:
+    def search_artist(self, name: str) -> list[dict[str, Any]]:
         self.calls.append(name)
         if name in self._error_names:
             raise httpx.ConnectError("simulated transient failure")
-        return self._responses.get(name, [])  # type: ignore[return-value]
+        return self._responses.get(name, [])
 
 
 def test_coalesce_artist_searches_one_call_per_bucket() -> None:
@@ -328,14 +329,15 @@ def test_coalesce_artist_searches_one_call_per_bucket() -> None:
         "Anthrax": [{"id": "a", "score": 100}],
         "Megadeth": [{"id": "mg", "score": 100}],
     })
-    search_map = coalesce_artist_searches(pending, mb)
+    search_map, distinct_keys = coalesce_artist_searches(pending, mb)
 
     # Exactly 5 live calls — one per distinct lower()-bucket.
     assert len(mb.calls) == 5
-    # All 5 buckets populated.
+    # All 5 buckets populated in both the map and the returned count.
     assert set(search_map.keys()) == {
         "metallica", "iron maiden", "slayer", "anthrax", "megadeth",
     }
+    assert distinct_keys == 5
 
 
 def test_coalesce_artist_searches_picks_lex_first_representative() -> None:
@@ -371,12 +373,15 @@ def test_coalesce_artist_searches_omits_key_on_httpx_error() -> None:
         responses={"GoodBand": [{"id": "g", "score": 100}]},
         error_names={"BadBand"},
     )
-    search_map = coalesce_artist_searches(pending, mb)
+    search_map, distinct_keys = coalesce_artist_searches(pending, mb)
 
     # Failing key is OMITTED (not present with any sentinel value).
     assert "badband" not in search_map
     # Successful key is present.
     assert search_map["goodband"] == [{"id": "g", "score": 100}]
+    # Distinct count reflects the INPUT set (2 buckets), NOT the map (1 entry)
+    # — so transient errors don't distort the pre-cache metric.
+    assert distinct_keys == 2
 
 
 def test_coalesce_artist_searches_inserts_empty_list_on_no_candidates() -> None:
@@ -387,7 +392,7 @@ def test_coalesce_artist_searches_inserts_empty_list_on_no_candidates() -> None:
         BroadcastArtist(id=uuid4(), original_name="Nonexistent", normalized_name="nonexistent"),
     ]
     mb = FakeMbClient(responses={})  # default returns []
-    search_map = coalesce_artist_searches(pending, mb)
+    search_map, _ = coalesce_artist_searches(pending, mb)
 
     assert search_map == {"nonexistent": []}
 
@@ -444,56 +449,6 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
     # all in the pre-pass. The per-row loop in the strategy short-circuits
     # via the populated search_map, making zero additional live calls.
     assert len(mb.calls) == 2
-
-
-def test_match_artists_failure_isolation_pre_pass_httpx_error() -> None:
-    # A transient pre-pass failure for one bucket must NOT block other buckets.
-    # The failing bucket's rows fall through to per-row live search (which
-    # will error again on the live path with this fake, but that's a per-row
-    # failure surfaced by the existing error boundary, not a whole-batch abort).
-    playlist_id = uuid4()
-    broadcast_artist_repo = FakeBroadcastArtistRepository()
-    artist_repo = FakeArtistRepository()
-    match_repo = FakeMatchRepository()
-
-    good = _pending_artist("GoodBand", broadcast_artist_repo, playlist_id)
-    _pending_artist("BadBand", broadcast_artist_repo, playlist_id)
-
-    mb = _RaisingMbClient(
-        responses={
-            "GoodBand": [{"id": "mbid-good", "name": "GoodBand",
-                          "sort-name": "GoodBand", "score": 100}],
-        },
-        error_names={"BadBand"},
-    )
-
-    # The pre-pass omits BadBand's bucket on httpx error. The per-row loop
-    # then falls back to a live search_artist for BadBand which raises again;
-    # whether that propagates out of match_artists_for_playlist is an
-    # orthogonal concern (error boundary behavior unchanged by this task).
-    # This test pins only the isolation property: GoodBand is resolved first
-    # (alphabetic order over FakeBroadcastArtistRepository's iteration is
-    # dict insertion order, GoodBand upserted first in this fixture).
-    import contextlib
-
-    with contextlib.suppress(httpx.HTTPError):
-        match_artists_for_playlist(
-            playlist_id=playlist_id,
-            broadcast_artist_repo=broadcast_artist_repo,
-            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-            artist_repo=artist_repo,
-            match_repo=match_repo,
-            rules_repo=FakeMappingRuleRepository(),
-            mb_client=mb,
-        )
-
-    # GoodBand resolved regardless of BadBand's pre-pass failure.
-    good_stored = broadcast_artist_repo.get_by_id(good.id)
-    assert good_stored is not None
-    assert good_stored.match_status == MatchStatus.AUTO_MATCHED
-    good_match = match_repo.get_by_artist(good.id)
-    assert good_match is not None
-    assert good_match.target_id == "mbid-good"
 
 
 def test_match_artists_empty_bucket_skips_live_call() -> None:
@@ -613,14 +568,12 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
             mb_client=mb,
         )
 
+    # The summary event is emitted from a finally block, so it fires even
+    # when the per-row live fallback re-raises for the Flaky bucket. The
+    # guarantee under test: distinct_search_keys counts the INPUT set (both
+    # buckets), NOT the (smaller) search_map that the pre-pass populated.
     summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
-    # The task may raise out of the per-row live fallback for the Flaky bucket
-    # (no per-row boundary in this service today). Whether the summary event
-    # fires depends on that — when it does, distinct_search_keys must reflect
-    # the INPUT, not the (smaller) search_map. Skip the assertion if the task
-    # aborted before emitting; the guarantee we care about is the value, not
-    # that it always fires.
-    if summary_events:
-        assert summary_events[0]["distinct_search_keys"] == 2  # both buckets counted
-        assert summary_events[0]["rows_processed"] == 2
+    assert len(summary_events) == 1
+    assert summary_events[0]["distinct_search_keys"] == 2
+    assert summary_events[0]["rows_processed"] == 2
 

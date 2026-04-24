@@ -231,20 +231,13 @@ def coalesce_recording_lookups(
 ) -> dict[str, MbRecording | None]:
     """Call lookup_recording exactly once per distinct MBID.
 
-    Mirrors `coalesce_artist_lookups` including its exception-isolation
-    semantics:
-      - httpx.HTTPError on an MBID -> OMIT from the map so the per-item loop
-        falls through to its own lookup_recording (inside the retriable
-        try/except), turning a pre-pass failure into a per-item failure.
-      - MB returns 404 -> lookup_recording returns None -> store `{mbid: None}`
-        in the map so the per-item loop knows the lookup already happened and
-        must NOT re-query. Distinct from key-absent.
-      - success -> payload in map.
-
-    The `set(mbids)` conversion is the dedup mechanism. A dict comprehension
-    over a list does NOT deduplicate calls — each duplicate already triggered
-    a lookup by the time the comprehension writes its key. Explicit `set()`
-    is therefore required for the coalescing contract.
+    Sentinel convention (mirrors coalesce_artist_lookups):
+      - httpx.HTTPError -> OMIT the MBID. The per-item loop falls through
+        to a live lookup_recording inside its own retriable try/except.
+      - 404 (lookup_recording returns None) -> store `{mbid: None}`. The
+        per-item loop treats this as authoritative "not found" and must
+        NOT re-query. Distinct from key-absent.
+      - success -> payload in the map.
     """
     result: dict[str, MbRecording | None] = {}
     for mbid in set(mbids):
@@ -335,12 +328,8 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
-                # --- Metrics counters + coalescing pre-pass ---
-                # Explicit start-snapshot so the delta is correct even if the
-                # client is ever hoisted outside the phase block. Today the
-                # client is fresh per phase (counters start at 0), so start
-                # values are always 0 here; keeping the snapshot makes the
-                # shape match `match_artists_for_playlist` for consistency.
+                # Snapshot counters at phase entry so the delta stays correct
+                # if the client is ever shared across phases in the future.
                 artists_live_start = mb_client.live_fetches
                 artists_hits_start = mb_client.cache_hits
                 rows_queued = len(pending_artists)
@@ -449,7 +438,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     ),
                     "duplicate_mbid_ratio": (
                         1.0 - (len(distinct_mbids) / rows_queued)
-                        if rows_queued else None
+                        if rows_queued and distinct_mbids else None
                     ),
                 }
 
@@ -496,12 +485,24 @@ def mb_enrichment_task() -> dict[str, int]:
             # No phase-level commit — per-item commits already flushed each
             # successful mark_enhanced write independently.
 
+            works_distinct_mbids = len({
+                w.mbid for w in pending_works if w.mbid is not None
+            })
+            works_rows = len(pending_works)
             phases["works"] = {
-                "rows_processed": len(pending_works),
-                "distinct_mbids": 0,
+                "rows_processed": works_rows,
+                "distinct_mbids": works_distinct_mbids,
+                # Works phase does no MB HTTP today (only mark_enhanced DB
+                # writes), so live_fetches / cache_hits deltas are always
+                # zero. If a future enhancement calls MB here, snapshot
+                # counters around this block the same way the artist and
+                # recording phases do.
                 "live_fetches_delta": 0,
                 "cache_hits_delta": 0,
-                "duplicate_mbid_ratio": None,
+                "duplicate_mbid_ratio": (
+                    1.0 - (works_distinct_mbids / works_rows)
+                    if works_rows and works_distinct_mbids else None
+                ),
             }
 
         # --------------------------------------------------------- recordings
@@ -509,7 +510,6 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
-                # Explicit start-snapshot — see artists phase comment.
                 recordings_live_start = mb_client.live_fetches
                 recordings_hits_start = mb_client.cache_hits
                 # Pre-pass: one lookup_recording per distinct MBID. Read from
@@ -581,7 +581,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     ),
                     "duplicate_mbid_ratio": (
                         1.0 - (recordings_distinct_mbids / recordings_rows)
-                        if recordings_rows else None
+                        if recordings_rows and recordings_distinct_mbids else None
                     ),
                 }
 

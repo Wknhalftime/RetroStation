@@ -249,7 +249,8 @@ class MusicBrainzApiStrategy:
 
     `search_map` short-circuits the live search. When present, bucket key is
     `broadcast_artist.original_name.lower()` — identical to the cache key
-    suffix in mb_client.py:179. Sentinel convention:
+    suffix `artist-search:{name.lower()}` used by MusicBrainzApiClient.
+    Sentinel convention:
       - key absent  -> live search_artist fallback (same as pre-coalesce).
       - key = []    -> "no candidates" from MB, return None without live call.
       - key = [...] -> use those results directly.
@@ -348,23 +349,26 @@ class ArtistMatchingEngine:
 def coalesce_artist_searches(
     pending: list[BroadcastArtist],
     mb_client: MusicBrainzClientProtocol,
-) -> dict[str, list[MbArtistResult]]:
+) -> tuple[dict[str, list[MbArtistResult]], int]:
     """Call search_artist exactly once per distinct `original_name.lower()`.
 
-    Mirrors `coalesce_artist_lookups` (backend/tasks/mb_enrichment_tasks.py:192)
-    including its exception-isolation semantics:
-      - transient httpx.HTTPError -> OMIT the key (live fallback in the per-row
-        loop reproduces the failure in isolation).
-      - empty MB response -> key present with [] (strategy short-circuits to
-        None without re-querying).
+    Returns `(search_map, distinct_key_count)`. The count is the pre-cache
+    bucket count — stable even when transient httpx errors omit keys from
+    `search_map` — so callers can report it as `distinct_search_keys` in
+    observability events without a second scan of `pending`.
+
+    Sentinel convention (same as coalesce_artist_lookups):
+      - transient httpx.HTTPError -> OMIT the key (per-row live fallback
+        reproduces the failure in isolation).
+      - empty MB response -> key present with [] (strategy short-circuits
+        to None without re-querying).
       - success -> key present with list of results.
 
-    Bucket key is `.lower()` to match the cache key suffix in mb_client.py:179
-    (`artist-search:{name.lower()}`). The representative query string is the
-    lex-first `original_name` in the bucket (sort key = `sorted(originals)[0]`
-    = Python codepoint order: uppercase before lowercase). Choice of
-    representative only affects which exact string MB sees; the cache row is
-    always `.lower()`-keyed.
+    Bucket key is `original_name.lower()` to match the cache key suffix
+    `artist-search:{name.lower()}` used by MusicBrainzApiClient. Choice of
+    representative query string within a bucket is irrelevant to the cache
+    (always `.lower()`-keyed) and to MB's search (case-insensitive); the
+    lex-first original is chosen purely for deterministic test behavior.
     """
     buckets: dict[str, list[str]] = {}
     for row in pending:
@@ -382,7 +386,7 @@ def coalesce_artist_searches(
                 representative=representative,
                 error=str(exc),
             )
-    return result
+    return result, len(buckets)
 
 
 def match_artists_for_playlist(
@@ -414,7 +418,7 @@ def match_artists_for_playlist(
     live_start = mb_client.live_fetches
     hits_start = mb_client.cache_hits
 
-    search_map = coalesce_artist_searches(pending, mb_client)
+    search_map, distinct_search_keys = coalesce_artist_searches(pending, mb_client)
 
     engine = ArtistMatchingEngine([
         MappingRuleStrategy(rules),
@@ -427,55 +431,55 @@ def match_artists_for_playlist(
         ),
     ])
 
-    for broadcast_artist in pending:
-        result = engine.resolve(broadcast_artist)
-        if result is None:
+    try:
+        for broadcast_artist in pending:
+            result = engine.resolve(broadcast_artist)
+            if result is None:
+                broadcast_artist_repo.update_match_status(
+                    broadcast_artist.id,
+                    MatchStatus.NEEDS_REVIEW,
+                    reason_code=ReasonCode.NO_CANDIDATES,
+                    reason_detail="No candidates found across all matching tiers",
+                )
+                continue
+
             broadcast_artist_repo.update_match_status(
                 broadcast_artist.id,
-                MatchStatus.NEEDS_REVIEW,
-                reason_code=ReasonCode.NO_CANDIDATES,
-                reason_detail="No candidates found across all matching tiers",
+                result.status,
+                reason_code=result.reason_code,
+                reason_detail=result.reason_detail,
             )
-            continue
 
-        broadcast_artist_repo.update_match_status(
-            broadcast_artist.id,
-            result.status,
-            reason_code=result.reason_code,
-            reason_detail=result.reason_detail,
+            if result.status == MatchStatus.AUTO_MATCHED:
+                match_repo.create(Match(
+                    id=uuid4(),
+                    artist_id=broadcast_artist.id,
+                    target_id=result.target_id,
+                    target_type=TargetType.ARTIST,
+                    confidence_score=result.confidence_score,
+                    match_tier=result.tier,
+                ))
+
+        _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+    finally:
+        # Emit in finally so observability survives exceptions raised from
+        # the engine or the cascade. `distinct_search_keys` comes from the
+        # coalesce pre-pass so it counts the input set, not `len(search_map)`
+        # — a pre-pass failure that omits a bucket must not shift the metric.
+        rows_processed = len(pending)
+        logger.info(
+            "mb_task_summary",
+            task_type="artist_matching",
+            rows_processed=rows_processed,
+            distinct_search_keys=distinct_search_keys,
+            distinct_mbids=0,
+            live_fetches_delta=mb_client.live_fetches - live_start,
+            cache_hits_delta=mb_client.cache_hits - hits_start,
+            duplicate_name_ratio=(
+                1.0 - (distinct_search_keys / rows_processed) if rows_processed else None
+            ),
+            duplicate_mbid_ratio=None,
         )
-
-        if result.status == MatchStatus.AUTO_MATCHED:
-            match_repo.create(Match(
-                id=uuid4(),
-                artist_id=broadcast_artist.id,
-                target_id=result.target_id,
-                target_type=TargetType.ARTIST,
-                confidence_score=result.confidence_score,
-                match_tier=result.tier,
-            ))
-
-    _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
-
-    rows_processed = len(pending)
-    # Compute over the INPUT set (not `len(search_map)`) so a transient httpx
-    # error that omits a bucket from the map doesn't shift the metric. Plan
-    # Step 3: "ratios are computed pre-cache (over the input set), not
-    # post-cache, so they're stable across runs."
-    distinct_search_keys = len({a.original_name.lower() for a in pending})
-    logger.info(
-        "mb_task_summary",
-        task_type="artist_matching",
-        rows_processed=rows_processed,
-        distinct_search_keys=distinct_search_keys,
-        distinct_mbids=0,
-        live_fetches_delta=mb_client.live_fetches - live_start,
-        cache_hits_delta=mb_client.cache_hits - hits_start,
-        duplicate_name_ratio=(
-            1.0 - (distinct_search_keys / rows_processed) if rows_processed else None
-        ),
-        duplicate_mbid_ratio=None,
-    )
 
 
 def _cascade_auto_rejected(

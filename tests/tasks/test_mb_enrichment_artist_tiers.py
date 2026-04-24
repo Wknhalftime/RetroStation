@@ -233,6 +233,9 @@ def test_coalesce_artist_lookups_swallows_transient_error_per_mbid():
     class FlakyClient:
         def __init__(self) -> None:
             self.calls: list[str] = []
+            # MusicBrainzClientProtocol requires these counter attributes.
+            self.live_fetches: int = 0
+            self.cache_hits: int = 0
 
         def lookup_artist(self, mbid: str):
             self.calls.append(f"lookup_artist:{mbid}")
@@ -299,6 +302,9 @@ def test_coalesce_recording_lookups_swallows_transient_error_per_mbid():
     class FlakyClient:
         def __init__(self) -> None:
             self.calls: list[str] = []
+            # MusicBrainzClientProtocol requires these counter attributes.
+            self.live_fetches: int = 0
+            self.cache_hits: int = 0
 
         def lookup_recording(self, mbid: str):
             self.calls.append(f"lookup_recording:{mbid}")
