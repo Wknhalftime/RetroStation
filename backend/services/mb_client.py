@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import httpx
@@ -117,6 +117,37 @@ class MusicBrainzApiClient:
     def __exit__(self, *_: object) -> None:
         self._http.close()
 
+    def _cache_write(
+        self,
+        *,
+        cache_key: str,
+        entity_type: str,
+        entity_mbid: str,
+        response_data: dict[str, Any],
+    ) -> None:
+        """Build a MusicBrainzCache row, persist it, and emit a DEBUG log.
+
+        Factored out so every cache-write site emits the same observable
+        event (`mb_cache_set`) without copy-pasting the construction block.
+        """
+        now = datetime.now(tz=UTC)
+        expires_at = now + timedelta(days=_CACHE_TTL_DAYS)
+        self._cache.set(MusicBrainzCache(
+            id=uuid4(),
+            cache_key=cache_key,
+            entity_type=entity_type,
+            entity_mbid=entity_mbid,
+            response_data=response_data,
+            cached_at=now,
+            expires_at=expires_at,
+        ))
+        logger.debug(
+            "mb_cache_set",
+            cache_key=cache_key,
+            entity_type=entity_type,
+            expires_at=expires_at.isoformat(),
+        )
+
     @retry(
         retry=retry_if_exception(_is_transient_mb_error),
         stop=stop_after_attempt(3),
@@ -130,6 +161,10 @@ class MusicBrainzApiClient:
         (2–30s) on transient errors (429, 5xx).  Non-transient errors (e.g. 404)
         are re-raised immediately without retrying.
         """
+        # Pre-fetch debug log: if a request hangs at the rate limiter or in the
+        # HTTP call, the post-call info logs never fire. Emitting here makes
+        # the in-flight request visible in a DEBUG trail without spamming INFO.
+        logger.debug("mb_api_fetch_start", url=url, params=params)
         _rate_limit()
         response = self._http.get(url, params=params)
         response.raise_for_status()
@@ -156,16 +191,12 @@ class MusicBrainzApiClient:
         )
         response_payload: dict[str, object] = response.json()
 
-        now = datetime.now(tz=UTC)
-        self._cache.set(MusicBrainzCache(
-            id=uuid4(),
+        self._cache_write(
             cache_key=cache_key,
             entity_type="artist-search",
             entity_mbid="",
             response_data=dict(response_payload),
-            cached_at=now,
-            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
-        ))
+        )
 
         artists = cast(list[MbArtistResult], response_payload.get("artists", []))
         logger.info("mb_api_search", name=name, results=len(artists))
@@ -205,16 +236,12 @@ class MusicBrainzApiClient:
         )
         response_payload: dict[str, object] = response.json()
 
-        now = datetime.now(tz=UTC)
-        self._cache.set(MusicBrainzCache(
-            id=uuid4(),
+        self._cache_write(
             cache_key=cache_key,
             entity_type="recording-search",
             entity_mbid="",
             response_data=dict(response_payload),
-            cached_at=now,
-            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
-        ))
+        )
 
         recordings = cast(list[MbRecording], response_payload.get("recordings", []))
         logger.info(
@@ -253,16 +280,12 @@ class MusicBrainzApiClient:
 
         release = cast(MbRelease, response.json())
 
-        now = datetime.now(tz=UTC)
-        self._cache.set(MusicBrainzCache(
-            id=uuid4(),
+        self._cache_write(
             cache_key=cache_key,
             entity_type="release",
             entity_mbid=mbid,
             response_data=dict(release),
-            cached_at=now,
-            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
-        ))
+        )
 
         logger.info("mb_api_lookup_release", mbid=mbid)
         return release
@@ -295,16 +318,12 @@ class MusicBrainzApiClient:
 
         recording = cast(MbRecording, response.json())
 
-        now = datetime.now(tz=UTC)
-        self._cache.set(MusicBrainzCache(
-            id=uuid4(),
+        self._cache_write(
             cache_key=cache_key,
             entity_type="recording",
             entity_mbid=mbid,
             response_data=dict(recording),
-            cached_at=now,
-            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
-        ))
+        )
 
         logger.info("mb_api_lookup_recording", mbid=mbid)
         return recording
@@ -343,16 +362,12 @@ class MusicBrainzApiClient:
 
         artist = cast(MbArtist, response.json())
 
-        now = datetime.now(tz=UTC)
-        self._cache.set(MusicBrainzCache(
-            id=uuid4(),
+        self._cache_write(
             cache_key=cache_key,
             entity_type="artist",
             entity_mbid=mbid,
             response_data=dict(artist),
-            cached_at=now,
-            expires_at=now + timedelta(days=_CACHE_TTL_DAYS),
-        ))
+        )
 
         logger.info("mb_api_lookup_artist", mbid=mbid)
         return artist
