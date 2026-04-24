@@ -670,7 +670,7 @@ def test_mb_strategy_missing_key_falls_back_to_live() -> None:
 
 
 def test_mb_strategy_search_map_key_is_lowercased() -> None:
-    # Cache key convention in `artist-search:{name.lower()}` is `artist-search:{name.lower()}`.
+    # Cache key convention is `artist-search:{name.lower()}`.
     # Strategy must look up the map with `.lower()` so bucket identity matches.
     mb = FakeMbClient(responses={})
     repo = FakeArtistRepository()

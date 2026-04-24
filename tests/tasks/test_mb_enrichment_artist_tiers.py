@@ -297,31 +297,10 @@ def test_coalesce_recording_lookups_swallows_transient_error_per_mbid():
     The failing MBID is OMITTED from the map (distinct from 404 which lands
     as None) so the per-item loop falls through to its own lookup_recording
     inside the retriable try/except."""
-    import httpx
-
-    class FlakyClient:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-            # MusicBrainzClientProtocol requires these counter attributes.
-            self.live_fetches: int = 0
-            self.cache_hits: int = 0
-
-        def lookup_recording(self, mbid: str):
-            self.calls.append(f"lookup_recording:{mbid}")
-            if mbid == "mbid-flaky":
-                raise httpx.ConnectError("boom")
-            return {"id": mbid, "title": f"title-{mbid}"}
-
-        def lookup_artist(self, mbid: str):
-            return None
-        def search_artist(self, name: str):
-            return []
-        def lookup_release(self, mbid: str):
-            return None
-        def search_recording(self, artist_mbid: str, title: str, limit: int = 10):
-            return []
-
-    client = FlakyClient()
+    client = FakeMbClient(
+        recordings={"mbid-ok": {"id": "mbid-ok", "title": "title-mbid-ok"}},
+        error_mbids={"mbid-flaky"},
+    )
     result = coalesce_recording_lookups({"mbid-ok", "mbid-flaky"}, client)
 
     assert "mbid-ok" in result

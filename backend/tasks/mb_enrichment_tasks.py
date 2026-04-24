@@ -668,10 +668,10 @@ def mb_enrichment_task() -> dict[str, int]:
         # Emit the summary even on partial failure. `phases` is built
         # incrementally (each phase writes its own key on success), so a
         # failure mid-recordings still produces a useful "artists + works"
-        # summary. suppress() on the log call itself so a malformed phase
-        # dict never masks the underlying task exception in the `except`
-        # above.
-        with contextlib.suppress(Exception):
+        # summary. Narrow suppress: only catch serialization errors from
+        # an unexpected value in `phases`. A broader catch would silently
+        # hide logging-infrastructure bugs we'd want to surface.
+        with contextlib.suppress(TypeError, ValueError):
             logger.info(
                 "mb_task_summary",
                 task_type="mb_enrichment",

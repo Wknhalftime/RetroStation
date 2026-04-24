@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 
 class FakeMbClient:
-    """In-memory MusicBrainz client for testing. Returns canned responses."""
+    """In-memory MusicBrainz client for testing. Returns canned responses.
+
+    `error_mbids` makes `lookup_artist` / `lookup_recording` raise
+    `httpx.ConnectError` for selected MBIDs — useful for exercising the
+    coalescing helpers' "omit on transient error" paths without hand-rolling
+    an inline test double.
+    """
 
     def __init__(
         self,
@@ -13,12 +21,14 @@ class FakeMbClient:
         recordings: dict[str, dict[str, Any]] | None = None,
         recording_searches: dict[tuple[str, str], list[dict[str, Any]]] | None = None,
         artists: dict[str, dict[str, Any]] | None = None,
+        error_mbids: set[str] | None = None,
     ) -> None:
         self._responses = responses or {}
         self._releases = releases or {}
         self._recordings = recordings or {}
         self._recording_searches = recording_searches or {}
         self._artists = artists or {}
+        self._error_mbids = error_mbids or set()
         self.calls: list[str] = []
         # Observability counters exposed by MusicBrainzClientProtocol. Tests
         # that care about counter deltas can mutate these directly; tests
@@ -36,6 +46,8 @@ class FakeMbClient:
 
     def lookup_recording(self, mbid: str) -> dict[str, Any] | None:
         self.calls.append(f"lookup_recording:{mbid}")
+        if mbid in self._error_mbids:
+            raise httpx.ConnectError("simulated transient failure")
         return self._recordings.get(mbid)
 
     def search_recording(
@@ -46,4 +58,6 @@ class FakeMbClient:
 
     def lookup_artist(self, mbid: str) -> dict[str, Any] | None:
         self.calls.append(f"lookup_artist:{mbid}")
+        if mbid in self._error_mbids:
+            raise httpx.ConnectError("simulated transient failure")
         return self._artists.get(mbid)
