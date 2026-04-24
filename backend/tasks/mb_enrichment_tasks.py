@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -131,8 +132,59 @@ def _enhance_artist(
         )
         return ArtistEnhanceOutcome.ENHANCED
 
-    # Tier 2/3 — implemented in Task 5
-    raise NotImplementedError("Tier 2/3 added in Task 5")
+    # --- Tier 2 / Tier 3: MBID known ---
+    if mbid_map is not None and artist.mbid in mbid_map:
+        data = mbid_map[artist.mbid]
+    else:
+        data = mb_client.lookup_artist(artist.mbid)
+
+    if data is None:
+        repos.artists.mark_enhancement_failed(
+            artist.id,
+            f"MB lookup returned 404 for mbid={artist.mbid}",
+        )
+        return ArtistEnhanceOutcome.FAILED
+
+    field_updates: dict[str, str] = {}
+    if not artist.disambiguation and data.get("disambiguation"):
+        field_updates["disambiguation"] = data["disambiguation"]
+    if artist.sort_name in ("", artist.name) and data.get("sort-name"):
+        field_updates["sort_name"] = data["sort-name"]
+
+    if field_updates:
+        _apply_artist_updates(conn, artist.id, field_updates)
+        logger.info(
+            "mb_artist_enhanced_tier2",
+            artist_id=artist.id,
+            mbid=artist.mbid,
+            fields_updated=list(field_updates.keys()),
+        )
+    else:
+        logger.debug(
+            "mb_artist_enhanced_tier3_no_changes",
+            artist_id=artist.id,
+            mbid=artist.mbid,
+        )
+
+    repos.artists.mark_enhanced(artist.id)
+    return ArtistEnhanceOutcome.ENHANCED
+
+
+def coalesce_artist_lookups(
+    mbids: Iterable[str],
+    client: MusicBrainzClientProtocol,
+) -> dict[str, MbArtist | None]:
+    """Call lookup_artist exactly once per distinct MBID.
+
+    Returns {mbid: MbArtist | None}. The `set(mbids)` conversion is the dedup
+    mechanism — a plain dict comprehension over a list does NOT deduplicate
+    calls (it only deduplicates the output dict's keys, after each duplicate
+    has already triggered a full lookup). The explicit `set()` is therefore
+    required for the coalescing contract, even when callers pass an iterable
+    that happens to already be a set.
+    The underlying lookup is cache-read-through — warm entries produce 0 live calls.
+    """
+    return {mbid: client.lookup_artist(mbid) for mbid in set(mbids)}
 
 
 @huey.task()  # type: ignore[untyped-decorator]
