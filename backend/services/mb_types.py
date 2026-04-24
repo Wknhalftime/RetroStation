@@ -50,6 +50,29 @@ MbArtistResult = TypedDict(
     total=False,
 )
 
+MbAliasEntry = TypedDict(
+    "MbAliasEntry",
+    {"name": str, "sort-name": str, "locale": str, "type": str, "primary": str},
+    total=False,
+)
+
+class MbTagEntry(TypedDict, total=False):
+    name: str
+    count: int
+
+MbArtist = TypedDict(
+    "MbArtist",
+    {
+        "id": str,
+        "name": str,
+        "sort-name": str,
+        "disambiguation": str,
+        "aliases": list[MbAliasEntry],
+        "tags": list[MbTagEntry],
+    },
+    total=False,
+)
+
 # Returned by lookup_release
 MbRelease = TypedDict(
     "MbRelease",
