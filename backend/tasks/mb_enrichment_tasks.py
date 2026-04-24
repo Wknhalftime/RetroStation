@@ -262,37 +262,55 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
+                # --- Metrics counters + coalescing pre-pass ---
+                rows_queued = len(pending_artists)
+                distinct_mbids = {
+                    a.mbid for a in pending_artists if a.mbid is not None
+                }
+                mbid_map = coalesce_artist_lookups(distinct_mbids, mb_client)
+                # Commit pre-pass cache writes NOW so they can't be rolled
+                # back by a later per-item rollback. Otherwise a queue with
+                # a failing first item silently discards all coalesced
+                # mb_cache rows, re-issuing live HTTP on the next run.
+                conn.commit()
+
+                logger.info(
+                    "mb_artist_phase_start",
+                    rows_queued=rows_queued,
+                    distinct_mbid=len(distinct_mbids),
+                    bare_artists=sum(
+                        1 for a in pending_artists if a.mbid is None
+                    ),
+                )
+
                 for artist in pending_artists:
-                    # Commit per item so a later item's failure never rolls
-                    # back earlier successful mark_enhanced writes. The
-                    # phase-level commit at the end of the loop became a
-                    # no-op and was removed.
                     try:
-                        results = mb_client.search_artist(artist.name)
-                        match = next(
-                            (r for r in results if r.get("id") == artist.id), None
+                        outcome = _enhance_artist(
+                            artist, mb_client, conn, repos, mbid_map=mbid_map
                         )
-                        if match and match.get("disambiguation"):
-                            conn.execute(
-                                "UPDATE artists SET disambiguation = %s WHERE id = %s",
-                                (match["disambiguation"], artist.id),
-                            )
-                        repos.artists.mark_enhanced(artist.id)
                         conn.commit()
-                        artists_done += 1
-                        logger.info("mb_artist_enhanced", mbid=artist.id, name=artist.name)
+                        if outcome is ArtistEnhanceOutcome.FAILED:
+                            artists_failed += 1
+                            logger.warning(
+                                "mb_artist_enhancement_failed",
+                                mbid=artist.id,
+                                name=artist.name,
+                                reason="mb_lookup_404",
+                            )
+                        else:
+                            artists_done += 1
+                            logger.info(
+                                "mb_artist_enhanced",
+                                mbid=artist.id,
+                                name=artist.name,
+                            )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        # Rollback only discards THIS item's partial writes —
-                        # previous items are already committed. On any
-                        # psycopg.Error the transaction is aborted and the
-                        # rollback is required before any further query.
                         conn.rollback()
                         error_msg = str(exc)
-                        # mark_enhancement_failed in its own transaction so a
-                        # write failure here doesn't cascade into the next
-                        # item's savepoint state.
                         try:
-                            repos.artists.mark_enhancement_failed(artist.id, error_msg)
+                            repos.artists.mark_enhancement_failed(
+                                artist.id, error_msg
+                            )
                             conn.commit()
                         except psycopg.Error:
                             conn.rollback()
