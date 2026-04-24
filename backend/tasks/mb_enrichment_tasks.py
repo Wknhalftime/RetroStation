@@ -3,19 +3,25 @@ from __future__ import annotations
 import contextlib
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 import httpx
 import psycopg
 import structlog
+from psycopg import sql
 
 from backend.config import get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
+from backend.domain.catalog import Artist
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
-from backend.services.mb_client import MusicBrainzApiClient
+from backend.services.matching_constants import MB_AUTO_LINK_SCORE
+from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
+from backend.services.mb_types import MbArtist
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -33,6 +39,94 @@ _PER_ITEM_RETRIABLE_ERRORS: tuple[type[BaseException], ...] = (
     psycopg.Error,
     ValueError,
 )
+
+
+class ArtistEnhanceOutcome(StrEnum):
+    ENHANCED = "enhanced"
+    FAILED = "failed"
+
+
+_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset(
+    {"disambiguation", "sort_name", "mbid"}
+)
+
+
+def _apply_artist_updates(
+    conn: psycopg.Connection[Any],
+    artist_id: str,
+    updates: dict[str, str],
+) -> None:
+    """Issue a targeted UPDATE for only the fields that changed.
+
+    Column names pass through psycopg.sql.Identifier for SQL safety.
+    The allowlist guard catches logic bugs at development time.
+    """
+    if not updates:
+        return
+    unknown_cols = updates.keys() - _ALLOWED_ARTIST_UPDATE_COLS
+    if unknown_cols:
+        raise ValueError(f"Unexpected artist update columns: {unknown_cols!r}")
+
+    query = sql.SQL("UPDATE artists SET {sets} WHERE id = %s").format(
+        sets=sql.SQL(", ").join(
+            sql.SQL("{col} = %s").format(col=sql.Identifier(col))
+            for col in updates
+        )
+    )
+    conn.execute(query, (*updates.values(), artist_id))
+
+
+def _enhance_artist(
+    artist: Artist,
+    mb_client: MusicBrainzClientProtocol,
+    conn: psycopg.Connection[Any],
+    repos: RepositoryFactory,
+    *,
+    mbid_map: dict[str, MbArtist | None] | None = None,
+) -> ArtistEnhanceOutcome:
+    """Tiered artist enhancement.
+
+    Tier 1 (no MBID): name search → score gate → fill fields or bail out.
+    Tier 2/3 (MBID known): placeholder — added in Task 5.
+
+    Returns ArtistEnhanceOutcome so the caller increments the right counter.
+    """
+    if artist.mbid is None:
+        results = mb_client.search_artist(artist.name)
+        if not results:
+            repos.artists.mark_enhanced(artist.id)
+            return ArtistEnhanceOutcome.ENHANCED
+
+        best = results[0]
+        best_score = int(best.get("score", 0))
+        if best_score < MB_AUTO_LINK_SCORE:
+            repos.artists.mark_enhanced(artist.id)
+            logger.info(
+                "mb_artist_no_confident_match",
+                artist_id=artist.id,
+                name=artist.name,
+                best_score=best_score,
+            )
+            return ArtistEnhanceOutcome.ENHANCED
+
+        resolved_mbid: str = best["id"]
+        updates: dict[str, str] = {"mbid": resolved_mbid}
+        if best.get("sort-name"):
+            updates["sort_name"] = best["sort-name"]
+        if best.get("disambiguation"):
+            updates["disambiguation"] = best["disambiguation"]
+        _apply_artist_updates(conn, artist.id, updates)
+        repos.artists.mark_enhanced(artist.id)
+        logger.info(
+            "mb_artist_enhanced_tier1",
+            artist_id=artist.id,
+            name=artist.name,
+            resolved_mbid=resolved_mbid,
+        )
+        return ArtistEnhanceOutcome.ENHANCED
+
+    # Tier 2/3 — implemented in Task 5
+    raise NotImplementedError("Tier 2/3 added in Task 5")
 
 
 @huey.task()  # type: ignore[untyped-decorator]
