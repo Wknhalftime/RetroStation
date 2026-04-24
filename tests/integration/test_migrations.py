@@ -117,3 +117,69 @@ def test_xor_constraint_on_matches(migrated_db: str) -> None:
                 INSERT INTO matches (identity_id, artist_id, confidence_score, match_tier)
                 VALUES (%s, %s, 0.9, 'MANUAL')
             """, (uuid.uuid4(), uuid.uuid4()))
+
+
+def test_runner_persists_without_caller_commit(db_url: str) -> None:
+    """Regression for the silent-success audit:
+
+    A caller that invokes run_migrations on a non-autocommit connection
+    and forgets the trailing ``conn.commit()`` MUST still see migrations
+    persisted. Before the fix, conn.transaction() created savepoints
+    inside an uncommitted outer transaction, so migrations rolled back
+    on connection close — the log said "applied successfully" but the
+    schema didn't change.
+    """
+    import psycopg
+
+    from backend.db.migrations import run_migrations
+
+    # Start from a clean schema so run_migrations has work to do.
+    with psycopg.connect(db_url, autocommit=True) as setup:
+        setup.execute("DROP SCHEMA IF EXISTS public CASCADE")
+        setup.execute("CREATE SCHEMA public")
+
+    # Non-autocommit connection; caller does NOT commit after run_migrations.
+    # Close via context manager — psycopg3 context manager rolls back on
+    # pending transactions, so ANY uncommitted outer transaction would
+    # discard work. With the fix, the runner's internal autocommit flip
+    # means each migration is durable before it returns.
+    with psycopg.connect(db_url, autocommit=False) as conn:
+        run_migrations(conn)
+        # Deliberately no conn.commit() here.
+
+    # Verify migrations landed in the DB.
+    with psycopg.connect(db_url) as verify:
+        rows = verify.execute(
+            "SELECT version FROM schema_migrations ORDER BY version",
+        ).fetchall()
+    assert len(rows) >= 1, (
+        "run_migrations on a non-autocommit connection must persist "
+        "without relying on a trailing caller-side conn.commit()"
+    )
+
+
+def test_runner_restores_caller_autocommit_mode(migrated_db: str) -> None:
+    """Runner must restore the caller's original autocommit setting.
+
+    Temporarily flipping autocommit is how the runner makes each migration
+    durable; the caller may still expect a non-autocommit connection for
+    subsequent work. Restoring the original value keeps the function
+    transparent to callers.
+    """
+    import psycopg
+
+    from backend.db.migrations import run_migrations
+
+    with psycopg.connect(migrated_db, autocommit=False) as conn:
+        assert conn.autocommit is False
+        run_migrations(conn)
+        assert conn.autocommit is False, (
+            "run_migrations must restore autocommit=False after it completes"
+        )
+
+    with psycopg.connect(migrated_db, autocommit=True) as conn:
+        assert conn.autocommit is True
+        run_migrations(conn)
+        assert conn.autocommit is True, (
+            "run_migrations must restore autocommit=True after it completes"
+        )
