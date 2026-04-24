@@ -34,9 +34,9 @@ export interface SystemLogsParams {
 // Hooks
 // ---------------------------------------------------------------------------
 
-export function useSystemLogs(params: SystemLogsParams = {}): ReturnType<
-  typeof useQuery<SystemLogPage>
-> {
+export function useSystemLogs(
+  params: SystemLogsParams = {}
+): ReturnType<typeof useQuery<SystemLogPage>> {
   const { level, category, trace_id, limit = 100, offset = 0 } = params;
 
   return useQuery<SystemLogPage>({
@@ -56,9 +56,9 @@ export function useSystemLogs(params: SystemLogsParams = {}): ReturnType<
   });
 }
 
-export function useSystemLogsByTrace(traceId: string): ReturnType<
-  typeof useQuery<SystemLogEntry[]>
-> {
+export function useSystemLogsByTrace(
+  traceId: string
+): ReturnType<typeof useQuery<SystemLogEntry[]>> {
   return useQuery<SystemLogEntry[]>({
     queryKey: systemLogsKeys.byTrace(traceId),
     queryFn: async () => {
@@ -69,4 +69,3 @@ export function useSystemLogsByTrace(traceId: string): ReturnType<
     staleTime: 30_000,
   });
 }
-

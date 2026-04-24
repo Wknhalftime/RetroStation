@@ -46,7 +46,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
       onClick={handleClick}
       className={cn(
         "m-auto w-full max-w-lg rounded-xl bg-white p-0 shadow-xl backdrop:bg-black/40",
-        "open:flex open:flex-col",
+        "open:flex open:flex-col"
       )}
     >
       <div className={cn("flex flex-col", className)}>

@@ -27,11 +27,7 @@ interface PlaylistEventTableProps {
 export function PlaylistEventTable({ playlistId }: PlaylistEventTableProps) {
   const [offset, setOffset] = useState(0);
 
-  const { data, isLoading, isError } = usePlaylistEvents(
-    playlistId,
-    PAGE_SIZE,
-    offset,
-  );
+  const { data, isLoading, isError } = usePlaylistEvents(playlistId, PAGE_SIZE, offset);
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -77,9 +73,7 @@ export function PlaylistEventTable({ playlistId }: PlaylistEventTableProps) {
     <div className="flex flex-col gap-3">
       {/* Total count header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          {data.total.toLocaleString()} events total
-        </p>
+        <p className="text-sm text-gray-500">{data.total.toLocaleString()} events total</p>
         <p className="text-sm text-gray-400">
           Page {page} of {totalPages}
         </p>
@@ -90,21 +84,11 @@ export function PlaylistEventTable({ playlistId }: PlaylistEventTableProps) {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Time
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Artist
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Title
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Tier
-              </th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Artist</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Title</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Tier</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

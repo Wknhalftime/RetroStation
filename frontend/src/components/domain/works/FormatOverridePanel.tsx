@@ -10,11 +10,7 @@ import type { FormatOverrideInfo, RecordingDetail } from "@/lib/schemas/works";
 interface FormatOverridePanelProps {
   overrides: FormatOverrideInfo[];
   recordings: RecordingDetail[];
-  onAdd: (data: {
-    format_name: string;
-    preferred_file_id: string;
-    notes: string | null;
-  }) => void;
+  onAdd: (data: { format_name: string; preferred_file_id: string; notes: string | null }) => void;
   onDelete: (oid: string) => void;
   isAdding?: boolean;
   isDeleting?: boolean;
@@ -39,7 +35,7 @@ export function FormatOverridePanel({
 
   // Flatten all files across recordings for the dropdown
   const allFiles = recordings.flatMap((rec) =>
-    rec.files.map((f) => ({ ...f, recordingTitle: rec.title })),
+    rec.files.map((f) => ({ ...f, recordingTitle: rec.title }))
   );
 
   function handleSave() {
@@ -86,9 +82,7 @@ export function FormatOverridePanel({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Format name */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
-                Format Name
-              </label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Format Name</label>
               <input
                 type="text"
                 value={formatName}
@@ -100,9 +94,7 @@ export function FormatOverridePanel({
 
             {/* File select */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">
-                Preferred File
-              </label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Preferred File</label>
               <select
                 value={preferredFileId}
                 onChange={(e) => setPreferredFileId(e.target.value)}
@@ -121,9 +113,7 @@ export function FormatOverridePanel({
 
           {/* Notes */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Notes (optional)
-            </label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Notes (optional)</label>
             <input
               type="text"
               value={notes}
@@ -143,7 +133,7 @@ export function FormatOverridePanel({
                 "rounded-md px-3 py-1.5 text-xs font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400",
                 formatName.trim() && preferredFileId && !isAdding
                   ? "bg-indigo-600 hover:bg-indigo-700"
-                  : "cursor-not-allowed bg-indigo-300",
+                  : "cursor-not-allowed bg-indigo-300"
               )}
             >
               {isAdding ? "Saving..." : "Save"}
@@ -172,12 +162,8 @@ export function FormatOverridePanel({
                 key={override.id}
                 className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700"
               >
-                <span className="font-mono uppercase text-indigo-600">
-                  {override.format_name}
-                </span>
-                {override.notes && (
-                  <span className="text-gray-500">— {override.notes}</span>
-                )}
+                <span className="font-mono uppercase text-indigo-600">{override.format_name}</span>
+                {override.notes && <span className="text-gray-500">— {override.notes}</span>}
                 <button
                   type="button"
                   onClick={() => onDelete(override.id)}

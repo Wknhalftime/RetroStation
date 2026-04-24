@@ -1,44 +1,42 @@
-import { MatchStatusBadge } from '@/components/ui/Badge'
-import { useResolveIdentity } from '@/api/matcher'
-import type { QueueArtist, QueueIdentity } from '@/lib/schemas/matcher'
+import { MatchStatusBadge } from "@/components/ui/Badge";
+import { useResolveIdentity } from "@/api/matcher";
+import type { QueueArtist, QueueIdentity } from "@/lib/schemas/matcher";
 
 interface TitlePanelProps {
-  artist: QueueArtist | null
-  onFileSearch: (identityId: string) => void
+  artist: QueueArtist | null;
+  onFileSearch: (identityId: string) => void;
 }
 
 export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
-  const resolveIdentity = useResolveIdentity()
+  const resolveIdentity = useResolveIdentity();
 
   const artistResolved =
     artist !== null &&
-    (artist.match_status === 'manual_matched' || artist.match_status === 'matched')
+    (artist.match_status === "manual_matched" || artist.match_status === "matched");
 
   if (!artist) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-5">
         <p className="text-sm text-gray-400">Select an artist to view titles.</p>
       </div>
-    )
+    );
   }
 
   if (!artistResolved) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <p className="text-sm text-gray-500">
-          Resolve the artist first before managing titles.
-        </p>
+        <p className="text-sm text-gray-500">Resolve the artist first before managing titles.</p>
       </div>
-    )
+    );
   }
 
-  const identities: QueueIdentity[] = artist.identities ?? []
+  const identities: QueueIdentity[] = artist.identities ?? [];
 
   function handleReject(identity: QueueIdentity) {
     resolveIdentity.mutate({
       id: identity.id,
-      resolution: { match_status: 'manual_rejected', library_file_id: null },
-    })
+      resolution: { match_status: "manual_rejected", library_file_id: null },
+    });
   }
 
   return (
@@ -64,35 +62,25 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
                   {(() => {
                     // Build segments so "· Score" never appears as the first
                     // visible token when match_tier is missing.
-                    const segments: string[] = []
+                    const segments: string[] = [];
                     if (identity.match_tier) {
-                      segments.push(`Tier: ${identity.match_tier}`)
+                      segments.push(`Tier: ${identity.match_tier}`);
                     }
                     if (identity.confidence_score != null) {
-                      segments.push(
-                        `Score: ${identity.confidence_score.toFixed(0)}%`,
-                      )
+                      segments.push(`Score: ${identity.confidence_score.toFixed(0)}%`);
                     }
                     return segments.length > 0 ? (
-                      <p className="text-xs text-gray-400">
-                        {segments.join(' · ')}
-                      </p>
-                    ) : null
+                      <p className="text-xs text-gray-400">{segments.join(" · ")}</p>
+                    ) : null;
                   })()}
                   {(() => {
-                    const reasonText =
-                      identity.reason_detail || identity.reason_code
+                    const reasonText = identity.reason_detail || identity.reason_code;
                     return reasonText ? (
-                      <p className="mt-1 text-xs text-amber-600">
-                        ⚠ {reasonText}
-                      </p>
-                    ) : null
+                      <p className="mt-1 text-xs text-amber-600">⚠ {reasonText}</p>
+                    ) : null;
                   })()}
                 </div>
-                <MatchStatusBadge
-                  status={identity.match_status}
-                  className="shrink-0"
-                />
+                <MatchStatusBadge status={identity.match_status} className="shrink-0" />
               </div>
 
               <div className="flex gap-2">
@@ -115,5 +103,5 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
         </div>
       )}
     </div>
-  )
+  );
 }

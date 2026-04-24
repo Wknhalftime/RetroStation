@@ -71,13 +71,10 @@ export function useCreateFormatOverride(workId: string) {
   const queryClient = useQueryClient();
   return useMutation<FormatOverrideInfo, Error, CreateFormatOverrideVariables>({
     mutationFn: (body) =>
-      apiFetch<FormatOverrideInfo>(
-        `/api/v1/library/works/${workId}/format-overrides`,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-      ),
+      apiFetch<FormatOverrideInfo>(`/api/v1/library/works/${workId}/format-overrides`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: workKey(workId) });
     },
@@ -92,10 +89,9 @@ export function useDeleteFormatOverride(workId: string) {
   const queryClient = useQueryClient();
   return useMutation<void, Error, DeleteFormatOverrideVariables>({
     mutationFn: ({ oid }) =>
-      apiFetch<void>(
-        `/api/v1/library/works/${workId}/format-overrides/${oid}`,
-        { method: "DELETE" },
-      ),
+      apiFetch<void>(`/api/v1/library/works/${workId}/format-overrides/${oid}`, {
+        method: "DELETE",
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: workKey(workId) });
     },

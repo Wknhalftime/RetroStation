@@ -26,10 +26,7 @@ export function ArtistDetail() {
     );
   }
 
-  const description = [
-    data.sort_name !== data.name ? data.sort_name : null,
-    data.disambiguation,
-  ]
+  const description = [data.sort_name !== data.name ? data.sort_name : null, data.disambiguation]
     .filter(Boolean)
     .join(" — ");
 
@@ -46,16 +43,11 @@ export function ArtistDetail() {
         </Link>
       </div>
 
-      <PageHeader
-        title={data.name}
-        description={description || undefined}
-      />
+      <PageHeader title={data.name} description={description || undefined} />
 
       {/* Works list */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-          Works
-        </h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Works</h2>
 
         {data.works.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-200 py-12 text-center">
@@ -76,14 +68,11 @@ export function ArtistDetail() {
                   {work.has_master && (
                     <Crown className="h-4 w-4 shrink-0 text-amber-400" aria-label="Has master" />
                   )}
-                  <span className="truncate text-sm font-medium text-gray-900">
-                    {work.title}
-                  </span>
+                  <span className="truncate text-sm font-medium text-gray-900">{work.title}</span>
                   <VersionBadges versionTypes={work.version_types} />
                 </div>
                 <span className="ml-4 shrink-0 text-xs text-gray-400">
-                  {work.recording_count}{" "}
-                  {work.recording_count === 1 ? "recording" : "recordings"}
+                  {work.recording_count} {work.recording_count === 1 ? "recording" : "recordings"}
                 </span>
               </Link>
             ))}

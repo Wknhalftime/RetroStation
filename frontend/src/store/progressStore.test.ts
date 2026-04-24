@@ -9,7 +9,7 @@ import type { TaskInfo } from "@/lib/schemas/tasks";
 function makeTask(
   id: string,
   status: "running" | "completed" | "failed",
-  overrides: Partial<TaskInfo> = {},
+  overrides: Partial<TaskInfo> = {}
 ): TaskInfo {
   return {
     task_id: id,
@@ -68,20 +68,15 @@ describe("setTasks — RUNNING", () => {
   });
 
   it("runningTasks contains only in-flight tasks, never terminal rows", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "running"),
-      makeTask("t2", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "running"), makeTask("t2", "failed")]);
     const { runningTasks } = useProgressStore.getState();
     expect(runningTasks.map((t) => t.task_id)).toEqual(["t1"]);
   });
 
   it("terminalTaskIds tracks grace-window terminal IDs for dismiss suppression", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "running"),
-      makeTask("t2", "failed"),
-      makeTask("t3", "completed"),
-    ]);
+    useProgressStore
+      .getState()
+      .setTasks([makeTask("t1", "running"), makeTask("t2", "failed"), makeTask("t3", "completed")]);
     expect(useProgressStore.getState().terminalTaskIds.sort()).toEqual(["t2", "t3"]);
   });
 
@@ -102,10 +97,7 @@ describe("setTasks — FAILED", () => {
   });
 
   it("terminalTaskIds holds all failed task IDs so dismiss() can suppress them", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "failed"),
-      makeTask("t2", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "failed"), makeTask("t2", "failed")]);
     expect(useProgressStore.getState().terminalTaskIds.sort()).toEqual(["t1", "t2"]);
   });
 
@@ -115,15 +107,12 @@ describe("setTasks — FAILED", () => {
   });
 
   it("extraCount reflects number of additional failed tasks beyond the active one", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "failed"),
-      makeTask("t2", "failed"),
-      makeTask("t3", "failed"),
-    ]);
+    useProgressStore
+      .getState()
+      .setTasks([makeTask("t1", "failed"), makeTask("t2", "failed"), makeTask("t3", "failed")]);
     expect(useProgressStore.getState().extraCount).toBe(2);
   });
 });
-
 
 // ---------------------------------------------------------------------------
 // setTasks — COMPLETED branch
@@ -206,31 +195,19 @@ describe("dismiss()", () => {
     useProgressStore.getState().dismiss();
 
     // Task B fails while tA is still within the grace window.
-    useProgressStore.getState().setTasks([
-      makeTask("tA", "failed"),
-      makeTask("tB", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("tA", "failed"), makeTask("tB", "failed")]);
     useProgressStore.getState().dismiss();
 
     // Both tA and tB must be suppressed — next tick must not restore FAILED.
-    useProgressStore.getState().setTasks([
-      makeTask("tA", "failed"),
-      makeTask("tB", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("tA", "failed"), makeTask("tB", "failed")]);
     expect(useProgressStore.getState().status).toBe("IDLE");
     expect(useProgressStore.getState().dismissedTaskIds.sort()).toEqual(["tA", "tB"]);
   });
 
   it("suppresses all failed tasks when multiple were shown at dismiss time", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "failed"),
-      makeTask("t2", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "failed"), makeTask("t2", "failed")]);
     useProgressStore.getState().dismiss();
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "failed"),
-      makeTask("t2", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "failed"), makeTask("t2", "failed")]);
     expect(useProgressStore.getState().status).toBe("IDLE");
   });
 });
@@ -248,10 +225,7 @@ describe("dismissedTaskIds pruning", () => {
   });
 
   it("retains IDs still present in the payload and drops only those that have expired", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "failed"),
-      makeTask("t2", "failed"),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "failed"), makeTask("t2", "failed")]);
     useProgressStore.getState().dismiss();
     // t2 has left the payload; t1 is still within the grace window.
     useProgressStore.getState().setTasks([makeTask("t1", "failed")]);
@@ -265,24 +239,22 @@ describe("dismissedTaskIds pruning", () => {
 
 describe("hasRunningType()", () => {
   it("returns true when a task of that type is currently running", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "running", { task_type: "scan" }),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "running", { task_type: "scan" })]);
     expect(useProgressStore.getState().hasRunningType("scan")).toBe(true);
   });
 
   it("returns false when no task of that type is running", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "running", { task_type: "scan" }),
-    ]);
+    useProgressStore.getState().setTasks([makeTask("t1", "running", { task_type: "scan" })]);
     expect(useProgressStore.getState().hasRunningType("mb_enrichment")).toBe(false);
   });
 
   it("returns false for a task type that is only present as a terminal row", () => {
-    useProgressStore.getState().setTasks([
-      makeTask("t1", "running", { task_type: "scan" }),
-      makeTask("t2", "failed", { task_type: "mb_enrichment" }),
-    ]);
+    useProgressStore
+      .getState()
+      .setTasks([
+        makeTask("t1", "running", { task_type: "scan" }),
+        makeTask("t2", "failed", { task_type: "mb_enrichment" }),
+      ]);
     expect(useProgressStore.getState().hasRunningType("mb_enrichment")).toBe(false);
   });
 });

@@ -17,10 +17,7 @@ export function useUploadPlaylist() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("station_id", stationId);
-      return apiUpload<UploadResult>(
-        `/api/v1/ingestion/playlists`,
-        formData,
-      );
+      return apiUpload<UploadResult>(`/api/v1/ingestion/playlists`, formData);
     },
   });
 }
@@ -60,10 +57,7 @@ export function useUploadPlaylists() {
           const formData = new FormData();
           formData.append("file", file);
           formData.append("station_id", stationId);
-          await apiUpload<UploadResult>(
-            `/api/v1/ingestion/playlists`,
-            formData,
-          );
+          await apiUpload<UploadResult>(`/api/v1/ingestion/playlists`, formData);
           result.succeeded++;
         } catch (err) {
           result.failed++;

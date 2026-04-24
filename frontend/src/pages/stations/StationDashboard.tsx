@@ -82,7 +82,7 @@ export function StationDashboard() {
             });
             if (fileInputRef.current) fileInputRef.current.value = "";
           },
-        },
+        }
       );
       return;
     }
@@ -96,9 +96,7 @@ export function StationDashboard() {
     if (!fileList || fileList.length === 0 || !station_id) return;
 
     // Filter to only .csv files from the folder tree
-    const csvFiles = Array.from(fileList).filter((f) =>
-      f.name.toLowerCase().endsWith(".csv"),
-    );
+    const csvFiles = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".csv"));
 
     if (csvFiles.length === 0) {
       setUploadStatus({
@@ -139,7 +137,7 @@ export function StationDashboard() {
           parts.push(`${result.succeeded}/${result.total} files uploaded.`);
           if (result.failed > 0) {
             parts.push(
-              `${result.failed} failed: ${result.errors.map((e) => e.filename).join(", ")}`,
+              `${result.failed} failed: ${result.errors.map((e) => e.filename).join(", ")}`
             );
           }
           setUploadStatus({
@@ -157,7 +155,7 @@ export function StationDashboard() {
           if (fileInputRef.current) fileInputRef.current.value = "";
           if (folderInputRef.current) folderInputRef.current.value = "";
         },
-      },
+      }
     );
   };
 
@@ -244,9 +242,7 @@ export function StationDashboard() {
             <CalendarDays className="h-4 w-4" />
             Created
           </div>
-          <p className="text-base font-semibold text-gray-900">
-            {formatDate(station.created_at)}
-          </p>
+          <p className="text-base font-semibold text-gray-900">{formatDate(station.created_at)}</p>
         </div>
 
         {/* Playlists link */}
@@ -258,20 +254,16 @@ export function StationDashboard() {
             <ListMusic className="h-4 w-4" />
             Playlists
           </div>
-          <p className="text-base font-semibold text-indigo-600">
-            View Playlists
-          </p>
+          <p className="text-base font-semibold text-indigo-600">View Playlists</p>
         </Link>
       </div>
 
       {/* CSV upload */}
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-1 text-sm font-semibold text-gray-900">
-          Upload Playlist CSV
-        </h2>
+        <h2 className="mb-1 text-sm font-semibold text-gray-900">Upload Playlist CSV</h2>
         <p className="mb-4 text-xs text-gray-500">
-          Select one or more CSV files, or choose a folder to import all .csv
-          files (including subfolders). Processing begins immediately.
+          Select one or more CSV files, or choose a folder to import all .csv files (including
+          subfolders). Processing begins immediately.
         </p>
 
         <div className="flex flex-wrap gap-3">
@@ -306,7 +298,10 @@ export function StationDashboard() {
               className="sr-only"
               onChange={handleFolderChange}
               disabled={uploadStatus.kind === "pending"}
-              {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+              {...({
+                webkitdirectory: "",
+                directory: "",
+              } as React.InputHTMLAttributes<HTMLInputElement>)}
             />
           </label>
         </div>
@@ -337,18 +332,11 @@ export function StationDashboard() {
       {/* Uploaded playlists */}
       {playlists && playlists.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold text-gray-900">
-            Uploaded Playlists
-          </h2>
+          <h2 className="mb-3 text-sm font-semibold text-gray-900">Uploaded Playlists</h2>
           <ul className="divide-y divide-gray-100">
             {playlists.map((playlist) => (
-              <li
-                key={playlist.id}
-                className="flex items-center justify-between py-2.5"
-              >
-                <span className="text-sm text-gray-700 truncate">
-                  {playlist.name}
-                </span>
+              <li key={playlist.id} className="flex items-center justify-between py-2.5">
+                <span className="text-sm text-gray-700 truncate">{playlist.name}</span>
                 <span className="text-xs text-gray-400 shrink-0 ml-3">
                   {playlist.event_count.toLocaleString()} events
                 </span>
@@ -359,11 +347,7 @@ export function StationDashboard() {
       )}
 
       {/* Edit modal */}
-      <Modal
-        open={showEdit}
-        onClose={() => setShowEdit(false)}
-        title="Edit Station"
-      >
+      <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
         <StationForm
           initial={{
             call_letters: station.call_letters,

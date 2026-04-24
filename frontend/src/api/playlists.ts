@@ -6,14 +6,10 @@ import type { PlaylistSummary, PaginatedEvents } from "@/lib/schemas/playlists";
 // Query keys
 // ---------------------------------------------------------------------------
 
-const playlistsKey = (stationId: string) =>
-  ["playlists", { stationId }] as const;
+const playlistsKey = (stationId: string) => ["playlists", { stationId }] as const;
 
-const playlistEventsKey = (
-  playlistId: string,
-  limit: number,
-  offset: number,
-) => ["playlists", playlistId, "events", { limit, offset }] as const;
+const playlistEventsKey = (playlistId: string, limit: number, offset: number) =>
+  ["playlists", playlistId, "events", { limit, offset }] as const;
 
 const broadcastDaysKey = (playlistId: string) =>
   ["playlists", playlistId, "broadcast-days"] as const;
@@ -25,24 +21,17 @@ const broadcastDaysKey = (playlistId: string) =>
 export function usePlaylists(stationId: string | undefined) {
   return useQuery<PlaylistSummary[]>({
     queryKey: playlistsKey(stationId ?? ""),
-    queryFn: () =>
-      apiFetch<PlaylistSummary[]>(
-        `/api/v1/playlists?station_id=${stationId}`,
-      ),
+    queryFn: () => apiFetch<PlaylistSummary[]>(`/api/v1/playlists?station_id=${stationId}`),
     enabled: Boolean(stationId),
   });
 }
 
-export function usePlaylistEvents(
-  playlistId: string | undefined,
-  limit: number,
-  offset: number,
-) {
+export function usePlaylistEvents(playlistId: string | undefined, limit: number, offset: number) {
   return useQuery<PaginatedEvents>({
     queryKey: playlistEventsKey(playlistId ?? "", limit, offset),
     queryFn: () =>
       apiFetch<PaginatedEvents>(
-        `/api/v1/playlists/${playlistId}/events?limit=${limit}&offset=${offset}`,
+        `/api/v1/playlists/${playlistId}/events?limit=${limit}&offset=${offset}`
       ),
     enabled: Boolean(playlistId),
   });
@@ -51,8 +40,7 @@ export function usePlaylistEvents(
 export function useBroadcastDays(playlistId: string | undefined) {
   return useQuery<string[]>({
     queryKey: broadcastDaysKey(playlistId ?? ""),
-    queryFn: () =>
-      apiFetch<string[]>(`/api/v1/playlists/${playlistId}/broadcast-days`),
+    queryFn: () => apiFetch<string[]>(`/api/v1/playlists/${playlistId}/broadcast-days`),
     enabled: Boolean(playlistId),
   });
 }
@@ -71,7 +59,7 @@ export function useExportM3u() {
     mutationFn: async ({ playlistId, formatName }) => {
       const blob = await apiDownload(
         `/api/v1/playlists/${playlistId}/export-m3u`,
-        formatName ? { format_name: formatName } : undefined,
+        formatName ? { format_name: formatName } : undefined
       );
       // Trigger browser download
       const url = URL.createObjectURL(blob);

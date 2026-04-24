@@ -8,7 +8,7 @@ const TOKEN = "dev-token";
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = "ApiError";
@@ -30,9 +30,7 @@ export class ConflictError extends ApiError {
 }
 
 export class ValidationError extends ApiError {
-  constructor(
-    public readonly detail: { loc: unknown[]; msg: string; type: string }[],
-  ) {
+  constructor(public readonly detail: { loc: unknown[]; msg: string; type: string }[]) {
     super(422, "Validation error");
     this.name = "ValidationError";
   }
@@ -65,32 +63,25 @@ async function throwForStatus(res: Response): Promise<never> {
   if (res.status === 422) {
     const body = await res.json().catch(() => ({ detail: [] }));
     throw new ValidationError(
-      (body as { detail: { loc: unknown[]; msg: string; type: string }[] })
-        .detail ?? [],
+      (body as { detail: { loc: unknown[]; msg: string; type: string }[] }).detail ?? []
     );
   }
   if (res.status >= 500) {
     const body = await res.json().catch(() => ({}));
     throw new ServerError(
       res.status,
-      (body as { detail?: string }).detail ?? `Server error ${res.status}`,
+      (body as { detail?: string }).detail ?? `Server error ${res.status}`
     );
   }
   const body = await res.json().catch(() => ({}));
-  throw new ApiError(
-    res.status,
-    (body as { detail?: string }).detail ?? `HTTP ${res.status}`,
-  );
+  throw new ApiError(res.status, (body as { detail?: string }).detail ?? `HTTP ${res.status}`);
 }
 
 // ---------------------------------------------------------------------------
 // apiFetch — JSON requests
 // ---------------------------------------------------------------------------
 
-export async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -124,10 +115,7 @@ async function parseJsonBody<T>(res: Response): Promise<T> {
 // apiUpload — multipart/form-data (no Content-Type — browser sets boundary)
 // ---------------------------------------------------------------------------
 
-export async function apiUpload<T>(
-  path: string,
-  formData: FormData,
-): Promise<T> {
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "X-Airwave-Token": TOKEN },
@@ -142,10 +130,7 @@ export async function apiUpload<T>(
 // apiDownload — POST that returns a Blob
 // ---------------------------------------------------------------------------
 
-export async function apiDownload(
-  path: string,
-  body?: unknown,
-): Promise<Blob> {
+export async function apiDownload(path: string, body?: unknown): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: {

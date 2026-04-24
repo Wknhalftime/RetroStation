@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from "zod";
 
 export const ArtistSummarySchema = z.object({
   id: z.string(),
@@ -9,12 +9,12 @@ export const ArtistSummarySchema = z.object({
   file_count: z.number(),
   mbid: z.string().nullable().default(null),
   origin: z.enum(["local", "musicbrainz"]).default("local"),
-})
+});
 
 export const PaginatedArtistsSchema = z.object({
   items: z.array(ArtistSummarySchema),
   total: z.number(),
-})
+});
 
 export const WorkSummarySchema = z.object({
   id: z.string(),
@@ -22,7 +22,7 @@ export const WorkSummarySchema = z.object({
   recording_count: z.number(),
   has_master: z.boolean(),
   version_types: z.array(z.string()).default([]),
-})
+});
 
 export const ArtistDetailSchema = z.object({
   id: z.string(),
@@ -32,15 +32,15 @@ export const ArtistDetailSchema = z.object({
   works: z.array(WorkSummarySchema),
   mbid: z.string().nullable().default(null),
   origin: z.enum(["local", "musicbrainz"]).default("local"),
-})
+});
 
-export type ArtistSummary = z.infer<typeof ArtistSummarySchema>
-export type PaginatedArtists = z.infer<typeof PaginatedArtistsSchema>
-export type WorkSummary = z.infer<typeof WorkSummarySchema>
-export type ArtistDetail = z.infer<typeof ArtistDetailSchema>
+export type ArtistSummary = z.infer<typeof ArtistSummarySchema>;
+export type PaginatedArtists = z.infer<typeof PaginatedArtistsSchema>;
+export type WorkSummary = z.infer<typeof WorkSummarySchema>;
+export type ArtistDetail = z.infer<typeof ArtistDetailSchema>;
 
 // Legacy exports preserved for any existing consumers
-export const ArtistSchema = ArtistSummarySchema
-export const ArtistSearchResultSchema = ArtistSummarySchema
-export type Artist = ArtistSummary
-export type ArtistSearchResult = ArtistSummary
+export const ArtistSchema = ArtistSummarySchema;
+export const ArtistSearchResultSchema = ArtistSummarySchema;
+export type Artist = ArtistSummary;
+export type ArtistSearchResult = ArtistSummary;

@@ -160,9 +160,7 @@ export function PathConfiguration() {
           <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-4 py-3">
             <div className="flex items-center gap-3">
               <ScanLibraryButton />
-              {toast && (
-                <InlineToast message={toast} onDismiss={() => setToast(null)} />
-              )}
+              {toast && <InlineToast message={toast} onDismiss={() => setToast(null)} />}
             </div>
             <button
               type="button"

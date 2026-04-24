@@ -19,20 +19,14 @@ interface StationFormProps {
   isPending: boolean;
 }
 
-export function StationForm({
-  initial,
-  onSubmit,
-  onCancel,
-  isPending,
-}: StationFormProps) {
+export function StationForm({ initial, onSubmit, onCancel, isPending }: StationFormProps) {
   const [callLetters, setCallLetters] = useState(initial?.call_letters ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [city, setCity] = useState(initial?.city ?? "");
   const [formatName, setFormatName] = useState(initial?.format_name ?? "");
 
   const isEdit = Boolean(initial);
-  const formatChanged =
-    isEdit && formatName !== (initial?.format_name ?? "");
+  const formatChanged = isEdit && formatName !== (initial?.format_name ?? "");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,10 +43,7 @@ export function StationForm({
     <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
       {/* call_letters */}
       <div>
-        <label
-          htmlFor="sf-call-letters"
-          className="block text-sm font-medium text-gray-700"
-        >
+        <label htmlFor="sf-call-letters" className="block text-sm font-medium text-gray-700">
           Call Letters <span className="text-red-500">*</span>
         </label>
         <input
@@ -64,17 +55,14 @@ export function StationForm({
           placeholder="e.g. WKRP"
           className={cn(
             "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm",
-            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
+            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           )}
         />
       </div>
 
       {/* name */}
       <div>
-        <label
-          htmlFor="sf-name"
-          className="block text-sm font-medium text-gray-700"
-        >
+        <label htmlFor="sf-name" className="block text-sm font-medium text-gray-700">
           Station Name
         </label>
         <input
@@ -85,17 +73,14 @@ export function StationForm({
           placeholder="e.g. Classic Rock 98.7"
           className={cn(
             "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm",
-            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
+            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           )}
         />
       </div>
 
       {/* city */}
       <div>
-        <label
-          htmlFor="sf-city"
-          className="block text-sm font-medium text-gray-700"
-        >
+        <label htmlFor="sf-city" className="block text-sm font-medium text-gray-700">
           City
         </label>
         <input
@@ -106,17 +91,14 @@ export function StationForm({
           placeholder="e.g. Cincinnati"
           className={cn(
             "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm",
-            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
+            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           )}
         />
       </div>
 
       {/* format_name */}
       <div>
-        <label
-          htmlFor="sf-format"
-          className="block text-sm font-medium text-gray-700"
-        >
+        <label htmlFor="sf-format" className="block text-sm font-medium text-gray-700">
           Format
         </label>
         <input
@@ -127,7 +109,7 @@ export function StationForm({
           placeholder="e.g. Classic Rock"
           className={cn(
             "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm",
-            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500",
+            "focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           )}
         />
         {formatChanged && (

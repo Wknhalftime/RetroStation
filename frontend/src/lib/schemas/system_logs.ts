@@ -16,4 +16,3 @@ export const SystemLogPageSchema = z.object({
   items: z.array(SystemLogEntrySchema),
 });
 export type SystemLogPage = z.infer<typeof SystemLogPageSchema>;
-

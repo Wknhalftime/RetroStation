@@ -33,12 +33,7 @@ export function StationEventTable({ stationId, date }: StationEventTableProps) {
     setOffset(0);
   }, [date]);
 
-  const { data, isLoading, isError } = useStationEvents(
-    stationId,
-    date,
-    PAGE_SIZE,
-    offset,
-  );
+  const { data, isLoading, isError } = useStationEvents(stationId, date, PAGE_SIZE, offset);
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -69,10 +64,7 @@ export function StationEventTable({ stationId, date }: StationEventTableProps) {
 
   if (data.items.length === 0 && offset === 0) {
     return (
-      <EmptyState
-        title="No events"
-        description="No broadcast events recorded for this date."
-      />
+      <EmptyState title="No events" description="No broadcast events recorded for this date." />
     );
   }
 
@@ -84,9 +76,7 @@ export function StationEventTable({ stationId, date }: StationEventTableProps) {
     <div className="flex flex-col gap-3">
       {/* Total count header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          {data.total.toLocaleString()} events total
-        </p>
+        <p className="text-sm text-gray-500">{data.total.toLocaleString()} events total</p>
         <p className="text-sm text-gray-400">
           Page {page} of {totalPages}
         </p>
@@ -97,24 +87,12 @@ export function StationEventTable({ stationId, date }: StationEventTableProps) {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Time
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Playlist
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Artist
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Title
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">
-                Tier
-              </th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Playlist</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Artist</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Title</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500">Tier</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -123,20 +101,14 @@ export function StationEventTable({ stationId, date }: StationEventTableProps) {
                 <td className="whitespace-nowrap px-4 py-3 text-gray-600">
                   {formatDateTime(event.played_at)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-500">
-                  {event.playlist_name}
-                </td>
-                <td className="px-4 py-3 text-gray-900">
-                  {event.artist_name}
-                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{event.playlist_name}</td>
+                <td className="px-4 py-3 text-gray-900">{event.artist_name}</td>
                 <td className="px-4 py-3 text-gray-900">{event.title}</td>
                 <td className="px-4 py-3">
                   <MatchStatusBadge status={event.match_status} />
                 </td>
                 <td className="px-4 py-3 text-gray-500">
-                  {event.match_tier ?? (
-                    <span className="text-gray-300">—</span>
-                  )}
+                  {event.match_tier ?? <span className="text-gray-300">—</span>}
                 </td>
               </tr>
             ))}

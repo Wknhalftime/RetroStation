@@ -15,14 +15,9 @@ import { useDeleteStation } from "./stations";
 
 const STATIONS_KEY = ["stations"] as const;
 const stationKey = (id: string) => ["stations", id] as const;
-const stationBroadcastDaysKey = (id: string) =>
-  ["stations", id, "broadcast-days"] as const;
-const stationEventsKey = (
-  id: string,
-  date: string,
-  limit: number,
-  offset: number,
-) => ["stations", id, "events", { date, limit, offset }] as const;
+const stationBroadcastDaysKey = (id: string) => ["stations", id, "broadcast-days"] as const;
+const stationEventsKey = (id: string, date: string, limit: number, offset: number) =>
+  ["stations", id, "events", { date, limit, offset }] as const;
 
 function makeStation(id: string, call: string): StationResponse & { playlist_count: number } {
   return {
@@ -66,7 +61,10 @@ describe("useDeleteStation", () => {
 
     let resolveFetch: (value: void) => void = () => {};
     mockedApiFetch.mockImplementation(
-      () => new Promise<void>((resolve) => { resolveFetch = resolve; }) as Promise<never>,
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFetch = resolve;
+        }) as Promise<never>
     );
 
     const { result } = renderHook(() => useDeleteStation(), { wrapper: wrapperFor(qc) });
@@ -147,9 +145,7 @@ describe("useDeleteStation", () => {
 
     expect(qc.getQueryData(stationKey("id-1"))).toBeUndefined();
     expect(qc.getQueryData(stationBroadcastDaysKey("id-1"))).toBeUndefined();
-    expect(
-      qc.getQueryData(stationEventsKey("id-1", "2026-01-01", 50, 0)),
-    ).toBeUndefined();
+    expect(qc.getQueryData(stationEventsKey("id-1", "2026-01-01", 50, 0))).toBeUndefined();
   });
 
   it("invalidates the stations list on successful delete", async () => {

@@ -6,11 +6,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StationEventTable } from "@/components/domain/stations/StationEventTable";
 import { DatePicker } from "@/components/domain/playlists/DatePicker";
-import {
-  useStation,
-  useStationBroadcastDays,
-  useExportStationM3u,
-} from "@/api/stations";
+import { useStation, useStationBroadcastDays, useExportStationM3u } from "@/api/stations";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -23,9 +19,7 @@ export function PlaylistViewer() {
   const { data: broadcastDays = [] } = useStationBroadcastDays(station_id);
 
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [selectedDate, setSelectedDate] = useState<string | undefined>(
-    undefined,
-  );
+  const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined);
 
   const exportMutation = useExportStationM3u();
 
@@ -113,9 +107,7 @@ export function PlaylistViewer() {
         <div className="flex-1 min-w-0">
           {selectedDate && station_id ? (
             <>
-              <p className="mb-3 text-sm font-medium text-gray-700">
-                {selectedDate}
-              </p>
+              <p className="mb-3 text-sm font-medium text-gray-700">{selectedDate}</p>
               <StationEventTable stationId={station_id} date={selectedDate} />
             </>
           ) : (
