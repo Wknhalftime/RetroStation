@@ -22,7 +22,7 @@ from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.matching_constants import MB_AUTO_LINK_SCORE
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
-from backend.services.mb_types import MbArtist
+from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -219,6 +219,40 @@ def coalesce_artist_lookups(
         except httpx.HTTPError as exc:
             logger.warning(
                 "mb_coalesce_lookup_failed",
+                mbid=mbid,
+                error=str(exc),
+            )
+    return result
+
+
+def coalesce_recording_lookups(
+    mbids: Iterable[str],
+    client: MusicBrainzClientProtocol,
+) -> dict[str, MbRecording | None]:
+    """Call lookup_recording exactly once per distinct MBID.
+
+    Mirrors `coalesce_artist_lookups` including its exception-isolation
+    semantics:
+      - httpx.HTTPError on an MBID -> OMIT from the map so the per-item loop
+        falls through to its own lookup_recording (inside the retriable
+        try/except), turning a pre-pass failure into a per-item failure.
+      - MB returns 404 -> lookup_recording returns None -> store `{mbid: None}`
+        in the map so the per-item loop knows the lookup already happened and
+        must NOT re-query. Distinct from key-absent.
+      - success -> payload in map.
+
+    The `set(mbids)` conversion is the dedup mechanism. A dict comprehension
+    over a list does NOT deduplicate calls — each duplicate already triggered
+    a lookup by the time the comprehension writes its key. Explicit `set()`
+    is therefore required for the coalescing contract.
+    """
+    result: dict[str, MbRecording | None] = {}
+    for mbid in set(mbids):
+        try:
+            result[mbid] = client.lookup_recording(mbid)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "mb_coalesce_recording_lookup_failed",
                 mbid=mbid,
                 error=str(exc),
             )
@@ -441,11 +475,22 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
+                # Pre-pass: one lookup_recording per distinct MBID. Read from
+                # the map inside the loop; absent keys (transient pre-pass
+                # failure) fall through to a live fallback lookup — same
+                # shape as the Tier 2/3 artist coalescing above.
+                recording_map = coalesce_recording_lookups(
+                    (r.id for r in pending_recordings), mb_client,
+                )
                 for recording in pending_recordings:
                     # Per-item commit: a single recording's failure never
                     # rolls back previously successful enhancements.
                     try:
-                        data = mb_client.lookup_recording(recording.id)
+                        if recording.id in recording_map:
+                            data = recording_map[recording.id]
+                        else:
+                            # Pre-pass failed for this MBID — retry live.
+                            data = mb_client.lookup_recording(recording.id)
                         if data and recording.duration_ms is None:
                             length_ms = data.get("length")
                             if length_ms is not None:

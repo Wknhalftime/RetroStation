@@ -9,6 +9,7 @@ from backend.tasks.mb_enrichment_tasks import (
     _enhance_artist,
     _UnexpectedArtistUpdateColumnError,
     coalesce_artist_lookups,
+    coalesce_recording_lookups,
 )
 from tests.fakes.mb_client import FakeMbClient
 
@@ -255,3 +256,68 @@ def test_coalesce_artist_lookups_swallows_transient_error_per_mbid():
     assert "mbid-ok" in result
     assert result["mbid-ok"] is not None
     assert "mbid-flaky" not in result  # omitted, not present-with-None
+
+
+# ---------------------------------------------------------------------------
+# coalesce_recording_lookups (Step 2) — mirrors coalesce_artist_lookups exactly:
+#   * transient httpx.HTTPError -> key OMITTED (live fallback in per-item loop).
+#   * MB returns 404 -> lookup_recording returns None -> key present as None
+#     (authoritative "not found"; per-item loop must NOT re-query).
+#   * success -> payload in map.
+# ---------------------------------------------------------------------------
+
+
+def test_coalesce_recording_lookups_dedups_shared_mbid():
+    fake_client = FakeMbClient(recordings={"mbid-R": {"id": "mbid-R", "title": "X"}})
+    result = coalesce_recording_lookups(["mbid-R", "mbid-R", "mbid-R"], fake_client)
+
+    assert result["mbid-R"] is not None
+    assert fake_client.calls.count("lookup_recording:mbid-R") == 1
+    assert set(result) == {"mbid-R"}
+
+
+def test_coalesce_recording_lookups_404_stored_as_none():
+    # FakeMbClient returns None from lookup_recording on miss (matches real
+    # MusicBrainzApiClient behavior which returns None on 404). The None must
+    # land in the map so the per-item loop knows "already queried, no result"
+    # and does NOT re-issue the lookup.
+    fake_client = FakeMbClient(recordings={})  # every mbid -> None
+    result = coalesce_recording_lookups({"mbid-missing"}, fake_client)
+
+    assert "mbid-missing" in result
+    assert result["mbid-missing"] is None
+    assert fake_client.calls.count("lookup_recording:mbid-missing") == 1
+
+
+def test_coalesce_recording_lookups_swallows_transient_error_per_mbid():
+    """Transient httpx failures on one MBID must not abort the pre-pass.
+    The failing MBID is OMITTED from the map (distinct from 404 which lands
+    as None) so the per-item loop falls through to its own lookup_recording
+    inside the retriable try/except."""
+    import httpx
+
+    class FlakyClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def lookup_recording(self, mbid: str):
+            self.calls.append(f"lookup_recording:{mbid}")
+            if mbid == "mbid-flaky":
+                raise httpx.ConnectError("boom")
+            return {"id": mbid, "title": f"title-{mbid}"}
+
+        def lookup_artist(self, mbid: str):
+            return None
+        def search_artist(self, name: str):
+            return []
+        def lookup_release(self, mbid: str):
+            return None
+        def search_recording(self, artist_mbid: str, title: str, limit: int = 10):
+            return []
+
+    client = FlakyClient()
+    result = coalesce_recording_lookups({"mbid-ok", "mbid-flaky"}, client)
+
+    assert "mbid-ok" in result
+    assert result["mbid-ok"] is not None
+    assert "mbid-flaky" not in result  # omitted, distinct from 404-as-None
