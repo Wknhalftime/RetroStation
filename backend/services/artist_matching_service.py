@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
 
+import httpx
 import structlog
 from rapidfuzz import fuzz
 
@@ -245,6 +246,15 @@ class MusicBrainzApiStrategy:
 
     Preserves the legacy _try_mb_match side effect: on AUTO_MATCHED, upserts
     the MB result into the local Artist catalog.
+
+    `search_map` short-circuits the live search. When present, bucket key is
+    `broadcast_artist.original_name.lower()` — identical to the cache key
+    suffix in mb_client.py:179. Sentinel convention:
+      - key absent  -> live search_artist fallback (same as pre-coalesce).
+      - key = []    -> "no candidates" from MB, return None without live call.
+      - key = [...] -> use those results directly.
+    The map is typically populated by `coalesce_artist_searches` before the
+    per-row loop in `match_artists_for_playlist`.
     """
 
     def __init__(
@@ -254,15 +264,21 @@ class MusicBrainzApiStrategy:
         high_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+        search_map: dict[str, list[MbArtistResult]] | None = None,
     ) -> None:
         self._mb = mb_client
         self._catalog = artist_repo
         self._high_threshold = high_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
+        self._search_map = search_map
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
-        results = self._mb.search_artist(broadcast_artist.original_name)
+        name_key = broadcast_artist.original_name.lower()
+        if self._search_map is not None and name_key in self._search_map:
+            results = self._search_map[name_key]
+        else:
+            results = self._mb.search_artist(broadcast_artist.original_name)
         if not results:
             return None
 
@@ -329,6 +345,46 @@ class ArtistMatchingEngine:
         return None
 
 
+def coalesce_artist_searches(
+    pending: list[BroadcastArtist],
+    mb_client: MusicBrainzClientProtocol,
+) -> dict[str, list[MbArtistResult]]:
+    """Call search_artist exactly once per distinct `original_name.lower()`.
+
+    Mirrors `coalesce_artist_lookups` (backend/tasks/mb_enrichment_tasks.py:192)
+    including its exception-isolation semantics:
+      - transient httpx.HTTPError -> OMIT the key (live fallback in the per-row
+        loop reproduces the failure in isolation).
+      - empty MB response -> key present with [] (strategy short-circuits to
+        None without re-querying).
+      - success -> key present with list of results.
+
+    Bucket key is `.lower()` to match the cache key suffix in mb_client.py:179
+    (`artist-search:{name.lower()}`). The representative query string is the
+    lex-first `original_name` in the bucket (sort key = `sorted(originals)[0]`
+    = Python codepoint order: uppercase before lowercase). Choice of
+    representative only affects which exact string MB sees; the cache row is
+    always `.lower()`-keyed.
+    """
+    buckets: dict[str, list[str]] = {}
+    for row in pending:
+        buckets.setdefault(row.original_name.lower(), []).append(row.original_name)
+
+    result: dict[str, list[MbArtistResult]] = {}
+    for name_key, originals in buckets.items():
+        representative = sorted(originals)[0]
+        try:
+            result[name_key] = mb_client.search_artist(representative)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "mb_coalesce_search_failed",
+                name_key=name_key,
+                representative=representative,
+                error=str(exc),
+            )
+    return result
+
+
 def match_artists_for_playlist(
     playlist_id: UUID,
     broadcast_artist_repo: BroadcastArtistRepository,
@@ -355,13 +411,16 @@ def match_artists_for_playlist(
     rules = rules_repo.list_ordered()
     all_canonical = artist_repo.list_all()
 
+    search_map = coalesce_artist_searches(pending, mb_client)
+
     engine = ArtistMatchingEngine([
         MappingRuleStrategy(rules),
         NormalizationStrategy(
             all_canonical, high_threshold, mb_score_gap, mb_auto_link_score
         ),
         MusicBrainzApiStrategy(
-            mb_client, artist_repo, high_threshold, mb_score_gap, mb_auto_link_score
+            mb_client, artist_repo, high_threshold, mb_score_gap, mb_auto_link_score,
+            search_map=search_map,
         ),
     ])
 

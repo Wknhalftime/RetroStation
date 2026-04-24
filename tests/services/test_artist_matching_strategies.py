@@ -604,3 +604,85 @@ def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
 
     assert result is not None
     assert result.status == MatchStatus.AUTO_MATCHED
+
+
+# ---------------------------------------------------------------------------
+# search_map (Step 1 coalescing): strategy-level behavior
+# The map is populated by a pre-pass in match_artists_for_playlist. The
+# strategy itself only reads it. Contract:
+#   key absent:  strategy falls back to live search_artist.
+#   key present, []:  treat as "no candidates", return None, no live call.
+#   key present, [...]: use those results, no live call.
+# Key = broadcast_artist.original_name.lower() — exactly matches the cache
+# key suffix in mb_client.py:179 so coalescing is identical to the cache's
+# bucketing.
+# ---------------------------------------------------------------------------
+
+
+def test_mb_strategy_uses_search_map_when_key_present() -> None:
+    # Map hit must satisfy the apply() call with zero live search_artist calls.
+    mb = FakeMbClient(responses={})
+    repo = FakeArtistRepository()
+    search_map: dict[str, list[dict[str, object]]] = {
+        "metallica": [
+            {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica",
+             "disambiguation": "US metal band", "score": 100},
+        ],
+    }
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo, search_map=search_map)
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.target_id == "mbid-m"
+    assert mb.calls == []  # no live fetch
+
+
+def test_mb_strategy_empty_list_in_map_returns_none_no_live_call() -> None:
+    # Empty list is the "no candidates from MB" sentinel — must NOT retry live.
+    mb = FakeMbClient(responses={"Obscure Band": [
+        {"id": "mbid-x", "name": "Obscure Band", "score": 100},
+    ]})
+    repo = FakeArtistRepository()
+    search_map: dict[str, list[dict[str, object]]] = {"obscure band": []}
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo, search_map=search_map)
+    result = strategy.apply(_broadcast_artist("Obscure Band", "obscure band"))
+
+    assert result is None
+    assert mb.calls == []  # sentinel short-circuits live fetch
+
+
+def test_mb_strategy_missing_key_falls_back_to_live() -> None:
+    # Key absent from map — strategy must call search_artist directly
+    # (happens when the pre-pass failed for that key, or the row was added
+    # after the pre-pass).
+    mb = FakeMbClient(responses={"Metallica": [
+        {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica", "score": 100},
+    ]})
+    repo = FakeArtistRepository()
+    search_map: dict[str, list[dict[str, object]]] = {"other band": []}
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo, search_map=search_map)
+    result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert mb.calls == ["Metallica"]  # exactly one live fallback call
+
+
+def test_mb_strategy_search_map_key_is_lowercased() -> None:
+    # Cache key convention in mb_client.py:179 is `artist-search:{name.lower()}`.
+    # Strategy must look up the map with `.lower()` so bucket identity matches.
+    mb = FakeMbClient(responses={})
+    repo = FakeArtistRepository()
+    search_map: dict[str, list[dict[str, object]]] = {
+        "metallica": [
+            {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica", "score": 100},
+        ],
+    }
+    strategy = MusicBrainzApiStrategy(mb_client=mb, artist_repo=repo, search_map=search_map)
+    # Note the mixed case — must still hit the "metallica" bucket.
+    result = strategy.apply(_broadcast_artist("MeTaLLiCa", "metallica"))
+
+    assert result is not None
+    assert result.target_id == "mbid-m"
+    assert mb.calls == []
