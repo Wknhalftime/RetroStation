@@ -296,16 +296,15 @@ def mb_enrichment_task() -> dict[str, int]:
                             artists_failed += 1
                             logger.warning(
                                 "mb_artist_enhancement_failed",
-                                mbid=artist.id,
+                                artist_id=artist.id,
                                 name=artist.name,
                                 reason="mb_lookup_404",
-                                error=None,
                             )
                         else:
                             artists_done += 1
                             logger.info(
                                 "mb_artist_enhanced",
-                                mbid=artist.id,
+                                artist_id=artist.id,
                                 name=artist.name,
                             )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
@@ -320,13 +319,13 @@ def mb_enrichment_task() -> dict[str, int]:
                             conn.rollback()
                             logger.warning(
                                 "mb_artist_mark_failed_write_failed",
-                                mbid=artist.id,
+                                artist_id=artist.id,
                                 primary_error=error_msg,
                             )
                         artists_failed += 1
                         logger.warning(
                             "mb_artist_enhancement_failed",
-                            mbid=artist.id,
+                            artist_id=artist.id,
                             name=artist.name,
                             reason="per_item_exception",
                             error=error_msg,
