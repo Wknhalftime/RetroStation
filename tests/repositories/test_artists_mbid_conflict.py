@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from typing import Any
+
+import psycopg
 import pytest
 
 from backend.db.repositories.artists import PgArtistRepository
@@ -5,7 +10,9 @@ from backend.db.repositories.artists import PgArtistRepository
 pytestmark = pytest.mark.integration
 
 
-def test_upsert_same_mbid_returns_existing_id(pg_conn):
+def test_upsert_same_mbid_returns_existing_id(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
     repo = PgArtistRepository(pg_conn)
     first_id = repo.upsert_musicbrainz_artist(
         mbid="mb-A",
@@ -24,7 +31,9 @@ def test_upsert_same_mbid_returns_existing_id(pg_conn):
     assert first_id == second_id
 
 
-def test_upsert_conflicting_mbid_does_not_overwrite(pg_conn):
+def test_upsert_conflicting_mbid_does_not_overwrite(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
     repo = PgArtistRepository(pg_conn)
     original_id = repo.upsert_musicbrainz_artist(
         mbid="mb-A",
@@ -44,10 +53,13 @@ def test_upsert_conflicting_mbid_does_not_overwrite(pg_conn):
     row = pg_conn.execute(
         "SELECT mbid FROM artists WHERE id = %s", (original_id,)
     ).fetchone()
+    assert row is not None
     assert row["mbid"] == "mb-A"  # NOT overwritten
 
 
-def test_upsert_complete_fields_clears_needs_enhancement(pg_conn):
+def test_upsert_complete_fields_clears_needs_enhancement(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
     repo = PgArtistRepository(pg_conn)
     artist_id = repo.upsert_musicbrainz_artist(
         mbid="mb-complete",
@@ -60,10 +72,13 @@ def test_upsert_complete_fields_clears_needs_enhancement(pg_conn):
         "SELECT needs_enhancement FROM artists WHERE id = %s",
         (artist_id,),
     ).fetchone()
+    assert row is not None
     assert row["needs_enhancement"] is False
 
 
-def test_upsert_missing_disambiguation_keeps_needs_enhancement(pg_conn):
+def test_upsert_missing_disambiguation_keeps_needs_enhancement(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
     repo = PgArtistRepository(pg_conn)
     artist_id = repo.upsert_musicbrainz_artist(
         mbid="mb-partial",
@@ -76,10 +91,13 @@ def test_upsert_missing_disambiguation_keeps_needs_enhancement(pg_conn):
         "SELECT needs_enhancement FROM artists WHERE id = %s",
         (artist_id,),
     ).fetchone()
+    assert row is not None
     assert row["needs_enhancement"] is True
 
 
-def test_upsert_sort_name_equals_name_keeps_needs_enhancement(pg_conn):
+def test_upsert_sort_name_equals_name_keeps_needs_enhancement(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
     """sort_name that merely echoes name isn't a real MB sort form."""
     repo = PgArtistRepository(pg_conn)
     artist_id = repo.upsert_musicbrainz_artist(
@@ -93,4 +111,5 @@ def test_upsert_sort_name_equals_name_keeps_needs_enhancement(pg_conn):
         "SELECT needs_enhancement FROM artists WHERE id = %s",
         (artist_id,),
     ).fetchone()
+    assert row is not None
     assert row["needs_enhancement"] is True

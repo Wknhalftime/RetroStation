@@ -86,6 +86,7 @@ def _enhance_artist(
     repos: RepositoryFactory,
     *,
     mbid_map: dict[str, MbArtist | None] | None = None,
+    auto_link_score: int = MB_AUTO_LINK_SCORE,
 ) -> ArtistEnhanceOutcome:
     """Tiered artist enhancement.
 
@@ -100,6 +101,10 @@ def _enhance_artist(
     one live lookup per distinct MBID across the queue. A value of `None`
     in the map represents a cached 404 and is respected without re-querying.
 
+    `auto_link_score` is the Tier 1 confidence threshold. Defaults to the
+    module constant but the task wires `Settings.mb_auto_link_score` so
+    operators can tune the threshold via env without patching code.
+
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
     if artist.mbid is None:
@@ -110,7 +115,7 @@ def _enhance_artist(
 
         best = results[0]
         best_score = int(best.get("score", 0))
-        if best_score < MB_AUTO_LINK_SCORE:
+        if best_score < auto_link_score:
             repos.artists.mark_enhanced(artist.id)
             logger.info(
                 "mb_artist_no_confident_match",
@@ -286,7 +291,12 @@ def mb_enrichment_task() -> dict[str, int]:
                 for artist in pending_artists:
                     try:
                         outcome = _enhance_artist(
-                            artist, mb_client, conn, repos, mbid_map=mbid_map
+                            artist,
+                            mb_client,
+                            conn,
+                            repos,
+                            mbid_map=mbid_map,
+                            auto_link_score=settings.mb_auto_link_score,
                         )
                         # Commit applies to both ENHANCED (mark_enhanced write)
                         # and FAILED (mark_enhancement_failed write inside

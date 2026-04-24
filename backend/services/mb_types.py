@@ -51,6 +51,8 @@ MbArtistResult = TypedDict(
 )
 
 # Nested in lookup_artist response under "aliases"
+# MB API returns JSON booleans for "primary" (not strings); typing as
+# `str` would make truthiness checks always True on non-empty values.
 MbAliasEntry = TypedDict(
     "MbAliasEntry",
     {
@@ -58,7 +60,7 @@ MbAliasEntry = TypedDict(
         "sort-name": str,
         "locale": str,
         "type": str,
-        "primary": str,
+        "primary": bool,
     },
     total=False,
 )
