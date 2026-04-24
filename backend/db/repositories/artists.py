@@ -4,11 +4,14 @@ from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
+import structlog
 
 from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
+
+logger = structlog.get_logger(__name__)
 
 
 class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
@@ -112,12 +115,36 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
+        # 1. Return early if this exact MBID is already known.
         row = self._conn.execute(
-            "SELECT id FROM artists WHERE mbid = %s",
-            (mbid,),
+            "SELECT id FROM artists WHERE mbid = %s", (mbid,)
         ).fetchone()
         if row is not None:
             return cast(str, row["id"])
+
+        # 2. normalized_name collision with a DIFFERENT MBID — do not overwrite.
+        existing = self._conn.execute(
+            "SELECT id, mbid FROM artists WHERE normalized_name = %s",
+            (normalized_name,),
+        ).fetchone()
+        if (
+            existing is not None
+            and existing["mbid"] is not None
+            and existing["mbid"] != mbid
+        ):
+            logger.warning(
+                "mb_artist_mbid_conflict",
+                normalized_name=normalized_name,
+                existing_mbid=existing["mbid"],
+                incoming_mbid=mbid,
+                message=(
+                    "Normalized name collision with conflicting MBIDs. "
+                    "Keeping existing MBID; skipping overwrite."
+                ),
+            )
+            return cast(str, existing["id"])
+
+        # 3. Safe upsert.
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name, mbid,
@@ -134,9 +161,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
         ).fetchone()
         if row is None:
-            raise RuntimeError(
-                f"Artist upsert_musicbrainz_artist failed: {mbid}"
-            )
+            raise RuntimeError(f"Artist upsert_musicbrainz_artist failed: {mbid}")
         return cast(str, row["id"])
 
     def get_by_normalized_name(
