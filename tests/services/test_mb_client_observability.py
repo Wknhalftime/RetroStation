@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-import structlog
 from structlog.testing import capture_logs
 
 from backend.services.mb_client import MusicBrainzApiClient
@@ -27,11 +26,9 @@ def _mb_events(captured: list[dict[str, Any]], event_name: str) -> list[dict[str
     return [e for e in captured if e.get("event") == event_name]
 
 
-@pytest.fixture(autouse=True)
-def _reset_structlog() -> None:
-    """capture_logs installs its own processor chain; restore the original
-    configuration after the test so later tests see the production config."""
-    structlog.reset_defaults()
+# `structlog.testing.capture_logs` installs its own processor chain for the
+# duration of its context manager and restores the previous configuration on
+# exit, so no fixture-level reset is needed or desirable.
 
 
 def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPatch) -> None:
