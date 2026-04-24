@@ -137,10 +137,6 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
                 normalized_name=normalized_name,
                 existing_mbid=existing["mbid"],
                 incoming_mbid=mbid,
-                message=(
-                    "Normalized name collision with conflicting MBIDs. "
-                    "Keeping existing MBID; skipping overwrite."
-                ),
             )
             return cast(str, existing["id"])
 
