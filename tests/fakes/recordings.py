@@ -24,7 +24,10 @@ class FakeRecordingRepository(RecordingRepository):
             rec.embedding = embedding
 
     def list_needing_enhancement(self) -> list[Recording]:
-        return [r for r in self._data.values() if r.needs_enhancement]
+        return [
+            r for r in self._data.values()
+            if r.needs_enhancement and r.enhancement_error is None
+        ]
 
     def mark_enhanced(self, mbid: str) -> None:
         if rec := self._data.get(mbid):
