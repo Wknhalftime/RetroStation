@@ -41,6 +41,7 @@ def task_failure_telemetry(
     log_category: LogCategory,
     *,
     task_id: str | None = None,
+    database_url: str | None = None,
 ) -> Iterator[str]:
     """Write a FAILED TaskProgress + ERROR SystemLog when the wrapped task raises.
 
@@ -59,6 +60,12 @@ def task_failure_telemetry(
         task_id: Optional pre-generated trace id. When omitted, a hex UUID4
             is generated so callers that log before entering the boundary
             can still correlate.
+        database_url: Optional override for where failure telemetry lands.
+            Defaults to `get_settings().database_url`. Pass explicitly when
+            the wrapped task operates on a DB URL that may differ from the
+            app settings (e.g. normalize_backfill_task takes a db_url
+            argument) so the FAILED row lands in the same DB being
+            operated on and is visible to whichever UI points at it.
 
     Yields:
         The task_id (generated or passed through).
@@ -68,7 +75,7 @@ def task_failure_telemetry(
         telemetry writes themselves fail, they are suppressed so the
         primary exception is not masked.
     """
-    settings = get_settings()
+    resolved_db_url = database_url or get_settings().database_url
     resolved_task_id = task_id or uuid.uuid4().hex
     started_at = datetime.now(UTC)
 
@@ -76,7 +83,7 @@ def task_failure_telemetry(
         yield resolved_task_id
     except Exception as exc:
         _report_failure(
-            database_url=settings.database_url,
+            database_url=resolved_db_url,
             task_id=resolved_task_id,
             task_type=task_type,
             log_category=log_category,

@@ -54,22 +54,47 @@ def normalize_backfill_task(db_url: str) -> None:
     DB outage mid-batch, a malformed raw_metadata JSONB) surfaces as a
     FAILED TaskProgress row + ERROR SystemLog entry before re-raising to
     Huey. Uses `TaskType.LIBRARY_ENRICHMENT` because the task enriches
-    library_files rows with normalized fields.
+    library_files rows with normalized fields. `database_url=db_url` so
+    failure telemetry lands in the same DB being backfilled (not in
+    settings.database_url, which may differ when the task is invoked
+    with an explicit DSN).
+
+    Pagination: uses `id > last_id` cursor bounds rather than the
+    `normalized_artist_name IS NULL` predicate alone. A row with no
+    extractable artist in `raw_metadata` stays NULL after UPDATE and
+    would otherwise be re-fetched indefinitely; the cursor guarantees
+    forward progress regardless of how individual rows respond to the
+    update.
     """
     with task_failure_telemetry(
         TaskType.LIBRARY_ENRICHMENT, LogCategory.ENRICHMENT,
+        database_url=db_url,
     ) as task_id:
         total = 0
+        last_id: str | None = None
         with psycopg.connect(db_url, row_factory=psycopg.rows.dict_row) as conn:
             while True:
-                rows = conn.execute(
-                    """SELECT id, raw_metadata
-                       FROM library_files
-                       WHERE normalized_artist_name IS NULL
-                         AND raw_metadata IS NOT NULL
-                       LIMIT %s""",
-                    (BATCH_SIZE,),
-                ).fetchall()
+                if last_id is None:
+                    rows = conn.execute(
+                        """SELECT id, raw_metadata
+                           FROM library_files
+                           WHERE normalized_artist_name IS NULL
+                             AND raw_metadata IS NOT NULL
+                           ORDER BY id
+                           LIMIT %s""",
+                        (BATCH_SIZE,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """SELECT id, raw_metadata
+                           FROM library_files
+                           WHERE normalized_artist_name IS NULL
+                             AND raw_metadata IS NOT NULL
+                             AND id > %s
+                           ORDER BY id
+                           LIMIT %s""",
+                        (last_id, BATCH_SIZE),
+                    ).fetchall()
 
                 if not rows:
                     break
@@ -93,6 +118,7 @@ def normalize_backfill_task(db_url: str) -> None:
                     )
                 conn.commit()
                 total += len(rows)
+                last_id = rows[-1]["id"]
                 logger.info(
                     "backfill_progress", processed=total, task_id=task_id,
                 )

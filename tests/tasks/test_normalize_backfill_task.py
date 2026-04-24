@@ -81,7 +81,9 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
         normalize_backfill_task.call_local(migrated_db)
 
     # At least one FAILED TaskProgress row for TaskType.LIBRARY_ENRICHMENT
-    # must have been written by the telemetry helper.
+    # must have been written by the telemetry helper to the SAME DB the
+    # task was operating on (passed via database_url= override, not
+    # settings.database_url).
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         failed_rows = conn.execute(
             """SELECT status, progress_data
@@ -91,13 +93,8 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
                LIMIT 1""",
             (TaskType.LIBRARY_ENRICHMENT.value, TaskStatus.FAILED.value),
         ).fetchall()
-        assert len(failed_rows) == 1, (
-            "task_failure_telemetry should have written exactly one "
-            "FAILED row for the failed backfill"
-        )
-        assert failed_rows[0]["progress_data"].get("error"), (
-            "FAILED row's progress_data should capture the error message"
-        )
+        assert len(failed_rows) == 1
+        assert failed_rows[0]["progress_data"].get("error")
 
         log_rows = conn.execute(
             """SELECT level, message
@@ -108,3 +105,51 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
             (LogLevel.ERROR.value, f"{TaskType.LIBRARY_ENRICHMENT.value}_%"),
         ).fetchall()
         assert len(log_rows) == 1
+
+
+def test_normalize_backfill_terminates_on_rows_without_artist(
+    migrated_db: str, settings_db_url: str,
+) -> None:
+    """Regression: rows whose raw_metadata has no artist key stay NULL
+    after UPDATE (normalized_artist_name remains NULL). Without cursor-
+    based pagination, the IS NULL filter keeps re-fetching the same rows
+    → infinite loop. With the `id > last_id` cursor, each row is visited
+    exactly once and the task terminates.
+    """
+    # Seed 3 rows, two with no artist/title in raw_metadata.
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        conn.execute(
+            """INSERT INTO library_files
+               (id, file_path, file_hash, format, file_status, raw_metadata)
+               VALUES
+                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb),
+                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb),
+                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb)""",
+            (
+                '/music/a.flac', 'hash-a-' + 'a' * 30,
+                '{"artist": "Prince"}',
+                '/music/b.flac', 'hash-b-' + 'b' * 30,
+                '{}',  # no artist / title
+                '/music/c.flac', 'hash-c-' + 'c' * 30,
+                '{"something_else": "x"}',  # unrecognized keys
+            ),
+        )
+        conn.commit()
+
+    # Must terminate (no timeout). Test itself having a reasonable runtime
+    # is the termination check — pytest-timeout at the suite level would
+    # catch a runaway.
+    normalize_backfill_task.call_local(migrated_db)
+
+    # One row should have artist_name populated; the two no-artist rows
+    # should still have NULL normalized_artist_name but are not re-processed
+    # thanks to the cursor (the task terminated). Re-invoking should be a
+    # no-op for the already-processed rows but will re-scan the two NULL
+    # rows; the cursor guarantees it visits each NULL row once per run
+    # (bounded work), rather than infinite re-work within a single run.
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        processed = conn.execute(
+            """SELECT count(*) AS cnt FROM library_files
+               WHERE artist_name = 'Prince'""",
+        ).fetchone()
+        assert processed is not None and processed["cnt"] == 1
