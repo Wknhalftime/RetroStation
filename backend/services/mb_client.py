@@ -303,6 +303,10 @@ class MusicBrainzApiClient:
         `url-rels` is intentionally omitted: MbArtist does not surface it and no
         downstream code reads it, so including it would bloat cache rows for no
         benefit.
+
+        404 responses are NOT cached: repeated calls for an unknown MBID will
+        hit the API each time. Callers in hot loops should dedupe seen-missing
+        MBIDs themselves to avoid rate-limiter thrash.
         """
         cache_key = f"artist:{mbid}"
 
