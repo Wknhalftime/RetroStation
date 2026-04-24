@@ -191,9 +191,28 @@ def coalesce_artist_lookups(
     has already triggered a full lookup). The explicit `set()` is therefore
     required for the coalescing contract, even when callers pass an iterable
     that happens to already be a set.
-    The underlying lookup is cache-read-through — warm entries produce 0 live calls.
+    The underlying lookup is cache-read-through — warm entries produce 0 live
+    calls.
+
+    Transient httpx failures are swallowed per-MBID: the failing MBID is
+    OMITTED from the result map instead of raised. That lets the per-item
+    loop in `mb_enrichment_task` fall through to its own `lookup_artist`
+    call (inside the retriable-error try/except), so one flaky MB request
+    during the pre-pass fails only that artist instead of aborting the whole
+    task. `httpx.HTTPStatusError(404)` is NOT raised by `lookup_artist`
+    (returns None), so genuine 404s still land in the map as `None`.
     """
-    return {mbid: client.lookup_artist(mbid) for mbid in set(mbids)}
+    result: dict[str, MbArtist | None] = {}
+    for mbid in set(mbids):
+        try:
+            result[mbid] = client.lookup_artist(mbid)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "mb_coalesce_lookup_failed",
+                mbid=mbid,
+                error=str(exc),
+            )
+    return result
 
 
 @huey.task()  # type: ignore[untyped-decorator]

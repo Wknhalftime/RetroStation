@@ -191,6 +191,7 @@ def _maybe_mark_complete_on_upsert(
            WHERE id = %s
              AND mbid IS NOT NULL
              AND disambiguation IS NOT NULL
+             AND disambiguation != ''
              AND sort_name IS NOT NULL
              AND sort_name != ''
              AND sort_name != name""",

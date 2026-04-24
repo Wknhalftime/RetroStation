@@ -113,3 +113,23 @@ def test_upsert_sort_name_equals_name_keeps_needs_enhancement(
     ).fetchone()
     assert row is not None
     assert row["needs_enhancement"] is True
+
+
+def test_upsert_empty_disambiguation_keeps_needs_enhancement(
+    pg_conn: psycopg.Connection[dict[str, Any]],
+) -> None:
+    """An empty-string disambiguation is effectively missing; still enqueue."""
+    repo = PgArtistRepository(pg_conn)
+    artist_id = repo.upsert_musicbrainz_artist(
+        mbid="mb-empty-disambig",
+        name="Blank",
+        sort_name="Blank, First",
+        normalized_name="blank",
+        disambiguation="",
+    )
+    row = pg_conn.execute(
+        "SELECT needs_enhancement FROM artists WHERE id = %s",
+        (artist_id,),
+    ).fetchone()
+    assert row is not None
+    assert row["needs_enhancement"] is True

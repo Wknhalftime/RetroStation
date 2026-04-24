@@ -206,3 +206,40 @@ def test_coalesce_artist_lookups_list_with_duplicates():
     result = coalesce_artist_lookups(["mbid-A", "mbid-A", "mbid-A"], fake_client)
     assert fake_client.calls.count("lookup_artist:mbid-A") == 1
     assert set(result) == {"mbid-A"}
+
+
+def test_coalesce_artist_lookups_swallows_transient_error_per_mbid():
+    """A transient httpx failure on one MBID must NOT abort the pre-pass.
+
+    Failing MBIDs are omitted from the map so the per-item loop falls
+    through to its own lookup (inside the retriable try/except), turning
+    a pre-pass failure into a per-item failure instead of a task abort.
+    """
+    import httpx
+
+    class FlakyClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def lookup_artist(self, mbid: str):
+            self.calls.append(f"lookup_artist:{mbid}")
+            if mbid == "mbid-flaky":
+                raise httpx.ConnectError("boom")
+            return {"id": mbid, "name": f"name-{mbid}"}
+
+        # Protocol fills — unused by this test
+        def search_artist(self, name: str):
+            return []
+        def lookup_release(self, mbid: str):
+            return None
+        def lookup_recording(self, mbid: str):
+            return None
+        def search_recording(self, artist_mbid: str, title: str, limit: int = 10):
+            return []
+
+    client = FlakyClient()
+    result = coalesce_artist_lookups({"mbid-ok", "mbid-flaky"}, client)
+
+    assert "mbid-ok" in result
+    assert result["mbid-ok"] is not None
+    assert "mbid-flaky" not in result  # omitted, not present-with-None
