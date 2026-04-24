@@ -50,16 +50,27 @@ MbArtistResult = TypedDict(
     total=False,
 )
 
+# Nested in lookup_artist response under "aliases"
 MbAliasEntry = TypedDict(
     "MbAliasEntry",
-    {"name": str, "sort-name": str, "locale": str, "type": str, "primary": str},
+    {
+        "name": str,
+        "sort-name": str,
+        "locale": str,
+        "type": str,
+        "primary": str,
+    },
     total=False,
 )
 
+
+# Nested in lookup_artist response under "tags"
 class MbTagEntry(TypedDict, total=False):
     name: str
     count: int
 
+
+# Returned by lookup_artist
 MbArtist = TypedDict(
     "MbArtist",
     {
