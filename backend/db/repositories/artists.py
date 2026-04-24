@@ -64,7 +64,9 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
 
     def list_unenhanced(self) -> list[Artist]:
         rows = self._conn.execute(
-            "SELECT * FROM artists WHERE needs_enhancement = TRUE"
+            """SELECT * FROM artists
+               WHERE needs_enhancement = TRUE
+                 AND enhancement_error IS NULL"""
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

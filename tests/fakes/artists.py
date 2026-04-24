@@ -21,7 +21,10 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         return list(self._data.values())
 
     def list_unenhanced(self) -> list[Artist]:
-        return [a for a in self._data.values() if a.needs_enhancement]
+        return [
+            a for a in self._data.values()
+            if a.needs_enhancement and a.enhancement_error is None
+        ]
 
     def mark_enhanced(self, artist_id: str) -> None:
         if artist := self._data.get(artist_id):
