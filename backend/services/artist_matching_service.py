@@ -458,7 +458,11 @@ def match_artists_for_playlist(
     _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
 
     rows_processed = len(pending)
-    distinct_search_keys = len(search_map)
+    # Compute over the INPUT set (not `len(search_map)`) so a transient httpx
+    # error that omits a bucket from the map doesn't shift the metric. Plan
+    # Step 3: "ratios are computed pre-cache (over the input set), not
+    # post-cache, so they're stable across runs."
+    distinct_search_keys = len({a.original_name.lower() for a in pending})
     logger.info(
         "mb_task_summary",
         task_type="artist_matching",

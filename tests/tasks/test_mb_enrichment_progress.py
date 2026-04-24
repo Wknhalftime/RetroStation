@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from backend.domain.enums import TaskStatus, TaskType
 
@@ -275,3 +276,116 @@ class TestMbEnrichmentProgress:
         last = _progress_calls(mock_progress_repo)[-1]
         assert last.progress_data["total"] == 0
         assert last.progress_data["processed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# mb_task_summary schema (Step 3) — verify the nested phases dict is emitted
+# with stable keys even when a phase has no MB traffic (works).
+# ---------------------------------------------------------------------------
+
+
+class TestMbEnrichmentSummary:
+    @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
+    @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
+    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    def test_summary_includes_all_three_phases_with_stable_schema(
+        self,
+        mock_connect: MagicMock,
+        _mock_progress_cls: MagicMock,
+        _sys_log_cls: MagicMock,
+        mock_factory_cls: MagicMock,
+        _cache_cls: MagicMock,
+        mock_mb_cls: MagicMock,
+    ) -> None:
+        artists = [_make_entity(f"a{i}") for i in range(2)]
+        works = [_make_entity(f"w{i}", name_field="title") for i in range(3)]
+        recordings = [_make_entity(f"r{i}", name_field="title") for i in range(4)]
+
+        mock_connect.side_effect = _fake_connect
+        mock_factory_cls.side_effect = _stub_repo_factory(artists, works, recordings)
+        # Mock client returns nothing from MB but the counters must still be
+        # readable — configure them as plain ints (MagicMock subtraction is
+        # undefined otherwise).
+        mock_mb_cls.return_value.search_artist.return_value = []
+        mock_mb_cls.return_value.lookup_artist.return_value = None
+        mock_mb_cls.return_value.lookup_recording.return_value = None
+        mock_mb_cls.return_value.live_fetches = 0
+        mock_mb_cls.return_value.cache_hits = 0
+        mock_mb_cls.return_value.__enter__ = lambda self: self
+        mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
+
+        from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+        with capture_logs() as events:
+            mb_enrichment_task.call_local()
+
+        summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
+        assert len(summary_events) == 1
+        summary = summary_events[0]
+        assert summary["task_type"] == "mb_enrichment"
+
+        phases = summary["phases"]
+        assert set(phases.keys()) == {"artists", "works", "recordings"}
+
+        # Every phase reports the same field set, even no-MB-traffic `works`.
+        required_fields = {
+            "rows_processed",
+            "distinct_mbids",
+            "live_fetches_delta",
+            "cache_hits_delta",
+            "duplicate_mbid_ratio",
+        }
+        for name, phase in phases.items():
+            assert required_fields.issubset(phase.keys()), f"{name} missing fields"
+
+        # Row counts match the fixture.
+        assert phases["artists"]["rows_processed"] == 2
+        assert phases["works"]["rows_processed"] == 3
+        assert phases["recordings"]["rows_processed"] == 4
+        # Works phase never calls MB — its counters are zero by contract.
+        assert phases["works"]["live_fetches_delta"] == 0
+        assert phases["works"]["cache_hits_delta"] == 0
+        assert phases["works"]["distinct_mbids"] == 0
+        assert phases["works"]["duplicate_mbid_ratio"] is None
+
+    @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
+    @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
+    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    def test_recordings_phase_404_sentinel_does_not_refetch(
+        self,
+        mock_connect: MagicMock,
+        _mock_progress_cls: MagicMock,
+        _sys_log_cls: MagicMock,
+        mock_factory_cls: MagicMock,
+        _cache_cls: MagicMock,
+        mock_mb_cls: MagicMock,
+    ) -> None:
+        # Plan Step 2: "pre-pass produces {mbid: None}; per-item loop calls
+        # lookup_recording zero additional times for that row." With 3
+        # recordings all returning None from MB, total calls = 3 (pre-pass),
+        # NOT 6 (pre-pass + per-item re-query).
+        recordings = [_make_entity(f"r{i}", name_field="title") for i in range(3)]
+
+        mock_connect.side_effect = _fake_connect
+        mock_factory_cls.side_effect = _stub_repo_factory([], [], recordings)
+        mock_mb_cls.return_value.search_artist.return_value = []
+        mock_mb_cls.return_value.lookup_artist.return_value = None
+        mock_mb_cls.return_value.lookup_recording.return_value = None  # 404
+        mock_mb_cls.return_value.live_fetches = 0
+        mock_mb_cls.return_value.cache_hits = 0
+        mock_mb_cls.return_value.__enter__ = lambda self: self
+        mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
+
+        from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+        mb_enrichment_task.call_local()
+
+        # Exactly one lookup_recording call per distinct MBID, all from the
+        # pre-pass. The per-item loop sees `None` in the map and does NOT
+        # re-query (distinct from key-absent which WOULD re-query).
+        assert mock_mb_cls.return_value.lookup_recording.call_count == 3
