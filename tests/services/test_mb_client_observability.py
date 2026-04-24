@@ -5,9 +5,12 @@
 """
 from __future__ import annotations
 
+import logging
+from collections.abc import Generator
 from typing import Any
 
 import pytest
+import structlog
 from structlog.testing import capture_logs
 
 from backend.services.mb_client import MusicBrainzApiClient
@@ -26,9 +29,27 @@ def _mb_events(captured: list[dict[str, Any]], event_name: str) -> list[dict[str
     return [e for e in captured if e.get("event") == event_name]
 
 
-# `structlog.testing.capture_logs` installs its own processor chain for the
-# duration of its context manager and restores the previous configuration on
-# exit, so no fixture-level reset is needed or desirable.
+@pytest.fixture(autouse=True)
+def _ensure_debug_bound_logger() -> Generator[None]:
+    """Temporarily set structlog's wrapper_class to a DEBUG-permitting filter.
+
+    `structlog.testing.capture_logs` swaps in a capturing processor list but
+    does NOT replace `wrapper_class`. The production config installs
+    `make_filtering_bound_logger(INFO)` which drops DEBUG events BEFORE the
+    processor chain runs — so `capture_logs` would see nothing. When test
+    ordering causes that config to be active (as in CI), the tests below
+    silently capture zero events without this fixture.
+
+    Save, swap, restore via try/finally so other tests see the app config.
+    """
+    original_config = structlog.get_config()
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
+    )
+    try:
+        yield
+    finally:
+        structlog.configure(**original_config)
 
 
 def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPatch) -> None:
