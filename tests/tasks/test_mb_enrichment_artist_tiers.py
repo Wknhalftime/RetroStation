@@ -42,7 +42,14 @@ def test_tier1_high_confidence_writes_mbid_and_marks_enhanced():
     _enhance_artist(artist, fake_client, conn, repos, mbid_map=None)
 
     repos.artists.mark_enhanced.assert_called_once_with("local-uuid-1")
-    assert conn.execute.called
+    # Verify the UPDATE actually carried the resolved MBID + sort-name +
+    # disambiguation — a weak `called` assertion would miss a dropped key.
+    conn.execute.assert_called_once()
+    params = conn.execute.call_args.args[1]
+    assert "mb-uuid-123" in params
+    assert "Band, Unknown" in params
+    assert "British rock band" in params
+    assert "local-uuid-1" in params
 
 
 def test_tier1_low_confidence_marks_enhanced_without_mbid():

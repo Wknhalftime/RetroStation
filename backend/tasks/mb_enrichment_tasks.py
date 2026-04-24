@@ -73,6 +73,8 @@ def _apply_artist_updates(
             for col in updates
         )
     )
+    # Placeholder order follows updates.keys() iteration order; Python 3.7+
+    # guarantees dict insertion-order preservation so this matches the SQL.
     conn.execute(query, (*updates.values(), artist_id))
 
 
@@ -88,6 +90,10 @@ def _enhance_artist(
 
     Tier 1 (no MBID): name search → score gate → fill fields or bail out.
     Tier 2/3 (MBID known): placeholder — added in Task 5.
+
+    `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
+    MBID. Tier 1 ignores it; Tier 2/3 reads it (once Task 5 lands) so the
+    caller can coalesce one live lookup per distinct MBID across the queue.
 
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
