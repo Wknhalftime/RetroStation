@@ -33,22 +33,40 @@ beforeEach(() => {
 })
 
 describe('SearchSlideOver mb-artist mode', () => {
-  it('does not fetch when slide-over is closed', () => {
-    // The component debounces input at 300ms and React Query schedules
-    // fetches on enabled-key change. Fake timers advance past both so a
-    // missing `open` gate would deterministically produce a fetch — if
-    // no fetch happens here after the timer advance, the gate is solid.
-    vi.useFakeTimers()
-    try {
-      render(
-        <SearchSlideOver open={false} onClose={vi.fn()} mode="mb-artist" />,
-        { wrapper: wrapperFor(makeClient()) },
-      )
-      vi.advanceTimersByTime(500)
-      expect(mockedApiFetch).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+  it('stops fetching after the slide-over closes (open gate guards refetches)', async () => {
+    // The `useMbArtistSearch` hook is `enabled: trimmed.length > 0`, so an
+    // empty-query render alone doesn't exercise the `open` gate (an
+    // empty-query test would pass even if the gate regressed). A meaningful
+    // test must:
+    //   1. Render open, type a real query, wait for the fetch to fire.
+    //   2. Rerender with open=false and invalidate the query cache. If the
+    //      `open` gate regressed, React Query would re-fire queryFn because
+    //      the hook would still be enabled; with the gate, the hook is
+    //      disabled and invalidation is a no-op.
+    mockedApiFetch.mockResolvedValue({ items: [] })
+    const qc = makeClient()
+    const { rerender } = render(
+      <SearchSlideOver open={true} onClose={vi.fn()} mode="mb-artist" />,
+      { wrapper: wrapperFor(qc) },
+    )
+    const input = screen.getByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'prince' } })
+    // Wait for the debounce to fire and React Query to dispatch the fetch.
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalled()
+    })
+    const fetchCountAfterOpen = mockedApiFetch.mock.calls.length
+
+    // Close the slide-over, then force any eligible refetch via invalidate.
+    // With the gate in place, the hook is disabled so invalidation cannot
+    // trigger queryFn. Without the gate, a fetch would fire here.
+    rerender(
+      <SearchSlideOver open={false} onClose={vi.fn()} mode="mb-artist" />,
+    )
+    await qc.invalidateQueries({ queryKey: ['mb-artist-search'] })
+    // Yield microtasks so any scheduled queryFn would have a chance to run.
+    await Promise.resolve()
+    expect(mockedApiFetch.mock.calls.length).toBe(fetchCountAfterOpen)
   })
 
   it('routes search through the mb-artists endpoint when open', async () => {
