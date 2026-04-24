@@ -119,15 +119,22 @@ def test_xor_constraint_on_matches(migrated_db: str) -> None:
             """, (uuid.uuid4(), uuid.uuid4()))
 
 
-def test_runner_persists_without_caller_commit(db_url: str) -> None:
-    """Regression for the silent-success audit:
+def test_runner_persists_even_when_caller_rolls_back_afterwards(
+    db_url: str,
+) -> None:
+    """Regression for the silent-success audit.
 
-    A caller that invokes run_migrations on a non-autocommit connection
-    and forgets the trailing ``conn.commit()`` MUST still see migrations
-    persisted. Before the fix, conn.transaction() created savepoints
-    inside an uncommitted outer transaction, so migrations rolled back
-    on connection close — the log said "applied successfully" but the
-    schema didn't change.
+    Simulates a caller that runs migrations on a non-autocommit connection
+    and then rolls back. With the old code, conn.transaction() created
+    savepoints inside an uncommitted outer transaction — the caller's
+    rollback would discard every migration. With the fix, each migration
+    is committed inside run_migrations via autocommit-mode transactions,
+    so the caller's rollback afterwards is a no-op.
+
+    Note: we open the connection WITHOUT a context manager because
+    ``with psycopg.connect(...) as conn:`` implicitly commits on normal
+    exit — which would mask the bug. Rollback is the strongest assertion
+    that the runner's persistence does not depend on caller commit.
     """
     import psycopg
 
@@ -138,24 +145,51 @@ def test_runner_persists_without_caller_commit(db_url: str) -> None:
         setup.execute("DROP SCHEMA IF EXISTS public CASCADE")
         setup.execute("CREATE SCHEMA public")
 
-    # Non-autocommit connection; caller does NOT commit after run_migrations.
-    # Close via context manager — psycopg3 context manager rolls back on
-    # pending transactions, so ANY uncommitted outer transaction would
-    # discard work. With the fix, the runner's internal autocommit flip
-    # means each migration is durable before it returns.
-    with psycopg.connect(db_url, autocommit=False) as conn:
+    conn = psycopg.connect(db_url, autocommit=False)
+    try:
         run_migrations(conn)
-        # Deliberately no conn.commit() here.
+        # Deliberate rollback — would discard work still in an uncommitted
+        # outer transaction. If the runner relied on caller-side commit,
+        # the schema would vanish here.
+        conn.rollback()
+    finally:
+        conn.close()
 
-    # Verify migrations landed in the DB.
+    # Verify migrations persisted across the rollback + close.
     with psycopg.connect(db_url) as verify:
         rows = verify.execute(
             "SELECT version FROM schema_migrations ORDER BY version",
         ).fetchall()
     assert len(rows) >= 1, (
-        "run_migrations on a non-autocommit connection must persist "
-        "without relying on a trailing caller-side conn.commit()"
+        "run_migrations must commit each migration internally; a caller "
+        "rollback afterwards must not discard them"
     )
+
+
+def test_runner_rejects_caller_with_open_transaction(db_url: str) -> None:
+    """Runner must refuse to run when the caller has uncommitted work.
+
+    Silently committing the caller's in-progress transaction (or flipping
+    autocommit on a connection in INTRANS state) would be a subtle API
+    violation — a helper that incidentally flushes unrelated pending
+    writes as a side effect of applying migrations. The runner raises
+    RuntimeError instead, leaving the caller's transaction intact so
+    they can commit or rollback explicitly.
+    """
+    import psycopg
+    import pytest
+
+    from backend.db.migrations import run_migrations
+
+    conn = psycopg.connect(db_url, autocommit=False)
+    try:
+        # Introduce a pending write — implicitly starts a transaction.
+        conn.execute("CREATE TABLE IF NOT EXISTS _mig_audit_tmp (id int)")
+        with pytest.raises(RuntimeError, match="pending transaction"):
+            run_migrations(conn)
+    finally:
+        conn.rollback()
+        conn.close()
 
 
 def test_runner_restores_caller_autocommit_mode(migrated_db: str) -> None:

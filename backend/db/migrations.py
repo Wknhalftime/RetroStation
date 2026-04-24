@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import psycopg.pq
 import structlog
 
 logger = structlog.get_logger()
@@ -30,17 +31,26 @@ def run_migrations(conn: psycopg.Connection[Any]) -> None:
     Autocommit is restored to the caller's original setting on exit so the
     connection can be reused normally after migrations complete.
     """
-    # Flip autocommit first — before any execute — because setting autocommit
-    # while the connection is in an in-transaction state raises. Every
-    # statement below (_ensure_public_schema, SET search_path, and the
-    # migration loop) runs in autocommit mode; the loop's `conn.transaction()`
-    # blocks then start real, atomically-committed transactions per migration.
+    # Refuse to run if the caller has uncommitted work on this connection —
+    # otherwise our autocommit flip would silently persist their mid-
+    # transaction state. Treat that as a programming error: callers should
+    # commit or rollback before calling run_migrations.
+    tx_status = conn.info.transaction_status
+    if tx_status != psycopg.pq.TransactionStatus.IDLE:
+        raise RuntimeError(
+            "run_migrations requires an idle connection; caller has a "
+            f"pending transaction (status={tx_status.name}). Commit or "
+            "rollback before calling."
+        )
+
+    # Flip autocommit before any execute — setting autocommit while the
+    # connection is in-transaction raises, and we've just verified that
+    # isn't the case. Every statement below (_ensure_public_schema,
+    # SET search_path, and the migration loop) runs in autocommit mode;
+    # the loop's `conn.transaction()` blocks then start real, atomically-
+    # committed transactions per migration.
     original_autocommit = conn.autocommit
     try:
-        if not conn.autocommit:
-            # If we entered with an open implicit transaction, commit it first
-            # so the autocommit flip is safe.
-            conn.commit()
         conn.autocommit = True
 
         _ensure_public_schema(conn)
