@@ -15,6 +15,7 @@ build/
 *.egg
 node_modules/
 frontend/dist/
+frontend/coverage/
 frontend/src/**/*.js
 frontend/tsconfig.tsbuildinfo
 huey.db
