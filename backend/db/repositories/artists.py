@@ -158,6 +158,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         ).fetchone()
         if row is None:
             raise RuntimeError(f"Artist upsert_musicbrainz_artist failed: {mbid}")
+        _maybe_mark_complete_on_upsert(self._conn, row["id"])
         return cast(str, row["id"])
 
     def get_by_normalized_name(
@@ -168,3 +169,30 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (normalized_name,),
         ).fetchone()
         return self._row_to_model(row) if row else None
+
+
+def _maybe_mark_complete_on_upsert(
+    conn: psycopg.Connection[Any], artist_id: str
+) -> None:
+    """Flip needs_enhancement back to FALSE if all completeness fields are filled.
+
+    The `sort_name != name` guard aligns with the Tier 2/3 "would we update
+    sort_name?" check in `_enhance_artist` — an artist whose sort_name merely
+    echoes `name` is still a bare default and should go through MB lookup to
+    pick up the real sort form (e.g., "Madonna" → "Ciccone, Madonna").
+
+    Scope: only called from the INSERT path in `upsert_musicbrainz_artist`.
+    Re-upserts of an already-known MBID short-circuit at the first SELECT
+    and never reach this helper — the enhancement task handles those.
+    """
+    conn.execute(
+        """UPDATE artists
+           SET needs_enhancement = FALSE, enhanced_at = now()
+           WHERE id = %s
+             AND mbid IS NOT NULL
+             AND disambiguation IS NOT NULL
+             AND sort_name IS NOT NULL
+             AND sort_name != ''
+             AND sort_name != name""",
+        (artist_id,),
+    )
