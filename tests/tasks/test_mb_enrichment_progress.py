@@ -47,6 +47,11 @@ def _stub_repo_factory(
 
 
 def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
+    """Build a Tier 1 artist / work / recording stub (mbid=None forces name-search).
+
+    Do NOT reuse for tests exercising Tier 2/3; rebuild with a real MBID and
+    explicit `disambiguation` / `sort_name` values for those cases.
+    """
     ent = MagicMock()
     ent.id = mbid
     ent.mbid = None                    # forces Tier 1 path

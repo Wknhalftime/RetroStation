@@ -277,7 +277,7 @@ def mb_enrichment_task() -> dict[str, int]:
                 logger.info(
                     "mb_artist_phase_start",
                     rows_queued=rows_queued,
-                    distinct_mbid=len(distinct_mbids),
+                    distinct_mbids=len(distinct_mbids),
                     bare_artists=sum(
                         1 for a in pending_artists if a.mbid is None
                     ),
@@ -288,6 +288,9 @@ def mb_enrichment_task() -> dict[str, int]:
                         outcome = _enhance_artist(
                             artist, mb_client, conn, repos, mbid_map=mbid_map
                         )
+                        # Commit applies to both ENHANCED (mark_enhanced write)
+                        # and FAILED (mark_enhancement_failed write inside
+                        # _enhance_artist). Both paths must persist.
                         conn.commit()
                         if outcome is ArtistEnhanceOutcome.FAILED:
                             artists_failed += 1
@@ -296,6 +299,7 @@ def mb_enrichment_task() -> dict[str, int]:
                                 mbid=artist.id,
                                 name=artist.name,
                                 reason="mb_lookup_404",
+                                error=None,
                             )
                         else:
                             artists_done += 1
@@ -324,6 +328,7 @@ def mb_enrichment_task() -> dict[str, int]:
                             "mb_artist_enhancement_failed",
                             mbid=artist.id,
                             name=artist.name,
+                            reason="per_item_exception",
                             error=error_msg,
                         )
 
