@@ -4,11 +4,14 @@ from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
+import structlog
 
 from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
+
+logger = structlog.get_logger(__name__)
 
 
 class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
@@ -64,7 +67,9 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
 
     def list_unenhanced(self) -> list[Artist]:
         rows = self._conn.execute(
-            "SELECT * FROM artists WHERE needs_enhancement = TRUE"
+            """SELECT * FROM artists
+               WHERE needs_enhancement = TRUE
+                 AND enhancement_error IS NULL"""
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
@@ -110,12 +115,32 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
+        # 1. Return early if this exact MBID is already known.
         row = self._conn.execute(
-            "SELECT id FROM artists WHERE mbid = %s",
-            (mbid,),
+            "SELECT id FROM artists WHERE mbid = %s", (mbid,)
         ).fetchone()
         if row is not None:
             return cast(str, row["id"])
+
+        # 2. normalized_name collision with a DIFFERENT MBID — do not overwrite.
+        existing = self._conn.execute(
+            "SELECT id, mbid FROM artists WHERE normalized_name = %s",
+            (normalized_name,),
+        ).fetchone()
+        if (
+            existing is not None
+            and existing["mbid"] is not None
+            and existing["mbid"] != mbid
+        ):
+            logger.warning(
+                "mb_artist_mbid_conflict",
+                normalized_name=normalized_name,
+                existing_mbid=existing["mbid"],
+                incoming_mbid=mbid,
+            )
+            return cast(str, existing["id"])
+
+        # 3. Safe upsert.
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name, mbid,
@@ -132,9 +157,8 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
         ).fetchone()
         if row is None:
-            raise RuntimeError(
-                f"Artist upsert_musicbrainz_artist failed: {mbid}"
-            )
+            raise RuntimeError(f"Artist upsert_musicbrainz_artist failed: {mbid}")
+        _maybe_mark_complete_on_upsert(self._conn, row["id"])
         return cast(str, row["id"])
 
     def get_by_normalized_name(
@@ -145,3 +169,31 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (normalized_name,),
         ).fetchone()
         return self._row_to_model(row) if row else None
+
+
+def _maybe_mark_complete_on_upsert(
+    conn: psycopg.Connection[Any], artist_id: str
+) -> None:
+    """Flip needs_enhancement back to FALSE if all completeness fields are filled.
+
+    The `sort_name != name` guard aligns with the Tier 2/3 "would we update
+    sort_name?" check in `_enhance_artist` — an artist whose sort_name merely
+    echoes `name` is still a bare default and should go through MB lookup to
+    pick up the real sort form (e.g., "Madonna" → "Ciccone, Madonna").
+
+    Scope: only called from the INSERT path in `upsert_musicbrainz_artist`.
+    Re-upserts of an already-known MBID short-circuit at the first SELECT
+    and never reach this helper — the enhancement task handles those.
+    """
+    conn.execute(
+        """UPDATE artists
+           SET needs_enhancement = FALSE, enhanced_at = now()
+           WHERE id = %s
+             AND mbid IS NOT NULL
+             AND disambiguation IS NOT NULL
+             AND disambiguation != ''
+             AND sort_name IS NOT NULL
+             AND sort_name != ''
+             AND sort_name != name""",
+        (artist_id,),
+    )

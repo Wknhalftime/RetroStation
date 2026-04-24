@@ -50,6 +50,42 @@ MbArtistResult = TypedDict(
     total=False,
 )
 
+# Nested in lookup_artist response under "aliases"
+# MB API returns JSON booleans for "primary" (not strings); typing as
+# `str` would make truthiness checks always True on non-empty values.
+MbAliasEntry = TypedDict(
+    "MbAliasEntry",
+    {
+        "name": str,
+        "sort-name": str,
+        "locale": str,
+        "type": str,
+        "primary": bool,
+    },
+    total=False,
+)
+
+
+# Nested in lookup_artist response under "tags"
+class MbTagEntry(TypedDict, total=False):
+    name: str
+    count: int
+
+
+# Returned by lookup_artist
+MbArtist = TypedDict(
+    "MbArtist",
+    {
+        "id": str,
+        "name": str,
+        "sort-name": str,
+        "disambiguation": str,
+        "aliases": list[MbAliasEntry],
+        "tags": list[MbTagEntry],
+    },
+    total=False,
+)
+
 # Returned by lookup_release
 MbRelease = TypedDict(
     "MbRelease",

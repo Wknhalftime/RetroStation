@@ -47,8 +47,16 @@ def _stub_repo_factory(
 
 
 def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
+    """Build a Tier 1 artist / work / recording stub (mbid=None forces name-search).
+
+    Do NOT reuse for tests exercising Tier 2/3; rebuild with a real MBID and
+    explicit `disambiguation` / `sort_name` values for those cases.
+    """
     ent = MagicMock()
     ent.id = mbid
+    ent.mbid = None                    # forces Tier 1 path
+    ent.disambiguation = None          # avoid MagicMock truthiness in Tier 2/3 checks
+    ent.sort_name = f"Name-{mbid}"     # deterministic value, avoids MagicMock `in (...)` comparison
     setattr(ent, name_field, f"Name-{mbid}")
     ent.duration_ms = None
     return ent
@@ -85,6 +93,7 @@ class TestMbEnrichmentProgress:
         mock_connect.side_effect = _fake_connect
         mock_factory_cls.side_effect = _stub_repo_factory(artists, works, recordings)
         mock_mb_cls.return_value.search_artist.return_value = []
+        mock_mb_cls.return_value.lookup_artist.return_value = None
         mock_mb_cls.return_value.lookup_recording.return_value = None
 
         mock_progress_repo = MagicMock()
@@ -120,6 +129,7 @@ class TestMbEnrichmentProgress:
         mock_connect.side_effect = _fake_connect
         mock_factory_cls.side_effect = _stub_repo_factory(artists, works, recordings)
         mock_mb_cls.return_value.search_artist.return_value = []
+        mock_mb_cls.return_value.lookup_artist.return_value = None
         mock_mb_cls.return_value.lookup_recording.return_value = None
 
         mock_progress_repo = MagicMock()
@@ -155,6 +165,7 @@ class TestMbEnrichmentProgress:
         mock_connect.side_effect = _fake_connect
         mock_factory_cls.side_effect = _stub_repo_factory(artists, works, recordings)
         mock_mb_cls.return_value.search_artist.return_value = []
+        mock_mb_cls.return_value.lookup_artist.return_value = None
         mock_mb_cls.return_value.lookup_recording.return_value = None
 
         mock_progress_repo = MagicMock()

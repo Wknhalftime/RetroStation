@@ -2,20 +2,27 @@ from __future__ import annotations
 
 import contextlib
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 import httpx
 import psycopg
 import structlog
+from psycopg import sql
 
 from backend.config import get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
+from backend.domain.catalog import Artist
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
-from backend.services.mb_client import MusicBrainzApiClient
+from backend.services.matching_constants import MB_AUTO_LINK_SCORE
+from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
+from backend.services.mb_types import MbArtist
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -33,6 +40,189 @@ _PER_ITEM_RETRIABLE_ERRORS: tuple[type[BaseException], ...] = (
     psycopg.Error,
     ValueError,
 )
+
+
+class ArtistEnhanceOutcome(StrEnum):
+    ENHANCED = "enhanced"
+    FAILED = "failed"
+
+
+_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset(
+    {"disambiguation", "sort_name", "mbid"}
+)
+
+
+class _UnexpectedArtistUpdateColumnError(Exception):
+    """Logic bug: a column outside the allowlist was passed to
+    _apply_artist_updates. Raised instead of ValueError so the exception
+    is NOT caught by _PER_ITEM_RETRIABLE_ERRORS — development-time guards
+    should crash the task, not be silently recorded as per-item failures.
+    """
+
+
+def _apply_artist_updates(
+    conn: psycopg.Connection[Any],
+    artist_id: str,
+    updates: dict[str, str],
+) -> None:
+    """Issue a targeted UPDATE for only the fields that changed.
+
+    Column names pass through psycopg.sql.Identifier for SQL safety.
+    The allowlist guard catches logic bugs at development time.
+    """
+    if not updates:
+        return
+    unknown_cols = updates.keys() - _ALLOWED_ARTIST_UPDATE_COLS
+    if unknown_cols:
+        raise _UnexpectedArtistUpdateColumnError(
+            f"Unexpected artist update columns: {unknown_cols!r}"
+        )
+
+    query = sql.SQL("UPDATE artists SET {sets} WHERE id = %s").format(
+        sets=sql.SQL(", ").join(
+            sql.SQL("{col} = %s").format(col=sql.Identifier(col))
+            for col in updates
+        )
+    )
+    # Placeholder order follows updates.keys() iteration order; Python 3.7+
+    # guarantees dict insertion-order preservation so this matches the SQL.
+    conn.execute(query, (*updates.values(), artist_id))
+
+
+def _enhance_artist(
+    artist: Artist,
+    mb_client: MusicBrainzClientProtocol,
+    conn: psycopg.Connection[Any],
+    repos: RepositoryFactory,
+    *,
+    mbid_map: dict[str, MbArtist | None] | None = None,
+    auto_link_score: int = MB_AUTO_LINK_SCORE,
+) -> ArtistEnhanceOutcome:
+    """Tiered artist enhancement.
+
+    Tier 1 (no MBID): name search → score gate → fill fields or bail out.
+    Tier 2/3 (MBID known): consult `mbid_map` (if provided) or call
+    `lookup_artist` directly; fill missing disambiguation / sort_name; a
+    `None` result (404 from the MB API or cached 404 in `mbid_map`) maps to
+    FAILED.
+
+    `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
+    MBID. Tier 1 ignores it; Tier 2/3 reads it so the caller can coalesce
+    one live lookup per distinct MBID across the queue. A value of `None`
+    in the map represents a cached 404 and is respected without re-querying.
+
+    `auto_link_score` is the Tier 1 confidence threshold. Defaults to the
+    module constant but the task wires `Settings.mb_auto_link_score` so
+    operators can tune the threshold via env without patching code.
+
+    Returns ArtistEnhanceOutcome so the caller increments the right counter.
+    """
+    if artist.mbid is None:
+        results = mb_client.search_artist(artist.name)
+        if not results:
+            repos.artists.mark_enhanced(artist.id)
+            return ArtistEnhanceOutcome.ENHANCED
+
+        best = results[0]
+        best_score = int(best.get("score", 0))
+        if best_score < auto_link_score:
+            repos.artists.mark_enhanced(artist.id)
+            logger.info(
+                "mb_artist_no_confident_match",
+                artist_id=artist.id,
+                name=artist.name,
+                best_score=best_score,
+            )
+            return ArtistEnhanceOutcome.ENHANCED
+
+        resolved_mbid: str = best["id"]
+        updates: dict[str, str] = {"mbid": resolved_mbid}
+        if best.get("sort-name"):
+            updates["sort_name"] = best["sort-name"]
+        if best.get("disambiguation"):
+            updates["disambiguation"] = best["disambiguation"]
+        _apply_artist_updates(conn, artist.id, updates)
+        repos.artists.mark_enhanced(artist.id)
+        logger.info(
+            "mb_artist_enhanced_tier1",
+            artist_id=artist.id,
+            name=artist.name,
+            resolved_mbid=resolved_mbid,
+        )
+        return ArtistEnhanceOutcome.ENHANCED
+
+    # --- Tier 2 / Tier 3: MBID known ---
+    if mbid_map is not None and artist.mbid in mbid_map:
+        data = mbid_map[artist.mbid]
+    else:
+        data = mb_client.lookup_artist(artist.mbid)
+
+    if data is None:
+        repos.artists.mark_enhancement_failed(
+            artist.id,
+            f"MB lookup returned 404 for mbid={artist.mbid}",
+        )
+        return ArtistEnhanceOutcome.FAILED
+
+    field_updates: dict[str, str] = {}
+    if not artist.disambiguation and data.get("disambiguation"):
+        field_updates["disambiguation"] = data["disambiguation"]
+    if artist.sort_name in ("", artist.name) and data.get("sort-name"):
+        field_updates["sort_name"] = data["sort-name"]
+
+    if field_updates:
+        _apply_artist_updates(conn, artist.id, field_updates)
+        logger.info(
+            "mb_artist_enhanced_tier2",
+            artist_id=artist.id,
+            mbid=artist.mbid,
+            fields_updated=list(field_updates.keys()),
+        )
+    else:
+        logger.debug(
+            "mb_artist_enhanced_tier3_no_changes",
+            artist_id=artist.id,
+            mbid=artist.mbid,
+        )
+
+    repos.artists.mark_enhanced(artist.id)
+    return ArtistEnhanceOutcome.ENHANCED
+
+
+def coalesce_artist_lookups(
+    mbids: Iterable[str],
+    client: MusicBrainzClientProtocol,
+) -> dict[str, MbArtist | None]:
+    """Call lookup_artist exactly once per distinct MBID.
+
+    Returns {mbid: MbArtist | None}. The `set(mbids)` conversion is the dedup
+    mechanism — a plain dict comprehension over a list does NOT deduplicate
+    calls (it only deduplicates the output dict's keys, after each duplicate
+    has already triggered a full lookup). The explicit `set()` is therefore
+    required for the coalescing contract, even when callers pass an iterable
+    that happens to already be a set.
+    The underlying lookup is cache-read-through — warm entries produce 0 live
+    calls.
+
+    Transient httpx failures are swallowed per-MBID: the failing MBID is
+    OMITTED from the result map instead of raised. That lets the per-item
+    loop in `mb_enrichment_task` fall through to its own `lookup_artist`
+    call (inside the retriable-error try/except), so one flaky MB request
+    during the pre-pass fails only that artist instead of aborting the whole
+    task. `httpx.HTTPStatusError(404)` is NOT raised by `lookup_artist`
+    (returns None), so genuine 404s still land in the map as `None`.
+    """
+    result: dict[str, MbArtist | None] = {}
+    for mbid in set(mbids):
+        try:
+            result[mbid] = client.lookup_artist(mbid)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "mb_coalesce_lookup_failed",
+                mbid=mbid,
+                error=str(exc),
+            )
+    return result
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -106,50 +296,76 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
+                # --- Metrics counters + coalescing pre-pass ---
+                rows_queued = len(pending_artists)
+                distinct_mbids = {
+                    a.mbid for a in pending_artists if a.mbid is not None
+                }
+                mbid_map = coalesce_artist_lookups(distinct_mbids, mb_client)
+                # Commit pre-pass cache writes NOW so they can't be rolled
+                # back by a later per-item rollback. Otherwise a queue with
+                # a failing first item silently discards all coalesced
+                # mb_cache rows, re-issuing live HTTP on the next run.
+                conn.commit()
+
+                logger.info(
+                    "mb_artist_phase_start",
+                    rows_queued=rows_queued,
+                    distinct_mbids=len(distinct_mbids),
+                    bare_artists=sum(
+                        1 for a in pending_artists if a.mbid is None
+                    ),
+                )
+
                 for artist in pending_artists:
-                    # Commit per item so a later item's failure never rolls
-                    # back earlier successful mark_enhanced writes. The
-                    # phase-level commit at the end of the loop became a
-                    # no-op and was removed.
                     try:
-                        results = mb_client.search_artist(artist.name)
-                        match = next(
-                            (r for r in results if r.get("id") == artist.id), None
+                        outcome = _enhance_artist(
+                            artist,
+                            mb_client,
+                            conn,
+                            repos,
+                            mbid_map=mbid_map,
+                            auto_link_score=settings.mb_auto_link_score,
                         )
-                        if match and match.get("disambiguation"):
-                            conn.execute(
-                                "UPDATE artists SET disambiguation = %s WHERE id = %s",
-                                (match["disambiguation"], artist.id),
-                            )
-                        repos.artists.mark_enhanced(artist.id)
+                        # Commit applies to both ENHANCED (mark_enhanced write)
+                        # and FAILED (mark_enhancement_failed write inside
+                        # _enhance_artist). Both paths must persist.
                         conn.commit()
-                        artists_done += 1
-                        logger.info("mb_artist_enhanced", mbid=artist.id, name=artist.name)
+                        if outcome is ArtistEnhanceOutcome.FAILED:
+                            artists_failed += 1
+                            logger.warning(
+                                "mb_artist_enhancement_failed",
+                                artist_id=artist.id,
+                                name=artist.name,
+                                reason="mb_lookup_404",
+                            )
+                        else:
+                            artists_done += 1
+                            logger.info(
+                                "mb_artist_enhanced",
+                                artist_id=artist.id,
+                                name=artist.name,
+                            )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        # Rollback only discards THIS item's partial writes —
-                        # previous items are already committed. On any
-                        # psycopg.Error the transaction is aborted and the
-                        # rollback is required before any further query.
+                        # Transient per-item failure: rollback this item's
+                        # partial writes and let it remain in the queue for
+                        # the next run. We deliberately do NOT call
+                        # mark_enhancement_failed here — that would write
+                        # enhancement_error and Task 7's list_unenhanced
+                        # filter would then terminally quarantine the artist
+                        # despite the root cause being transient (network
+                        # blip, temporary MB 5xx, idle-connection DB error).
+                        # Only permanent failures (404) quarantine, and those
+                        # are marked inside _enhance_artist before this
+                        # except branch is ever reached.
                         conn.rollback()
                         error_msg = str(exc)
-                        # mark_enhancement_failed in its own transaction so a
-                        # write failure here doesn't cascade into the next
-                        # item's savepoint state.
-                        try:
-                            repos.artists.mark_enhancement_failed(artist.id, error_msg)
-                            conn.commit()
-                        except psycopg.Error:
-                            conn.rollback()
-                            logger.warning(
-                                "mb_artist_mark_failed_write_failed",
-                                mbid=artist.id,
-                                primary_error=error_msg,
-                            )
                         artists_failed += 1
                         logger.warning(
                             "mb_artist_enhancement_failed",
-                            mbid=artist.id,
+                            artist_id=artist.id,
                             name=artist.name,
+                            reason="per_item_exception",
                             error=error_msg,
                         )
 
@@ -167,6 +383,15 @@ def mb_enrichment_task() -> dict[str, int]:
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                     ))
+
+                logger.info(
+                    "mb_artist_phase_summary",
+                    rows_queued=rows_queued,
+                    artists_done=artists_done,
+                    artists_failed=artists_failed,
+                    cache_hits=mb_client.cache_hits,
+                    live_fetches=mb_client.live_fetches,
+                )
 
         # -------------------------------------------------------------- works
         with connect_sync(settings.database_url) as conn:
