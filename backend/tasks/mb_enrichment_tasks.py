@@ -428,7 +428,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     live_fetches=mb_client.live_fetches,
                 )
                 phases["artists"] = {
-                    "rows_processed": rows_queued,
+                    "rows_queued": rows_queued,
                     "distinct_mbids": len(distinct_mbids),
                     "live_fetches_delta": (
                         mb_client.live_fetches - artists_live_start
@@ -436,9 +436,11 @@ def mb_enrichment_task() -> dict[str, int]:
                     "cache_hits_delta": (
                         mb_client.cache_hits - artists_hits_start
                     ),
+                    # None only when there's no input (see artist_matching
+                    # summary). Zero distinct on positive rows produces 1.0.
                     "duplicate_mbid_ratio": (
                         1.0 - (len(distinct_mbids) / rows_queued)
-                        if rows_queued and distinct_mbids else None
+                        if rows_queued else None
                     ),
                 }
 
@@ -490,7 +492,7 @@ def mb_enrichment_task() -> dict[str, int]:
             })
             works_rows = len(pending_works)
             phases["works"] = {
-                "rows_processed": works_rows,
+                "rows_queued": works_rows,
                 "distinct_mbids": works_distinct_mbids,
                 # Works phase does no MB HTTP today (only mark_enhanced DB
                 # writes), so live_fetches / cache_hits deltas are always
@@ -501,7 +503,7 @@ def mb_enrichment_task() -> dict[str, int]:
                 "cache_hits_delta": 0,
                 "duplicate_mbid_ratio": (
                     1.0 - (works_distinct_mbids / works_rows)
-                    if works_rows and works_distinct_mbids else None
+                    if works_rows else None
                 ),
             }
 
@@ -571,7 +573,7 @@ def mb_enrichment_task() -> dict[str, int]:
                 recordings_rows = len(pending_recordings)
                 recordings_distinct_mbids = len({r.id for r in pending_recordings})
                 phases["recordings"] = {
-                    "rows_processed": recordings_rows,
+                    "rows_queued": recordings_rows,
                     "distinct_mbids": recordings_distinct_mbids,
                     "live_fetches_delta": (
                         mb_client.live_fetches - recordings_live_start
@@ -581,7 +583,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     ),
                     "duplicate_mbid_ratio": (
                         1.0 - (recordings_distinct_mbids / recordings_rows)
-                        if recordings_rows and recordings_distinct_mbids else None
+                        if recordings_rows else None
                     ),
                 }
 
@@ -635,12 +637,6 @@ def mb_enrichment_task() -> dict[str, int]:
             details=completion_details,
         ))
 
-        logger.info(
-            "mb_task_summary",
-            task_type="mb_enrichment",
-            phases=phases,
-        )
-
     except Exception as exc:
         if progress_repo is not None:
             with contextlib.suppress(Exception):
@@ -669,6 +665,18 @@ def mb_enrichment_task() -> dict[str, int]:
         raise
 
     finally:
+        # Emit the summary even on partial failure. `phases` is built
+        # incrementally (each phase writes its own key on success), so a
+        # failure mid-recordings still produces a useful "artists + works"
+        # summary. suppress() on the log call itself so a malformed phase
+        # dict never masks the underlying task exception in the `except`
+        # above.
+        with contextlib.suppress(Exception):
+            logger.info(
+                "mb_task_summary",
+                task_type="mb_enrichment",
+                phases=phases,
+            )
         if progress_conn is not None:
             progress_conn.close()
 

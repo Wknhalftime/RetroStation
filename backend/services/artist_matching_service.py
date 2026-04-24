@@ -466,17 +466,23 @@ def match_artists_for_playlist(
         # the engine or the cascade. `distinct_search_keys` comes from the
         # coalesce pre-pass so it counts the input set, not `len(search_map)`
         # — a pre-pass failure that omits a bucket must not shift the metric.
-        rows_processed = len(pending)
+        # `rows_queued` is the input size (before the resolve loop), not a
+        # completion count — on a partial-failure run it still reflects what
+        # was submitted.
+        rows_queued = len(pending)
         logger.info(
             "mb_task_summary",
             task_type="artist_matching",
-            rows_processed=rows_processed,
+            rows_queued=rows_queued,
             distinct_search_keys=distinct_search_keys,
             distinct_mbids=0,
             live_fetches_delta=mb_client.live_fetches - live_start,
             cache_hits_delta=mb_client.cache_hits - hits_start,
+            # None only when there's no input. With input and zero distinct
+            # keys the ratio is well-defined (1.0); the caller can distinguish
+            # "no data" from "no diversity" by the sign of rows_queued.
             duplicate_name_ratio=(
-                1.0 - (distinct_search_keys / rows_processed) if rows_processed else None
+                1.0 - (distinct_search_keys / rows_queued) if rows_queued else None
             ),
             duplicate_mbid_ratio=None,
         )

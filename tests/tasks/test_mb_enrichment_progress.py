@@ -301,7 +301,10 @@ class TestMbEnrichmentSummary:
         mock_mb_cls: MagicMock,
     ) -> None:
         artists = [_make_entity(f"a{i}") for i in range(2)]
+        # Make one work row MBID-bearing so `distinct_mbids` exercises the
+        # dynamic computation path (falsifies any accidental hardcoded-0).
         works = [_make_entity(f"w{i}", name_field="title") for i in range(3)]
+        works[0].mbid = "work-mbid-seed"
         recordings = [_make_entity(f"r{i}", name_field="title") for i in range(4)]
 
         mock_connect.side_effect = _fake_connect
@@ -332,7 +335,7 @@ class TestMbEnrichmentSummary:
 
         # Every phase reports the same field set, even no-MB-traffic `works`.
         required_fields = {
-            "rows_processed",
+            "rows_queued",
             "distinct_mbids",
             "live_fetches_delta",
             "cache_hits_delta",
@@ -342,14 +345,17 @@ class TestMbEnrichmentSummary:
             assert required_fields.issubset(phase.keys()), f"{name} missing fields"
 
         # Row counts match the fixture.
-        assert phases["artists"]["rows_processed"] == 2
-        assert phases["works"]["rows_processed"] == 3
-        assert phases["recordings"]["rows_processed"] == 4
-        # Works phase never calls MB — its counters are zero by contract.
+        assert phases["artists"]["rows_queued"] == 2
+        assert phases["works"]["rows_queued"] == 3
+        assert phases["recordings"]["rows_queued"] == 4
+        # Works phase never calls MB — only live_fetches/cache_hits deltas are
+        # zero by contract. distinct_mbids is computed dynamically from the
+        # fixture (one MBID-bearing work seeded above proves it).
         assert phases["works"]["live_fetches_delta"] == 0
         assert phases["works"]["cache_hits_delta"] == 0
-        assert phases["works"]["distinct_mbids"] == 0
-        assert phases["works"]["duplicate_mbid_ratio"] is None
+        assert phases["works"]["distinct_mbids"] == 1
+        # 1 - (1 distinct / 3 rows) = 0.666...
+        assert phases["works"]["duplicate_mbid_ratio"] == pytest.approx(2 / 3)
 
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
@@ -366,10 +372,10 @@ class TestMbEnrichmentSummary:
         _cache_cls: MagicMock,
         mock_mb_cls: MagicMock,
     ) -> None:
-        # Plan Step 2: "pre-pass produces {mbid: None}; per-item loop calls
-        # lookup_recording zero additional times for that row." With 3
-        # recordings all returning None from MB, total calls = 3 (pre-pass),
-        # NOT 6 (pre-pass + per-item re-query).
+        # 404-as-None in the pre-pass map is authoritative: the per-item
+        # loop reads `None` and does NOT re-query. With 3 recordings all
+        # returning None from MB, total calls = 3 (pre-pass), NOT 6
+        # (pre-pass + per-item re-query).
         recordings = [_make_entity(f"r{i}", name_field="title") for i in range(3)]
 
         mock_connect.side_effect = _fake_connect

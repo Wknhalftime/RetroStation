@@ -355,7 +355,9 @@ def test_coalesce_artist_searches_picks_lex_first_representative() -> None:
         "Metallica": [{"id": "mixed", "score": 100}],
         "metallica": [{"id": "lower", "score": 100}],
     })
-    coalesce_artist_searches(pending, mb)
+    # Tuple return discarded deliberately — this test pins call-site behavior
+    # only, not the returned map/count.
+    _ = coalesce_artist_searches(pending, mb)
 
     # Python's default sort on str is codepoint-order: upper A-Z < lower a-z.
     # So lex-first among {"metallica","Metallica","METALLICA"} is "METALLICA".
@@ -482,9 +484,9 @@ def test_match_artists_emits_mb_task_summary() -> None:
     # the end of each run. Tooling (automated loops, dashboards) asserts on
     # this event rather than diffing logs. Shape contract:
     #   task_type: "artist_matching"
-    #   rows_processed, distinct_search_keys, distinct_mbids
+    #   rows_queued, distinct_search_keys, distinct_mbids
     #   live_fetches_delta, cache_hits_delta
-    #   duplicate_name_ratio (float in [0,1) or None for empty pending)
+    #   duplicate_name_ratio (float in [0,1] or None for empty pending)
     #   duplicate_mbid_ratio = None (not used by matching task)
     from structlog.testing import capture_logs
 
@@ -525,7 +527,7 @@ def test_match_artists_emits_mb_task_summary() -> None:
     assert len(summary_events) == 1
     s = summary_events[0]
     assert s["task_type"] == "artist_matching"
-    assert s["rows_processed"] == 2
+    assert s["rows_queued"] == 2
     assert s["distinct_search_keys"] == 2
     assert s["distinct_mbids"] == 0
     assert s["live_fetches_delta"] == 2  # one per distinct bucket
@@ -537,8 +539,8 @@ def test_match_artists_emits_mb_task_summary() -> None:
 def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors() -> None:
     # distinct_search_keys is computed over the INPUT set, not `len(search_map)`,
     # so a transient httpx error in the pre-pass (which omits one bucket from
-    # the map) MUST NOT shift the metric. Plan Step 3: "ratios are computed
-    # pre-cache (over the input set), not post-cache, so they're stable."
+    # the map) MUST NOT shift the metric. Ratios are pre-cache so they stay
+    # stable across runs regardless of transient failure patterns.
     from structlog.testing import capture_logs
 
     playlist_id = uuid4()
@@ -575,5 +577,5 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
     assert len(summary_events) == 1
     assert summary_events[0]["distinct_search_keys"] == 2
-    assert summary_events[0]["rows_processed"] == 2
+    assert summary_events[0]["rows_queued"] == 2
 

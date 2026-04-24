@@ -614,8 +614,8 @@ def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
 #   key present, []:  treat as "no candidates", return None, no live call.
 #   key present, [...]: use those results, no live call.
 # Key = broadcast_artist.original_name.lower() — exactly matches the cache
-# key suffix in mb_client.py:179 so coalescing is identical to the cache's
-# bucketing.
+# key suffix `artist-search:{name.lower()}` so coalescing is identical to
+# the cache's bucketing.
 # ---------------------------------------------------------------------------
 
 
@@ -670,7 +670,7 @@ def test_mb_strategy_missing_key_falls_back_to_live() -> None:
 
 
 def test_mb_strategy_search_map_key_is_lowercased() -> None:
-    # Cache key convention in mb_client.py:179 is `artist-search:{name.lower()}`.
+    # Cache key convention in `artist-search:{name.lower()}` is `artist-search:{name.lower()}`.
     # Strategy must look up the map with `.lower()` so bucket identity matches.
     mb = FakeMbClient(responses={})
     repo = FakeArtistRepository()
