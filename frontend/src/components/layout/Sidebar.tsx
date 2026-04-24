@@ -34,17 +34,13 @@ export function Sidebar() {
     <aside className="fixed left-0 top-0 h-full w-64 bg-gray-900 flex flex-col z-40">
       {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-800">
-        <span className="text-white text-lg font-bold tracking-wide">
-          RetroStation
-        </span>
+        <span className="text-white text-lg font-bold tracking-wide">RetroStation</span>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-          const showDot = runningTasks.some(
-            (t) => TASK_TYPE_TO_NAV[t.task_type] === to,
-          );
+          const showDot = runningTasks.some((t) => TASK_TYPE_TO_NAV[t.task_type] === to);
 
           return (
             <NavLink

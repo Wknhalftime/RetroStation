@@ -30,9 +30,7 @@ interface ProgressState {
 function pickActiveTask(tasks: TaskInfo[]): TaskInfo | null {
   if (tasks.length === 0) return null;
   // Most recently started task
-  return tasks.slice().sort((a, b) =>
-    b.started_at.localeCompare(a.started_at)
-  )[0] ?? null;
+  return tasks.slice().sort((a, b) => b.started_at.localeCompare(a.started_at))[0] ?? null;
 }
 
 export const useProgressStore = create<ProgressState>((set, get) => ({
@@ -51,19 +49,15 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     // Keep only dismissed IDs still present in the WS payload; the rest have
     // aged out of the grace window and no longer need suppressing.
     const payloadIds = new Set(tasks.map((t) => t.task_id));
-    const unexpiredDismissedIds = dismissedTaskIds.filter((id) =>
-      payloadIds.has(id),
-    );
+    const unexpiredDismissedIds = dismissedTaskIds.filter((id) => payloadIds.has(id));
     const dismissedSet = new Set(unexpiredDismissedIds);
 
     const runningTasks = tasks.filter((t) => t.status === "running");
     // Exclude user-dismissed tasks from terminal processing so a dismiss()
     // call is not immediately reversed by the next WebSocket tick.
-    const failedTasks = tasks.filter(
-      (t) => t.status === "failed" && !dismissedSet.has(t.task_id),
-    );
+    const failedTasks = tasks.filter((t) => t.status === "failed" && !dismissedSet.has(t.task_id));
     const completedTasks = tasks.filter(
-      (t) => t.status === "completed" && !dismissedSet.has(t.task_id),
+      (t) => t.status === "completed" && !dismissedSet.has(t.task_id)
     );
 
     if (runningTasks.length > 0) {
@@ -158,8 +152,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     }
   },
 
-  hasRunningType: (type: string) =>
-    get().runningTasks.some((t) => t.task_type === type),
+  hasRunningType: (type: string) => get().runningTasks.some((t) => t.task_type === type),
 
   dismiss: () => {
     const { dismissTimer, terminalTaskIds, dismissedTaskIds } = get();

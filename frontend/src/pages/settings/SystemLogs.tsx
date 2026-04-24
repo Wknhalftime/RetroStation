@@ -10,10 +10,10 @@ import type { SystemLogEntry } from "@/lib/schemas/system_logs";
 // ---------------------------------------------------------------------------
 
 const levelColour: Record<string, string> = {
-  DEBUG:   "bg-gray-100 text-gray-600",
-  INFO:    "bg-blue-100 text-blue-700",
+  DEBUG: "bg-gray-100 text-gray-600",
+  INFO: "bg-blue-100 text-blue-700",
   WARNING: "bg-yellow-100 text-yellow-700",
-  ERROR:   "bg-red-100 text-red-700",
+  ERROR: "bg-red-100 text-red-700",
 };
 
 // ---------------------------------------------------------------------------
@@ -63,7 +63,15 @@ function LogRow({ entry }: { entry: SystemLogEntry }) {
 
 const PAGE_SIZE = 100;
 
-const CATEGORIES = ["scan", "enrichment", "ingestion", "matching", "rules_apply", "m3u_export", "system"];
+const CATEGORIES = [
+  "scan",
+  "enrichment",
+  "ingestion",
+  "matching",
+  "rules_apply",
+  "m3u_export",
+  "system",
+];
 const LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"];
 
 export function SystemLogs() {
@@ -90,20 +98,34 @@ export function SystemLogs() {
       <div className="flex gap-3 flex-wrap">
         <select
           value={level}
-          onChange={(e) => { setLevel(e.target.value); setPage(0); }}
+          onChange={(e) => {
+            setLevel(e.target.value);
+            setPage(0);
+          }}
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
         >
           <option value="">All levels</option>
-          {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+          {LEVELS.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
         </select>
 
         <select
           value={category}
-          onChange={(e) => { setCategory(e.target.value); setPage(0); }}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setPage(0);
+          }}
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
         >
           <option value="">All categories</option>
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -115,13 +137,14 @@ export function SystemLogs() {
       )}
 
       {isError && (
-        <p className="rounded-md bg-red-50 p-4 text-sm text-red-700">
-          Failed to load system logs.
-        </p>
+        <p className="rounded-md bg-red-50 p-4 text-sm text-red-700">Failed to load system logs.</p>
       )}
 
       {!isLoading && !isError && data?.items.length === 0 && (
-        <EmptyState title="No log entries" description="Run a scan or enrichment task to generate logs." />
+        <EmptyState
+          title="No log entries"
+          description="Run a scan or enrichment task to generate logs."
+        />
       )}
 
       {!isLoading && !isError && data && data.items.length > 0 && (
@@ -129,7 +152,9 @@ export function SystemLogs() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                <th className="px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">Timestamp</th>
+                <th className="px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                  Timestamp
+                </th>
                 <th className="px-3 py-2.5 font-semibold text-gray-600">Level</th>
                 <th className="px-3 py-2.5 font-semibold text-gray-600">Category</th>
                 <th className="px-3 py-2.5 font-semibold text-gray-600">Message</th>
@@ -137,7 +162,9 @@ export function SystemLogs() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((entry) => <LogRow key={entry.id} entry={entry} />)}
+              {data.items.map((entry) => (
+                <LogRow key={entry.id} entry={entry} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -153,7 +180,9 @@ export function SystemLogs() {
           >
             Previous
           </button>
-          <span>Page {page + 1} of {totalPages}</span>
+          <span>
+            Page {page + 1} of {totalPages}
+          </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             disabled={page >= totalPages - 1}
@@ -166,4 +195,3 @@ export function SystemLogs() {
     </div>
   );
 }
-

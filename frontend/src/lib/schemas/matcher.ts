@@ -1,16 +1,12 @@
-import { z } from 'zod'
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Triage Bucket
 // ---------------------------------------------------------------------------
 
-export const TriageBucketSchema = z.enum([
-  'quick_review',
-  'needs_attention',
-  'blocked',
-])
+export const TriageBucketSchema = z.enum(["quick_review", "needs_attention", "blocked"]);
 
-export type TriageBucket = z.infer<typeof TriageBucketSchema>
+export type TriageBucket = z.infer<typeof TriageBucketSchema>;
 
 // ---------------------------------------------------------------------------
 // Queue Identity
@@ -26,9 +22,9 @@ export const QueueIdentitySchema = z.object({
   triage_bucket: TriageBucketSchema,
   reason_code: z.string().nullable().optional(),
   reason_detail: z.string().nullable().optional(),
-})
+});
 
-export type QueueIdentity = z.infer<typeof QueueIdentitySchema>
+export type QueueIdentity = z.infer<typeof QueueIdentitySchema>;
 
 // ---------------------------------------------------------------------------
 // Queue Artist
@@ -47,9 +43,9 @@ export const QueueArtistSchema = z.object({
   // and the array form so schema parsing doesn't reject legitimate rows.
   candidates: z.array(z.record(z.unknown()).nullable()).nullable(),
   identities: z.array(QueueIdentitySchema),
-})
+});
 
-export type QueueArtist = z.infer<typeof QueueArtistSchema>
+export type QueueArtist = z.infer<typeof QueueArtistSchema>;
 
 // ---------------------------------------------------------------------------
 // Matching Queue
@@ -58,31 +54,31 @@ export type QueueArtist = z.infer<typeof QueueArtistSchema>
 export const MatchingQueueSchema = z.object({
   items: z.array(QueueArtistSchema),
   total: z.number(),
-})
+});
 
-export type MatchingQueue = z.infer<typeof MatchingQueueSchema>
+export type MatchingQueue = z.infer<typeof MatchingQueueSchema>;
 
 // ---------------------------------------------------------------------------
 // Artist Resolution
 // ---------------------------------------------------------------------------
 
 export const ArtistResolutionSchema = z.object({
-  match_status: z.enum(['manual_matched', 'manual_rejected']),
+  match_status: z.enum(["manual_matched", "manual_rejected"]),
   target_artist_id: z.string().nullable().optional(),
-})
+});
 
-export type ArtistResolution = z.infer<typeof ArtistResolutionSchema>
+export type ArtistResolution = z.infer<typeof ArtistResolutionSchema>;
 
 // ---------------------------------------------------------------------------
 // Identity Resolution
 // ---------------------------------------------------------------------------
 
 export const IdentityResolutionSchema = z.object({
-  match_status: z.enum(['manual_matched', 'manual_rejected']),
+  match_status: z.enum(["manual_matched", "manual_rejected"]),
   library_file_id: z.string().uuid().nullable().optional(),
-})
+});
 
-export type IdentityResolution = z.infer<typeof IdentityResolutionSchema>
+export type IdentityResolution = z.infer<typeof IdentityResolutionSchema>;
 
 // ---------------------------------------------------------------------------
 // Resolve Result
@@ -91,9 +87,9 @@ export type IdentityResolution = z.infer<typeof IdentityResolutionSchema>
 export const ResolveResultSchema = z.object({
   id: z.string().uuid(),
   match_status: z.string(),
-})
+});
 
-export type ResolveResult = z.infer<typeof ResolveResultSchema>
+export type ResolveResult = z.infer<typeof ResolveResultSchema>;
 
 // ---------------------------------------------------------------------------
 // MusicBrainz Artist Search Result
@@ -103,10 +99,10 @@ export const MbArtistResultSchema = z.object({
   id: z.string(),
   name: z.string(),
   score: z.number(),
-  disambiguation: z.string().optional().default(''),
-})
+  disambiguation: z.string().optional().default(""),
+});
 
-export type MbArtistResult = z.infer<typeof MbArtistResultSchema>
+export type MbArtistResult = z.infer<typeof MbArtistResultSchema>;
 
 // Envelope returned by GET /api/v1/matching/mb-artists. Defaults `items` to
 // `[]` so a malformed response (missing field, null) never yields undefined
@@ -114,6 +110,6 @@ export type MbArtistResult = z.infer<typeof MbArtistResultSchema>
 // promises an array.
 export const MbArtistSearchResponseSchema = z.object({
   items: z.array(MbArtistResultSchema).default([]),
-})
+});
 
-export type MbArtistSearchResponse = z.infer<typeof MbArtistSearchResponseSchema>
+export type MbArtistSearchResponse = z.infer<typeof MbArtistSearchResponseSchema>;

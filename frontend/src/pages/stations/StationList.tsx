@@ -6,11 +6,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
-import {
-  useStations,
-  useCreateStation,
-  useDeleteStation,
-} from "@/api/stations";
+import { useStations, useCreateStation, useDeleteStation } from "@/api/stations";
 import type { StationCreate } from "@/lib/schemas/stations";
 
 export function StationList() {
@@ -44,7 +40,7 @@ export function StationList() {
     e.preventDefault(); // prevent card link navigation
     if (
       window.confirm(
-        "Delete this station? This permanently removes its playlists, broadcast calendar, and all play event history. This cannot be undone.",
+        "Delete this station? This permanently removes its playlists, broadcast calendar, and all play event history. This cannot be undone."
       )
     ) {
       deleteMutation.mutate(id);
@@ -122,16 +118,12 @@ export function StationList() {
               {/* Call letters */}
               <div className="mb-2 flex items-center gap-2">
                 <Radio className="h-5 w-5 text-indigo-400" />
-                <span className="text-lg font-bold text-gray-900">
-                  {station.call_letters}
-                </span>
+                <span className="text-lg font-bold text-gray-900">{station.call_letters}</span>
               </div>
 
               {/* Name */}
               {station.name && (
-                <p className="mb-3 text-sm font-medium text-gray-700">
-                  {station.name}
-                </p>
+                <p className="mb-3 text-sm font-medium text-gray-700">{station.name}</p>
               )}
 
               {/* Meta rows */}
@@ -150,8 +142,7 @@ export function StationList() {
                 )}
                 <div className="flex items-center gap-1.5">
                   <ListMusic className="h-3.5 w-3.5" />
-                  {station.playlist_count}{" "}
-                  {station.playlist_count === 1 ? "playlist" : "playlists"}
+                  {station.playlist_count} {station.playlist_count === 1 ? "playlist" : "playlists"}
                 </div>
               </div>
             </Link>
@@ -160,11 +151,7 @@ export function StationList() {
       )}
 
       {/* Create modal */}
-      <Modal
-        open={showCreate}
-        onClose={() => setShowCreate(false)}
-        title="Add Station"
-      >
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add Station">
         {showCreate && (
           <StationForm
             onSubmit={(data) => handleCreate(data as StationCreate)}

@@ -26,16 +26,10 @@ export function LibraryStatus() {
 
   const enrichedCount = data.by_enrichment["enriched"] ?? 0;
   const enrichedPct =
-    data.total_files > 0
-      ? Math.round((enrichedCount / data.total_files) * 100)
-      : 0;
+    data.total_files > 0 ? Math.round((enrichedCount / data.total_files) * 100) : 0;
 
-  const formatsSorted = Object.entries(data.by_format).sort(
-    ([, a], [, b]) => b - a,
-  );
-  const enrichmentSorted = Object.entries(data.by_enrichment).sort(
-    ([, a], [, b]) => b - a,
-  );
+  const formatsSorted = Object.entries(data.by_format).sort(([, a], [, b]) => b - a);
+  const enrichmentSorted = Object.entries(data.by_enrichment).sort(([, a], [, b]) => b - a);
 
   return (
     <div>
@@ -80,9 +74,7 @@ export function LibraryStatus() {
             <p className="text-sm text-gray-500">Enriched</p>
             <p className="text-2xl font-semibold text-gray-900">
               {enrichedCount.toLocaleString()}
-              <span className="ml-2 text-base font-normal text-gray-400">
-                ({enrichedPct}%)
-              </span>
+              <span className="ml-2 text-base font-normal text-gray-400">({enrichedPct}%)</span>
             </p>
           </div>
         </div>

@@ -4,7 +4,13 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { WorkFilesTable } from "@/components/domain/works/WorkFilesTable";
 import { FormatOverridePanel } from "@/components/domain/works/FormatOverridePanel";
-import { useWorkDetail, useSetMaster, useRevertMaster, useCreateFormatOverride, useDeleteFormatOverride } from "@/api/works";
+import {
+  useWorkDetail,
+  useSetMaster,
+  useRevertMaster,
+  useCreateFormatOverride,
+  useDeleteFormatOverride,
+} from "@/api/works";
 import { useArtistDetail } from "@/api/artists";
 
 // ---------------------------------------------------------------------------
@@ -17,8 +23,7 @@ export function AssociatedWorks() {
     work_id: string;
   }>();
 
-  const { data: work, isLoading: workLoading, isError: workError } =
-    useWorkDetail(work_id);
+  const { data: work, isLoading: workLoading, isError: workError } = useWorkDetail(work_id);
 
   const { data: artist } = useArtistDetail(artist_id);
 
@@ -118,9 +123,7 @@ export function AssociatedWorks() {
           recordings={work.recordings}
           masterFileId={masterFileId}
           masterMethod={masterMethod}
-          onSetMaster={(fileId) =>
-            setMaster.mutate({ preferred_file_id: fileId })
-          }
+          onSetMaster={(fileId) => setMaster.mutate({ preferred_file_id: fileId })}
         />
       </section>
 

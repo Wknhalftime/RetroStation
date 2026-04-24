@@ -41,22 +41,18 @@ export function WorkFilesTable({
           <div
             className={cn(
               "flex items-center justify-between bg-gray-50 px-4 py-2",
-              recIdx > 0 && "border-t border-gray-200",
+              recIdx > 0 && "border-t border-gray-200"
             )}
           >
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-800">
-                {recording.title}
-              </span>
+              <span className="text-sm font-semibold text-gray-800">{recording.title}</span>
               {recording.version_type && (
                 <span className="rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
                   {recording.version_type}
                 </span>
               )}
             </div>
-            <span className="text-xs text-gray-400">
-              {formatDuration(recording.duration_ms)}
-            </span>
+            <span className="text-xs text-gray-400">{formatDuration(recording.duration_ms)}</span>
           </div>
 
           {/* File rows */}
@@ -67,9 +63,8 @@ export function WorkFilesTable({
                 key={file.id}
                 className={cn(
                   "flex items-center gap-3 px-4 py-2.5 transition-colors",
-                  fileIdx < recording.files.length - 1 &&
-                    "border-b border-gray-100",
-                  isMaster ? "bg-amber-50" : "hover:bg-gray-50",
+                  fileIdx < recording.files.length - 1 && "border-b border-gray-100",
+                  isMaster ? "bg-amber-50" : "hover:bg-gray-50"
                 )}
               >
                 {/* Crown button */}
@@ -81,7 +76,7 @@ export function WorkFilesTable({
                     "shrink-0 rounded p-0.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
                     isMaster
                       ? "text-amber-500 hover:text-amber-600"
-                      : "text-gray-300 hover:text-amber-400",
+                      : "text-gray-300 hover:text-amber-400"
                   )}
                 >
                   <Crown
@@ -95,7 +90,7 @@ export function WorkFilesTable({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate text-sm",
-                    isMaster ? "font-medium text-amber-900" : "text-gray-700",
+                    isMaster ? "font-medium text-amber-900" : "text-gray-700"
                   )}
                   title={file.file_path}
                 >
@@ -107,9 +102,7 @@ export function WorkFilesTable({
                   <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono uppercase">
                     {file.format}
                   </span>
-                  {file.bitrate != null && (
-                    <span>{file.bitrate} kbps</span>
-                  )}
+                  {file.bitrate != null && <span>{file.bitrate} kbps</span>}
                   <span>{formatDuration(file.duration_ms)}</span>
                 </div>
               </div>

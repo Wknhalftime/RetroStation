@@ -34,13 +34,9 @@ function ArtistRow({ artist }: { artist: ArtistSummary }) {
       style={{ height: ROW_HEIGHT }}
     >
       <div className="min-w-0">
-        <span className="block truncate text-sm font-medium text-gray-900">
-          {artist.name}
-        </span>
+        <span className="block truncate text-sm font-medium text-gray-900">{artist.name}</span>
         {artist.disambiguation && (
-          <span className="block truncate text-xs text-gray-400">
-            {artist.disambiguation}
-          </span>
+          <span className="block truncate text-xs text-gray-400">{artist.disambiguation}</span>
         )}
       </div>
       <div className="ml-4 flex shrink-0 items-center gap-4 text-xs text-gray-500">
@@ -65,18 +61,11 @@ export function ArtistBrowser() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
 
-  const {
-    data,
-    isLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    fetchNextPage,
-    isError,
-  } = useArtistsInfinite(debouncedSearch || undefined);
+  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, isError } =
+    useArtistsInfinite(debouncedSearch || undefined);
 
   // Flatten pages into a single array
-  const allArtists: ArtistSummary[] =
-    data?.pages.flatMap((p) => p.items) ?? [];
+  const allArtists: ArtistSummary[] = data?.pages.flatMap((p) => p.items) ?? [];
 
   const parentRef = useRef<HTMLDivElement>(null);
 

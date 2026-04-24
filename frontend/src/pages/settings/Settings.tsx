@@ -43,9 +43,7 @@ export function Settings() {
             <ScrollText className="h-5 w-5 shrink-0 text-indigo-500" />
             <div>
               <p className="text-sm font-medium text-gray-900">System Logs</p>
-              <p className="text-xs text-gray-400">
-                Operational log of background task activity
-              </p>
+              <p className="text-xs text-gray-400">Operational log of background task activity</p>
             </div>
           </Link>
         </div>

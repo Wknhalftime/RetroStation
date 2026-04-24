@@ -36,7 +36,7 @@ interface VersionBadgesProps {
 export function VersionBadges({ versionTypes }: VersionBadgesProps) {
   // Filter out unknown and other — they indicate bad data
   const displayable = versionTypes.filter(
-    (v) => v !== "unknown" && v !== "other" && VERSION_LABELS[v] != null,
+    (v) => v !== "unknown" && v !== "other" && VERSION_LABELS[v] != null
   );
 
   if (displayable.length === 0) return null;
@@ -56,9 +56,7 @@ export function VersionBadges({ versionTypes }: VersionBadgesProps) {
         </span>
       ))}
       {overflow > 0 && (
-        <span className="inline-flex items-center text-[10px] text-gray-400">
-          +{overflow} more
-        </span>
+        <span className="inline-flex items-center text-[10px] text-gray-400">+{overflow} more</span>
       )}
     </span>
   );

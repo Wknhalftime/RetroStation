@@ -12,12 +12,8 @@ const STATIONS_KEY = ["stations"] as const;
 const stationKey = (id: string) => ["stations", id] as const;
 const stationBroadcastDaysKey = (stationId: string) =>
   ["stations", stationId, "broadcast-days"] as const;
-const stationEventsKey = (
-  stationId: string,
-  date: string,
-  limit: number,
-  offset: number,
-) => ["stations", stationId, "events", { date, limit, offset }] as const;
+const stationEventsKey = (stationId: string, date: string, limit: number, offset: number) =>
+  ["stations", stationId, "events", { date, limit, offset }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -41,8 +37,7 @@ export function useStation(id: string | undefined) {
 export function useStationBroadcastDays(stationId: string | undefined) {
   return useQuery<string[]>({
     queryKey: stationBroadcastDaysKey(stationId ?? ""),
-    queryFn: () =>
-      apiFetch<string[]>(`/api/v1/stations/${stationId}/broadcast-days`),
+    queryFn: () => apiFetch<string[]>(`/api/v1/stations/${stationId}/broadcast-days`),
     enabled: Boolean(stationId),
   });
 }
@@ -51,13 +46,13 @@ export function useStationEvents(
   stationId: string | undefined,
   date: string | undefined,
   limit: number,
-  offset: number,
+  offset: number
 ) {
   return useQuery<StationPaginatedEvents>({
     queryKey: stationEventsKey(stationId ?? "", date ?? "", limit, offset),
     queryFn: () =>
       apiFetch<StationPaginatedEvents>(
-        `/api/v1/stations/${stationId}/events?date=${date}&limit=${limit}&offset=${offset}`,
+        `/api/v1/stations/${stationId}/events?date=${date}&limit=${limit}&offset=${offset}`
       ),
     enabled: Boolean(stationId) && Boolean(date),
   });
@@ -99,15 +94,13 @@ export function useUpdateStation(id: string) {
 export function useDeleteStation() {
   const qc = useQueryClient();
   return useMutation<void, Error, string, { previous: StationList | undefined }>({
-    mutationFn: (id) =>
-      apiFetch<void>(`/api/v1/stations/${id}`, { method: "DELETE" }),
+    mutationFn: (id) => apiFetch<void>(`/api/v1/stations/${id}`, { method: "DELETE" }),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: STATIONS_KEY });
       const previous = qc.getQueryData<StationList>(STATIONS_KEY);
       if (previous) {
-        qc.setQueryData<StationList>(
-          STATIONS_KEY,
-          (old) => (old ? old.filter((s) => s.id !== id) : old),
+        qc.setQueryData<StationList>(STATIONS_KEY, (old) =>
+          old ? old.filter((s) => s.id !== id) : old
         );
       }
       return { previous };
@@ -143,10 +136,7 @@ interface ExportStationM3uVariables {
 export function useExportStationM3u() {
   return useMutation<void, Error, ExportStationM3uVariables>({
     mutationFn: async ({ stationId, date, callLetters }) => {
-      const blob = await apiDownload(
-        `/api/v1/stations/${stationId}/export-m3u`,
-        { date },
-      );
+      const blob = await apiDownload(`/api/v1/stations/${stationId}/export-m3u`, { date });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

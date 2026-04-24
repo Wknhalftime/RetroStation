@@ -1,72 +1,70 @@
-import { useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { EmptyState } from '@/components/ui/EmptyState'
-import { Spinner } from '@/components/ui/Spinner'
-import { MatchStatusBadge } from '@/components/ui/Badge'
-import { cn } from '@/lib/utils'
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Spinner } from "@/components/ui/Spinner";
+import { MatchStatusBadge } from "@/components/ui/Badge";
+import { cn } from "@/lib/utils";
 import {
   useMatchingQueue,
   useRerunMatching,
   useResolveArtist,
   useResolveIdentity,
-} from '@/api/matcher'
-import { ArtistPanel } from '@/components/domain/matcher/ArtistPanel'
-import { TitlePanel } from '@/components/domain/matcher/TitlePanel'
-import { SearchSlideOver } from '@/components/domain/matcher/SearchSlideOver'
-import type { MbArtistResult, QueueArtist } from '@/lib/schemas/matcher'
-import { firstCandidateMbid } from '@/lib/matcher/candidates'
+} from "@/api/matcher";
+import { ArtistPanel } from "@/components/domain/matcher/ArtistPanel";
+import { TitlePanel } from "@/components/domain/matcher/TitlePanel";
+import { SearchSlideOver } from "@/components/domain/matcher/SearchSlideOver";
+import type { MbArtistResult, QueueArtist } from "@/lib/schemas/matcher";
+import { firstCandidateMbid } from "@/lib/matcher/candidates";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface LibraryFile {
-  id: string
-  path: string
-  title?: string | null
+  id: string;
+  path: string;
+  title?: string | null;
 }
 
 // ---------------------------------------------------------------------------
 // MatcherBrowser
 // ---------------------------------------------------------------------------
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = 25;
 
 export function MatcherBrowser() {
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(1);
 
   // Switching pages can scroll the selected artist off-screen (the right-side
   // panels would otherwise keep acting on an artist not shown in the list).
   // Centralize page changes through this helper so the selection clears.
   const goToPage = (updater: (prev: number) => number) => {
     setPage((prev) => {
-      const next = updater(prev)
-      if (next !== prev) setSelectedArtist(null)
-      return next
-    })
-  }
-  const offset = (page - 1) * PAGE_SIZE
-  const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset)
-  const rerunMatching = useRerunMatching()
-  const resolveIdentity = useResolveIdentity()
-  const resolveArtist = useResolveArtist()
+      const next = updater(prev);
+      if (next !== prev) setSelectedArtist(null);
+      return next;
+    });
+  };
+  const offset = (page - 1) * PAGE_SIZE;
+  const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset);
+  const rerunMatching = useRerunMatching();
+  const resolveIdentity = useResolveIdentity();
+  const resolveArtist = useResolveArtist();
 
-  const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null)
-  const [slideOverOpen, setSlideOverOpen] = useState(false)
-  const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null)
-  const [mbSearchOpen, setMbSearchOpen] = useState(false)
+  const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null);
+  const [slideOverOpen, setSlideOverOpen] = useState(false);
+  const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null);
+  const [mbSearchOpen, setMbSearchOpen] = useState(false);
   // Captures the artist ID at the moment the curator opens MB search.
   // Without this, switching the queue selection while the slide-over is open
   // would apply the chosen MB artist to a DIFFERENT queue artist than the
   // one the search was initiated for — silent data corruption.
-  const [mbSearchTargetArtistId, setMbSearchTargetArtistId] = useState<
-    string | null
-  >(null)
+  const [mbSearchTargetArtistId, setMbSearchTargetArtistId] = useState<string | null>(null);
 
-  const artists: QueueArtist[] = data?.items ?? []
-  const total: number = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const artists: QueueArtist[] = data?.items ?? [];
+  const total: number = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Clamp page when `total` shrinks (after resolutions / re-runs). Without
   // this, a curator who is on page 3 when enough items resolve to fit on
@@ -74,46 +72,46 @@ export function MatcherBrowser() {
   // total>0 — which would wrongly trigger the "queue empty" state.
   useEffect(() => {
     if (page > totalPages) {
-      setPage(totalPages)
-      setSelectedArtist(null)
+      setPage(totalPages);
+      setSelectedArtist(null);
     }
-  }, [page, totalPages])
+  }, [page, totalPages]);
 
   function handleFileSearch(identityId: string) {
-    setActiveIdentityId(identityId)
-    setSlideOverOpen(true)
+    setActiveIdentityId(identityId);
+    setSlideOverOpen(true);
   }
 
   function handleFileSelect(file: LibraryFile) {
-    if (!activeIdentityId) return
+    if (!activeIdentityId) return;
     resolveIdentity.mutate({
       id: activeIdentityId,
-      resolution: { match_status: 'manual_matched', library_file_id: file.id },
-    })
-    setActiveIdentityId(null)
+      resolution: { match_status: "manual_matched", library_file_id: file.id },
+    });
+    setActiveIdentityId(null);
   }
 
   function handleOpenMbSearch() {
-    if (!selectedArtist) return
-    setMbSearchTargetArtistId(selectedArtist.id)
-    setMbSearchOpen(true)
+    if (!selectedArtist) return;
+    setMbSearchTargetArtistId(selectedArtist.id);
+    setMbSearchOpen(true);
   }
 
   function handleCloseMbSearch() {
-    setMbSearchOpen(false)
-    setMbSearchTargetArtistId(null)
+    setMbSearchOpen(false);
+    setMbSearchTargetArtistId(null);
   }
 
   function handleMbArtistSelect(mb: MbArtistResult) {
     // Use the artist ID captured at search-open time, not the current
     // `selectedArtist`. The curator may have navigated to a different
     // queue artist while the slide-over was open.
-    if (!mbSearchTargetArtistId) return
+    if (!mbSearchTargetArtistId) return;
     resolveArtist.mutate({
       id: mbSearchTargetArtistId,
-      resolution: { match_status: 'manual_matched', target_artist_id: mb.id },
-    })
-    handleCloseMbSearch()
+      resolution: { match_status: "manual_matched", target_artist_id: mb.id },
+    });
+    handleCloseMbSearch();
   }
 
   function handleRerun() {
@@ -121,10 +119,10 @@ export function MatcherBrowser() {
       onSuccess: () => {
         // Re-run can reshuffle the queue — clear the selection so the right
         // panels don't act on a stale artist that may no longer exist.
-        setPage(1)
-        setSelectedArtist(null)
+        setPage(1);
+        setSelectedArtist(null);
       },
-    })
+    });
   }
 
   return (
@@ -180,17 +178,14 @@ export function MatcherBrowser() {
                   <button
                     onClick={() => setSelectedArtist(artist)}
                     className={cn(
-                      'flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-gray-50',
-                      selectedArtist?.id === artist.id && 'bg-blue-50',
+                      "flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-gray-50",
+                      selectedArtist?.id === artist.id && "bg-blue-50"
                     )}
                   >
                     <span className="min-w-0 truncate text-sm font-medium text-gray-800">
                       {artist.original_name}
                     </span>
-                    <MatchStatusBadge
-                      status={artist.match_status}
-                      className="shrink-0"
-                    />
+                    <MatchStatusBadge status={artist.match_status} className="shrink-0" />
                   </button>
                 </li>
               ))}
@@ -220,20 +215,12 @@ export function MatcherBrowser() {
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {selectedArtist ? (
               <>
-                <ArtistPanel
-                  artist={selectedArtist}
-                  onSearchMusicBrainz={handleOpenMbSearch}
-                />
-                <TitlePanel
-                  artist={selectedArtist}
-                  onFileSearch={handleFileSearch}
-                />
+                <ArtistPanel artist={selectedArtist} onSearchMusicBrainz={handleOpenMbSearch} />
+                <TitlePanel artist={selectedArtist} onFileSearch={handleFileSearch} />
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-300 p-12 text-center">
-                <p className="text-sm text-gray-400">
-                  Select an artist from the list to begin.
-                </p>
+                <p className="text-sm text-gray-400">Select an artist from the list to begin.</p>
               </div>
             )}
           </div>
@@ -255,5 +242,5 @@ export function MatcherBrowser() {
         onSelectMbArtist={handleMbArtistSelect}
       />
     </div>
-  )
+  );
 }

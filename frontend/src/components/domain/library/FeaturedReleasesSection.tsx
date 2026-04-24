@@ -4,9 +4,7 @@ interface FeaturedReleasesSectionProps {
   artistId: string;
 }
 
-export function FeaturedReleasesSection({
-  artistId: _artistId,
-}: FeaturedReleasesSectionProps) {
+export function FeaturedReleasesSection({ artistId: _artistId }: FeaturedReleasesSectionProps) {
   return (
     <section className="mt-6">
       <div className="mb-3 flex items-center gap-2">
@@ -17,8 +15,8 @@ export function FeaturedReleasesSection({
       </div>
       <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
         <p className="text-sm text-gray-500">
-          Featured release detection requires enrichment data. Once this artist's
-          files are enriched, featured appearances will appear here automatically.
+          Featured release detection requires enrichment data. Once this artist's files are
+          enriched, featured appearances will appear here automatically.
         </p>
       </div>
     </section>
