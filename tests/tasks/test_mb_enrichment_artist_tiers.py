@@ -3,7 +3,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from backend.domain.catalog import Artist, CatalogSource
-from backend.tasks.mb_enrichment_tasks import _enhance_artist
+from backend.tasks.mb_enrichment_tasks import (
+    ArtistEnhanceOutcome,
+    _enhance_artist,
+    coalesce_artist_lookups,
+)
 from tests.fakes.mb_client import FakeMbClient
 
 
@@ -78,12 +82,6 @@ def test_tier1_no_results_marks_enhanced():
 
     repos.artists.mark_enhanced.assert_called_once_with("local-uuid-1")
     conn.execute.assert_not_called()
-
-
-from backend.tasks.mb_enrichment_tasks import (  # noqa: E402
-    ArtistEnhanceOutcome,
-    coalesce_artist_lookups,
-)
 
 
 def _mbid_artist(**overrides) -> Artist:
@@ -176,6 +174,24 @@ def test_mbid_map_short_circuits_api_call():
 
     assert not any(c.startswith("lookup_artist:") for c in fake_client.calls)
     repos.artists.mark_enhanced.assert_called_once()
+
+
+def test_mbid_map_with_none_value_treated_as_404():
+    """Cached 404 in mbid_map → FAILED without a live lookup_artist call."""
+    artist = _mbid_artist()
+    fake_client = FakeMbClient()
+    conn = MagicMock()
+    repos = MagicMock()
+    mbid_map: dict[str, object] = {"mb-uuid-known": None}
+
+    outcome = _enhance_artist(
+        artist, fake_client, conn, repos, mbid_map=mbid_map,  # type: ignore[arg-type]
+    )
+
+    assert outcome is ArtistEnhanceOutcome.FAILED
+    repos.artists.mark_enhancement_failed.assert_called_once()
+    repos.artists.mark_enhanced.assert_not_called()
+    assert not any(c.startswith("lookup_artist:") for c in fake_client.calls)
 
 
 def test_coalesce_artist_lookups_dedups_shared_mbid():

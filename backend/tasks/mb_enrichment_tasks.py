@@ -90,11 +90,15 @@ def _enhance_artist(
     """Tiered artist enhancement.
 
     Tier 1 (no MBID): name search → score gate → fill fields or bail out.
-    Tier 2/3 (MBID known): placeholder — added in Task 5.
+    Tier 2/3 (MBID known): consult `mbid_map` (if provided) or call
+    `lookup_artist` directly; fill missing disambiguation / sort_name; a
+    `None` result (404 from the MB API or cached 404 in `mbid_map`) maps to
+    FAILED.
 
     `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
-    MBID. Tier 1 ignores it; Tier 2/3 reads it (once Task 5 lands) so the
-    caller can coalesce one live lookup per distinct MBID across the queue.
+    MBID. Tier 1 ignores it; Tier 2/3 reads it so the caller can coalesce
+    one live lookup per distinct MBID across the queue. A value of `None`
+    in the map represents a cached 404 and is respected without re-querying.
 
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
