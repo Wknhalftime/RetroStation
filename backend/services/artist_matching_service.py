@@ -411,6 +411,9 @@ def match_artists_for_playlist(
     rules = rules_repo.list_ordered()
     all_canonical = artist_repo.list_all()
 
+    live_start = mb_client.live_fetches
+    hits_start = mb_client.cache_hits
+
     search_map = coalesce_artist_searches(pending, mb_client)
 
     engine = ArtistMatchingEngine([
@@ -453,6 +456,22 @@ def match_artists_for_playlist(
             ))
 
     _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+
+    rows_processed = len(pending)
+    distinct_search_keys = len(search_map)
+    logger.info(
+        "mb_task_summary",
+        task_type="artist_matching",
+        rows_processed=rows_processed,
+        distinct_search_keys=distinct_search_keys,
+        distinct_mbids=0,
+        live_fetches_delta=mb_client.live_fetches - live_start,
+        cache_hits_delta=mb_client.cache_hits - hits_start,
+        duplicate_name_ratio=(
+            1.0 - (distinct_search_keys / rows_processed) if rows_processed else None
+        ),
+        duplicate_mbid_ratio=None,
+    )
 
 
 def _cascade_auto_rejected(

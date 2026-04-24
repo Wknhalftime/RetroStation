@@ -56,7 +56,16 @@ def _is_transient_mb_error(exc: BaseException) -> bool:
 
 
 class MusicBrainzClientProtocol(Protocol):
-    """Protocol for MusicBrainz API clients (production + test doubles)."""
+    """Protocol for MusicBrainz API clients (production + test doubles).
+
+    `live_fetches` / `cache_hits` are monotonic counters incremented per call.
+    Callers snapshot them around a phase to report `mb_task_summary` metrics
+    (cache hit ratio, live-API volume). Test doubles start at 0 and need not
+    increment them — the metrics they emit will just all be deltas of 0.
+    """
+
+    live_fetches: int
+    cache_hits: int
 
     def search_artist(self, name: str) -> list[MbArtistResult]: ...
     def lookup_artist(self, mbid: str) -> MbArtist | None: ...

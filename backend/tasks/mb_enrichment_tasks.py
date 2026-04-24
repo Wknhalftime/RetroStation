@@ -279,6 +279,11 @@ def mb_enrichment_task() -> dict[str, int]:
     processed = 0
     total = 0
 
+    # Per-phase metrics for the final `mb_task_summary` event. Each phase
+    # populates its own entry; works has no MB traffic so its counters are
+    # all zero (schema kept stable for automated runners).
+    phases: dict[str, dict[str, object]] = {}
+
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
     sys_log_repo: PgSystemLogRepository | None = None
@@ -426,6 +431,18 @@ def mb_enrichment_task() -> dict[str, int]:
                     cache_hits=mb_client.cache_hits,
                     live_fetches=mb_client.live_fetches,
                 )
+                # Snapshot per-phase metrics for mb_task_summary. The client
+                # is fresh per phase, so its counters at block-end == delta.
+                phases["artists"] = {
+                    "rows_processed": rows_queued,
+                    "distinct_mbids": len(distinct_mbids),
+                    "live_fetches_delta": mb_client.live_fetches,
+                    "cache_hits_delta": mb_client.cache_hits,
+                    "duplicate_mbid_ratio": (
+                        1.0 - (len(distinct_mbids) / rows_queued)
+                        if rows_queued else None
+                    ),
+                }
 
         # -------------------------------------------------------------- works
         with connect_sync(settings.database_url) as conn:
@@ -469,6 +486,14 @@ def mb_enrichment_task() -> dict[str, int]:
                 ))
             # No phase-level commit — per-item commits already flushed each
             # successful mark_enhanced write independently.
+
+            phases["works"] = {
+                "rows_processed": len(pending_works),
+                "distinct_mbids": 0,
+                "live_fetches_delta": 0,
+                "cache_hits_delta": 0,
+                "duplicate_mbid_ratio": None,
+            }
 
         # --------------------------------------------------------- recordings
         with connect_sync(settings.database_url) as conn:
@@ -531,6 +556,19 @@ def mb_enrichment_task() -> dict[str, int]:
                         updated_at=datetime.now(UTC),
                     ))
 
+                recordings_rows = len(pending_recordings)
+                recordings_distinct_mbids = len({r.id for r in pending_recordings})
+                phases["recordings"] = {
+                    "rows_processed": recordings_rows,
+                    "distinct_mbids": recordings_distinct_mbids,
+                    "live_fetches_delta": mb_client.live_fetches,
+                    "cache_hits_delta": mb_client.cache_hits,
+                    "duplicate_mbid_ratio": (
+                        1.0 - (recordings_distinct_mbids / recordings_rows)
+                        if recordings_rows else None
+                    ),
+                }
+
             orphan_cur = conn.execute(
                 """DELETE FROM recordings r
                    WHERE NOT EXISTS (
@@ -580,6 +618,12 @@ def mb_enrichment_task() -> dict[str, int]:
             trace_id=task_id,
             details=completion_details,
         ))
+
+        logger.info(
+            "mb_task_summary",
+            task_type="mb_enrichment",
+            phases=phases,
+        )
 
     except Exception as exc:
         if progress_repo is not None:

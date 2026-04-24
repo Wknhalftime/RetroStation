@@ -20,6 +20,11 @@ class FakeMbClient:
         self._recording_searches = recording_searches or {}
         self._artists = artists or {}
         self.calls: list[str] = []
+        # Observability counters exposed by MusicBrainzClientProtocol. Tests
+        # that care about counter deltas can mutate these directly; tests
+        # that don't care leave them at 0.
+        self.live_fetches: int = 0
+        self.cache_hits: int = 0
 
     def search_artist(self, name: str) -> list[dict[str, Any]]:
         self.calls.append(name)

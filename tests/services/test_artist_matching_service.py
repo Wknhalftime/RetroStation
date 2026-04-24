@@ -520,3 +520,61 @@ def test_match_artists_empty_bucket_skips_live_call() -> None:
     # search_artist called exactly ONCE — in the pre-pass. The per-row loop
     # reads the [] sentinel and does not re-query.
     assert len(mb.calls) == 1
+
+
+def test_match_artists_emits_mb_task_summary() -> None:
+    # match_artists_for_playlist emits a structured `mb_task_summary` event at
+    # the end of each run. Tooling (automated loops, dashboards) asserts on
+    # this event rather than diffing logs. Shape contract:
+    #   task_type: "artist_matching"
+    #   rows_processed, distinct_search_keys, distinct_mbids
+    #   live_fetches_delta, cache_hits_delta
+    #   duplicate_name_ratio (float in [0,1) or None for empty pending)
+    #   duplicate_mbid_ratio = None (not used by matching task)
+    from structlog.testing import capture_logs
+
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
+    _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+
+    mb = FakeMbClient(responses={
+        "Ozzy Osbourne": [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
+        "Slayer": [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
+    })
+    # Simulate the concrete client's counter behavior so the test asserts a
+    # real delta computation.
+    orig_search = mb.search_artist
+
+    def counting_search(name: str) -> list[dict[str, object]]:
+        mb.live_fetches += 1
+        return orig_search(name)
+
+    mb.search_artist = counting_search  # type: ignore[method-assign]
+
+    with capture_logs() as events:
+        match_artists_for_playlist(
+            playlist_id=playlist_id,
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+            mb_client=mb,
+        )
+
+    summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
+    assert len(summary_events) == 1
+    s = summary_events[0]
+    assert s["task_type"] == "artist_matching"
+    assert s["rows_processed"] == 2
+    assert s["distinct_search_keys"] == 2
+    assert s["distinct_mbids"] == 0
+    assert s["live_fetches_delta"] == 2  # one per distinct bucket
+    assert s["cache_hits_delta"] == 0
+    assert s["duplicate_name_ratio"] == 0.0  # 1 - 2/2
+    assert s["duplicate_mbid_ratio"] is None
+
