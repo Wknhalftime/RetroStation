@@ -5,7 +5,9 @@ from unittest.mock import MagicMock
 from backend.domain.catalog import Artist, CatalogSource
 from backend.tasks.mb_enrichment_tasks import (
     ArtistEnhanceOutcome,
+    _apply_artist_updates,
     _enhance_artist,
+    _UnexpectedArtistUpdateColumnError,
     coalesce_artist_lookups,
 )
 from tests.fakes.mb_client import FakeMbClient
@@ -206,6 +208,16 @@ def test_coalesce_artist_lookups_list_with_duplicates():
     result = coalesce_artist_lookups(["mbid-A", "mbid-A", "mbid-A"], fake_client)
     assert fake_client.calls.count("lookup_artist:mbid-A") == 1
     assert set(result) == {"mbid-A"}
+
+
+def test_apply_artist_updates_raises_non_retriable_on_bad_column():
+    """Allowlist violations are logic bugs; must propagate, not be caught
+    by _PER_ITEM_RETRIABLE_ERRORS."""
+    import pytest
+
+    conn = MagicMock()
+    with pytest.raises(_UnexpectedArtistUpdateColumnError):
+        _apply_artist_updates(conn, "local-uuid", {"not_a_column": "value"})
 
 
 def test_coalesce_artist_lookups_swallows_transient_error_per_mbid():

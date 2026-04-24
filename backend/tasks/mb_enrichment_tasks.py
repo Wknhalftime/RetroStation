@@ -52,6 +52,14 @@ _ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset(
 )
 
 
+class _UnexpectedArtistUpdateColumnError(Exception):
+    """Logic bug: a column outside the allowlist was passed to
+    _apply_artist_updates. Raised instead of ValueError so the exception
+    is NOT caught by _PER_ITEM_RETRIABLE_ERRORS — development-time guards
+    should crash the task, not be silently recorded as per-item failures.
+    """
+
+
 def _apply_artist_updates(
     conn: psycopg.Connection[Any],
     artist_id: str,
@@ -66,7 +74,9 @@ def _apply_artist_updates(
         return
     unknown_cols = updates.keys() - _ALLOWED_ARTIST_UPDATE_COLS
     if unknown_cols:
-        raise ValueError(f"Unexpected artist update columns: {unknown_cols!r}")
+        raise _UnexpectedArtistUpdateColumnError(
+            f"Unexpected artist update columns: {unknown_cols!r}"
+        )
 
     query = sql.SQL("UPDATE artists SET {sets} WHERE id = %s").format(
         sets=sql.SQL(", ").join(
@@ -337,20 +347,19 @@ def mb_enrichment_task() -> dict[str, int]:
                                 name=artist.name,
                             )
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                        # Transient per-item failure: rollback this item's
+                        # partial writes and let it remain in the queue for
+                        # the next run. We deliberately do NOT call
+                        # mark_enhancement_failed here — that would write
+                        # enhancement_error and Task 7's list_unenhanced
+                        # filter would then terminally quarantine the artist
+                        # despite the root cause being transient (network
+                        # blip, temporary MB 5xx, idle-connection DB error).
+                        # Only permanent failures (404) quarantine, and those
+                        # are marked inside _enhance_artist before this
+                        # except branch is ever reached.
                         conn.rollback()
                         error_msg = str(exc)
-                        try:
-                            repos.artists.mark_enhancement_failed(
-                                artist.id, error_msg
-                            )
-                            conn.commit()
-                        except psycopg.Error:
-                            conn.rollback()
-                            logger.warning(
-                                "mb_artist_mark_failed_write_failed",
-                                artist_id=artist.id,
-                                primary_error=error_msg,
-                            )
                         artists_failed += 1
                         logger.warning(
                             "mb_artist_enhancement_failed",
@@ -374,6 +383,15 @@ def mb_enrichment_task() -> dict[str, int]:
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                     ))
+
+                logger.info(
+                    "mb_artist_phase_summary",
+                    rows_queued=rows_queued,
+                    artists_done=artists_done,
+                    artists_failed=artists_failed,
+                    cache_hits=mb_client.cache_hits,
+                    live_fetches=mb_client.live_fetches,
+                )
 
         # -------------------------------------------------------------- works
         with connect_sync(settings.database_url) as conn:
