@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -257,12 +257,17 @@ def coalesce_recording_lookups(
 class _PhaseContext:
     """Shared task/progress state passed to each phase helper.
 
-    `processed` is the running per-row counter. Helpers mutate it directly
-    so the orchestrator's outer try/except can read an accurate value if a
-    phase raises mid-loop — otherwise the FAILED progress upsert would
-    report a stale `processed` from before the phase started, even though
-    per-item progress upserts inside the helper had already advanced the
-    DB-visible state.
+    All per-phase counters (`processed`, `done`, `failed`, `metrics`,
+    `orphans_deleted`) are mutated in place by the helpers as work
+    progresses, so the orchestrator's outer try/except can read accurate
+    partial values if a phase raises mid-loop — otherwise the FAILED
+    progress upsert and the `mb_task_summary` event would record stale
+    pre-phase defaults even though per-item progress upserts inside the
+    helper had already advanced the DB-visible state.
+
+    `done` and `failed` are keyed by phase name ("artists", "works",
+    "recordings") so the context is phase-agnostic; the recordings
+    phase additionally writes `orphans_deleted` as a top-level scalar.
     """
 
     task_id: str
@@ -270,23 +275,10 @@ class _PhaseContext:
     total: int
     progress_repo: PgTaskProgressRepository
     processed: int = 0
-
-
-@dataclass(frozen=True)
-class _PhaseResult:
-    """Outputs every phase produces.
-
-    `metrics` matches the schema emitted in `mb_task_summary.phases.<name>`
-    (rows_queued, distinct_mbids, live_fetches_delta, cache_hits_delta,
-    duplicate_mbid_ratio). Recordings phase additionally returns
-    orphans_deleted as a separate scalar — see `_run_recordings_phase`.
-    The running `processed` counter lives on `_PhaseContext` (mutated in
-    place) and is not returned here.
-    """
-
-    done: int
-    failed: int
-    metrics: dict[str, object]
+    done: dict[str, int] = field(default_factory=dict)
+    failed: dict[str, int] = field(default_factory=dict)
+    metrics: dict[str, dict[str, object]] = field(default_factory=dict)
+    orphans_deleted: int = 0
 
 
 def _advance_progress(
@@ -344,16 +336,17 @@ def _run_artist_phase(
     pending_artists: list[Artist],
     ctx: _PhaseContext,
     settings: Settings,
-) -> _PhaseResult:
+) -> None:
     """Tier-1/2/3 artist enhancement with MBID coalescing.
 
-    Per-row failure isolation: transient errors roll back ONE artist's
-    partial writes and leave it in the queue for the next run; permanent
-    404s are quarantined inside `_enhance_artist`. Whole-phase aborts
-    propagate.
+    Mutates `ctx.done["artists"]`, `ctx.failed["artists"]`, and
+    `ctx.metrics["artists"]` as it goes. Per-row failure isolation:
+    transient errors roll back ONE artist's partial writes and leave
+    it in the queue for the next run; permanent 404s are quarantined
+    inside `_enhance_artist`. Whole-phase aborts propagate.
     """
-    done = 0
-    failed = 0
+    ctx.done["artists"] = 0
+    ctx.failed["artists"] = 0
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -407,7 +400,7 @@ def _run_artist_phase(
                     # Permanent 404s are quarantined inside _enhance_artist
                     # before this except branch is ever reached.
                     conn.rollback()
-                    failed += 1
+                    ctx.failed["artists"] += 1
                     logger.warning(
                         "mb_artist_enhancement_failed",
                         artist_id=artist.id,
@@ -417,7 +410,7 @@ def _run_artist_phase(
                     )
                 else:
                     if outcome is ArtistEnhanceOutcome.FAILED:
-                        failed += 1
+                        ctx.failed["artists"] += 1
                         logger.warning(
                             "mb_artist_enhancement_failed",
                             artist_id=artist.id,
@@ -425,7 +418,7 @@ def _run_artist_phase(
                             reason="mb_lookup_404",
                         )
                     else:
-                        done += 1
+                        ctx.done["artists"] += 1
                         logger.info(
                             "mb_artist_enhanced",
                             artist_id=artist.id,
@@ -437,37 +430,31 @@ def _run_artist_phase(
             logger.info(
                 "mb_artist_phase_summary",
                 rows_queued=rows_queued,
-                artists_done=done,
-                artists_failed=failed,
+                artists_done=ctx.done["artists"],
+                artists_failed=ctx.failed["artists"],
                 cache_hits=mb_client.cache_hits,
                 live_fetches=mb_client.live_fetches,
             )
-            metrics = _phase_metrics(
+            ctx.metrics["artists"] = _phase_metrics(
                 rows_queued=rows_queued,
                 distinct_mbids=len(distinct_mbids),
                 live_fetches_delta=mb_client.live_fetches - live_start,
                 cache_hits_delta=mb_client.cache_hits - hits_start,
             )
 
-    return _PhaseResult(
-        done=done,
-        failed=failed,
-        metrics=metrics,
-    )
-
 
 def _run_works_phase(
     pending_works: list[Work],
     ctx: _PhaseContext,
     settings: Settings,
-) -> _PhaseResult:
+) -> None:
     """Mark queued works as enhanced. No MB calls today — only DB writes.
 
-    `failed` counts psycopg.Error per-row failures; `done` counts
-    successful mark_enhanced commits.
+    Mutates `ctx.done["works"]`, `ctx.failed["works"]`, and
+    `ctx.metrics["works"]` as it goes.
     """
-    done = 0
-    failed = 0
+    ctx.done["works"] = 0
+    ctx.failed["works"] = 0
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -483,7 +470,7 @@ def _run_works_phase(
                 conn.commit()
             except psycopg.Error as exc:
                 conn.rollback()
-                failed += 1
+                ctx.failed["works"] += 1
                 logger.warning(
                     "mb_work_enhancement_failed",
                     mbid=work.id,
@@ -491,7 +478,7 @@ def _run_works_phase(
                     error=str(exc),
                 )
             else:
-                done += 1
+                ctx.done["works"] += 1
                 logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
 
             _advance_progress(ctx, "works", f"work:{work.id}")
@@ -499,7 +486,7 @@ def _run_works_phase(
         # successful mark_enhanced write independently.
 
     distinct_mbids = len({w.mbid for w in pending_works if w.mbid is not None})
-    metrics = _phase_metrics(
+    ctx.metrics["works"] = _phase_metrics(
         rows_queued=len(pending_works),
         distinct_mbids=distinct_mbids,
         # Works phase does no MB HTTP today (only mark_enhanced DB
@@ -511,26 +498,21 @@ def _run_works_phase(
         cache_hits_delta=0,
     )
 
-    return _PhaseResult(
-        done=done,
-        failed=failed,
-        metrics=metrics,
-    )
-
 
 def _run_recordings_phase(
     pending_recordings: list[Recording],
     ctx: _PhaseContext,
     settings: Settings,
-) -> tuple[_PhaseResult, int]:
+) -> None:
     """Recording duration backfill with MBID coalescing + orphan cleanup.
 
-    Returns `(result, orphans_deleted)`. `orphans_deleted` is the rowcount
+    Mutates `ctx.done["recordings"]`, `ctx.failed["recordings"]`,
+    `ctx.metrics["recordings"]`, and `ctx.orphans_deleted` (the rowcount
     from the post-loop DELETE that drops recordings with no library_files
-    referencing them and no enhancement attempt yet.
+    referencing them and no enhancement attempt yet).
     """
-    done = 0
-    failed = 0
+    ctx.done["recordings"] = 0
+    ctx.failed["recordings"] = 0
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -585,7 +567,7 @@ def _run_recordings_phase(
                     conn.commit()
                 except _PER_ITEM_RETRIABLE_ERRORS as exc:
                     conn.rollback()
-                    failed += 1
+                    ctx.failed["recordings"] += 1
                     logger.warning(
                         "mb_recording_enhancement_failed",
                         mbid=recording.id,
@@ -593,7 +575,7 @@ def _run_recordings_phase(
                         error=str(exc),
                     )
                 else:
-                    done += 1
+                    ctx.done["recordings"] += 1
                     logger.info(
                         "mb_recording_enhanced",
                         mbid=recording.id,
@@ -602,7 +584,7 @@ def _run_recordings_phase(
 
                 _advance_progress(ctx, "recordings", f"recording:{recording.id}")
 
-            metrics = _phase_metrics(
+            ctx.metrics["recordings"] = _phase_metrics(
                 rows_queued=len(pending_recordings),
                 distinct_mbids=len({r.id for r in pending_recordings}),
                 live_fetches_delta=mb_client.live_fetches - live_start,
@@ -619,17 +601,11 @@ def _run_recordings_phase(
                AND r.enhanced_at IS NULL""",
         )
         # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
-        orphans_deleted = max(0, orphan_cur.rowcount)
-        if orphans_deleted > 0:
-            logger.info("orphaned_recordings_cleaned", count=orphans_deleted)
+        ctx.orphans_deleted = max(0, orphan_cur.rowcount)
+        if ctx.orphans_deleted > 0:
+            logger.info("orphaned_recordings_cleaned", count=ctx.orphans_deleted)
 
         conn.commit()
-
-    return _PhaseResult(
-        done=done,
-        failed=failed,
-        metrics=metrics,
-    ), orphans_deleted
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -643,23 +619,14 @@ def mb_enrichment_task() -> dict[str, int]:
     task_id = uuid.uuid4().hex
     task_started_at = datetime.now(UTC)
 
-    artists_done = 0
-    artists_failed = 0
-    works_done = 0
-    works_failed = 0
-    recordings_done = 0
-    recordings_failed = 0
-    orphans_deleted = 0
     total = 0
-    # ctx is created after `total` is computed inside the try; the outer
-    # except handler reads ctx.processed if it was reached, else falls
-    # back to 0. Pre-declared so the type-checker sees a single name.
+    # ctx is created after `total` is computed inside the try block. The
+    # outer except handler reads ctx.processed / ctx.done / ctx.failed /
+    # ctx.metrics if ctx was reached, else falls back to defaults. All
+    # phase counters live on ctx so a mid-loop raise leaves accurate
+    # partial values visible to the FAILED progress upsert and the
+    # mb_task_summary `finally` emission.
     ctx: _PhaseContext | None = None
-
-    # Per-phase metrics for the final `mb_task_summary` event. Each phase
-    # writes its own entry on success; on mid-task raise, partially-built
-    # phases survive to the `finally` summary emission.
-    phases: dict[str, dict[str, object]] = {}
 
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
@@ -707,10 +674,10 @@ def mb_enrichment_task() -> dict[str, int]:
             },
         ))
 
-        # Single ctx shared across phases. `ctx.processed` is the running
-        # per-row counter mutated by each helper as it advances; the outer
-        # except handler reads it to record an accurate `processed` value
-        # in the FAILED progress upsert if a phase raises mid-loop.
+        # Single ctx shared across phases. Helpers mutate ctx.processed /
+        # ctx.done / ctx.failed / ctx.metrics per row so the outer except
+        # handler can read accurate partial values if a phase raises
+        # mid-loop.
         ctx = _PhaseContext(
             task_id=task_id,
             task_started_at=task_started_at,
@@ -718,31 +685,18 @@ def mb_enrichment_task() -> dict[str, int]:
             progress_repo=progress_repo,
         )
 
-        artists_result = _run_artist_phase(pending_artists, ctx, settings)
-        artists_done = artists_result.done
-        artists_failed = artists_result.failed
-        phases["artists"] = artists_result.metrics
-
-        works_result = _run_works_phase(pending_works, ctx, settings)
-        works_done = works_result.done
-        works_failed = works_result.failed
-        phases["works"] = works_result.metrics
-
-        recordings_result, orphans_deleted = _run_recordings_phase(
-            pending_recordings, ctx, settings,
-        )
-        recordings_done = recordings_result.done
-        recordings_failed = recordings_result.failed
-        phases["recordings"] = recordings_result.metrics
+        _run_artist_phase(pending_artists, ctx, settings)
+        _run_works_phase(pending_works, ctx, settings)
+        _run_recordings_phase(pending_recordings, ctx, settings)
 
         completion_details = {
-            "artists_done": artists_done,
-            "artists_failed": artists_failed,
-            "works_done": works_done,
-            "works_failed": works_failed,
-            "recordings_done": recordings_done,
-            "recordings_failed": recordings_failed,
-            "orphans_deleted": orphans_deleted,
+            "artists_done": ctx.done.get("artists", 0),
+            "artists_failed": ctx.failed.get("artists", 0),
+            "works_done": ctx.done.get("works", 0),
+            "works_failed": ctx.failed.get("works", 0),
+            "recordings_done": ctx.done.get("recordings", 0),
+            "recordings_failed": ctx.failed.get("recordings", 0),
+            "orphans_deleted": ctx.orphans_deleted,
         }
 
         progress_repo.upsert(TaskProgress(
@@ -750,7 +704,7 @@ def mb_enrichment_task() -> dict[str, int]:
             task_type=TaskType.MB_ENRICHMENT,
             status=TaskStatus.COMPLETED,
             progress_data={
-                "processed": ctx.processed if ctx is not None else 0,
+                "processed": ctx.processed,
                 "total": total,
                 **completion_details,
             },
@@ -798,20 +752,27 @@ def mb_enrichment_task() -> dict[str, int]:
         raise
 
     finally:
-        # Emit the summary even on partial failure. `phases` is built
+        # Emit the summary even on partial failure. `ctx.metrics` is built
         # incrementally (each phase writes its own key on success), so a
         # failure mid-recordings still produces a useful "artists + works"
         # summary. Narrow suppress: only catch serialization errors from
-        # an unexpected value in `phases`. A broader catch would silently
-        # hide logging-infrastructure bugs we'd want to surface.
+        # an unexpected value in the metrics dict. A broader catch would
+        # silently hide logging-infrastructure bugs we'd want to surface.
         with contextlib.suppress(TypeError, ValueError):
             logger.info(
                 "mb_task_summary",
                 task_type="mb_enrichment",
-                phases=phases,
+                phases=ctx.metrics if ctx is not None else {},
             )
         if progress_conn is not None:
             progress_conn.close()
+
+    artists_done = ctx.done.get("artists", 0) if ctx is not None else 0
+    artists_failed = ctx.failed.get("artists", 0) if ctx is not None else 0
+    works_done = ctx.done.get("works", 0) if ctx is not None else 0
+    works_failed = ctx.failed.get("works", 0) if ctx is not None else 0
+    recordings_done = ctx.done.get("recordings", 0) if ctx is not None else 0
+    recordings_failed = ctx.failed.get("recordings", 0) if ctx is not None else 0
 
     logger.info(
         "mb_enrichment_task_complete",
