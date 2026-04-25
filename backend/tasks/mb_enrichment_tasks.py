@@ -253,21 +253,23 @@ def coalesce_recording_lookups(
     return result
 
 
-@dataclass(frozen=True)
+@dataclass
 class _PhaseContext:
     """Shared task/progress state passed to each phase helper.
 
-    Frozen so a phase helper can't accidentally mutate the orchestrator's
-    view of `processed_start` / `total` etc. The running `processed`
-    counter is returned as a delta from each helper instead of mutated
-    in place.
+    `processed` is the running per-row counter. Helpers mutate it directly
+    so the orchestrator's outer try/except can read an accurate value if a
+    phase raises mid-loop — otherwise the FAILED progress upsert would
+    report a stale `processed` from before the phase started, even though
+    per-item progress upserts inside the helper had already advanced the
+    DB-visible state.
     """
 
     task_id: str
     task_started_at: datetime
     total: int
-    processed_start: int
     progress_repo: PgTaskProgressRepository
+    processed: int = 0
 
 
 @dataclass(frozen=True)
@@ -278,26 +280,33 @@ class _PhaseResult:
     (rows_queued, distinct_mbids, live_fetches_delta, cache_hits_delta,
     duplicate_mbid_ratio). Recordings phase additionally returns
     orphans_deleted as a separate scalar — see `_run_recordings_phase`.
+    The running `processed` counter lives on `_PhaseContext` (mutated in
+    place) and is not returned here.
     """
 
     done: int
     failed: int
-    processed_delta: int
     metrics: dict[str, object]
 
 
-def _emit_progress(
+def _advance_progress(
     ctx: _PhaseContext,
-    processed: int,
     phase: str,
     current_item: str,
 ) -> None:
+    """Increment `ctx.processed` and emit a RUNNING progress upsert.
+
+    Helpers call this after each row finishes (success or per-item-failure
+    path); the increment must be visible to the orchestrator's outer
+    except handler so the FAILED upsert reports an accurate count.
+    """
+    ctx.processed += 1
     ctx.progress_repo.upsert(TaskProgress(
         task_id=ctx.task_id,
         task_type=TaskType.MB_ENRICHMENT,
         status=TaskStatus.RUNNING,
         progress_data={
-            "processed": processed,
+            "processed": ctx.processed,
             "total": ctx.total,
             "current_item": current_item,
             "phase": phase,
@@ -345,7 +354,6 @@ def _run_artist_phase(
     """
     done = 0
     failed = 0
-    processed = ctx.processed_start
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -424,8 +432,7 @@ def _run_artist_phase(
                             name=artist.name,
                         )
 
-                processed += 1
-                _emit_progress(ctx, processed, "artists", f"artist:{artist.id}")
+                _advance_progress(ctx, "artists", f"artist:{artist.id}")
 
             logger.info(
                 "mb_artist_phase_summary",
@@ -445,7 +452,6 @@ def _run_artist_phase(
     return _PhaseResult(
         done=done,
         failed=failed,
-        processed_delta=processed - ctx.processed_start,
         metrics=metrics,
     )
 
@@ -462,7 +468,6 @@ def _run_works_phase(
     """
     done = 0
     failed = 0
-    processed = ctx.processed_start
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -489,8 +494,7 @@ def _run_works_phase(
                 done += 1
                 logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
 
-            processed += 1
-            _emit_progress(ctx, processed, "works", f"work:{work.id}")
+            _advance_progress(ctx, "works", f"work:{work.id}")
         # No phase-level commit — per-item commits already flushed each
         # successful mark_enhanced write independently.
 
@@ -510,7 +514,6 @@ def _run_works_phase(
     return _PhaseResult(
         done=done,
         failed=failed,
-        processed_delta=processed - ctx.processed_start,
         metrics=metrics,
     )
 
@@ -528,7 +531,6 @@ def _run_recordings_phase(
     """
     done = 0
     failed = 0
-    processed = ctx.processed_start
 
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
@@ -598,10 +600,7 @@ def _run_recordings_phase(
                         title=recording.title,
                     )
 
-                processed += 1
-                _emit_progress(
-                    ctx, processed, "recordings", f"recording:{recording.id}",
-                )
+                _advance_progress(ctx, "recordings", f"recording:{recording.id}")
 
             metrics = _phase_metrics(
                 rows_queued=len(pending_recordings),
@@ -629,7 +628,6 @@ def _run_recordings_phase(
     return _PhaseResult(
         done=done,
         failed=failed,
-        processed_delta=processed - ctx.processed_start,
         metrics=metrics,
     ), orphans_deleted
 
@@ -652,8 +650,11 @@ def mb_enrichment_task() -> dict[str, int]:
     recordings_done = 0
     recordings_failed = 0
     orphans_deleted = 0
-    processed = 0
     total = 0
+    # ctx is created after `total` is computed inside the try; the outer
+    # except handler reads ctx.processed if it was reached, else falls
+    # back to 0. Pre-declared so the type-checker sees a single name.
+    ctx: _PhaseContext | None = None
 
     # Per-phase metrics for the final `mb_task_summary` event. Each phase
     # writes its own entry on success; on mid-task raise, partially-built
@@ -706,33 +707,32 @@ def mb_enrichment_task() -> dict[str, int]:
             },
         ))
 
-        def _ctx(processed_start: int) -> _PhaseContext:
-            return _PhaseContext(
-                task_id=task_id,
-                task_started_at=task_started_at,
-                total=total,
-                processed_start=processed_start,
-                progress_repo=progress_repo,
-            )
+        # Single ctx shared across phases. `ctx.processed` is the running
+        # per-row counter mutated by each helper as it advances; the outer
+        # except handler reads it to record an accurate `processed` value
+        # in the FAILED progress upsert if a phase raises mid-loop.
+        ctx = _PhaseContext(
+            task_id=task_id,
+            task_started_at=task_started_at,
+            total=total,
+            progress_repo=progress_repo,
+        )
 
-        artists_result = _run_artist_phase(pending_artists, _ctx(processed), settings)
+        artists_result = _run_artist_phase(pending_artists, ctx, settings)
         artists_done = artists_result.done
         artists_failed = artists_result.failed
-        processed += artists_result.processed_delta
         phases["artists"] = artists_result.metrics
 
-        works_result = _run_works_phase(pending_works, _ctx(processed), settings)
+        works_result = _run_works_phase(pending_works, ctx, settings)
         works_done = works_result.done
         works_failed = works_result.failed
-        processed += works_result.processed_delta
         phases["works"] = works_result.metrics
 
         recordings_result, orphans_deleted = _run_recordings_phase(
-            pending_recordings, _ctx(processed), settings,
+            pending_recordings, ctx, settings,
         )
         recordings_done = recordings_result.done
         recordings_failed = recordings_result.failed
-        processed += recordings_result.processed_delta
         phases["recordings"] = recordings_result.metrics
 
         completion_details = {
@@ -750,7 +750,7 @@ def mb_enrichment_task() -> dict[str, int]:
             task_type=TaskType.MB_ENRICHMENT,
             status=TaskStatus.COMPLETED,
             progress_data={
-                "processed": processed,
+                "processed": ctx.processed if ctx is not None else 0,
                 "total": total,
                 **completion_details,
             },
@@ -775,7 +775,10 @@ def mb_enrichment_task() -> dict[str, int]:
                     task_type=TaskType.MB_ENRICHMENT,
                     status=TaskStatus.FAILED,
                     progress_data={
-                        "processed": processed,
+                        # Read live counter from ctx so a mid-loop raise
+                        # records the actual rows processed, not the
+                        # pre-phase value.
+                        "processed": ctx.processed if ctx is not None else 0,
                         "total": total,
                         "error": str(exc),
                     },
