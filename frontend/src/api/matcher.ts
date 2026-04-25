@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { MbArtistSearchResponseSchema } from "@/lib/schemas/matcher";
 import type {
@@ -25,6 +25,10 @@ export function useMatchingQueue(limit = 50, offset = 0) {
     queryKey: matchingQueueKey(limit, offset),
     queryFn: () =>
       apiFetch<MatchingQueue>(`/api/v1/matching/queue?limit=${limit}&offset=${offset}`),
+    // Without this, switching offsets makes `data` undefined while the new page
+    // fetches, which collapses MatcherBrowser's totalPages to 1 and trips its
+    // page-clamp effect into setPage(1) mid-traversal.
+    placeholderData: keepPreviousData,
   });
 }
 

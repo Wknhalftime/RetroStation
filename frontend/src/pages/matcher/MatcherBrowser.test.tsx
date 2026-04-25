@@ -95,6 +95,54 @@ describe("MatcherBrowser rendering", () => {
   });
 });
 
+describe("MatcherBrowser — pagination across loading transitions", () => {
+  it("keeps the page indicator on 'Page 2 of 4' across the Next click and fetch (regression: bug-1)", async () => {
+    // Regression for the resolution-center pagination bug where clicking
+    // Next would snap back to page 1 mid-traversal. Root cause: the queue
+    // query did not preserve previous data across query-key changes, so
+    // `data` briefly became undefined while the new offset fetched, which
+    // collapsed totalPages to 1 and tripped the page-clamp useEffect into
+    // setPage(1). With placeholderData=keepPreviousData on useMatchingQueue,
+    // total stays populated and the clamp does not fire.
+    const page1Items = [makeArtist("00000000-0000-0000-0000-000000000001", "Alpha")];
+    const page2Items = [makeArtist("00000000-0000-0000-0000-000000000002", "Bravo")];
+
+    let resolvePage2: (val: { items: QueueArtist[]; total: number }) => void = () => {};
+    const page2Promise = new Promise<{ items: QueueArtist[]; total: number }>((r) => {
+      resolvePage2 = r;
+    });
+
+    mockedApiFetch.mockImplementation(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/api/v1/matching/queue")) {
+        if (u.includes("offset=0")) return { items: page1Items, total: 100 };
+        if (u.includes("offset=25")) return page2Promise;
+      }
+      return {};
+    });
+
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    // Page 1 lands.
+    await screen.findByText(/Page 1 of 4/);
+
+    // Click Next while the page-2 fetch is still pending. Without the fix,
+    // total would transiently fall to 0 here and the clamp effect would
+    // setPage(1) before the fetch even resolves.
+    fireEvent.click(screen.getByRole("button", { name: /Next/i }));
+
+    // The indicator must read "Page 2 of 4" while page-2 is still in flight.
+    // This is the assertion that fails without keepPreviousData.
+    await screen.findByText(/Page 2 of 4/);
+
+    // Resolve the deferred fetch and confirm the new items render.
+    resolvePage2({ items: page2Items, total: 100 });
+    await screen.findByText("Bravo");
+    expect(screen.queryByText("Alpha")).toBeNull();
+    expect(screen.getByText(/Page 2 of 4/)).toBeDefined();
+  });
+});
+
 describe("MatcherBrowser — MB search target-artist capture", () => {
   it("captures the queue artist ID at MB-search-open time so a later selection change does not redirect the mutation", async () => {
     const artistA = makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha");
