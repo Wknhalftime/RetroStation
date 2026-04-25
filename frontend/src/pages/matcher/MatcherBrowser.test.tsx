@@ -95,6 +95,40 @@ describe("MatcherBrowser rendering", () => {
   });
 });
 
+describe("MatcherBrowser — pagination across loading transitions", () => {
+  it("keeps the page indicator on 'Page 2 of 4' across the Next click and fetch (regression: bug-1)", async () => {
+    const page1Items = [makeArtist("00000000-0000-0000-0000-000000000001", "Alpha")];
+    const page2Items = [makeArtist("00000000-0000-0000-0000-000000000002", "Bravo")];
+
+    let resolvePage2: (val: { items: QueueArtist[]; total: number }) => void = () => {};
+    const page2Promise = new Promise<{ items: QueueArtist[]; total: number }>((r) => {
+      resolvePage2 = r;
+    });
+
+    mockedApiFetch.mockImplementation(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/api/v1/matching/queue")) {
+        if (u.includes("offset=0")) return { items: page1Items, total: 100 };
+        if (u.includes("offset=25")) return page2Promise;
+      }
+      return {};
+    });
+
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    await screen.findByText(/Page 1 of 4/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Next/i }));
+
+    await screen.findByText(/Page 2 of 4/);
+
+    resolvePage2({ items: page2Items, total: 100 });
+    await screen.findByText("Bravo");
+    expect(screen.queryByText("Alpha")).toBeNull();
+    expect(screen.getByText(/Page 2 of 4/)).toBeDefined();
+  });
+});
+
 describe("MatcherBrowser — MB search target-artist capture", () => {
   it("captures the queue artist ID at MB-search-open time so a later selection change does not redirect the mutation", async () => {
     const artistA = makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha");
