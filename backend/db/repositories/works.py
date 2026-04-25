@@ -63,8 +63,17 @@ class PgWorkRepository(WorkRepository):
         return [self._row_to_model(r) for r in rows]
 
     def list_needing_enhancement(self) -> list[Work]:
+        # Mirrors PgArtistRepository.list_unenhanced: rows with a populated
+        # enhancement_error are excluded so a permanent failure (once any
+        # future code path writes to the column) does not re-queue on every
+        # run. Currently no code writes enhancement_error for works, making
+        # this a defensive no-op; wired here for parity and forward-safety.
+        # Re-queue a row by clearing the column: UPDATE works SET
+        # enhancement_error = NULL WHERE id = %s.
         rows = self._conn.execute(
-            "SELECT * FROM works WHERE needs_enhancement = TRUE"
+            """SELECT * FROM works
+               WHERE needs_enhancement = TRUE
+                 AND enhancement_error IS NULL"""
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

@@ -20,7 +20,10 @@ class FakeWorkRepository(WorkRepository):
         return [w for w in self._data.values() if w.artist_id == artist_id]
 
     def list_needing_enhancement(self) -> list[Work]:
-        return [w for w in self._data.values() if w.needs_enhancement]
+        return [
+            w for w in self._data.values()
+            if w.needs_enhancement and w.enhancement_error is None
+        ]
 
     def mark_enhanced(self, mbid: str) -> None:
         if work := self._data.get(mbid):
