@@ -39,15 +39,15 @@ export function MatcherBrowser() {
   // Switching pages can scroll the selected artist off-screen (the right-side
   // panels would otherwise keep acting on an artist not shown in the list).
   // Centralize page changes through this helper so the selection clears.
-  const goToPage = (updater: (prev: number) => number) => {
-    setPage((prev) => {
-      const next = updater(prev);
-      if (next !== prev) setSelectedArtist(null);
-      return next;
-    });
+  // Note: calling setState inside a setState updater is a React anti-pattern
+  // that can cause unexpected behaviour in concurrent mode — use two separate
+  // state updates here instead.
+  const goToPage = (newPage: number) => {
+    setPage(newPage);
+    setSelectedArtist(null);
   };
   const offset = (page - 1) * PAGE_SIZE;
-  const { data, isLoading, isError } = useMatchingQueue(PAGE_SIZE, offset);
+  const { data, isLoading, isError, isPlaceholderData } = useMatchingQueue(PAGE_SIZE, offset);
   const rerunMatching = useRerunMatching();
   const resolveIdentity = useResolveIdentity();
   const resolveArtist = useResolveArtist();
@@ -66,16 +66,25 @@ export function MatcherBrowser() {
   const total: number = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Clamp page when `total` shrinks (after resolutions / re-runs). Without
-  // this, a curator who is on page 3 when enough items resolve to fit on
-  // page 1 gets stuck fetching offset=50 and sees items=[] even though
-  // total>0 — which would wrongly trigger the "queue empty" state.
+  // Clamp page when `total` shrinks (e.g. after resolving items reduces the queue).
+  // Without this a curator on page 3 would fetch offset=50 and see items=[] even
+  // though total > 0, wrongly showing the "queue empty" UI.
+  //
+  // Guards — only clamp when ALL of these hold:
+  //   1. data != null  — real or placeholder data is available (not a blank loading state)
+  //   2. total > 0     — the response has real rows; total=0 signals an empty fetch, not shrinkage
+  //   3. !isPlaceholderData — we are seeing ACTUAL data for the current page, not the stale
+  //                           placeholder from the previous page.  During a page transition
+  //                           keepPreviousData shows the PREVIOUS page's total, so totalPages
+  //                           reflects THAT page — if we clamped now we'd bounce the user back
+  //                           before the new page ever loads.
+  //   4. page > totalPages — the current page genuinely exceeds the new last page
   useEffect(() => {
-    if (page > totalPages) {
+    if (data != null && total > 0 && !isPlaceholderData && page > totalPages) {
       setPage(totalPages);
       setSelectedArtist(null);
     }
-  }, [page, totalPages]);
+  }, [page, totalPages, data, total, isPlaceholderData]);
 
   function handleFileSearch(identityId: string) {
     setActiveIdentityId(identityId);
@@ -192,7 +201,7 @@ export function MatcherBrowser() {
             </ul>
             <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
               <button
-                onClick={() => goToPage((p) => Math.max(1, p - 1))}
+                onClick={() => goToPage(Math.max(1, page - 1))}
                 disabled={page === 1}
                 className="text-xs text-gray-500 disabled:opacity-40"
               >
@@ -202,7 +211,7 @@ export function MatcherBrowser() {
                 Page {page} of {totalPages} ({total} total)
               </span>
               <button
-                onClick={() => goToPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => goToPage(Math.min(totalPages, page + 1))}
                 disabled={page === totalPages}
                 className="text-xs text-gray-500 disabled:opacity-40"
               >

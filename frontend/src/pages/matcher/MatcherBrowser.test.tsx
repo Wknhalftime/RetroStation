@@ -10,9 +10,10 @@
  * by the hook-level tests and the comments describing the invariants
  * in MatcherBrowser.tsx.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager } from "@tanstack/query-core";
 import type { ReactNode } from "react";
 import type { QueueArtist } from "@/lib/schemas/matcher";
 
@@ -26,7 +27,18 @@ import { MatcherBrowser } from "./MatcherBrowser";
 function makeClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      queries: {
+        retry: false,
+        // Disable focus-triggered refetches so jsdom focus events (fired
+        // by act() / waitFor internally) don't cause a spurious re-fetch
+        // of the previous page's query during pagination tests.
+        refetchOnWindowFocus: false,
+        // Prevent immediate stale-triggered background refetches.  With the
+        // default staleTime of 0 every resolved fetch is immediately "stale",
+        // and some React Query / React 19 interactions can cause a spurious
+        // remount-triggered re-fetch of the previous-page query.
+        staleTime: Infinity,
+      },
       mutations: { retry: false },
     },
   });
@@ -42,6 +54,19 @@ const mockedApiFetch = vi.mocked(apiFetch);
 
 beforeEach(() => {
   mockedApiFetch.mockReset();
+  // TanStack Query v5 normally uses setTimeout(0) to batch+schedule store
+  // notifications.  In tests we need those notifications to fire *within* the
+  // React act() window so that React commits the resulting re-renders before
+  // waitFor starts polling.  Using a synchronous scheduler means the notify
+  // callbacks run immediately inside the batch flush, which happens in the
+  // same microtask chain as the resolved fetch — all inside await act().
+  notifyManager.setScheduler((cb) => cb());
+});
+
+afterEach(() => {
+  // Restore the default macrotask scheduler so this test file doesn't bleed
+  // into other test suites that rely on the real scheduling behaviour.
+  notifyManager.setScheduler((cb) => setTimeout(cb, 0));
 });
 
 function makeArtist(id: string, name: string): QueueArtist {
@@ -195,5 +220,66 @@ describe("MatcherBrowser — MB search target-artist capture", () => {
       expect(url).toContain(artistA.id);
       expect(url).not.toContain(artistB.id);
     });
+  });
+});
+
+
+describe("MatcherBrowser — pagination", () => {
+  it("navigating to the next page does not reset to page 1 while the new page is loading", async () => {
+    const page1Artists = Array.from({ length: 25 }, (_, i) =>
+      makeArtist(
+        `00000000-0000-0000-0000-0000000000${String(i).padStart(2, "0")}`,
+        `Artist ${i + 1}`
+      )
+    );
+    const page2Artists = Array.from({ length: 25 }, (_, i) =>
+      makeArtist(
+        `00000000-0000-0000-0000-0000000001${String(i).padStart(2, "0")}`,
+        `Artist ${i + 26}`
+      )
+    );
+
+    // Both pages resolve immediately — Promise.resolve() still goes through a
+    // microtask tick, which is enough to expose the original bug (the clamping
+    // useEffect would fire while data was transiently undefined, see totalPages
+    // drop to 1, and reset page back to 1 before the data arrived).
+    mockedApiFetch.mockImplementation((url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("offset=0"))  return Promise.resolve({ items: page1Artists, total: 50 });
+      if (u.includes("offset=25")) return Promise.resolve({ items: page2Artists, total: 50 });
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    // Wait until page 1 is fully rendered.
+    await waitFor(() => {
+      expect(screen.getByText(/Page 1 of 2/)).toBeDefined();
+    });
+
+    // Click Next — page state becomes 2. The bug: without the fix the clamping
+    // useEffect fires while data is transiently undefined (totalPages drops to
+    // 1) and resets page back to 1.
+    //
+    // Use async act() so that after the click React 19 flushes all pending
+    // work: the setPage(2) render, the observer.setOptions effect, the fetch
+    // microtask, and the subsequent TanStack Query queueMicrotask notification
+    // (queueMicrotask because we override the scheduler in beforeEach).
+    // Plain fireEvent.click uses only synchronous act(), which ends before
+    // those microtasks can run, leaving the notification unprocessed.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Next/i }));
+    });
+
+    // By the time await act() resolves, the synchronous TQ scheduler has fired
+    // all store notifications and React has committed the page-2 render.
+    // Use waitFor as a safety net for any remaining async React work.
+    await waitFor(() => {
+      expect(screen.getByText("Artist 26")).toBeDefined();
+    });
+
+    // Secondary assertions: page-1 artists must be gone once page 2 loaded.
+    expect(screen.queryByText("Artist 1")).toBeNull();
+    expect(screen.getByText(/Page 2 of 2/)).toBeDefined();
   });
 });
