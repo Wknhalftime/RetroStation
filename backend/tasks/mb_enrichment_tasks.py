@@ -543,6 +543,13 @@ def _run_recordings_phase(
             recording_map = coalesce_recording_lookups(
                 (r.id for r in pending_recordings), mb_client,
             )
+            # Commit pre-pass cache writes NOW so they can't be rolled
+            # back by a later per-item rollback. Otherwise a queue with
+            # a failing first item silently discards all coalesced
+            # mb_cache rows, re-issuing live HTTP on the next run.
+            # Mirrors the artists phase pattern.
+            conn.commit()
+
             for recording in pending_recordings:
                 # Per-item commit: a single recording's failure never
                 # rolls back previously successful enhancements.
@@ -641,6 +648,7 @@ def mb_enrichment_task() -> dict[str, int]:
     artists_done = 0
     artists_failed = 0
     works_done = 0
+    works_failed = 0
     recordings_done = 0
     recordings_failed = 0
     orphans_deleted = 0
@@ -715,6 +723,7 @@ def mb_enrichment_task() -> dict[str, int]:
 
         works_result = _run_works_phase(pending_works, _ctx(processed), settings)
         works_done = works_result.done
+        works_failed = works_result.failed
         processed += works_result.processed_delta
         phases["works"] = works_result.metrics
 
@@ -730,6 +739,7 @@ def mb_enrichment_task() -> dict[str, int]:
             "artists_done": artists_done,
             "artists_failed": artists_failed,
             "works_done": works_done,
+            "works_failed": works_failed,
             "recordings_done": recordings_done,
             "recordings_failed": recordings_failed,
             "orphans_deleted": orphans_deleted,
@@ -805,6 +815,7 @@ def mb_enrichment_task() -> dict[str, int]:
         artists_done=artists_done,
         artists_failed=artists_failed,
         works_done=works_done,
+        works_failed=works_failed,
         recordings_done=recordings_done,
         recordings_failed=recordings_failed,
     )
@@ -813,6 +824,7 @@ def mb_enrichment_task() -> dict[str, int]:
         "artists_done": artists_done,
         "artists_failed": artists_failed,
         "works_done": works_done,
+        "works_failed": works_failed,
         "recordings_done": recordings_done,
         "recordings_failed": recordings_failed,
     }
