@@ -1,0 +1,21 @@
+-- Make mb_cache UNLOGGED.
+--
+-- mb_cache is a write-through buffer for MusicBrainz API responses with a
+-- 30-day TTL. The data is fully reconstructable from MB on a cache miss
+-- (no FKs reference it; no domain row depends on a particular cached blob),
+-- so the durability guarantees of a logged table are not needed.
+--
+-- Trade-offs:
+--   * No WAL on inserts/updates/deletes — cuts write amplification on the
+--     hottest write path during enrichment / artist matching backfills.
+--   * NOT replicated to standbys — fine, this is a single-primary deploy.
+--   * Truncated on crash recovery — acceptable: a missing cache row simply
+--     forces one live MB lookup that would have happened anyway after the
+--     30-day TTL expired.
+--
+-- Safe to run inside a transaction: ALTER TABLE ... SET UNLOGGED takes an
+-- ACCESS EXCLUSIVE lock and rewrites the table, but mb_cache has no FKs
+-- to/from logged tables, so the constraint that would otherwise block
+-- this conversion does not apply.
+
+ALTER TABLE mb_cache SET UNLOGGED;
