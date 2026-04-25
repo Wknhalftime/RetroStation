@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -12,12 +13,12 @@ import psycopg
 import structlog
 from psycopg import sql
 
-from backend.config import get_settings
+from backend.config import Settings, get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.catalog import Artist
+from backend.domain.catalog import Artist, Recording, Work
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.matching_constants import MB_AUTO_LINK_SCORE
@@ -252,6 +253,380 @@ def coalesce_recording_lookups(
     return result
 
 
+@dataclass(frozen=True)
+class _PhaseContext:
+    """Shared task/progress state passed to each phase helper.
+
+    Frozen so a phase helper can't accidentally mutate the orchestrator's
+    view of `processed_start` / `total` etc. The running `processed`
+    counter is returned as a delta from each helper instead of mutated
+    in place.
+    """
+
+    task_id: str
+    task_started_at: datetime
+    total: int
+    processed_start: int
+    progress_repo: PgTaskProgressRepository
+
+
+@dataclass(frozen=True)
+class _PhaseResult:
+    """Outputs every phase produces.
+
+    `metrics` matches the schema emitted in `mb_task_summary.phases.<name>`
+    (rows_queued, distinct_mbids, live_fetches_delta, cache_hits_delta,
+    duplicate_mbid_ratio). Recordings phase additionally returns
+    orphans_deleted as a separate scalar — see `_run_recordings_phase`.
+    """
+
+    done: int
+    failed: int
+    processed_delta: int
+    metrics: dict[str, object]
+
+
+def _emit_progress(
+    ctx: _PhaseContext,
+    processed: int,
+    phase: str,
+    current_item: str,
+) -> None:
+    ctx.progress_repo.upsert(TaskProgress(
+        task_id=ctx.task_id,
+        task_type=TaskType.MB_ENRICHMENT,
+        status=TaskStatus.RUNNING,
+        progress_data={
+            "processed": processed,
+            "total": ctx.total,
+            "current_item": current_item,
+            "phase": phase,
+        },
+        started_at=ctx.task_started_at,
+        updated_at=datetime.now(UTC),
+    ))
+
+
+def _phase_metrics(
+    *,
+    rows_queued: int,
+    distinct_mbids: int,
+    live_fetches_delta: int,
+    cache_hits_delta: int,
+) -> dict[str, object]:
+    """Build the per-phase entry for the mb_task_summary event.
+
+    `duplicate_mbid_ratio` is None only when there is no input — zero
+    distinct on positive rows produces 1.0 (well-defined: "no MBID
+    diversity in the input").
+    """
+    return {
+        "rows_queued": rows_queued,
+        "distinct_mbids": distinct_mbids,
+        "live_fetches_delta": live_fetches_delta,
+        "cache_hits_delta": cache_hits_delta,
+        "duplicate_mbid_ratio": (
+            1.0 - (distinct_mbids / rows_queued) if rows_queued else None
+        ),
+    }
+
+
+def _run_artist_phase(
+    pending_artists: list[Artist],
+    ctx: _PhaseContext,
+    settings: Settings,
+) -> _PhaseResult:
+    """Tier-1/2/3 artist enhancement with MBID coalescing.
+
+    Per-row failure isolation: transient errors roll back ONE artist's
+    partial writes and leave it in the queue for the next run; permanent
+    404s are quarantined inside `_enhance_artist`. Whole-phase aborts
+    propagate.
+    """
+    done = 0
+    failed = 0
+    processed = ctx.processed_start
+
+    with connect_sync(settings.database_url) as conn:
+        repos = RepositoryFactory(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
+        with MusicBrainzApiClient(cache_repo) as mb_client:
+            live_start = mb_client.live_fetches
+            hits_start = mb_client.cache_hits
+            rows_queued = len(pending_artists)
+            distinct_mbids = {
+                a.mbid for a in pending_artists if a.mbid is not None
+            }
+            mbid_map = coalesce_artist_lookups(distinct_mbids, mb_client)
+            # Commit pre-pass cache writes NOW so they can't be rolled
+            # back by a later per-item rollback. Otherwise a queue with
+            # a failing first item silently discards all coalesced
+            # mb_cache rows, re-issuing live HTTP on the next run.
+            conn.commit()
+
+            logger.info(
+                "mb_artist_phase_start",
+                rows_queued=rows_queued,
+                distinct_mbids=len(distinct_mbids),
+                bare_artists=sum(
+                    1 for a in pending_artists if a.mbid is None
+                ),
+            )
+
+            for artist in pending_artists:
+                try:
+                    outcome = _enhance_artist(
+                        artist,
+                        mb_client,
+                        conn,
+                        repos,
+                        mbid_map=mbid_map,
+                        auto_link_score=settings.mb_auto_link_score,
+                    )
+                    # Commit applies to both ENHANCED (mark_enhanced write)
+                    # and FAILED (mark_enhancement_failed write inside
+                    # _enhance_artist). Both paths must persist.
+                    conn.commit()
+                except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                    # Transient per-item failure: rollback this item's
+                    # partial writes and let it remain in the queue for
+                    # the next run. We deliberately do NOT call
+                    # mark_enhancement_failed here — that would write
+                    # enhancement_error and list_unenhanced's filter
+                    # would then terminally quarantine the artist
+                    # despite the root cause being transient (network
+                    # blip, MB 5xx, idle-connection DB error).
+                    # Permanent 404s are quarantined inside _enhance_artist
+                    # before this except branch is ever reached.
+                    conn.rollback()
+                    failed += 1
+                    logger.warning(
+                        "mb_artist_enhancement_failed",
+                        artist_id=artist.id,
+                        name=artist.name,
+                        reason="per_item_exception",
+                        error=str(exc),
+                    )
+                else:
+                    if outcome is ArtistEnhanceOutcome.FAILED:
+                        failed += 1
+                        logger.warning(
+                            "mb_artist_enhancement_failed",
+                            artist_id=artist.id,
+                            name=artist.name,
+                            reason="mb_lookup_404",
+                        )
+                    else:
+                        done += 1
+                        logger.info(
+                            "mb_artist_enhanced",
+                            artist_id=artist.id,
+                            name=artist.name,
+                        )
+
+                processed += 1
+                _emit_progress(ctx, processed, "artists", f"artist:{artist.id}")
+
+            logger.info(
+                "mb_artist_phase_summary",
+                rows_queued=rows_queued,
+                artists_done=done,
+                artists_failed=failed,
+                cache_hits=mb_client.cache_hits,
+                live_fetches=mb_client.live_fetches,
+            )
+            metrics = _phase_metrics(
+                rows_queued=rows_queued,
+                distinct_mbids=len(distinct_mbids),
+                live_fetches_delta=mb_client.live_fetches - live_start,
+                cache_hits_delta=mb_client.cache_hits - hits_start,
+            )
+
+    return _PhaseResult(
+        done=done,
+        failed=failed,
+        processed_delta=processed - ctx.processed_start,
+        metrics=metrics,
+    )
+
+
+def _run_works_phase(
+    pending_works: list[Work],
+    ctx: _PhaseContext,
+    settings: Settings,
+) -> _PhaseResult:
+    """Mark queued works as enhanced. No MB calls today — only DB writes.
+
+    `failed` counts psycopg.Error per-row failures; `done` counts
+    successful mark_enhanced commits.
+    """
+    done = 0
+    failed = 0
+    processed = ctx.processed_start
+
+    with connect_sync(settings.database_url) as conn:
+        repos = RepositoryFactory(conn)
+
+        for work in pending_works:
+            # Per-item commit: a single work's failure never rolls back
+            # previously successful mark_enhanced writes in this phase.
+            # No MB calls / JSON parsing here, so the catch is scoped
+            # to psycopg.Error — catching httpx/ValueError would mask
+            # logic bugs (KeyError, AttributeError) reaching this block.
+            try:
+                repos.works.mark_enhanced(work.id)
+                conn.commit()
+            except psycopg.Error as exc:
+                conn.rollback()
+                failed += 1
+                logger.warning(
+                    "mb_work_enhancement_failed",
+                    mbid=work.id,
+                    title=work.title,
+                    error=str(exc),
+                )
+            else:
+                done += 1
+                logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
+
+            processed += 1
+            _emit_progress(ctx, processed, "works", f"work:{work.id}")
+        # No phase-level commit — per-item commits already flushed each
+        # successful mark_enhanced write independently.
+
+    distinct_mbids = len({w.mbid for w in pending_works if w.mbid is not None})
+    metrics = _phase_metrics(
+        rows_queued=len(pending_works),
+        distinct_mbids=distinct_mbids,
+        # Works phase does no MB HTTP today (only mark_enhanced DB
+        # writes), so live_fetches / cache_hits deltas are always
+        # zero. If a future enhancement calls MB here, snapshot
+        # counters around this block the same way the artist and
+        # recording phases do.
+        live_fetches_delta=0,
+        cache_hits_delta=0,
+    )
+
+    return _PhaseResult(
+        done=done,
+        failed=failed,
+        processed_delta=processed - ctx.processed_start,
+        metrics=metrics,
+    )
+
+
+def _run_recordings_phase(
+    pending_recordings: list[Recording],
+    ctx: _PhaseContext,
+    settings: Settings,
+) -> tuple[_PhaseResult, int]:
+    """Recording duration backfill with MBID coalescing + orphan cleanup.
+
+    Returns `(result, orphans_deleted)`. `orphans_deleted` is the rowcount
+    from the post-loop DELETE that drops recordings with no library_files
+    referencing them and no enhancement attempt yet.
+    """
+    done = 0
+    failed = 0
+    processed = ctx.processed_start
+
+    with connect_sync(settings.database_url) as conn:
+        repos = RepositoryFactory(conn)
+        cache_repo = PgMusicBrainzCacheRepository(conn)
+        with MusicBrainzApiClient(cache_repo) as mb_client:
+            live_start = mb_client.live_fetches
+            hits_start = mb_client.cache_hits
+            # Pre-pass: one lookup_recording per distinct MBID. Read from
+            # the map inside the loop; absent keys (transient pre-pass
+            # failure) fall through to a live fallback lookup — same
+            # shape as the Tier 2/3 artist coalescing above.
+            recording_map = coalesce_recording_lookups(
+                (r.id for r in pending_recordings), mb_client,
+            )
+            for recording in pending_recordings:
+                # Per-item commit: a single recording's failure never
+                # rolls back previously successful enhancements.
+                #
+                # Narrow try-block: the dict-containment check and the
+                # cached payload lookup are pure dict ops and cannot
+                # raise; only the live lookup_recording fallback and the
+                # DB writes can fail. Counter increments + success log
+                # live in the `else:` branch so a logic bug there
+                # surfaces instead of being silently caught.
+                cache_hit = recording.id in recording_map
+                cached_payload = recording_map.get(recording.id)
+                try:
+                    # Map hit -> use cached value (may be None for a 404
+                    # that was already authoritative). Map miss -> the
+                    # pre-pass failed transiently for this MBID, retry
+                    # the lookup live inside this same try/except.
+                    data = (
+                        cached_payload
+                        if cache_hit
+                        else mb_client.lookup_recording(recording.id)
+                    )
+                    if data and recording.duration_ms is None:
+                        length_ms = data.get("length")
+                        if length_ms is not None:
+                            conn.execute(
+                                "UPDATE recordings SET duration_ms = %s WHERE id = %s",
+                                (int(length_ms), recording.id),
+                            )
+                    repos.recordings.mark_enhanced(recording.id)
+                    conn.commit()
+                except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                    conn.rollback()
+                    failed += 1
+                    logger.warning(
+                        "mb_recording_enhancement_failed",
+                        mbid=recording.id,
+                        title=recording.title,
+                        error=str(exc),
+                    )
+                else:
+                    done += 1
+                    logger.info(
+                        "mb_recording_enhanced",
+                        mbid=recording.id,
+                        title=recording.title,
+                    )
+
+                processed += 1
+                _emit_progress(
+                    ctx, processed, "recordings", f"recording:{recording.id}",
+                )
+
+            metrics = _phase_metrics(
+                rows_queued=len(pending_recordings),
+                distinct_mbids=len({r.id for r in pending_recordings}),
+                live_fetches_delta=mb_client.live_fetches - live_start,
+                cache_hits_delta=mb_client.cache_hits - hits_start,
+            )
+
+        orphan_cur = conn.execute(
+            """DELETE FROM recordings r
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM library_files lf
+                   WHERE lf.recording_id = r.id
+               )
+               AND r.needs_enhancement = FALSE
+               AND r.enhanced_at IS NULL""",
+        )
+        # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
+        orphans_deleted = max(0, orphan_cur.rowcount)
+        if orphans_deleted > 0:
+            logger.info("orphaned_recordings_cleaned", count=orphans_deleted)
+
+        conn.commit()
+
+    return _PhaseResult(
+        done=done,
+        failed=failed,
+        processed_delta=processed - ctx.processed_start,
+        metrics=metrics,
+    ), orphans_deleted
+
+
 @huey.task()  # type: ignore[untyped-decorator]
 def mb_enrichment_task() -> dict[str, int]:
     """Fill metadata on canonical entities flagged needs_enhancement=TRUE.
@@ -273,8 +648,8 @@ def mb_enrichment_task() -> dict[str, int]:
     total = 0
 
     # Per-phase metrics for the final `mb_task_summary` event. Each phase
-    # populates its own entry; works has no MB traffic so its counters are
-    # all zero (schema kept stable for automated runners).
+    # writes its own entry on success; on mid-task raise, partially-built
+    # phases survive to the `finally` summary emission.
     phases: dict[str, dict[str, object]] = {}
 
     progress_conn: psycopg.Connection | None = None
@@ -323,288 +698,33 @@ def mb_enrichment_task() -> dict[str, int]:
             },
         ))
 
-        # ------------------------------------------------------------ artists
-        with connect_sync(settings.database_url) as conn:
-            repos = RepositoryFactory(conn)
-            cache_repo = PgMusicBrainzCacheRepository(conn)
-            with MusicBrainzApiClient(cache_repo) as mb_client:
-                # Snapshot counters at phase entry so the delta stays correct
-                # if the client is ever shared across phases in the future.
-                artists_live_start = mb_client.live_fetches
-                artists_hits_start = mb_client.cache_hits
-                rows_queued = len(pending_artists)
-                distinct_mbids = {
-                    a.mbid for a in pending_artists if a.mbid is not None
-                }
-                mbid_map = coalesce_artist_lookups(distinct_mbids, mb_client)
-                # Commit pre-pass cache writes NOW so they can't be rolled
-                # back by a later per-item rollback. Otherwise a queue with
-                # a failing first item silently discards all coalesced
-                # mb_cache rows, re-issuing live HTTP on the next run.
-                conn.commit()
-
-                logger.info(
-                    "mb_artist_phase_start",
-                    rows_queued=rows_queued,
-                    distinct_mbids=len(distinct_mbids),
-                    bare_artists=sum(
-                        1 for a in pending_artists if a.mbid is None
-                    ),
-                )
-
-                for artist in pending_artists:
-                    try:
-                        outcome = _enhance_artist(
-                            artist,
-                            mb_client,
-                            conn,
-                            repos,
-                            mbid_map=mbid_map,
-                            auto_link_score=settings.mb_auto_link_score,
-                        )
-                        # Commit applies to both ENHANCED (mark_enhanced write)
-                        # and FAILED (mark_enhancement_failed write inside
-                        # _enhance_artist). Both paths must persist.
-                        conn.commit()
-                        if outcome is ArtistEnhanceOutcome.FAILED:
-                            artists_failed += 1
-                            logger.warning(
-                                "mb_artist_enhancement_failed",
-                                artist_id=artist.id,
-                                name=artist.name,
-                                reason="mb_lookup_404",
-                            )
-                        else:
-                            artists_done += 1
-                            logger.info(
-                                "mb_artist_enhanced",
-                                artist_id=artist.id,
-                                name=artist.name,
-                            )
-                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        # Transient per-item failure: rollback this item's
-                        # partial writes and let it remain in the queue for
-                        # the next run. We deliberately do NOT call
-                        # mark_enhancement_failed here — that would write
-                        # enhancement_error and Task 7's list_unenhanced
-                        # filter would then terminally quarantine the artist
-                        # despite the root cause being transient (network
-                        # blip, temporary MB 5xx, idle-connection DB error).
-                        # Only permanent failures (404) quarantine, and those
-                        # are marked inside _enhance_artist before this
-                        # except branch is ever reached.
-                        conn.rollback()
-                        error_msg = str(exc)
-                        artists_failed += 1
-                        logger.warning(
-                            "mb_artist_enhancement_failed",
-                            artist_id=artist.id,
-                            name=artist.name,
-                            reason="per_item_exception",
-                            error=error_msg,
-                        )
-
-                    processed += 1
-                    progress_repo.upsert(TaskProgress(
-                        task_id=task_id,
-                        task_type=TaskType.MB_ENRICHMENT,
-                        status=TaskStatus.RUNNING,
-                        progress_data={
-                            "processed": processed,
-                            "total": total,
-                            "current_item": f"artist:{artist.id}",
-                            "phase": "artists",
-                        },
-                        started_at=task_started_at,
-                        updated_at=datetime.now(UTC),
-                    ))
-
-                logger.info(
-                    "mb_artist_phase_summary",
-                    rows_queued=rows_queued,
-                    artists_done=artists_done,
-                    artists_failed=artists_failed,
-                    cache_hits=mb_client.cache_hits,
-                    live_fetches=mb_client.live_fetches,
-                )
-                phases["artists"] = {
-                    "rows_queued": rows_queued,
-                    "distinct_mbids": len(distinct_mbids),
-                    "live_fetches_delta": (
-                        mb_client.live_fetches - artists_live_start
-                    ),
-                    "cache_hits_delta": (
-                        mb_client.cache_hits - artists_hits_start
-                    ),
-                    # None only when there's no input (see artist_matching
-                    # summary). Zero distinct on positive rows produces 1.0.
-                    "duplicate_mbid_ratio": (
-                        1.0 - (len(distinct_mbids) / rows_queued)
-                        if rows_queued else None
-                    ),
-                }
-
-        # -------------------------------------------------------------- works
-        with connect_sync(settings.database_url) as conn:
-            repos = RepositoryFactory(conn)
-
-            for work in pending_works:
-                # Per-item commit: a single work's failure never rolls back
-                # previously successful mark_enhanced writes in this phase.
-                # This phase does only a DB UPDATE — no MB calls, no JSON
-                # parsing — so the catch is scoped to psycopg.Error only.
-                # httpx/ValueError can't arise here, and catching them
-                # would mask logic bugs (KeyError, AttributeError) that
-                # would reach this block from the mark_enhanced call path.
-                try:
-                    repos.works.mark_enhanced(work.id)
-                    conn.commit()
-                    works_done += 1
-                    logger.info("mb_work_enhanced", mbid=work.id, title=work.title)
-                except psycopg.Error as exc:
-                    conn.rollback()
-                    logger.warning(
-                        "mb_work_enhancement_failed",
-                        mbid=work.id,
-                        title=work.title,
-                        error=str(exc),
-                    )
-
-                processed += 1
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.MB_ENRICHMENT,
-                    status=TaskStatus.RUNNING,
-                    progress_data={
-                        "processed": processed,
-                        "total": total,
-                        "current_item": f"work:{work.id}",
-                        "phase": "works",
-                    },
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                ))
-            # No phase-level commit — per-item commits already flushed each
-            # successful mark_enhanced write independently.
-
-            works_distinct_mbids = len({
-                w.mbid for w in pending_works if w.mbid is not None
-            })
-            works_rows = len(pending_works)
-            phases["works"] = {
-                "rows_queued": works_rows,
-                "distinct_mbids": works_distinct_mbids,
-                # Works phase does no MB HTTP today (only mark_enhanced DB
-                # writes), so live_fetches / cache_hits deltas are always
-                # zero. If a future enhancement calls MB here, snapshot
-                # counters around this block the same way the artist and
-                # recording phases do.
-                "live_fetches_delta": 0,
-                "cache_hits_delta": 0,
-                "duplicate_mbid_ratio": (
-                    1.0 - (works_distinct_mbids / works_rows)
-                    if works_rows else None
-                ),
-            }
-
-        # --------------------------------------------------------- recordings
-        with connect_sync(settings.database_url) as conn:
-            repos = RepositoryFactory(conn)
-            cache_repo = PgMusicBrainzCacheRepository(conn)
-            with MusicBrainzApiClient(cache_repo) as mb_client:
-                recordings_live_start = mb_client.live_fetches
-                recordings_hits_start = mb_client.cache_hits
-                # Pre-pass: one lookup_recording per distinct MBID. Read from
-                # the map inside the loop; absent keys (transient pre-pass
-                # failure) fall through to a live fallback lookup — same
-                # shape as the Tier 2/3 artist coalescing above.
-                recording_map = coalesce_recording_lookups(
-                    (r.id for r in pending_recordings), mb_client,
-                )
-                for recording in pending_recordings:
-                    # Per-item commit: a single recording's failure never
-                    # rolls back previously successful enhancements.
-                    try:
-                        if recording.id in recording_map:
-                            data = recording_map[recording.id]
-                        else:
-                            # Pre-pass failed for this MBID — retry live.
-                            data = mb_client.lookup_recording(recording.id)
-                        if data and recording.duration_ms is None:
-                            length_ms = data.get("length")
-                            if length_ms is not None:
-                                conn.execute(
-                                    "UPDATE recordings SET duration_ms = %s WHERE id = %s",
-                                    (int(length_ms), recording.id),
-                                )
-                        repos.recordings.mark_enhanced(recording.id)
-                        conn.commit()
-                        recordings_done += 1
-                        logger.info(
-                            "mb_recording_enhanced",
-                            mbid=recording.id,
-                            title=recording.title,
-                        )
-                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
-                        conn.rollback()
-                        logger.warning(
-                            "mb_recording_enhancement_failed",
-                            mbid=recording.id,
-                            title=recording.title,
-                            error=str(exc),
-                        )
-                        recordings_failed += 1
-
-                    processed += 1
-                    progress_repo.upsert(TaskProgress(
-                        task_id=task_id,
-                        task_type=TaskType.MB_ENRICHMENT,
-                        status=TaskStatus.RUNNING,
-                        progress_data={
-                            "processed": processed,
-                            "total": total,
-                            "current_item": f"recording:{recording.id}",
-                            "phase": "recordings",
-                        },
-                        started_at=task_started_at,
-                        updated_at=datetime.now(UTC),
-                    ))
-
-                recordings_rows = len(pending_recordings)
-                recordings_distinct_mbids = len({r.id for r in pending_recordings})
-                phases["recordings"] = {
-                    "rows_queued": recordings_rows,
-                    "distinct_mbids": recordings_distinct_mbids,
-                    "live_fetches_delta": (
-                        mb_client.live_fetches - recordings_live_start
-                    ),
-                    "cache_hits_delta": (
-                        mb_client.cache_hits - recordings_hits_start
-                    ),
-                    "duplicate_mbid_ratio": (
-                        1.0 - (recordings_distinct_mbids / recordings_rows)
-                        if recordings_rows else None
-                    ),
-                }
-
-            orphan_cur = conn.execute(
-                """DELETE FROM recordings r
-                   WHERE NOT EXISTS (
-                       SELECT 1 FROM library_files lf
-                       WHERE lf.recording_id = r.id
-                   )
-                   AND r.needs_enhancement = FALSE
-                   AND r.enhanced_at IS NULL""",
+        def _ctx(processed_start: int) -> _PhaseContext:
+            return _PhaseContext(
+                task_id=task_id,
+                task_started_at=task_started_at,
+                total=total,
+                processed_start=processed_start,
+                progress_repo=progress_repo,
             )
-            # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
-            orphans_deleted = max(0, orphan_cur.rowcount)
-            if orphans_deleted > 0:
-                logger.info(
-                    "orphaned_recordings_cleaned",
-                    count=orphans_deleted,
-                )
 
-            conn.commit()
+        artists_result = _run_artist_phase(pending_artists, _ctx(processed), settings)
+        artists_done = artists_result.done
+        artists_failed = artists_result.failed
+        processed += artists_result.processed_delta
+        phases["artists"] = artists_result.metrics
+
+        works_result = _run_works_phase(pending_works, _ctx(processed), settings)
+        works_done = works_result.done
+        processed += works_result.processed_delta
+        phases["works"] = works_result.metrics
+
+        recordings_result, orphans_deleted = _run_recordings_phase(
+            pending_recordings, _ctx(processed), settings,
+        )
+        recordings_done = recordings_result.done
+        recordings_failed = recordings_result.failed
+        processed += recordings_result.processed_delta
+        phases["recordings"] = recordings_result.metrics
 
         completion_details = {
             "artists_done": artists_done,
