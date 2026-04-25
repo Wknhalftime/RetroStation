@@ -22,7 +22,7 @@ from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.matching_constants import MB_AUTO_LINK_SCORE
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
-from backend.services.mb_types import MbArtist
+from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -225,6 +225,33 @@ def coalesce_artist_lookups(
     return result
 
 
+def coalesce_recording_lookups(
+    mbids: Iterable[str],
+    client: MusicBrainzClientProtocol,
+) -> dict[str, MbRecording | None]:
+    """Call lookup_recording exactly once per distinct MBID.
+
+    Sentinel convention (mirrors coalesce_artist_lookups):
+      - httpx.HTTPError -> OMIT the MBID. The per-item loop falls through
+        to a live lookup_recording inside its own retriable try/except.
+      - 404 (lookup_recording returns None) -> store `{mbid: None}`. The
+        per-item loop treats this as authoritative "not found" and must
+        NOT re-query. Distinct from key-absent.
+      - success -> payload in the map.
+    """
+    result: dict[str, MbRecording | None] = {}
+    for mbid in set(mbids):
+        try:
+            result[mbid] = client.lookup_recording(mbid)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "mb_coalesce_recording_lookup_failed",
+                mbid=mbid,
+                error=str(exc),
+            )
+    return result
+
+
 @huey.task()  # type: ignore[untyped-decorator]
 def mb_enrichment_task() -> dict[str, int]:
     """Fill metadata on canonical entities flagged needs_enhancement=TRUE.
@@ -244,6 +271,11 @@ def mb_enrichment_task() -> dict[str, int]:
     orphans_deleted = 0
     processed = 0
     total = 0
+
+    # Per-phase metrics for the final `mb_task_summary` event. Each phase
+    # populates its own entry; works has no MB traffic so its counters are
+    # all zero (schema kept stable for automated runners).
+    phases: dict[str, dict[str, object]] = {}
 
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
@@ -296,7 +328,10 @@ def mb_enrichment_task() -> dict[str, int]:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
-                # --- Metrics counters + coalescing pre-pass ---
+                # Snapshot counters at phase entry so the delta stays correct
+                # if the client is ever shared across phases in the future.
+                artists_live_start = mb_client.live_fetches
+                artists_hits_start = mb_client.cache_hits
                 rows_queued = len(pending_artists)
                 distinct_mbids = {
                     a.mbid for a in pending_artists if a.mbid is not None
@@ -392,6 +427,22 @@ def mb_enrichment_task() -> dict[str, int]:
                     cache_hits=mb_client.cache_hits,
                     live_fetches=mb_client.live_fetches,
                 )
+                phases["artists"] = {
+                    "rows_queued": rows_queued,
+                    "distinct_mbids": len(distinct_mbids),
+                    "live_fetches_delta": (
+                        mb_client.live_fetches - artists_live_start
+                    ),
+                    "cache_hits_delta": (
+                        mb_client.cache_hits - artists_hits_start
+                    ),
+                    # None only when there's no input (see artist_matching
+                    # summary). Zero distinct on positive rows produces 1.0.
+                    "duplicate_mbid_ratio": (
+                        1.0 - (len(distinct_mbids) / rows_queued)
+                        if rows_queued else None
+                    ),
+                }
 
         # -------------------------------------------------------------- works
         with connect_sync(settings.database_url) as conn:
@@ -436,16 +487,49 @@ def mb_enrichment_task() -> dict[str, int]:
             # No phase-level commit — per-item commits already flushed each
             # successful mark_enhanced write independently.
 
+            works_distinct_mbids = len({
+                w.mbid for w in pending_works if w.mbid is not None
+            })
+            works_rows = len(pending_works)
+            phases["works"] = {
+                "rows_queued": works_rows,
+                "distinct_mbids": works_distinct_mbids,
+                # Works phase does no MB HTTP today (only mark_enhanced DB
+                # writes), so live_fetches / cache_hits deltas are always
+                # zero. If a future enhancement calls MB here, snapshot
+                # counters around this block the same way the artist and
+                # recording phases do.
+                "live_fetches_delta": 0,
+                "cache_hits_delta": 0,
+                "duplicate_mbid_ratio": (
+                    1.0 - (works_distinct_mbids / works_rows)
+                    if works_rows else None
+                ),
+            }
+
         # --------------------------------------------------------- recordings
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
             with MusicBrainzApiClient(cache_repo) as mb_client:
+                recordings_live_start = mb_client.live_fetches
+                recordings_hits_start = mb_client.cache_hits
+                # Pre-pass: one lookup_recording per distinct MBID. Read from
+                # the map inside the loop; absent keys (transient pre-pass
+                # failure) fall through to a live fallback lookup — same
+                # shape as the Tier 2/3 artist coalescing above.
+                recording_map = coalesce_recording_lookups(
+                    (r.id for r in pending_recordings), mb_client,
+                )
                 for recording in pending_recordings:
                     # Per-item commit: a single recording's failure never
                     # rolls back previously successful enhancements.
                     try:
-                        data = mb_client.lookup_recording(recording.id)
+                        if recording.id in recording_map:
+                            data = recording_map[recording.id]
+                        else:
+                            # Pre-pass failed for this MBID — retry live.
+                            data = mb_client.lookup_recording(recording.id)
                         if data and recording.duration_ms is None:
                             length_ms = data.get("length")
                             if length_ms is not None:
@@ -485,6 +569,23 @@ def mb_enrichment_task() -> dict[str, int]:
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                     ))
+
+                recordings_rows = len(pending_recordings)
+                recordings_distinct_mbids = len({r.id for r in pending_recordings})
+                phases["recordings"] = {
+                    "rows_queued": recordings_rows,
+                    "distinct_mbids": recordings_distinct_mbids,
+                    "live_fetches_delta": (
+                        mb_client.live_fetches - recordings_live_start
+                    ),
+                    "cache_hits_delta": (
+                        mb_client.cache_hits - recordings_hits_start
+                    ),
+                    "duplicate_mbid_ratio": (
+                        1.0 - (recordings_distinct_mbids / recordings_rows)
+                        if recordings_rows else None
+                    ),
+                }
 
             orphan_cur = conn.execute(
                 """DELETE FROM recordings r
@@ -564,6 +665,18 @@ def mb_enrichment_task() -> dict[str, int]:
         raise
 
     finally:
+        # Emit the summary even on partial failure. `phases` is built
+        # incrementally (each phase writes its own key on success), so a
+        # failure mid-recordings still produces a useful "artists + works"
+        # summary. Narrow suppress: only catch serialization errors from
+        # an unexpected value in `phases`. A broader catch would silently
+        # hide logging-infrastructure bugs we'd want to surface.
+        with contextlib.suppress(TypeError, ValueError):
+            logger.info(
+                "mb_task_summary",
+                task_type="mb_enrichment",
+                phases=phases,
+            )
         if progress_conn is not None:
             progress_conn.close()
 

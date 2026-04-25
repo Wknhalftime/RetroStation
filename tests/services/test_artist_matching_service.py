@@ -15,7 +15,10 @@ and the AUTO_REJECTED cascade preserved from the legacy implementation.
 """
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
+
+import httpx
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
@@ -267,3 +270,312 @@ def test_match_artists_auto_rejected_cascades_to_identity_bulk_reject() -> None:
     stored = track_identity_repo.get_by_id(identity.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_REJECTED
+
+
+# ---------------------------------------------------------------------------
+# Step 1 — search coalescing
+#
+# coalesce_artist_searches builds {lower(original_name): [MbArtistResult, ...]}
+# from a pending-artist list by calling search_artist once per distinct bucket.
+# Mirrors coalesce_artist_lookups (mb_enrichment_tasks.py:192):
+#   - transient httpx.HTTPError for a bucket -> key OMITTED (live fallback).
+#   - empty MB response for a bucket -> key present with [] (no-candidates
+#     sentinel; strategy returns None without re-querying).
+#   - success -> key present with list of results.
+# Representative query string per bucket = lex-first original_name whose
+# .lower() hits the bucket.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingMbClient(FakeMbClient):
+    """FakeMbClient that raises httpx.HTTPError on selected search names."""
+
+    def __init__(
+        self,
+        responses: dict[str, list[dict[str, Any]]] | None = None,
+        error_names: set[str] | None = None,
+    ) -> None:
+        super().__init__(responses=responses)
+        self._error_names = error_names or set()
+
+    def search_artist(self, name: str) -> list[dict[str, Any]]:
+        self.calls.append(name)
+        if name in self._error_names:
+            raise httpx.ConnectError("simulated transient failure")
+        return self._responses.get(name, [])
+
+
+def test_coalesce_artist_searches_one_call_per_bucket() -> None:
+    from backend.services.artist_matching_service import coalesce_artist_searches
+
+    # 50 rows across 5 distinct name_keys (case variations of same underlying name).
+    pending: list[BroadcastArtist] = []
+    variants = ["Metallica", "metallica", "METALLICA"]  # all -> "metallica"
+    for i in range(10):
+        pending.append(BroadcastArtist(
+            id=uuid4(), original_name=variants[i % 3], normalized_name="metallica",
+        ))
+    for name in ["Iron Maiden", "Slayer", "Anthrax", "Megadeth"]:
+        for _ in range(10):
+            pending.append(BroadcastArtist(
+                id=uuid4(), original_name=name, normalized_name=name.lower(),
+            ))
+    assert len(pending) == 50
+
+    mb = FakeMbClient(responses={
+        "Metallica": [{"id": "m", "score": 100}],
+        "Iron Maiden": [{"id": "im", "score": 100}],
+        "Slayer": [{"id": "s", "score": 100}],
+        "Anthrax": [{"id": "a", "score": 100}],
+        "Megadeth": [{"id": "mg", "score": 100}],
+    })
+    search_map, distinct_keys = coalesce_artist_searches(pending, mb)
+
+    # Exactly 5 live calls — one per distinct lower()-bucket.
+    assert len(mb.calls) == 5
+    # All 5 buckets populated in both the map and the returned count.
+    assert set(search_map.keys()) == {
+        "metallica", "iron maiden", "slayer", "anthrax", "megadeth",
+    }
+    assert distinct_keys == 5
+
+
+def test_coalesce_artist_searches_picks_lex_first_representative() -> None:
+    # Three variants normalize to the same .lower() bucket; the representative
+    # passed to search_artist must be deterministic (lex-first among originals).
+    from backend.services.artist_matching_service import coalesce_artist_searches
+
+    pending = [
+        BroadcastArtist(id=uuid4(), original_name="metallica", normalized_name="metallica"),
+        BroadcastArtist(id=uuid4(), original_name="Metallica", normalized_name="metallica"),
+        BroadcastArtist(id=uuid4(), original_name="METALLICA", normalized_name="metallica"),
+    ]
+    mb = FakeMbClient(responses={
+        "METALLICA": [{"id": "all-caps", "score": 100}],
+        "Metallica": [{"id": "mixed", "score": 100}],
+        "metallica": [{"id": "lower", "score": 100}],
+    })
+    # Tuple return discarded deliberately — this test pins call-site behavior
+    # only, not the returned map/count.
+    _ = coalesce_artist_searches(pending, mb)
+
+    # Python's default sort on str is codepoint-order: upper A-Z < lower a-z.
+    # So lex-first among {"metallica","Metallica","METALLICA"} is "METALLICA".
+    assert mb.calls == ["METALLICA"]
+
+
+def test_coalesce_artist_searches_omits_key_on_httpx_error() -> None:
+    from backend.services.artist_matching_service import coalesce_artist_searches
+
+    pending = [
+        BroadcastArtist(id=uuid4(), original_name="BadBand", normalized_name="badband"),
+        BroadcastArtist(id=uuid4(), original_name="GoodBand", normalized_name="goodband"),
+    ]
+    mb = _RaisingMbClient(
+        responses={"GoodBand": [{"id": "g", "score": 100}]},
+        error_names={"BadBand"},
+    )
+    search_map, distinct_keys = coalesce_artist_searches(pending, mb)
+
+    # Failing key is OMITTED (not present with any sentinel value).
+    assert "badband" not in search_map
+    # Successful key is present.
+    assert search_map["goodband"] == [{"id": "g", "score": 100}]
+    # Distinct count reflects the INPUT set (2 buckets), NOT the map (1 entry)
+    # — so transient errors don't distort the pre-cache metric.
+    assert distinct_keys == 2
+
+
+def test_coalesce_artist_searches_inserts_empty_list_on_no_candidates() -> None:
+    # MB returns 200 OK with zero results -> bucket present with [].
+    from backend.services.artist_matching_service import coalesce_artist_searches
+
+    pending = [
+        BroadcastArtist(id=uuid4(), original_name="Nonexistent", normalized_name="nonexistent"),
+    ]
+    mb = FakeMbClient(responses={})  # default returns []
+    search_map, _ = coalesce_artist_searches(pending, mb)
+
+    assert search_map == {"nonexistent": []}
+
+
+def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
+    # Equivalence: running with coalescing wired up (default post-change) must
+    # produce the same per-row Match rows the per-row search_artist path would
+    # have returned. Two distinct pending artists, two buckets (one search
+    # per bucket in the pre-pass).
+    #
+    # Note: the duplicate-same-bucket scenario is pre-empted at the
+    # broadcast_artists repo layer by upsert-on-normalized_name (normalize_artist
+    # lower-cases + strips articles/features/etc., which collapses case-only
+    # variants into a single row at write time). Bucket-dedup behavior of
+    # coalesce_artist_searches itself is covered directly by
+    # test_coalesce_artist_searches_one_call_per_bucket.
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    a1 = _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
+    a2 = _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+
+    mb = FakeMbClient(responses={
+        "Ozzy Osbourne": [
+            {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
+             "sort-name": "Osbourne, Ozzy", "score": 100},
+        ],
+        "Slayer": [
+            {"id": "mbid-slayer", "name": "Slayer", "sort-name": "Slayer", "score": 100},
+        ],
+    })
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=mb,
+    )
+
+    for a, expected in [(a1, "mbid-ozzy"), (a2, "mbid-slayer")]:
+        stored = broadcast_artist_repo.get_by_id(a.id)
+        assert stored is not None
+        assert stored.match_status == MatchStatus.AUTO_MATCHED
+        created = match_repo.get_by_artist(a.id)
+        assert created is not None
+        assert created.target_id == expected
+
+    # Exactly 2 live search_artist calls — one per distinct .lower() bucket,
+    # all in the pre-pass. The per-row loop in the strategy short-circuits
+    # via the populated search_map, making zero additional live calls.
+    assert len(mb.calls) == 2
+
+
+def test_match_artists_empty_bucket_skips_live_call() -> None:
+    # A bucket that MB returned [] for in the pre-pass must NOT be retried
+    # via live search during the per-row loop.
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    _pending_artist("NoSuchArtist", broadcast_artist_repo, playlist_id)
+    mb = FakeMbClient(responses={})  # empty responses => [] for every name
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=mb,
+    )
+
+    # search_artist called exactly ONCE — in the pre-pass. The per-row loop
+    # reads the [] sentinel and does not re-query.
+    assert len(mb.calls) == 1
+
+
+def test_match_artists_emits_mb_task_summary() -> None:
+    # match_artists_for_playlist emits a structured `mb_task_summary` event at
+    # the end of each run. Tooling (automated loops, dashboards) asserts on
+    # this event rather than diffing logs. Shape contract:
+    #   task_type: "artist_matching"
+    #   rows_queued, distinct_search_keys, distinct_mbids
+    #   live_fetches_delta, cache_hits_delta
+    #   duplicate_name_ratio (float in [0,1] or None for empty pending)
+    #   duplicate_mbid_ratio = None (not used by matching task)
+    from structlog.testing import capture_logs
+
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
+    _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+
+    mb = FakeMbClient(responses={
+        "Ozzy Osbourne": [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
+        "Slayer": [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
+    })
+    # Simulate the concrete client's counter behavior so the test asserts a
+    # real delta computation.
+    orig_search = mb.search_artist
+
+    def counting_search(name: str) -> list[dict[str, object]]:
+        mb.live_fetches += 1
+        return orig_search(name)
+
+    mb.search_artist = counting_search  # type: ignore[method-assign]
+
+    with capture_logs() as events:
+        match_artists_for_playlist(
+            playlist_id=playlist_id,
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+            mb_client=mb,
+        )
+
+    summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
+    assert len(summary_events) == 1
+    s = summary_events[0]
+    assert s["task_type"] == "artist_matching"
+    assert s["rows_queued"] == 2
+    assert s["distinct_search_keys"] == 2
+    assert s["distinct_mbids"] == 0
+    assert s["live_fetches_delta"] == 2  # one per distinct bucket
+    assert s["cache_hits_delta"] == 0
+    assert s["duplicate_name_ratio"] == 0.0  # 1 - 2/2
+    assert s["duplicate_mbid_ratio"] is None
+
+
+def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors() -> None:
+    # distinct_search_keys is computed over the INPUT set, not `len(search_map)`,
+    # so a transient httpx error in the pre-pass (which omits one bucket from
+    # the map) MUST NOT shift the metric. Ratios are pre-cache so they stay
+    # stable across runs regardless of transient failure patterns.
+    from structlog.testing import capture_logs
+
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    _pending_artist("Flaky", broadcast_artist_repo, playlist_id)
+    _pending_artist("GoodBand", broadcast_artist_repo, playlist_id)
+
+    mb = _RaisingMbClient(
+        responses={"GoodBand": [{"id": "g", "name": "GoodBand",
+                                 "sort-name": "GoodBand", "score": 100}]},
+        error_names={"Flaky"},
+    )
+
+    import contextlib
+
+    with capture_logs() as events, contextlib.suppress(httpx.HTTPError):
+        match_artists_for_playlist(
+            playlist_id=playlist_id,
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+            mb_client=mb,
+        )
+
+    # The summary event is emitted from a finally block, so it fires even
+    # when the per-row live fallback re-raises for the Flaky bucket. The
+    # guarantee under test: distinct_search_keys counts the INPUT set (both
+    # buckets), NOT the (smaller) search_map that the pre-pass populated.
+    summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
+    assert len(summary_events) == 1
+    assert summary_events[0]["distinct_search_keys"] == 2
+    assert summary_events[0]["rows_queued"] == 2
+

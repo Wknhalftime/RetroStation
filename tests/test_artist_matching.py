@@ -20,6 +20,10 @@ class StubMbClient:
     """Returns canned results for testing."""
     def __init__(self, results: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self._results = results or {}
+        # MusicBrainzClientProtocol now declares counter attributes; keep them
+        # at 0 — these tests don't exercise summary-event behavior.
+        self.live_fetches: int = 0
+        self.cache_hits: int = 0
 
     def search_artist(self, name: str) -> list[dict[str, Any]]:
         return self._results.get(name, [])
