@@ -348,7 +348,7 @@ class ArtistMatchingEngine:
 
 def coalesce_artist_searches(
     pending: list[BroadcastArtist],
-    mb_client: MusicBrainzClientProtocol,
+    client: MusicBrainzClientProtocol,
 ) -> tuple[dict[str, list[MbArtistResult]], int]:
     """Call search_artist exactly once per distinct `original_name.lower()`.
 
@@ -378,7 +378,7 @@ def coalesce_artist_searches(
     for name_key, originals in buckets.items():
         representative = sorted(originals)[0]
         try:
-            result[name_key] = mb_client.search_artist(representative)
+            result[name_key] = client.search_artist(representative)
         except httpx.HTTPError as exc:
             logger.warning(
                 "mb_coalesce_search_failed",
