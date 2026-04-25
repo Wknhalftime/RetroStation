@@ -97,13 +97,6 @@ describe("MatcherBrowser rendering", () => {
 
 describe("MatcherBrowser — pagination across loading transitions", () => {
   it("keeps the page indicator on 'Page 2 of 4' across the Next click and fetch (regression: bug-1)", async () => {
-    // Regression for the resolution-center pagination bug where clicking
-    // Next would snap back to page 1 mid-traversal. Root cause: the queue
-    // query did not preserve previous data across query-key changes, so
-    // `data` briefly became undefined while the new offset fetched, which
-    // collapsed totalPages to 1 and tripped the page-clamp useEffect into
-    // setPage(1). With placeholderData=keepPreviousData on useMatchingQueue,
-    // total stays populated and the clamp does not fire.
     const page1Items = [makeArtist("00000000-0000-0000-0000-000000000001", "Alpha")];
     const page2Items = [makeArtist("00000000-0000-0000-0000-000000000002", "Bravo")];
 
@@ -123,19 +116,12 @@ describe("MatcherBrowser — pagination across loading transitions", () => {
 
     render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
 
-    // Page 1 lands.
     await screen.findByText(/Page 1 of 4/);
 
-    // Click Next while the page-2 fetch is still pending. Without the fix,
-    // total would transiently fall to 0 here and the clamp effect would
-    // setPage(1) before the fetch even resolves.
     fireEvent.click(screen.getByRole("button", { name: /Next/i }));
 
-    // The indicator must read "Page 2 of 4" while page-2 is still in flight.
-    // This is the assertion that fails without keepPreviousData.
     await screen.findByText(/Page 2 of 4/);
 
-    // Resolve the deferred fetch and confirm the new items render.
     resolvePage2({ items: page2Items, total: 100 });
     await screen.findByText("Bravo");
     expect(screen.queryByText("Alpha")).toBeNull();
