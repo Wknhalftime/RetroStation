@@ -1,6 +1,11 @@
 from rapidfuzz.fuzz import token_sort_ratio
 
-from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
+from backend.services.matching_utils import (
+    TRUNCATION_TOLERANCE_CHARS,
+    is_likely_truncated,
+    normalize_title_for_scoring,
+    rule_matches,
+)
 
 
 class TestRuleMatches:
@@ -49,3 +54,40 @@ class TestNormalizeTitleForScoring:
 
     def test_brackets_instead_of_parens(self) -> None:
         assert normalize_title_for_scoring("Song [Live]") == "Song"
+
+
+class TestIsLikelyTruncated:
+    def test_short_clean_name_returns_false(self) -> None:
+        assert is_likely_truncated("U2", max_len=30) is False
+
+    def test_medium_clean_name_returns_false(self) -> None:
+        assert is_likely_truncated("Florence + The Machine", max_len=30) is False
+
+    def test_at_limit_alphanumeric_end_returns_true(self) -> None:
+        name = "A" * 30
+        assert is_likely_truncated(name, max_len=30) is True
+
+    def test_within_tolerance_alphanumeric_end_returns_true(self) -> None:
+        # max_len - TRUNCATION_TOLERANCE_CHARS, alphanumeric end → suspicious.
+        name = "B" * (30 - TRUNCATION_TOLERANCE_CHARS)
+        assert is_likely_truncated(name, max_len=30) is True
+
+    def test_at_limit_punctuation_end_returns_false(self) -> None:
+        name = "C" * 29 + "."
+        assert is_likely_truncated(name, max_len=30) is False
+
+    def test_at_limit_digit_end_returns_true(self) -> None:
+        # Digits count as alphanumeric → still suspicious.
+        name = "Blink-18" + "X" * 21 + "2"
+        assert len(name) == 30
+        assert is_likely_truncated(name, max_len=30) is True
+
+    def test_well_below_limit_returns_false(self) -> None:
+        assert is_likely_truncated("Queen", max_len=30) is False
+
+    def test_empty_string_returns_false(self) -> None:
+        assert is_likely_truncated("", max_len=30) is False
+
+    def test_tolerance_constant_value(self) -> None:
+        # Locks the published value — change requires updating callers.
+        assert TRUNCATION_TOLERANCE_CHARS == 2

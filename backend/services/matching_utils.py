@@ -47,3 +47,29 @@ def normalize_title_for_scoring(title: str) -> str:
     t = _STRIP_FEAT.sub("", title)
     t = _STRIP_SUFFIXES.sub("", t)
     return t.strip()
+
+
+TRUNCATION_TOLERANCE_CHARS: int = 2
+"""Characters below ``max_len`` still considered "at the limit".
+
+Absorbs trailing-space trimming variations across broadcast feeds. A name of
+length ``max_len - TRUNCATION_TOLERANCE_CHARS`` ending in an alphanumeric
+character is treated as likely truncated.
+"""
+
+
+def is_likely_truncated(name: str, max_len: int) -> bool:
+    """True when ``name`` appears cut off by a fixed-width broadcast field.
+
+    Heuristic: at or near the field limit AND the final character is alphanumeric.
+    Clean short names typically end with punctuation or a clear word boundary;
+    a name that maxes out the field and ends mid-word is the diagnostic signal.
+
+    Empty input returns False — a missing name is a different problem.
+    """
+    if not name:
+        return False
+    return (
+        len(name) >= max_len - TRUNCATION_TOLERANCE_CHARS
+        and name[-1].isalnum()
+    )
