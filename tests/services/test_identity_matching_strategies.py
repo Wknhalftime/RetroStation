@@ -13,6 +13,7 @@ from backend.domain.enums import (
     EnrichmentStatus,
     MatchStatus,
     MatchTier,
+    ReasonCode,
     TargetType,
 )
 from backend.domain.library import AudioMetadata, LibraryFile
@@ -22,7 +23,6 @@ from backend.services.identity_matching_service import (
     IdentityMappingRuleStrategy,
     ResolvedArtistMbidStrategy,
 )
-from backend.services.matching_reasons import ReasonCode
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient

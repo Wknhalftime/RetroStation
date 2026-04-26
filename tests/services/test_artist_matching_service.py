@@ -22,11 +22,10 @@ import httpx
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.matching_constants import MB_SCORE_GAP
-from backend.services.matching_reasons import ReasonCode
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
@@ -170,10 +169,9 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     # No Match row on NEEDS_REVIEW (service only writes Match on AUTO_MATCHED).
     assert match_repo.get_by_artist(artist.id) is None
     # NEW behavior: reason is persisted.
-    assert broadcast_artist_repo._reason_codes.get(artist.id) == ReasonCode.LOW_CONFIDENCE
-    detail = broadcast_artist_repo._reason_details.get(artist.id)
-    assert detail is not None
-    assert detail  # non-empty formatted string
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_detail is not None
+    assert stored.reason_detail  # non-empty formatted string
 
 
 def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
@@ -197,8 +195,8 @@ def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert broadcast_artist_repo._reason_codes.get(artist.id) == ReasonCode.NO_CANDIDATES
-    assert broadcast_artist_repo._reason_details.get(artist.id) is not None
+    assert stored.reason_code == ReasonCode.NO_CANDIDATES
+    assert stored.reason_detail is not None
 
 
 def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
@@ -579,3 +577,22 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     assert summary_events[0]["distinct_search_keys"] == 2
     assert summary_events[0]["rows_queued"] == 2
 
+
+def test_broadcast_artist_dataclass_carries_reason_code_after_update() -> None:
+    """Reason state is on the dataclass, not in a sidecar. Tests assert via
+    repo.get_by_id(...).reason_code, never via repo._reason_codes."""
+    repo = FakeBroadcastArtistRepository()
+    playlist_id = uuid4()
+    artist = _pending_artist("ARTIST", repo, playlist_id)
+
+    repo.update_match_status(
+        artist.id,
+        MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.LOW_CONFIDENCE,
+        reason_detail="Score 55% — below confidence threshold",
+    )
+
+    stored = repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_detail == "Score 55% — below confidence threshold"

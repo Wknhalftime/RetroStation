@@ -10,7 +10,7 @@ from rapidfuzz import fuzz
 
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule, Match
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
@@ -27,7 +27,6 @@ from backend.services.matching_constants import (
     MIN_PRESENTATION_SCORE,
 )
 from backend.services.matching_reasons import (
-    ReasonCode,
     format_ambiguous_gap,
     format_low_confidence,
 )

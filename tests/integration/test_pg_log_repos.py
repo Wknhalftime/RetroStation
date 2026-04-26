@@ -18,8 +18,7 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import MatchStatus, MatchTier
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 
 
 def test_broadcast_artist_upsert_and_conflict(migrated_db: str) -> None:

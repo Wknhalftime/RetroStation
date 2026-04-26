@@ -123,3 +123,16 @@ class LogCategory(StrEnum):
     RULES_APPLY = "rules_apply"
     M3U_EXPORT  = "m3u_export"
     SYSTEM      = "system"
+
+
+# uppercase intentional: stable persisted keys for why a match is in NEEDS_REVIEW.
+# Values are written to broadcast_artists.reason_code / track_identities.reason_code;
+# do not rename — they are queried by telemetry and asserted in characterization tests.
+class ReasonCode(StrEnum):
+    LOW_CONFIDENCE         = "LOW_CONFIDENCE"
+    AMBIGUOUS_GAP          = "AMBIGUOUS_GAP"
+    NO_CANDIDATES          = "NO_CANDIDATES"
+    NO_LOCAL_FILES         = "NO_LOCAL_FILES"
+    MB_SEARCH_INCONCLUSIVE = "MB_SEARCH_INCONCLUSIVE"
+    MISSING_MATCH_RECORD   = "MISSING_MATCH_RECORD"
+    ORPHANED_IDENTITY      = "ORPHANED_IDENTITY"

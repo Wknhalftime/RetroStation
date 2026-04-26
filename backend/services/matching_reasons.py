@@ -1,8 +1,8 @@
-"""Stable keys and UI formatters for why a match is in NEEDS_REVIEW state.
+"""UI formatters for why a match is in NEEDS_REVIEW state.
 
-`ReasonCode` values are written to `broadcast_artists.reason_code` and
-`track_identities.reason_code`. Do not rename values — they are persisted,
-queried by telemetry, and asserted in characterization tests.
+`ReasonCode` lives in `backend.domain.enums` (domain → services would be a
+layering violation). It is re-exported here so existing imports keep working;
+new code should import it from `backend.domain.enums` directly.
 
 `reason_detail` strings are for curators only. They may include dynamic values
 (score, gap). Keep them in this module so strategies never inline f-strings.
@@ -10,17 +10,14 @@ queried by telemetry, and asserted in characterization tests.
 from __future__ import annotations
 
 import math
-from enum import StrEnum
 
+from backend.domain.enums import ReasonCode
 
-class ReasonCode(StrEnum):
-    LOW_CONFIDENCE = "LOW_CONFIDENCE"
-    AMBIGUOUS_GAP = "AMBIGUOUS_GAP"
-    NO_CANDIDATES = "NO_CANDIDATES"
-    NO_LOCAL_FILES = "NO_LOCAL_FILES"
-    MB_SEARCH_INCONCLUSIVE = "MB_SEARCH_INCONCLUSIVE"
-    MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
-    ORPHANED_IDENTITY = "ORPHANED_IDENTITY"
+__all__ = [
+    "ReasonCode",
+    "format_low_confidence",
+    "format_ambiguous_gap",
+]
 
 
 def _round_half_up(value: float) -> int:

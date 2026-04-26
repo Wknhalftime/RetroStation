@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, ReasonCode
 
 
 class BroadcastArtistRepository(ABC):

@@ -7,9 +7,8 @@ import psycopg
 
 from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
-from backend.services.matching_reasons import ReasonCode
 
 
 class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -17,6 +16,7 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         self._conn = conn
 
     def _row_to_model(self, row: dict[str, Any]) -> BroadcastTrackIdentity:
+        rc = row.get("reason_code")
         return BroadcastTrackIdentity(
             id=row["id"],
             broadcast_artist_id=row["broadcast_artist_id"],
@@ -29,6 +29,8 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             ),
             created_at=row["created_at"],
             embedding=parse_embedding(row.get("embedding")),
+            reason_code=ReasonCode(rc) if rc else None,
+            reason_detail=row.get("reason_detail"),
         )
 
     def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:

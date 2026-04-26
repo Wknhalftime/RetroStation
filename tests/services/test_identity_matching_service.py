@@ -17,7 +17,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import MappingRule, Match
 from backend.services.identity_matching_service import match_identities_for_playlist
@@ -271,8 +271,8 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
 
     # NEW: reason_code and reason_detail are now persisted.
-    assert identity_repo._reason_codes.get(identity.id) is not None
-    assert identity_repo._reason_details.get(identity.id) is not None
+    assert stored.reason_code is not None
+    assert stored.reason_detail is not None
 
 
 def test_match_identities_no_pending_returns_empty() -> None:
@@ -332,5 +332,33 @@ def test_match_identities_skips_orphaned_identity_without_artist() -> None:
     # Orphan is surfaced as NEEDS_REVIEW so review tooling can see it.
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
     assert stored.match_tier == MatchTier.UNCLASSIFIED
-    assert identity_repo._reason_codes.get(identity.id) is not None
+    assert stored.reason_code is not None
     assert match_repo.get_by_identity(identity.id) is None
+
+
+def test_broadcast_track_identity_dataclass_carries_reason_code_after_update() -> None:
+    """Reason state is on the dataclass, not a sidecar."""
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+
+    repo = FakeBroadcastTrackIdentityRepository()
+    identity = BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=uuid4(),
+        original_title="X",
+        normalized_title="x",
+        normalized_signature="x",
+    )
+    repo.upsert(identity)
+
+    repo.update_match_status(
+        identity.id,
+        MatchStatus.NEEDS_REVIEW,
+        MatchTier.UNCLASSIFIED,
+        reason_code=ReasonCode.ORPHANED_IDENTITY,
+        reason_detail="No BroadcastArtist row for this identity",
+    )
+
+    stored = repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.reason_code == ReasonCode.ORPHANED_IDENTITY
+    assert stored.reason_detail == "No BroadcastArtist row for this identity"

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import (
     MappingRuleStrategy,
@@ -18,7 +18,6 @@ from backend.services.artist_matching_service import (
     NormalizationStrategy,
 )
 from backend.services.matching_constants import MB_SCORE_GAP
-from backend.services.matching_reasons import ReasonCode
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.mb_client import FakeMbClient

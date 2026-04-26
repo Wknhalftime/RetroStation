@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 
 
 @dataclass
@@ -44,6 +44,8 @@ class BroadcastArtist:
     error_message: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     embedding: list[float] | None = None
+    reason_code: ReasonCode | None = None
+    reason_detail: str | None = None
 
 
 @dataclass
@@ -57,6 +59,8 @@ class BroadcastTrackIdentity:
     match_tier: MatchTier | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     embedding: list[float] | None = None
+    reason_code: ReasonCode | None = None
+    reason_detail: str | None = None
 
 
 @dataclass(frozen=True)

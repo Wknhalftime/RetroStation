@@ -1,17 +1,15 @@
+from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
-from backend.services.matching_reasons import ReasonCode
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, BroadcastTrackIdentity] = {}
         self._playlist_identities: dict[UUID, set[UUID]] = {}
-        self._reason_codes: dict[UUID, ReasonCode | None] = {}
-        self._reason_details: dict[UUID, str | None] = {}
 
     def register_playlist_identity(
         self, playlist_id: UUID, identity_id: UUID
@@ -75,19 +73,32 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         identity = self._data.get(identity_id)
         if identity is None:
             return
-        identity.match_status = status
-        identity.match_tier = tier
-        # Unconditionally overwrite — mirrors Pg UPDATE semantics.
-        self._reason_codes[identity_id] = reason_code
-        self._reason_details[identity_id] = reason_detail
+        # Mirror Pg UPDATE semantics: unconditionally overwrite reason fields.
+        self._data[identity_id] = replace(
+            identity,
+            match_status=status,
+            match_tier=tier,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+        )
 
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
         if identity := self._data.get(identity_id):
             identity.embedding = embedding
 
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
-        for identity in self._data.values():
-            if identity.broadcast_artist_id == broadcast_artist_id:
-                identity.match_status = MatchStatus.AUTO_REJECTED
-                identity.match_tier = MatchTier.UNCLASSIFIED
+        # Match Pg semantics: only PENDING rows are flipped, and we zero out
+        # any stale reason_code/reason_detail in the process.
+        for identity_id, identity in list(self._data.items()):
+            if (
+                identity.broadcast_artist_id == broadcast_artist_id
+                and identity.match_status == MatchStatus.PENDING
+            ):
+                self._data[identity_id] = replace(
+                    identity,
+                    match_status=MatchStatus.AUTO_REJECTED,
+                    match_tier=MatchTier.UNCLASSIFIED,
+                    reason_code=None,
+                    reason_detail=None,
+                )
 

@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 
 
 class BroadcastTrackIdentityRepository(ABC):

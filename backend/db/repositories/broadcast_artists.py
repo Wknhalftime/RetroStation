@@ -7,9 +7,8 @@ import psycopg
 
 from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus
+from backend.domain.enums import MatchStatus, ReasonCode
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
-from backend.services.matching_reasons import ReasonCode
 
 
 class PgBroadcastArtistRepository(BroadcastArtistRepository):
@@ -17,6 +16,7 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         self._conn = conn
 
     def _row_to_model(self, row: dict[str, Any]) -> BroadcastArtist:
+        rc = row.get("reason_code")
         return BroadcastArtist(
             id=row["id"],
             original_name=row["original_name"],
@@ -26,6 +26,8 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             error_message=row.get("error_message"),
             created_at=row["created_at"],
             embedding=parse_embedding(row.get("embedding")),
+            reason_code=ReasonCode(rc) if rc else None,
+            reason_detail=row.get("reason_detail"),
         )
 
     def upsert(self, artist: BroadcastArtist) -> BroadcastArtist:

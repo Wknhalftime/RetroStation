@@ -8,7 +8,7 @@ import structlog
 from rapidfuzz.fuzz import token_sort_ratio
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import LibraryFile
 from backend.domain.matching import MappingRule, Match
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
@@ -24,7 +24,6 @@ from backend.services.matching_constants import (
     MID_BAND_UPPER,
 )
 from backend.services.matching_reasons import (
-    ReasonCode,
     format_ambiguous_gap,
     format_low_confidence,
 )
