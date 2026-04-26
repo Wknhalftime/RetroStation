@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -21,11 +22,19 @@ from backend.db.sync_conn import connect_sync
 from backend.domain.catalog import Artist, Recording, Work
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
+from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.matching_constants import MB_AUTO_LINK_SCORE
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
+
+# Threshold for the slow-iteration warning emitted from inside the coalesce
+# helpers. If the wall-clock gap between consecutive heartbeats exceeds this,
+# we log a structured warning so post-hoc analysis can spot drift toward the
+# 10-minute WS stale threshold (see `backend/websocket.py:57`). Independent
+# of the cadence math; this is a guardrail, not a contract.
+_SLOW_ITERATION_WARN_SECONDS = 30.0
 
 logger = structlog.get_logger()
 
@@ -190,18 +199,57 @@ def _enhance_artist(
     return ArtistEnhanceOutcome.ENHANCED
 
 
+def _heartbeat_with_slow_warning(
+    on_progress: Callable[[int, int, str], None] | None,
+    last_heartbeat_at: float,
+    current: int,
+    total: int,
+    mbid: str,
+    *,
+    phase_label: str,
+) -> float:
+    """Invoke `on_progress` and return the new last-heartbeat timestamp.
+
+    If the gap since `last_heartbeat_at` exceeds the slow-iteration
+    threshold, emit a structured warning so post-hoc analysis can spot
+    cadence drift toward the WS 10-minute stale threshold. Cheap guardrail
+    against future tenacity / HTTP changes silently re-introducing the
+    original WS-empty bug.
+    """
+    if on_progress is None:
+        return last_heartbeat_at
+    now = time.monotonic()
+    gap = now - last_heartbeat_at
+    if last_heartbeat_at > 0.0 and gap > _SLOW_ITERATION_WARN_SECONDS:
+        logger.warning(
+            "mb_coalesce_slow_iteration",
+            phase=phase_label,
+            mbid=mbid,
+            current=current,
+            total=total,
+            gap_seconds=round(gap, 2),
+            threshold_seconds=_SLOW_ITERATION_WARN_SECONDS,
+        )
+    on_progress(current, total, mbid)
+    return time.monotonic()
+
+
 def coalesce_artist_lookups(
     mbids: Iterable[str],
     client: MusicBrainzClientProtocol,
+    *,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, MbArtist | None]:
     """Call lookup_artist exactly once per distinct MBID.
 
-    Returns {mbid: MbArtist | None}. The `set(mbids)` conversion is the dedup
-    mechanism — a plain dict comprehension over a list does NOT deduplicate
-    calls (it only deduplicates the output dict's keys, after each duplicate
-    has already triggered a full lookup). The explicit `set()` is therefore
-    required for the coalescing contract, even when callers pass an iterable
-    that happens to already be a set.
+    Returns {mbid: MbArtist | None}. The `sorted(set(mbids))` conversion is
+    the dedup mechanism — a plain dict comprehension over a list does NOT
+    deduplicate calls (it only deduplicates the output dict's keys, after
+    each duplicate has already triggered a full lookup). The explicit
+    `set()` is therefore required for the coalescing contract, even when
+    callers pass an iterable that happens to already be a set. The `sorted`
+    wrapper makes iteration order deterministic so heartbeat assertions and
+    the WS pre-pass stream are reproducible.
     The underlying lookup is cache-read-through — warm entries produce 0 live
     calls.
 
@@ -212,9 +260,21 @@ def coalesce_artist_lookups(
     during the pre-pass fails only that artist instead of aborting the whole
     task. `httpx.HTTPStatusError(404)` is NOT raised by `lookup_artist`
     (returns None), so genuine 404s still land in the map as `None`.
+
+    `on_progress(current, total, mbid)` is invoked **at the start of each
+    iteration AND in the iteration's `finally` block** — twice per MBID,
+    regardless of HTTP outcome. Halves the worst-case heartbeat gap during
+    sustained 429/5xx retries (see plan: "Heartbeat placement"). Callbacks
+    MUST NOT raise; if one does, the helper does not swallow it.
     """
+    distinct = sorted(set(mbids))
+    total = len(distinct)
     result: dict[str, MbArtist | None] = {}
-    for mbid in set(mbids):
+    last_heartbeat_at = 0.0
+    for i, mbid in enumerate(distinct, start=1):
+        last_heartbeat_at = _heartbeat_with_slow_warning(
+            on_progress, last_heartbeat_at, i, total, mbid, phase_label="artists",
+        )
         try:
             result[mbid] = client.lookup_artist(mbid)
         except httpx.HTTPError as exc:
@@ -223,12 +283,18 @@ def coalesce_artist_lookups(
                 mbid=mbid,
                 error=str(exc),
             )
+        finally:
+            last_heartbeat_at = _heartbeat_with_slow_warning(
+                on_progress, last_heartbeat_at, i, total, mbid, phase_label="artists",
+            )
     return result
 
 
 def coalesce_recording_lookups(
     mbids: Iterable[str],
     client: MusicBrainzClientProtocol,
+    *,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, MbRecording | None]:
     """Call lookup_recording exactly once per distinct MBID.
 
@@ -239,9 +305,18 @@ def coalesce_recording_lookups(
         per-item loop treats this as authoritative "not found" and must
         NOT re-query. Distinct from key-absent.
       - success -> payload in the map.
+
+    `on_progress` and `sorted(set(mbids))` semantics match
+    `coalesce_artist_lookups` — see that docstring.
     """
+    distinct = sorted(set(mbids))
+    total = len(distinct)
     result: dict[str, MbRecording | None] = {}
-    for mbid in set(mbids):
+    last_heartbeat_at = 0.0
+    for i, mbid in enumerate(distinct, start=1):
+        last_heartbeat_at = _heartbeat_with_slow_warning(
+            on_progress, last_heartbeat_at, i, total, mbid, phase_label="recordings",
+        )
         try:
             result[mbid] = client.lookup_recording(mbid)
         except httpx.HTTPError as exc:
@@ -249,6 +324,10 @@ def coalesce_recording_lookups(
                 "mb_coalesce_recording_lookup_failed",
                 mbid=mbid,
                 error=str(exc),
+            )
+        finally:
+            last_heartbeat_at = _heartbeat_with_slow_warning(
+                on_progress, last_heartbeat_at, i, total, mbid, phase_label="recordings",
             )
     return result
 
@@ -273,12 +352,80 @@ class _PhaseContext:
     task_id: str
     task_started_at: datetime
     total: int
-    progress_repo: PgTaskProgressRepository
+    # Annotated as the ABC `TaskProgressRepository`, not the concrete
+    # `PgTaskProgressRepository`, so test fakes are type-compatible without
+    # `# type: ignore`. Project convention (.claude/CLAUDE.md) mandates ABCs
+    # for repository interfaces.
+    progress_repo: TaskProgressRepository
     processed: int = 0
     done: dict[str, int] = field(default_factory=dict)
     failed: dict[str, int] = field(default_factory=dict)
     metrics: dict[str, dict[str, object]] = field(default_factory=dict)
     orphans_deleted: int = 0
+
+
+def _emit_pre_pass_heartbeat(
+    ctx: _PhaseContext,
+    phase: str,
+    current: int,
+    total: int,
+    mbid: str,
+) -> None:
+    """Refresh ``updated_at`` and write a pre-pass overlay onto the existing
+    ``progress_tracking`` row, without incrementing ``ctx.processed``.
+
+    Parameter order ``(current, total, mbid)`` matches the
+    ``on_progress: Callable[[int, int, str], None]`` callback convention in
+    `coalesce_*_lookups`, so phase-helper closures don't have to permute
+    arguments — they pass them through positionally after the fixed
+    ``ctx, phase`` prefix.
+
+    `phase` is the BASE phase string (``"artists"`` / ``"recordings"``).
+    The helper appends ``-prepass`` before writing it so callers don't
+    accidentally double-suffix. The overlay shape is the contract documented
+    in the WS-empty-during-mb_enrichment fix plan ("Public contract — field-
+    presence rules"); change ``upsert``-vs-``touch_running`` discipline only
+    by reading that section.
+
+    Errors on the heartbeat path are observability, not work accounting:
+    a transient `psycopg.Error` here MUST NOT crash a pre-pass that is
+    otherwise progressing. The first per-item `_advance_progress` after the
+    pre-pass will surface a genuinely dead `progress_conn` (it propagates
+    psycopg errors to the outer task except handler), so the swallow is
+    bounded by pre-pass duration, not "forever". A `rowcount == 0` from
+    `touch_running` means the row vanished (deleted externally or wrong
+    task_id) — log it at WARNING level; the next `_advance_progress`
+    upsert will recreate the row via INSERT ON CONFLICT (the case is
+    self-healing and does not require operator intervention).
+    """
+    overlay: dict[str, Any] = {
+        "phase": f"{phase}-prepass",
+        "current_item": f"prepass:{mbid}",
+        "prepass_current": current,
+        "prepass_total": total,
+    }
+    try:
+        rowcount = ctx.progress_repo.touch_running(ctx.task_id, overlay)
+    except psycopg.Error as exc:
+        logger.warning(
+            "heartbeat_failed",
+            task_id=ctx.task_id,
+            phase=overlay["phase"],
+            error=str(exc),
+        )
+        return
+    if rowcount == 0:
+        # WARNING, not ERROR: the row is self-healing on the next per-item
+        # `_advance_progress` upsert (its INSERT ON CONFLICT path will
+        # recreate the row), so this case does not require operator
+        # intervention. ERROR-class would imply something an on-call needs
+        # to act on; this is "unusual, worth investigating if it recurs"
+        # — exactly the WARNING semantics elsewhere in this module.
+        logger.warning(
+            "touch_running_no_row",
+            task_id=ctx.task_id,
+            phase=overlay["phase"],
+        )
 
 
 def _advance_progress(
@@ -358,7 +505,13 @@ def _run_artist_phase(
             distinct_mbids = {
                 a.mbid for a in pending_artists if a.mbid is not None
             }
-            mbid_map = coalesce_artist_lookups(distinct_mbids, mb_client)
+
+            def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
+                _emit_pre_pass_heartbeat(ctx, "artists", current, total, mbid)
+
+            mbid_map = coalesce_artist_lookups(
+                distinct_mbids, mb_client, on_progress=_artist_heartbeat,
+            )
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
             # a failing first item silently discards all coalesced
@@ -524,8 +677,13 @@ def _run_recordings_phase(
             # the map inside the loop; absent keys (transient pre-pass
             # failure) fall through to a live fallback lookup — same
             # shape as the Tier 2/3 artist coalescing above.
+            def _recording_heartbeat(current: int, total: int, mbid: str) -> None:
+                _emit_pre_pass_heartbeat(ctx, "recordings", current, total, mbid)
+
             recording_map = coalesce_recording_lookups(
-                (r.id for r in pending_recordings), mb_client,
+                (r.id for r in pending_recordings),
+                mb_client,
+                on_progress=_recording_heartbeat,
             )
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
@@ -633,6 +791,15 @@ def mb_enrichment_task() -> dict[str, int]:
     sys_log_repo: PgSystemLogRepository | None = None
 
     try:
+        # MUST be autocommit=True. The /ws WebSocket reader polls
+        # `progress_tracking` from a separate connection on the async pool;
+        # pre-pass heartbeats (`touch_running`) and per-item upserts both
+        # need to be immediately visible across connections so the WS
+        # broadcast doesn't go silent during long pre-pass phases. A future
+        # refactor that shares a transactional connection here will
+        # silently re-introduce the WS-empty-during-mb_enrichment bug. See
+        # the "Public contract — autocommit dependency" section in the WS
+        # fix plan for the full rationale.
         progress_conn = connect_sync(settings.database_url, autocommit=True)
         progress_repo = PgTaskProgressRepository(progress_conn)
         sys_log_repo = PgSystemLogRepository(progress_conn)

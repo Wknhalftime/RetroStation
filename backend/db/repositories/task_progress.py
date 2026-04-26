@@ -71,3 +71,32 @@ class PgTaskProgressRepository(TaskProgressRepository):
         )
         return result.rowcount
 
+    def touch_running(self, task_id: str, progress_overlay: dict[str, Any]) -> int:
+        # Single round-trip: UPDATE only, no follow-up SELECT. Server-side
+        # `now()` keeps `updated_at` anchored to the same clock the WS
+        # stale-cleanup query uses. Deliberately no `AND status='running'`
+        # guard: a heartbeat must be able to resurrect a row that the WS
+        # stale-cleanup tentatively flipped to `failed` while the worker
+        # was busy in a long pre-pass — that resurrection is the contract
+        # this method exists to provide.
+        #
+        # `completed_at = NULL` is part of the resurrection: the WS
+        # stale-cleanup sets `completed_at = now()` when it flips a row
+        # to `failed` (backend/websocket.py:57). Without explicitly
+        # clearing it here, a resurrected row would carry a stale
+        # `completed_at` while having `status='running'` — currently
+        # harmless because the WS SELECT does not filter the running
+        # branch on `completed_at`, but a latent data-integrity bug that
+        # any future `AND completed_at IS NULL` defensive guard would
+        # silently break.
+        result = self._conn.execute(
+            """UPDATE progress_tracking
+               SET status = 'running',
+                   updated_at = now(),
+                   completed_at = NULL,
+                   progress_data = progress_data || %s::jsonb
+               WHERE task_id = %s""",
+            (json.dumps(progress_overlay), task_id),
+        )
+        return result.rowcount
+
