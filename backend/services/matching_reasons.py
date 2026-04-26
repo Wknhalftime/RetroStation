@@ -40,7 +40,12 @@ def format_ambiguous_gap(gap: float, threshold: float) -> str:
 
 
 def format_deferred_retry() -> str:
+    # Path-agnostic on purpose: DEFERRED_RETRY fires both when a non-truncated
+    # name skips MB entirely AND when a truncated name reaches MB but gets no
+    # candidates. The cascade through bulk_defer_by_artist propagates this
+    # same reason to child identities. "Unresolved across all matching tiers"
+    # covers both without misleading curators about which path was taken.
     return (
-        "Unresolved locally and name is not truncated — "
+        "Unresolved across all matching tiers — "
         "deferred for retry on next playlist"
     )
