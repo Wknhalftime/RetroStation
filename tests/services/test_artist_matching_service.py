@@ -846,3 +846,92 @@ def test_orchestration_local_match_always_wins_over_truncation_check() -> None:
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
     assert mb_client.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Dual cascade: AUTO_REJECTED -> bulk_reject; DEFERRED_RETRY -> bulk_defer
+# ---------------------------------------------------------------------------
+
+
+def test_match_artists_deferred_retry_cascades_to_identity_bulk_defer() -> None:
+    """Invariant 6: cascade isolation. DEFERRED_RETRY artists cascade
+    DEFERRED_RETRY (not AUTO_REJECTED) to their child identities."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    artist = _pending_artist("UNKNOWN ARTIST", broadcast_artist_repo, playlist_id)
+    identity = BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=artist.id,
+        original_title="Song",
+        normalized_title="song",
+        normalized_signature="cascade_deferred_sig",
+    )
+    track_identity_repo.upsert(identity)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=FakeArtistRepository(),
+        match_repo=FakeMatchRepository(),
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=FakeMbClient(),
+    )
+
+    stored_artist = broadcast_artist_repo.get_by_id(artist.id)
+    stored_identity = track_identity_repo.get_by_id(identity.id)
+
+    assert stored_artist is not None
+    assert stored_artist.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored_artist.reason_code == ReasonCode.DEFERRED_RETRY
+
+    assert stored_identity is not None
+    assert stored_identity.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored_identity.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
+    """Invariant 6: _cascade_auto_rejected only touches AUTO_REJECTED rows;
+    _cascade_deferred only touches DEFERRED_RETRY rows. They never overlap."""
+    from backend.services.artist_matching_service import (
+        _cascade_auto_rejected,
+        _cascade_deferred,
+    )
+    from backend.services.matching_reasons import format_deferred_retry
+
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    rejected = _pending_artist("REJECTED", broadcast_artist_repo, playlist_id)
+    deferred = _pending_artist("DEFERRED", broadcast_artist_repo, playlist_id)
+    broadcast_artist_repo.update_match_status(rejected.id, MatchStatus.AUTO_REJECTED)
+    broadcast_artist_repo.update_match_status(
+        deferred.id,
+        MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+
+    rid = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=rejected.id,
+        original_title="A", normalized_title="a", normalized_signature="A",
+    )
+    did = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=deferred.id,
+        original_title="B", normalized_title="b", normalized_signature="B",
+    )
+    track_identity_repo.upsert(rid)
+    track_identity_repo.upsert(did)
+
+    _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+    _cascade_deferred([deferred.id], track_identity_repo)
+
+    rid_after = track_identity_repo.get_by_id(rid.id)
+    did_after = track_identity_repo.get_by_id(did.id)
+    assert rid_after is not None and rid_after.match_status == MatchStatus.AUTO_REJECTED
+    assert did_after is not None
+    assert did_after.match_status == MatchStatus.NEEDS_REVIEW
+    assert did_after.reason_code == ReasonCode.DEFERRED_RETRY

@@ -609,7 +609,11 @@ def match_artists_for_playlist(
             )
 
         _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
-        # Task 9 inserts the _cascade_deferred call here.
+        deferred_artist_ids = [
+            artist_id for artist_id, result in resolved.items()
+            if result.reason_code == ReasonCode.DEFERRED_RETRY
+        ]
+        _cascade_deferred(deferred_artist_ids, track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
         # the engine or the cascade. `distinct_search_keys` comes from the
@@ -650,3 +654,22 @@ def _cascade_auto_rejected(
     for broadcast_artist in all_playlist_artists:
         if broadcast_artist.match_status == MatchStatus.AUTO_REJECTED:
             track_identity_repo.bulk_reject_by_artist(broadcast_artist.id)
+
+
+def _cascade_deferred(
+    deferred_artist_ids: list[UUID],
+    track_identity_repo: BroadcastTrackIdentityRepository,
+) -> None:
+    """Cascade: DEFERRED_RETRY artists -> defer their child identities.
+
+    Mirrors _cascade_auto_rejected with retryable status (Invariant 6:
+    cascade isolation). Caller passes artist IDs whose result was
+    DEFERRED_RETRY in this run, sourced from the orchestration's
+    ``resolved`` map. Avoids re-fetching reason_codes from the repo.
+
+    Asymmetry note: _cascade_auto_rejected scans the playlist (legacy
+    signature, retained to preserve its existing test contract). Aligning
+    both signatures is left as a follow-up — see plan §"Out of Scope".
+    """
+    for artist_id in deferred_artist_ids:
+        track_identity_repo.bulk_defer_by_artist(artist_id)
