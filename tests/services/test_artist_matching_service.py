@@ -596,3 +596,53 @@ def test_broadcast_artist_dataclass_carries_reason_code_after_update() -> None:
     assert stored is not None
     assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
     assert stored.reason_detail == "Score 55% — below confidence threshold"
+
+
+def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
+    """Caller passes the artist IDs (typically derived from the current
+    playlist's artist set), not names. ID-keying makes scope explicit and
+    avoids accidental cross-playlist mutation if the API is later misused."""
+    from backend.services.matching_reasons import format_deferred_retry
+
+    repo = FakeBroadcastArtistRepository()
+    playlist_id = uuid4()
+
+    deferred = _pending_artist("ARTIST A", repo, playlist_id)
+    repo.update_match_status(
+        deferred.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+    auto_matched = _pending_artist("ARTIST B", repo, playlist_id)
+    repo.update_match_status(auto_matched.id, MatchStatus.AUTO_MATCHED)
+    other_review = _pending_artist("ARTIST C", repo, playlist_id)
+    repo.update_match_status(
+        other_review.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.LOW_CONFIDENCE,
+        reason_detail="Score 55%",
+    )
+    # Out-of-scope row: DEFERRED_RETRY but its ID is NOT passed in, so it
+    # must remain DEFERRED_RETRY (proves scope is honored).
+    out_of_scope = _pending_artist("ARTIST D", repo, playlist_id)
+    repo.update_match_status(
+        out_of_scope.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+
+    rows_reset = repo.reset_deferred_by_ids(
+        [deferred.id, auto_matched.id, other_review.id]
+    )
+
+    assert rows_reset == 1
+    assert repo.get_by_id(deferred.id).match_status == MatchStatus.PENDING  # type: ignore[union-attr]
+    assert repo.get_by_id(deferred.id).reason_code is None  # type: ignore[union-attr]
+    assert repo.get_by_id(auto_matched.id).match_status == MatchStatus.AUTO_MATCHED  # type: ignore[union-attr]
+    assert repo.get_by_id(other_review.id).match_status == MatchStatus.NEEDS_REVIEW  # type: ignore[union-attr]
+    assert repo.get_by_id(out_of_scope.id).match_status == MatchStatus.NEEDS_REVIEW  # type: ignore[union-attr]
+    assert repo.get_by_id(out_of_scope.id).reason_code == ReasonCode.DEFERRED_RETRY  # type: ignore[union-attr]
+
+
+def test_reset_deferred_by_ids_empty_input_returns_zero() -> None:
+    repo = FakeBroadcastArtistRepository()
+    assert repo.reset_deferred_by_ids([]) == 0

@@ -120,3 +120,21 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             "UPDATE broadcast_artists SET embedding = %s WHERE id = %s",
             (format_embedding(embedding), artist_id),
         )
+
+    def reset_deferred_by_ids(self, artist_ids: list[UUID]) -> int:
+        if not artist_ids:
+            return 0
+        cur = self._conn.execute(
+            """UPDATE broadcast_artists
+               SET match_status = %s, reason_code = NULL, reason_detail = NULL
+               WHERE id = ANY(%s)
+                 AND match_status = %s
+                 AND reason_code = %s""",
+            (
+                MatchStatus.PENDING.value,
+                artist_ids,
+                MatchStatus.NEEDS_REVIEW.value,
+                ReasonCode.DEFERRED_RETRY.value,
+            ),
+        )
+        return cur.rowcount

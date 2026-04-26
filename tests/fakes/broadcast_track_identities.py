@@ -102,3 +102,43 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                     reason_detail=None,
                 )
 
+    def bulk_defer_by_artist(self, broadcast_artist_id: UUID) -> int:
+        from backend.services.matching_reasons import format_deferred_retry
+
+        changed = 0
+        for identity_id, identity in list(self._data.items()):
+            if (
+                identity.broadcast_artist_id == broadcast_artist_id
+                and identity.match_status == MatchStatus.PENDING
+            ):
+                self._data[identity_id] = replace(
+                    identity,
+                    match_status=MatchStatus.NEEDS_REVIEW,
+                    match_tier=MatchTier.UNCLASSIFIED,
+                    reason_code=ReasonCode.DEFERRED_RETRY,
+                    reason_detail=format_deferred_retry(),
+                )
+                changed += 1
+        return changed
+
+    def reset_deferred_by_artist_ids(self, artist_ids: list[UUID]) -> int:
+        if not artist_ids:
+            return 0
+        ids = set(artist_ids)
+        reset = 0
+        for identity_id, identity in list(self._data.items()):
+            if (
+                identity.broadcast_artist_id in ids
+                and identity.match_status == MatchStatus.NEEDS_REVIEW
+                and identity.reason_code == ReasonCode.DEFERRED_RETRY
+            ):
+                self._data[identity_id] = replace(
+                    identity,
+                    match_status=MatchStatus.PENDING,
+                    match_tier=MatchTier.UNCLASSIFIED,
+                    reason_code=None,
+                    reason_detail=None,
+                )
+                reset += 1
+        return reset
+

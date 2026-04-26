@@ -84,3 +84,23 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         if artist := self._data.get(artist_id):
             artist.embedding = embedding
+
+    def reset_deferred_by_ids(self, artist_ids: list[UUID]) -> int:
+        if not artist_ids:
+            return 0
+        ids = set(artist_ids)
+        reset = 0
+        for artist_id, artist in list(self._data.items()):
+            if (
+                artist_id in ids
+                and artist.match_status == MatchStatus.NEEDS_REVIEW
+                and artist.reason_code == ReasonCode.DEFERRED_RETRY
+            ):
+                self._data[artist_id] = replace(
+                    artist,
+                    match_status=MatchStatus.PENDING,
+                    reason_code=None,
+                    reason_detail=None,
+                )
+                reset += 1
+        return reset
