@@ -118,11 +118,11 @@ def test_normalization_high_score_with_gap_auto_matches() -> None:
     # the runner-up (totally unrelated) should be well below.
     best = _canonical("metallic")
     other = _canonical("radiohead")
-    # Lower high_threshold so ~94 score clears the AUTO_MATCHED bar via the
-    # "high_threshold + gap" branch rather than the MB_AUTO_LINK_SCORE bypass.
+    # Lower strong_match_threshold so ~94 score clears the AUTO_MATCHED bar via the
+    # "strong_match_threshold + gap" branch rather than the MB_AUTO_LINK_SCORE bypass.
     strategy = NormalizationStrategy(
         all_canonical=[best, other],
-        high_threshold=80,
+        strong_match_threshold=80,
         mb_score_gap=10,
     )
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
@@ -142,7 +142,7 @@ def test_normalization_gap_insufficient_needs_review_ambiguous_gap() -> None:
     c2 = _canonical("metallicca")
     strategy = NormalizationStrategy(
         all_canonical=[c1, c2],
-        high_threshold=80,
+        strong_match_threshold=80,
         mb_score_gap=50,  # force gap insufficiency
     )
     result = strategy.apply(_broadcast_artist("Metalica", "metalica"))
@@ -175,7 +175,7 @@ def test_normalization_empty_canonical_returns_none() -> None:
 
 # ---------------------------------------------------------------------------
 # Review fixes (mirrors identity side: has_competitor, noise floor fall-through,
-# separate high_threshold vs MB_AUTO_LINK_SCORE).
+# separate strong_match_threshold vs MB_AUTO_LINK_SCORE).
 # ---------------------------------------------------------------------------
 
 
@@ -222,14 +222,14 @@ def test_normalization_below_noise_floor_falls_through_to_next_strategy() -> Non
     assert result is None
 
 
-def test_normalization_score_90_with_gap_auto_matches_via_high_threshold() -> None:
+def test_normalization_score_90_with_gap_auto_matches_via_strong_match_threshold() -> None:
     """Issue #3: a score of ~90-94 with sufficient gap must AUTO_MATCH via the
-    high_threshold(80)+gap(10) band. Previously broken because both ctor params
+    strong_match_threshold(80)+gap(10) band. Previously broken because both ctor params
     were conflated to MB_AUTO_LINK_SCORE=95, so 90 < 95 forced NEEDS_REVIEW."""
     best = _canonical("metallic")  # fuzzy ~94 against "metallica"
     other = _canonical("radiohead")  # far away — gap is large
     # Rely on DEFAULT ctor (no kwargs) so we're testing the default separation
-    # of high_threshold=80 vs MB_AUTO_LINK_SCORE=95.
+    # of strong_match_threshold=80 vs MB_AUTO_LINK_SCORE=95.
     strategy = NormalizationStrategy(all_canonical=[best, other])
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
@@ -237,7 +237,7 @@ def test_normalization_score_90_with_gap_auto_matches_via_high_threshold() -> No
     assert result.status == MatchStatus.AUTO_MATCHED
     assert result.target_id == best.mbid
     # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95)
-    # — so the AUTO decision came through the high_threshold+gap branch.
+    # — so the AUTO decision came through the strong_match_threshold+gap branch.
     assert result.confidence_score < 95
 
 
@@ -361,7 +361,7 @@ def test_normalization_fuzzy_filters_out_canonicals_without_mbid() -> None:
     mbid_runner_up = _canonical("metallic", mbid="mbid-metallic-ok")
     strategy = NormalizationStrategy(
         all_canonical=[no_mbid_winner, mbid_runner_up],
-        high_threshold=80,
+        strong_match_threshold=80,
         mb_score_gap=10,
     )
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
@@ -470,10 +470,10 @@ def test_normalization_fuzzy_ties_break_deterministically_by_mbid() -> None:
     broadcast = _broadcast_artist(normalized="alpha beta gamma")
 
     result_ab = NormalizationStrategy(
-        [a, b], high_threshold=80, mb_score_gap=MB_SCORE_GAP
+        [a, b], strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP
     ).apply(broadcast)
     result_ba = NormalizationStrategy(
-        [b, a], high_threshold=80, mb_score_gap=MB_SCORE_GAP
+        [b, a], strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP
     ).apply(broadcast)
 
     assert result_ab is not None and result_ba is not None
@@ -491,7 +491,7 @@ def test_mb_strategy_ties_break_deterministically_by_id() -> None:
         }
     )
     repo = FakeArtistRepository()
-    strat = MusicBrainzApiStrategy(fake, repo, high_threshold=80, mb_score_gap=MB_SCORE_GAP)
+    strat = MusicBrainzApiStrategy(fake, repo, strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP)
     result = strat.apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert result is not None
     # Lower id wins the tie-break.
@@ -501,7 +501,7 @@ def test_mb_strategy_ties_break_deterministically_by_id() -> None:
 def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     """Operator can make AUTO harder to achieve by raising mb_auto_link_score.
     Use two candidates with a small gap so the unconditional-AUTO gate
-    (mb_auto_link_score) is the decisive clause — the high_threshold+gap
+    (mb_auto_link_score) is the decisive clause — the strong_match_threshold+gap
     clause is blocked by the small gap, so the override is observable.
     """
     responses = {
@@ -515,19 +515,19 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     default_result = MusicBrainzApiStrategy(
         FakeMbClient(responses=responses),
         FakeArtistRepository(),
-        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert default_result is not None
     assert default_result.status == MatchStatus.AUTO_MATCHED
 
     # Override: raise the gate to 98. Score 95 no longer clears it; the
-    # high_threshold+gap clause is blocked by gap=5 < score_gap(10);
+    # strong_match_threshold+gap clause is blocked by gap=5 < score_gap(10);
     # mid-band clause doesn't fire (score 95 is above the band). Falls to
     # NEEDS_REVIEW with AMBIGUOUS_GAP reason.
     overridden = MusicBrainzApiStrategy(
         FakeMbClient(responses=responses),
         FakeArtistRepository(),
-        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
         mb_auto_link_score=98,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert overridden is not None
@@ -541,20 +541,20 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
 
 
 def test_normalization_lone_candidate_high_band_needs_review_not_auto() -> None:
-    """A lone canonical with score >= high_threshold must NOT auto-match.
+    """A lone canonical with score >= strong_match_threshold must NOT auto-match.
 
-    Without the `has_competitor` guard on the high_threshold+gap clause,
+    Without the `has_competitor` guard on the strong_match_threshold+gap clause,
     a single canonical with synthesized gap=100 would pass the auto-match
     test silently. A single match at any score below the unconditional-AUTO
     gate (95) is genuinely unverifiable, so it belongs in NEEDS_REVIEW.
     """
-    # "metalica" vs "metallica" scores ~94 — above high_threshold (80),
+    # "metalica" vs "metallica" scores ~94 — above strong_match_threshold (80),
     # below MB_AUTO_LINK_SCORE (95).
     bc = _broadcast_artist(normalized="metalica")
     only = _canonical("Metallica", mbid="mbid-metallica-xxx")
 
     result = NormalizationStrategy(
-        [only], high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        [only], strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
     ).apply(bc)
 
     assert result is not None
@@ -576,7 +576,7 @@ def test_mb_lone_candidate_high_band_needs_review_not_auto() -> None:
     )
     result = MusicBrainzApiStrategy(
         fake, FakeArtistRepository(),
-        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
 
     assert result is not None
@@ -598,7 +598,7 @@ def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
     )
     result = MusicBrainzApiStrategy(
         fake, FakeArtistRepository(),
-        high_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
 
     assert result is not None

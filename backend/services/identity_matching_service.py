@@ -72,7 +72,7 @@ def _score_candidates(
     broadcast_title: str,
     candidates: list[LibraryFile],
     tier: MatchTier,
-    high_threshold: int,
+    strong_match_threshold: int,
 ) -> IdentityMatchResult:
     """Score candidates against broadcast_title; return best-match result.
 
@@ -117,7 +117,7 @@ def _score_candidates(
     # Both gap-dependent auto-match clauses require `has_competitor`: when
     # there is no real second candidate, gap is synthesized to 100 and a
     # lone result at score 85 would otherwise auto-match via the
-    # high_threshold+gap path — exactly the "too permissive" failure the
+    # strong_match_threshold+gap path — exactly the "too permissive" failure the
     # mid-band guard prevents. The MB_AUTO_LINK_SCORE (>= 95) path is
     # unguarded because at that confidence a token match is effectively a
     # literal identity and a lone result is still trustworthy.
@@ -125,7 +125,7 @@ def _score_candidates(
         top_score >= MB_AUTO_LINK_SCORE
         or (
             has_competitor
-            and top_score >= high_threshold
+            and top_score >= strong_match_threshold
             and gap >= MB_SCORE_GAP
         )
         or (
@@ -136,7 +136,7 @@ def _score_candidates(
     )
     if auto_match:
         status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
-    elif has_competitor and top_score >= high_threshold:
+    elif has_competitor and top_score >= strong_match_threshold:
         # AMBIGUOUS_GAP only applies when a real peer is close on score.
         # Lone candidates (synthetic gap=100) fall through to LOW_CONFIDENCE
         # so the "within 100 points" message never renders.
@@ -220,12 +220,12 @@ class ResolvedArtistMbidStrategy:
         library_file_repo: LibraryFileRepository,
         match_repo: MatchRepository,
         mb_client: MusicBrainzClientProtocol,
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
         self._mb_client = mb_client
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
 
     def apply(
         self,
@@ -273,7 +273,7 @@ class ResolvedArtistMbidStrategy:
                 identity.normalized_title,
                 candidate_files,
                 tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-                high_threshold=self._high_threshold,
+                strong_match_threshold=self._strong_match_threshold,
             )
             if local_result.status == MatchStatus.AUTO_MATCHED:
                 return local_result
@@ -333,7 +333,7 @@ class ResolvedArtistMbidStrategy:
             identity.normalized_title,
             all_candidates,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
-            high_threshold=self._high_threshold,
+            strong_match_threshold=self._strong_match_threshold,
         )
 
 
@@ -348,10 +348,10 @@ class BroadcastToLocalStrategy:
     def __init__(
         self,
         library_file_repo: LibraryFileRepository,
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
     ) -> None:
         self._library_file_repo = library_file_repo
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
 
     def apply(
         self,
@@ -383,7 +383,7 @@ class BroadcastToLocalStrategy:
             identity.normalized_title,
             candidate_files,
             tier=MatchTier.LOCAL_FILE_FUZZY,
-            high_threshold=self._high_threshold,
+            strong_match_threshold=self._strong_match_threshold,
         )
 
 
@@ -417,7 +417,7 @@ def match_identities_for_playlist(
     library_file_repo: LibraryFileRepository,
     rules_repo: MappingRuleRepository,
     mb_client: MusicBrainzClientProtocol,
-    high_threshold: int = 80,
+    strong_match_threshold: int = 80,
 ) -> list[str]:
     """Resolve pending identities for a playlist.
 
@@ -444,9 +444,9 @@ def match_identities_for_playlist(
     engine = IdentityMatchingEngine([
         IdentityMappingRuleStrategy(rules, library_file_repo),
         ResolvedArtistMbidStrategy(
-            library_file_repo, match_repo, mb_client, high_threshold
+            library_file_repo, match_repo, mb_client, strong_match_threshold
         ),
-        BroadcastToLocalStrategy(library_file_repo, high_threshold),
+        BroadcastToLocalStrategy(library_file_repo, strong_match_threshold),
     ])
 
     auto_matched = 0

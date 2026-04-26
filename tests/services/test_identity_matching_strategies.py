@@ -361,8 +361,8 @@ def test_tier2_mid_confidence_needs_review_with_low_confidence_reason() -> None:
 
 def test_tier2_lone_candidate_high_band_needs_review_not_auto() -> None:
     """BroadcastToLocalStrategy must NOT auto-match when a single library
-    file scores above high_threshold (80) but below MB_AUTO_LINK_SCORE (95).
-    Without has_competitor on the high_threshold+gap clause, synthesized
+    file scores above strong_match_threshold (80) but below MB_AUTO_LINK_SCORE (95).
+    Without has_competitor on the strong_match_threshold+gap clause, synthesized
     gap=100 would falsely trigger auto-match for a lone result.
     """
     artist = _artist(status=MatchStatus.PENDING)
@@ -378,7 +378,7 @@ def test_tier2_lone_candidate_high_band_needs_review_not_auto() -> None:
         )
     )
 
-    strat = BroadcastToLocalStrategy(lib_repo, high_threshold=80)
+    strat = BroadcastToLocalStrategy(lib_repo, strong_match_threshold=80)
     result = strat.apply(identity, artist)
 
     assert result is not None
@@ -404,7 +404,7 @@ def test_tier2_lone_candidate_above_auto_link_still_auto_matches() -> None:
         )
     )
 
-    strat = BroadcastToLocalStrategy(lib_repo, high_threshold=80)
+    strat = BroadcastToLocalStrategy(lib_repo, strong_match_threshold=80)
     result = strat.apply(identity, artist)
 
     assert result is not None

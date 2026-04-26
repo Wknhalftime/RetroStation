@@ -23,7 +23,7 @@ def test_canonical_values() -> None:
     assert mc.QUICK_REVIEW_MIN_SCORE == 65
 
 
-def test_mid_band_is_within_noise_floor_and_high_threshold() -> None:
+def test_mid_band_is_within_noise_floor_and_strong_match_threshold() -> None:
     assert mc.MIN_PRESENTATION_SCORE <= mc.MID_BAND_LOWER
     assert mc.MID_BAND_UPPER < mc.QUICK_REVIEW_MIN_SCORE
     assert mc.MID_BAND_LOWER < mc.MID_BAND_UPPER

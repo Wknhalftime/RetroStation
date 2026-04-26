@@ -239,7 +239,7 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
 
     # Score 71.43 for "enter sandman" vs "Sandman Returns" — above mid-band
-    # (>64) but below high_threshold (<80) → LOW_CONFIDENCE / NEEDS_REVIEW.
+    # (>64) but below strong_match_threshold (<80) → LOW_CONFIDENCE / NEEDS_REVIEW.
     lib_file = _lib_file(
         "/music/metallica/sandman_returns.flac",
         artist_mbid=canonical_mbid,

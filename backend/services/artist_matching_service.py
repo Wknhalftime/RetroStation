@@ -81,7 +81,7 @@ class ArtistMatchingStrategy(Protocol):
 def _decide_artist_zone(
     top_score: float,
     gap: float,
-    high_threshold: int,
+    strong_match_threshold: int,
     score_gap: int,
     has_competitor: bool,
     mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
@@ -93,7 +93,7 @@ def _decide_artist_zone(
     `has_competitor` guards BOTH gap-dependent auto-match clauses: when
     there is no real second candidate, gap is synthesized (100 locally,
     or top_score for MB where second=0). Without the guard, a lone
-    candidate at score 85 would auto-match via the high_threshold+gap
+    candidate at score 85 would auto-match via the strong_match_threshold+gap
     clause (synthetic gap >> MB_SCORE_GAP), which is exactly the "too
     permissive" bug the mid-band guard was added to prevent. Apply the
     same guard on both gap-based clauses so a lone candidate always
@@ -108,7 +108,7 @@ def _decide_artist_zone(
         top_score >= mb_auto_link_score
         or (
             has_competitor
-            and top_score >= high_threshold
+            and top_score >= strong_match_threshold
             and gap >= score_gap
         )
         or (
@@ -124,7 +124,7 @@ def _decide_artist_zone(
     # is NOT ambiguous — there's nobody to be ambiguous with. Report it as
     # LOW_CONFIDENCE so format_ambiguous_gap's "top candidates within 100
     # points" message never renders.
-    if has_competitor and top_score >= high_threshold:
+    if has_competitor and top_score >= strong_match_threshold:
         return (
             MatchStatus.NEEDS_REVIEW,
             ReasonCode.AMBIGUOUS_GAP,
@@ -169,14 +169,16 @@ class NormalizationStrategy:
     def __init__(
         self,
         all_canonical: list[Artist],
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+        min_presentation_score: int = MIN_PRESENTATION_SCORE,
     ) -> None:
         self._all_canonical = all_canonical
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
+        self._min_presentation_score = min_presentation_score
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
         if not self._all_canonical:
@@ -216,16 +218,17 @@ class NormalizationStrategy:
             key=lambda x: (-x[0], x[1].mbid or ""),
         )
         top_score, best = scored[0]
-        # Noise floor: if the best fuzzy score is below MIN_PRESENTATION_SCORE,
-        # fall through so the engine can reach MusicBrainzApiStrategy. Mirrors
-        # the legacy _try_fuzzy_match's return-False-below-threshold behaviour.
-        if top_score < MIN_PRESENTATION_SCORE:
+        # Noise floor: if the best fuzzy score is below the configured
+        # min_presentation_score, fall through so the engine can reach
+        # MusicBrainzApiStrategy. Mirrors the legacy _try_fuzzy_match's
+        # return-False-below-threshold behaviour.
+        if top_score < self._min_presentation_score:
             return None
         has_competitor = len(scored) > 1
         gap = (top_score - scored[1][0]) if has_competitor else 100.0
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
         assert best.mbid is not None  # guaranteed by the with_mbid filter above
@@ -261,14 +264,14 @@ class MusicBrainzApiStrategy:
         self,
         mb_client: MusicBrainzClientProtocol,
         artist_repo: ArtistCatalogRepository,
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
         search_map: dict[str, list[MbArtistResult]] | None = None,
     ) -> None:
         self._mb = mb_client
         self._catalog = artist_repo
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
         self._search_map = search_map
@@ -299,7 +302,7 @@ class MusicBrainzApiStrategy:
         gap = float(best.get("score", 0) - second)
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
 
@@ -396,9 +399,10 @@ def match_artists_for_playlist(
     match_repo: MatchRepository,
     rules_repo: MappingRuleRepository,
     mb_client: MusicBrainzClientProtocol,
-    high_threshold: int = 80,
+    strong_match_threshold: int = 80,
     mb_score_gap: int = MB_SCORE_GAP,
     mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+    min_presentation_score: int = MIN_PRESENTATION_SCORE,
 ) -> None:
     """Resolve PENDING artists for a playlist. Strategy order:
     mapping rules -> normalization (exact + fuzzy local catalog) -> MusicBrainz API.
@@ -422,10 +426,11 @@ def match_artists_for_playlist(
     engine = ArtistMatchingEngine([
         MappingRuleStrategy(rules),
         NormalizationStrategy(
-            all_canonical, high_threshold, mb_score_gap, mb_auto_link_score
+            all_canonical, strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            min_presentation_score=min_presentation_score,
         ),
         MusicBrainzApiStrategy(
-            mb_client, artist_repo, high_threshold, mb_score_gap, mb_auto_link_score,
+            mb_client, artist_repo, strong_match_threshold, mb_score_gap, mb_auto_link_score,
             search_map=search_map,
         ),
     ])
