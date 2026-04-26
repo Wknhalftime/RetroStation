@@ -260,3 +260,168 @@ class TestWebSocketBroadcast:
         assert "ws-done-fresh" in task_ids
         task = next(t for t in data["tasks"] if t["task_id"] == "ws-done-fresh")
         assert task["completed_at"] is not None
+
+
+class TestWebSocketHeartbeatResurrection:
+    """Regression test for the WS-empty-during-mb_enrichment bug.
+
+    A long pre-pass in `mb_enrichment_task` left `progress_tracking.updated_at`
+    frozen for hours. The WS stale-cleanup at backend/websocket.py:57
+    tentatively flipped the row to `failed`, the 5-second grace expired, and
+    the broadcast became `{"tasks": []}` even though the worker was still
+    running. The fix: heartbeats from inside `coalesce_*_lookups` call
+    `touch_running` to refresh `updated_at` and resurrect the row to
+    `running`. This test exercises that contract end-to-end against a real
+    PostgreSQL instance.
+    """
+
+    def test_heartbeat_resurrects_stale_failed_row(
+        self,
+        ws_client: TestClient,
+        db_conn: psycopg.Connection[dict],  # type: ignore[type-arg]
+    ) -> None:
+        """A stale row gets WS-flipped to failed, then a single heartbeat
+        resurrects it back to `running` and re-enters the broadcast.
+
+        Timestamps are computed server-side via PostgreSQL's `now()` so the
+        test is anchored to the same clock the WS query uses — no Python
+        ↔ DB clock drift in CI.
+        """
+        from backend.db.repositories.task_progress import PgTaskProgressRepository
+
+        # Seed: status=running, updated_at=11 minutes ago (PAST the 10-min
+        # WS stale threshold). Server-side timestamp → same clock as WS.
+        db_conn.execute(
+            """INSERT INTO progress_tracking
+               (task_id, task_type, status, progress_data, started_at,
+                updated_at, completed_at)
+               VALUES (%s, %s, 'running', %s,
+                       now() - interval '20 minutes',
+                       now() - interval '11 minutes',
+                       NULL)""",
+            (
+                "ws-heartbeat-resurrect",
+                TaskType.MB_ENRICHMENT.value,
+                json.dumps({
+                    "processed": 627,
+                    "total": 17193,
+                    "phase": "recordings",
+                }),
+            ),
+        )
+        db_conn.commit()
+
+        # First WS poll: stale-cleanup flips status=failed and sets
+        # completed_at=now(); the 5-second terminal grace then immediately
+        # expires (because completed_at == now() at flip time, but the next
+        # frame is read 0.5s later — wait, that's still inside grace).
+        # Need to also age the completed_at past the grace BEFORE polling.
+        # Approach: poll once to trigger the flip, then age completed_at
+        # to 10s ago, then poll again — that frame must NOT contain the row.
+        with ws_client.websocket_connect("/ws?token=dev-token") as ws:
+            ws.receive_json()  # triggers stale-cleanup UPDATE → status=failed
+
+            # Verify the WS UPDATE actually flipped status.
+            row_after_flip = db_conn.execute(
+                "SELECT status FROM progress_tracking WHERE task_id = %s",
+                ("ws-heartbeat-resurrect",),
+            ).fetchone()
+            assert row_after_flip is not None
+            assert row_after_flip["status"] == "failed", (
+                "WS stale-cleanup must flip the stale running row to failed"
+            )
+
+            # Age completed_at past the 5-second terminal grace.
+            db_conn.execute(
+                "UPDATE progress_tracking "
+                "SET completed_at = now() - interval '10 seconds' "
+                "WHERE task_id = %s",
+                ("ws-heartbeat-resurrect",),
+            )
+            db_conn.commit()
+
+            # Drain stale frames and confirm the row is now absent — this
+            # is the original bug: WS shows `{"tasks": []}` while the
+            # worker is still running.
+            absent = False
+            for _ in range(6):
+                frame = ws.receive_json()
+                ids = [t["task_id"] for t in frame["tasks"]]
+                if "ws-heartbeat-resurrect" not in ids:
+                    absent = True
+                    break
+            assert absent, (
+                "post-grace frame must NOT contain the stale-flipped row"
+            )
+
+            # Now the heartbeat fires. NOTE: `db_conn` is the test fixture's
+            # standard (non-autocommit) sync connection; we approximate the
+            # production autocommit-conn semantics with an explicit
+            # `db_conn.commit()` after the call. The autocommit-required
+            # contract of `progress_conn` in `mb_enrichment_task` is
+            # exercised only in production — a regression that drops
+            # `autocommit=True` from `connect_sync(...)` in the worker
+            # would NOT be caught by this test. See the
+            # "Autocommit dependency" subsection of the public contract
+            # in the WS-empty fix plan for why production needs it.
+            heartbeat_repo = PgTaskProgressRepository(db_conn)
+            rowcount = heartbeat_repo.touch_running(
+                "ws-heartbeat-resurrect",
+                {
+                    "phase": "recordings-prepass",
+                    "current_item": "prepass:abc-123",
+                    "prepass_current": 8042,
+                    "prepass_total": 16566,
+                },
+            )
+            db_conn.commit()
+            assert rowcount == 1
+
+            # Verify DB state: status=running, updated_at fresh,
+            # completed_at cleared, overlay merged, prior keys preserved.
+            row = db_conn.execute(
+                """SELECT status, updated_at, completed_at, progress_data,
+                          updated_at >= now() - interval '5 seconds' AS fresh
+                   FROM progress_tracking WHERE task_id = %s""",
+                ("ws-heartbeat-resurrect",),
+            ).fetchone()
+            assert row is not None
+            assert row["status"] == "running", (
+                "heartbeat must resurrect the row from failed → running"
+            )
+            assert row["fresh"] is True, "heartbeat must refresh updated_at"
+            assert row["completed_at"] is None, (
+                "heartbeat must clear completed_at on resurrection so a "
+                "future `AND completed_at IS NULL` guard on the WS running "
+                "branch wouldn't silently break the broadcast"
+            )
+            pd = row["progress_data"]
+            if isinstance(pd, str):
+                pd = json.loads(pd)
+            assert pd["phase"] == "recordings-prepass"
+            assert pd["current_item"] == "prepass:abc-123"
+            assert pd["prepass_current"] == 8042
+            assert pd["prepass_total"] == 16566
+            # Persistent keys from the initial seed survive the JSONB merge.
+            assert pd["processed"] == 627
+            assert pd["total"] == 17193
+
+            # Final WS frame: row reappears in the broadcast, with the
+            # heartbeat overlay visible to the client.
+            present = False
+            for _ in range(6):
+                frame = ws.receive_json()
+                ids = [t["task_id"] for t in frame["tasks"]]
+                if "ws-heartbeat-resurrect" in ids:
+                    task = next(
+                        t for t in frame["tasks"]
+                        if t["task_id"] == "ws-heartbeat-resurrect"
+                    )
+                    assert task["status"] == "running"
+                    assert task["progress_data"]["phase"] == "recordings-prepass"
+                    assert task["progress_data"]["prepass_current"] == 8042
+                    present = True
+                    break
+            assert present, (
+                "post-heartbeat frame must contain the resurrected row"
+            )
