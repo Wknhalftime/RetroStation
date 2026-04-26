@@ -17,7 +17,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import MappingRule, Match
 from backend.services.identity_matching_service import match_identities_for_playlist
@@ -239,7 +239,7 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
 
     # Score 71.43 for "enter sandman" vs "Sandman Returns" — above mid-band
-    # (>64) but below high_threshold (<80) → LOW_CONFIDENCE / NEEDS_REVIEW.
+    # (>64) but below strong_match_threshold (<80) → LOW_CONFIDENCE / NEEDS_REVIEW.
     lib_file = _lib_file(
         "/music/metallica/sandman_returns.flac",
         artist_mbid=canonical_mbid,
@@ -271,8 +271,8 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
 
     # NEW: reason_code and reason_detail are now persisted.
-    assert identity_repo._reason_codes.get(identity.id) is not None
-    assert identity_repo._reason_details.get(identity.id) is not None
+    assert stored.reason_code is not None
+    assert stored.reason_detail is not None
 
 
 def test_match_identities_no_pending_returns_empty() -> None:
@@ -332,5 +332,117 @@ def test_match_identities_skips_orphaned_identity_without_artist() -> None:
     # Orphan is surfaced as NEEDS_REVIEW so review tooling can see it.
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
     assert stored.match_tier == MatchTier.UNCLASSIFIED
-    assert identity_repo._reason_codes.get(identity.id) is not None
+    assert stored.reason_code is not None
     assert match_repo.get_by_identity(identity.id) is None
+
+
+def test_broadcast_track_identity_dataclass_carries_reason_code_after_update() -> None:
+    """Reason state is on the dataclass, not a sidecar."""
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+
+    repo = FakeBroadcastTrackIdentityRepository()
+    identity = BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=uuid4(),
+        original_title="X",
+        normalized_title="x",
+        normalized_signature="x",
+    )
+    repo.upsert(identity)
+
+    repo.update_match_status(
+        identity.id,
+        MatchStatus.NEEDS_REVIEW,
+        MatchTier.UNCLASSIFIED,
+        reason_code=ReasonCode.ORPHANED_IDENTITY,
+        reason_detail="No BroadcastArtist row for this identity",
+    )
+
+    stored = repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.reason_code == ReasonCode.ORPHANED_IDENTITY
+    assert stored.reason_detail == "No BroadcastArtist row for this identity"
+
+
+def test_bulk_defer_by_artist_returns_count_and_only_touches_pending() -> None:
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+
+    repo = FakeBroadcastTrackIdentityRepository()
+    target = uuid4()
+    other = uuid4()
+
+    pending_target = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=target,
+        original_title="A", normalized_title="a", normalized_signature="sig-a",
+    )
+    matched_target = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=target,
+        original_title="B", normalized_title="b", normalized_signature="sig-b",
+    )
+    pending_other = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=other,
+        original_title="C", normalized_title="c", normalized_signature="sig-c",
+    )
+    repo.upsert(pending_target)
+    repo.upsert(matched_target)
+    repo.upsert(pending_other)
+    repo.update_match_status(matched_target.id, MatchStatus.AUTO_MATCHED, MatchTier.NORMALIZATION)
+
+    rows_deferred = repo.bulk_defer_by_artist(target)
+
+    assert rows_deferred == 1
+    after = repo.get_by_id(pending_target.id)
+    assert after is not None
+    assert after.match_status == MatchStatus.NEEDS_REVIEW
+    assert after.reason_code == ReasonCode.DEFERRED_RETRY
+    matched_after = repo.get_by_id(matched_target.id)
+    assert matched_after is not None
+    assert matched_after.match_status == MatchStatus.AUTO_MATCHED  # unchanged
+    other_after = repo.get_by_id(pending_other.id)
+    assert other_after is not None
+    assert other_after.match_status == MatchStatus.PENDING  # unchanged
+
+
+def test_reset_deferred_by_artist_ids_promotes_only_under_those_artists() -> None:
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+
+    repo = FakeBroadcastTrackIdentityRepository()
+    artist_a = uuid4()
+    artist_b = uuid4()
+
+    a = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=artist_a,
+        original_title="A", normalized_title="a", normalized_signature="sig-1",
+    )
+    b = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=artist_b,
+        original_title="B", normalized_title="b", normalized_signature="sig-2",
+    )
+    rejected = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=artist_a,
+        original_title="C", normalized_title="c", normalized_signature="sig-3",
+    )
+    repo.upsert(a)
+    repo.upsert(b)
+    repo.upsert(rejected)
+    repo.bulk_defer_by_artist(artist_a)
+    repo.bulk_defer_by_artist(artist_b)
+    # Force one to AUTO_REJECTED to verify the reset is reason-code-scoped.
+    repo.update_match_status(rejected.id, MatchStatus.AUTO_REJECTED, MatchTier.UNCLASSIFIED)
+
+    rows_reset = repo.reset_deferred_by_artist_ids([artist_a])
+
+    assert rows_reset == 1
+    a_after = repo.get_by_id(a.id)
+    b_after = repo.get_by_id(b.id)
+    rejected_after = repo.get_by_id(rejected.id)
+    assert a_after is not None and a_after.match_status == MatchStatus.PENDING
+    assert b_after is not None and b_after.match_status == MatchStatus.NEEDS_REVIEW
+    assert rejected_after is not None and rejected_after.match_status == MatchStatus.AUTO_REJECTED
+
+
+def test_reset_deferred_by_artist_ids_empty_input_returns_zero() -> None:
+    from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+
+    repo = FakeBroadcastTrackIdentityRepository()
+    assert repo.reset_deferred_by_artist_ids([]) == 0

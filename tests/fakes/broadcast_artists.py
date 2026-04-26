@@ -1,9 +1,9 @@
+from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus
+from backend.domain.enums import MatchStatus, ReasonCode
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
-from backend.services.matching_reasons import ReasonCode
 
 
 class FakeBroadcastArtistRepository(BroadcastArtistRepository):
@@ -11,8 +11,6 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
         self._data: dict[UUID, BroadcastArtist] = {}
         # playlist_id -> set of artist_ids (simulates the JOIN through play_events)
         self._playlist_artists: dict[UUID, set[UUID]] = {}
-        self._reason_codes: dict[UUID, ReasonCode | None] = {}
-        self._reason_details: dict[UUID, str | None] = {}
 
     def register_playlist_artist(
         self, playlist_id: UUID, artist_id: UUID
@@ -75,12 +73,34 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
         current = self._data.get(artist_id)
         if current is None:
             return
-        from dataclasses import replace
-        self._data[artist_id] = replace(current, match_status=status)
-        # Unconditionally overwrite — mirrors Pg UPDATE semantics.
-        self._reason_codes[artist_id] = reason_code
-        self._reason_details[artist_id] = reason_detail
+        # Mirror Pg UPDATE semantics: unconditionally overwrite reason fields.
+        self._data[artist_id] = replace(
+            current,
+            match_status=status,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+        )
 
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         if artist := self._data.get(artist_id):
             artist.embedding = embedding
+
+    def reset_deferred_by_ids(self, artist_ids: list[UUID]) -> int:
+        if not artist_ids:
+            return 0
+        ids = set(artist_ids)
+        reset = 0
+        for artist_id, artist in list(self._data.items()):
+            if (
+                artist_id in ids
+                and artist.match_status == MatchStatus.NEEDS_REVIEW
+                and artist.reason_code == ReasonCode.DEFERRED_RETRY
+            ):
+                self._data[artist_id] = replace(
+                    artist,
+                    match_status=MatchStatus.PENDING,
+                    reason_code=None,
+                    reason_detail=None,
+                )
+                reset += 1
+        return reset

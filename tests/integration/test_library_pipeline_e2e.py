@@ -28,8 +28,9 @@ from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.domain.broadcast import BroadcastStation
 from backend.domain.catalog import Recording
-from backend.domain.enums import EnrichmentStatus
+from backend.domain.enums import EnrichmentStatus, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.identity_matching_service import match_identities_for_playlist
 from backend.services.ingestion_service import ingest_csv
@@ -73,14 +74,24 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         assert result.rows_processed >= 3166
         assert result.artists_created >= 100
 
-        # --- Step 2: Artist matching with FakeMbClient ---
-        # Seed Metallica so it gets AUTO_MATCHED
-        fake_mb = FakeMbClient({
-            "METALLICA": [
-                {"id": "mbid-metallica-lib", "name": "Metallica",
-                 "sort-name": "Metallica", "score": 100},
-            ],
-        })
+        # --- Step 2: Artist matching ---
+        # Seed a mapping rule so METALLICA resolves via the local Tier-0 rule
+        # path (AUTO_MATCHED, MANUAL tier). After the broadcast-local-first
+        # change, MB is only consulted for likely-truncated names; "METALLICA"
+        # (9 chars) is non-truncated and would otherwise land in DEFERRED_RETRY.
+        # The rule is the cleanest way to give Metallica a stable target_id
+        # for the downstream identity-match assertions in this test.
+        rules_repo = PgMappingRuleRepository(conn)
+        rules_repo.create(MappingRule(
+            id=uuid4(),
+            source_pattern="metallica",
+            target_type=TargetType.ARTIST,
+            target_id="mbid-metallica-lib",
+            priority=10,
+        ))
+        # FakeMbClient is still passed to match_identities_for_playlist below,
+        # but its seeded responses are no longer consulted by the artist tier.
+        fake_mb = FakeMbClient({})
 
         match_artists_for_playlist(
             playlist_id=playlist_id,
@@ -88,7 +99,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
             artist_repo=PgArtistRepository(conn),
             match_repo=PgMatchRepository(conn),
-            rules_repo=PgMappingRuleRepository(conn),
+            rules_repo=rules_repo,
             mb_client=fake_mb,
         )
         conn.commit()

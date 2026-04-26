@@ -10,7 +10,7 @@ from rapidfuzz import fuzz
 
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule, Match
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
@@ -27,11 +27,11 @@ from backend.services.matching_constants import (
     MIN_PRESENTATION_SCORE,
 )
 from backend.services.matching_reasons import (
-    ReasonCode,
     format_ambiguous_gap,
+    format_deferred_retry,
     format_low_confidence,
 )
-from backend.services.matching_utils import rule_matches
+from backend.services.matching_utils import is_likely_truncated, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import normalize_artist
@@ -63,6 +63,12 @@ class ArtistMatchResult:
 
     reason_code / reason_detail are None for AUTO_MATCHED; populated for
     NEEDS_REVIEW using the stable ReasonCode vocabulary.
+
+    mb_candidate carries the raw MB search result for the orchestration to
+    upsert into the local catalog when status == AUTO_MATCHED. Populated only
+    by MusicBrainzApiStrategy; None for all other strategies. Decoupling the
+    upsert from the strategy keeps the strategy single-responsibility (decide
+    the match) and lets the orchestration own all writes.
     """
 
     status: MatchStatus
@@ -71,6 +77,7 @@ class ArtistMatchResult:
     target_id: str
     reason_code: ReasonCode | None = None
     reason_detail: str | None = None
+    mb_candidate: MbArtistResult | None = None
 
 
 class ArtistMatchingStrategy(Protocol):
@@ -82,7 +89,7 @@ class ArtistMatchingStrategy(Protocol):
 def _decide_artist_zone(
     top_score: float,
     gap: float,
-    high_threshold: int,
+    strong_match_threshold: int,
     score_gap: int,
     has_competitor: bool,
     mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
@@ -94,7 +101,7 @@ def _decide_artist_zone(
     `has_competitor` guards BOTH gap-dependent auto-match clauses: when
     there is no real second candidate, gap is synthesized (100 locally,
     or top_score for MB where second=0). Without the guard, a lone
-    candidate at score 85 would auto-match via the high_threshold+gap
+    candidate at score 85 would auto-match via the strong_match_threshold+gap
     clause (synthetic gap >> MB_SCORE_GAP), which is exactly the "too
     permissive" bug the mid-band guard was added to prevent. Apply the
     same guard on both gap-based clauses so a lone candidate always
@@ -109,7 +116,7 @@ def _decide_artist_zone(
         top_score >= mb_auto_link_score
         or (
             has_competitor
-            and top_score >= high_threshold
+            and top_score >= strong_match_threshold
             and gap >= score_gap
         )
         or (
@@ -125,7 +132,7 @@ def _decide_artist_zone(
     # is NOT ambiguous — there's nobody to be ambiguous with. Report it as
     # LOW_CONFIDENCE so format_ambiguous_gap's "top candidates within 100
     # points" message never renders.
-    if has_competitor and top_score >= high_threshold:
+    if has_competitor and top_score >= strong_match_threshold:
         return (
             MatchStatus.NEEDS_REVIEW,
             ReasonCode.AMBIGUOUS_GAP,
@@ -170,14 +177,16 @@ class NormalizationStrategy:
     def __init__(
         self,
         all_canonical: list[Artist],
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+        min_presentation_score: int = MIN_PRESENTATION_SCORE,
     ) -> None:
         self._all_canonical = all_canonical
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
+        self._min_presentation_score = min_presentation_score
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
         if not self._all_canonical:
@@ -217,16 +226,17 @@ class NormalizationStrategy:
             key=lambda x: (-x[0], x[1].mbid or ""),
         )
         top_score, best = scored[0]
-        # Noise floor: if the best fuzzy score is below MIN_PRESENTATION_SCORE,
-        # fall through so the engine can reach MusicBrainzApiStrategy. Mirrors
-        # the legacy _try_fuzzy_match's return-False-below-threshold behaviour.
-        if top_score < MIN_PRESENTATION_SCORE:
+        # Noise floor: if the best fuzzy score is below the configured
+        # min_presentation_score, fall through so the engine can reach
+        # MusicBrainzApiStrategy. Mirrors the legacy _try_fuzzy_match's
+        # return-False-below-threshold behaviour.
+        if top_score < self._min_presentation_score:
             return None
         has_competitor = len(scored) > 1
         gap = (top_score - scored[1][0]) if has_competitor else 100.0
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
         assert best.mbid is not None  # guaranteed by the with_mbid filter above
@@ -241,11 +251,13 @@ class NormalizationStrategy:
 
 
 class MusicBrainzApiStrategy:
-    """Final artist tier — query MusicBrainz. Caches AUTO_MATCHED results to
-    local artist catalog so subsequent NormalizationStrategy runs hit locally.
+    """Final artist tier — query MusicBrainz.
 
-    Preserves the legacy _try_mb_match side effect: on AUTO_MATCHED, upserts
-    the MB result into the local Artist catalog.
+    Read-only: returns ArtistMatchResult with mb_candidate populated whenever
+    a candidate is selected. The orchestration is responsible for upserting
+    the MB result into the local catalog when status == AUTO_MATCHED so the
+    strategy stays single-responsibility (decide the match) and all writes
+    flow through one layer.
 
     `search_map` short-circuits the live search. When present, bucket key is
     `broadcast_artist.original_name.lower()` — identical to the cache key
@@ -261,15 +273,13 @@ class MusicBrainzApiStrategy:
     def __init__(
         self,
         mb_client: MusicBrainzClientProtocol,
-        artist_repo: ArtistCatalogRepository,
-        high_threshold: int = 80,
+        strong_match_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
         search_map: dict[str, list[MbArtistResult]] | None = None,
     ) -> None:
         self._mb = mb_client
-        self._catalog = artist_repo
-        self._high_threshold = high_threshold
+        self._strong_match_threshold = strong_match_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
         self._search_map = search_map
@@ -300,23 +310,9 @@ class MusicBrainzApiStrategy:
         gap = float(best.get("score", 0) - second)
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._high_threshold, self._gap, has_competitor,
+            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
-
-        # Preserve legacy side effect: cache the MB result into the local
-        # catalog on AUTO_MATCHED so later NormalizationStrategy runs can
-        # hit locally. Use upsert_musicbrainz_artist so mbid / origin /
-        # normalized_name are populated — the generic upsert leaves them
-        # NULL / LOCAL, which breaks later lookups keyed on those columns.
-        if status == MatchStatus.AUTO_MATCHED:
-            self._catalog.upsert_musicbrainz_artist(
-                mbid=best["id"],
-                name=best["name"],
-                sort_name=best.get("sort-name", best["name"]),
-                normalized_name=normalize_artist(best["name"]),
-                disambiguation=best.get("disambiguation"),
-            )
 
         return ArtistMatchResult(
             status=status,
@@ -325,6 +321,49 @@ class MusicBrainzApiStrategy:
             target_id=best["id"],
             reason_code=rc,
             reason_detail=rd,
+            mb_candidate=best,
+        )
+
+
+class TruncatedNameMbStrategy:
+    """Gates an inner strategy by the truncation heuristic.
+
+    Returns the inner strategy's result when ``original_name`` looks truncated
+    by the broadcast system's fixed-width field, else None so the engine
+    falls through to the next tier (DeferredRetryStrategy in production
+    wiring).
+
+    Single responsibility: routing. Match logic stays in the inner strategy.
+    """
+
+    def __init__(self, inner: ArtistMatchingStrategy, max_len: int) -> None:
+        self._inner = inner
+        self._max_len = max_len
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        if not is_likely_truncated(broadcast_artist.original_name, self._max_len):
+            return None
+        return self._inner.apply(broadcast_artist)
+
+
+class DeferredRetryStrategy:
+    """Terminal strategy — always returns NEEDS_REVIEW/DEFERRED_RETRY.
+
+    Reached only when every higher tier returned None. Eliminates the
+    ``result is None → NO_CANDIDATES`` branch in the orchestration result
+    loop: every artist gets a terminal result. The reset paths in the
+    artist_matching_task pick these up on the next ingestion so previously-
+    deferred artists get another local pass after the catalog has grown.
+    """
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        return ArtistMatchResult(
+            status=MatchStatus.NEEDS_REVIEW,
+            tier=MatchTier.UNCLASSIFIED,
+            confidence_score=0.0,
+            target_id="",
+            reason_code=ReasonCode.DEFERRED_RETRY,
+            reason_detail=format_deferred_retry(),
         )
 
 
@@ -389,6 +428,152 @@ def coalesce_artist_searches(
     return result, len(buckets)
 
 
+def _run_local_phase(
+    pending: list[BroadcastArtist],
+    rules: list[MappingRule],
+    all_canonical: list[Artist],
+    strong_match_threshold: int,
+    mb_score_gap: int,
+    mb_auto_link_score: int,
+    min_presentation_score: int,
+) -> tuple[dict[UUID, ArtistMatchResult], list[BroadcastArtist]]:
+    """Phase 1: local engine — runs for every artist.
+
+    Returns (resolved_results, unresolved_artists). Unresolved artists fall
+    through to Phase 2 (truncated-MB + DeferredRetryStrategy fallback).
+    """
+    engine = ArtistMatchingEngine([
+        MappingRuleStrategy(rules),
+        NormalizationStrategy(
+            all_canonical, strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            min_presentation_score=min_presentation_score,
+        ),
+    ])
+    resolved: dict[UUID, ArtistMatchResult] = {}
+    unresolved: list[BroadcastArtist] = []
+    for broadcast_artist in pending:
+        result = engine.resolve(broadcast_artist)
+        if result is not None:
+            resolved[broadcast_artist.id] = result
+        else:
+            unresolved.append(broadcast_artist)
+    return resolved, unresolved
+
+
+def _build_truncated_search_map(
+    unresolved: list[BroadcastArtist],
+    mb_client: MusicBrainzClientProtocol,
+    broadcast_name_max_len: int,
+) -> tuple[dict[str, list[MbArtistResult]], int]:
+    """Filter unresolved to truncated-only, then coalesce MB searches.
+
+    Non-truncated names never trigger an MB search (Invariant 3). Wraps
+    ``coalesce_artist_searches`` with the truncation pre-filter — the
+    coalescer's existing httpx error-omit-key semantics are preserved but
+    now apply only to the truncated subset, not the full pending list.
+
+    NOTE: there are TWO truncation checks in Phase 2 — this pre-filter and
+    the gate inside ``TruncatedNameMbStrategy``. They have different jobs:
+
+    - This pre-filter is for *efficiency*: only truncated names are added
+      to the search map, so non-truncated names never trigger a coalesced
+      MB search call in the first place.
+    - ``TruncatedNameMbStrategy`` is for *correctness*: it stops
+      ``MusicBrainzApiStrategy`` from falling back to a live ``search_artist``
+      call for any unresolved name absent from the map. Without that gate,
+      non-truncated names would still hit MB at per-row resolve time.
+
+    Both must remain. Removing only one silently re-enables unconstrained
+    MB calls for non-truncated names.
+    """
+    truncated = [
+        a for a in unresolved
+        if is_likely_truncated(a.original_name, broadcast_name_max_len)
+    ]
+    if not truncated:
+        return {}, 0
+    return coalesce_artist_searches(truncated, mb_client)
+
+
+def _run_mb_or_deferred_phase(
+    unresolved: list[BroadcastArtist],
+    mb_client: MusicBrainzClientProtocol,
+    search_map: dict[str, list[MbArtistResult]],
+    strong_match_threshold: int,
+    mb_score_gap: int,
+    mb_auto_link_score: int,
+    broadcast_name_max_len: int,
+) -> dict[UUID, ArtistMatchResult]:
+    """Phase 2: TruncatedNameMbStrategy → DeferredRetryStrategy.
+
+    DeferredRetryStrategy is terminal — every artist gets a result
+    (Invariant 2 — no orphaned ``result is None`` state).
+    """
+    engine = ArtistMatchingEngine([
+        TruncatedNameMbStrategy(
+            inner=MusicBrainzApiStrategy(
+                mb_client, strong_match_threshold, mb_score_gap, mb_auto_link_score,
+                search_map=search_map,
+            ),
+            max_len=broadcast_name_max_len,
+        ),
+        DeferredRetryStrategy(),
+    ])
+    out: dict[UUID, ArtistMatchResult] = {}
+    for broadcast_artist in unresolved:
+        result = engine.resolve(broadcast_artist)
+        # Invariant 2: DeferredRetryStrategy is the terminal tier and never
+        # returns None. RuntimeError (not assert) so this stays load-bearing
+        # under python -O, where asserts are stripped.
+        if result is None:
+            raise RuntimeError(
+                "Invariant 2 violated: Phase-2 engine returned None for "
+                f"broadcast_artist {broadcast_artist.id}; DeferredRetryStrategy "
+                "should make every artist terminal."
+            )
+        out[broadcast_artist.id] = result
+    return out
+
+
+def _persist_artist_result(
+    broadcast_artist: BroadcastArtist,
+    result: ArtistMatchResult,
+    broadcast_artist_repo: BroadcastArtistRepository,
+    artist_repo: ArtistCatalogRepository,
+    match_repo: MatchRepository,
+) -> None:
+    """Apply a single result to repositories. Owned by orchestration so
+    strategies stay read-only (Invariant 1)."""
+    broadcast_artist_repo.update_match_status(
+        broadcast_artist.id,
+        result.status,
+        reason_code=result.reason_code,
+        reason_detail=result.reason_detail,
+    )
+    if result.status != MatchStatus.AUTO_MATCHED:
+        return
+    match_repo.create(Match(
+        id=uuid4(),
+        artist_id=broadcast_artist.id,
+        target_id=result.target_id,
+        target_type=TargetType.ARTIST,
+        confidence_score=result.confidence_score,
+        match_tier=result.tier,
+    ))
+    # Catalog upsert moved out of MusicBrainzApiStrategy (SRP). Only the MB
+    # tier populates mb_candidate, so this fires only on MB hits.
+    if result.mb_candidate is not None:
+        artist_repo.upsert_musicbrainz_artist(
+            mbid=result.mb_candidate["id"],
+            name=result.mb_candidate["name"],
+            sort_name=result.mb_candidate.get(
+                "sort-name", result.mb_candidate["name"]
+            ),
+            normalized_name=normalize_artist(result.mb_candidate["name"]),
+            disambiguation=result.mb_candidate.get("disambiguation"),
+        )
+
+
 def match_artists_for_playlist(
     playlist_id: UUID,
     broadcast_artist_repo: BroadcastArtistRepository,
@@ -397,19 +582,24 @@ def match_artists_for_playlist(
     match_repo: MatchRepository,
     rules_repo: MappingRuleRepository,
     mb_client: MusicBrainzClientProtocol,
-    high_threshold: int = 80,
+    strong_match_threshold: int = 80,
     mb_score_gap: int = MB_SCORE_GAP,
     mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
+    min_presentation_score: int = MIN_PRESENTATION_SCORE,
+    broadcast_name_max_len: int = 30,
 ) -> None:
-    """Resolve PENDING artists for a playlist. Strategy order:
-    mapping rules -> normalization (exact + fuzzy local catalog) -> MusicBrainz API.
+    """Resolve PENDING artists. Tier order:
 
-    Persistence lives here, not in strategies. Strategies return
-    ArtistMatchResult values; this function writes the match row and status
-    transition.
+    Phase 1 (every artist): MappingRuleStrategy → NormalizationStrategy.
+    Phase 2 (Phase-1-unresolved): TruncatedNameMbStrategy → DeferredRetryStrategy.
 
-    AUTO_REJECTED cascade: after all pending are resolved, identities under an
-    AUTO_REJECTED artist are bulk-rejected (preserved from legacy).
+    MB is consulted only for names that look truncated by the broadcast
+    system's fixed-width field. Everything else parks in
+    NEEDS_REVIEW/DEFERRED_RETRY for retry on the next ingestion (see
+    artist_matching_task's reset paths).
+
+    Persistence lives here, not in strategies. AUTO_REJECTED cascade
+    preserved from legacy.
     """
     pending = broadcast_artist_repo.get_pending_for_playlist(playlist_id)
     rules = rules_repo.list_ordered()
@@ -417,50 +607,35 @@ def match_artists_for_playlist(
 
     live_start = mb_client.live_fetches
     hits_start = mb_client.cache_hits
-
-    search_map, distinct_search_keys = coalesce_artist_searches(pending, mb_client)
-
-    engine = ArtistMatchingEngine([
-        MappingRuleStrategy(rules),
-        NormalizationStrategy(
-            all_canonical, high_threshold, mb_score_gap, mb_auto_link_score
-        ),
-        MusicBrainzApiStrategy(
-            mb_client, artist_repo, high_threshold, mb_score_gap, mb_auto_link_score,
-            search_map=search_map,
-        ),
-    ])
+    distinct_search_keys = 0  # populated below; retained for the finally summary
 
     try:
-        for broadcast_artist in pending:
-            result = engine.resolve(broadcast_artist)
-            if result is None:
-                broadcast_artist_repo.update_match_status(
-                    broadcast_artist.id,
-                    MatchStatus.NEEDS_REVIEW,
-                    reason_code=ReasonCode.NO_CANDIDATES,
-                    reason_detail="No candidates found across all matching tiers",
-                )
-                continue
+        resolved, unresolved = _run_local_phase(
+            pending, rules, all_canonical,
+            strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            min_presentation_score=min_presentation_score,
+        )
+        search_map, distinct_search_keys = _build_truncated_search_map(
+            unresolved, mb_client, broadcast_name_max_len,
+        )
+        resolved.update(_run_mb_or_deferred_phase(
+            unresolved, mb_client, search_map,
+            strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            broadcast_name_max_len,
+        ))
 
-            broadcast_artist_repo.update_match_status(
-                broadcast_artist.id,
-                result.status,
-                reason_code=result.reason_code,
-                reason_detail=result.reason_detail,
+        for broadcast_artist in pending:
+            _persist_artist_result(
+                broadcast_artist, resolved[broadcast_artist.id],
+                broadcast_artist_repo, artist_repo, match_repo,
             )
 
-            if result.status == MatchStatus.AUTO_MATCHED:
-                match_repo.create(Match(
-                    id=uuid4(),
-                    artist_id=broadcast_artist.id,
-                    target_id=result.target_id,
-                    target_type=TargetType.ARTIST,
-                    confidence_score=result.confidence_score,
-                    match_tier=result.tier,
-                ))
-
         _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+        deferred_artist_ids = [
+            artist_id for artist_id, result in resolved.items()
+            if result.reason_code == ReasonCode.DEFERRED_RETRY
+        ]
+        _cascade_deferred(deferred_artist_ids, track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
         # the engine or the cascade. `distinct_search_keys` comes from the
@@ -501,3 +676,22 @@ def _cascade_auto_rejected(
     for broadcast_artist in all_playlist_artists:
         if broadcast_artist.match_status == MatchStatus.AUTO_REJECTED:
             track_identity_repo.bulk_reject_by_artist(broadcast_artist.id)
+
+
+def _cascade_deferred(
+    deferred_artist_ids: list[UUID],
+    track_identity_repo: BroadcastTrackIdentityRepository,
+) -> None:
+    """Cascade: DEFERRED_RETRY artists -> defer their child identities.
+
+    Mirrors _cascade_auto_rejected with retryable status (Invariant 6:
+    cascade isolation). Caller passes artist IDs whose result was
+    DEFERRED_RETRY in this run, sourced from the orchestration's
+    ``resolved`` map. Avoids re-fetching reason_codes from the repo.
+
+    Asymmetry note: _cascade_auto_rejected scans the playlist (legacy
+    signature, retained to preserve its existing test contract). Aligning
+    both signatures is left as a follow-up — see plan §"Out of Scope".
+    """
+    for artist_id in deferred_artist_ids:
+        track_identity_repo.bulk_defer_by_artist(artist_id)

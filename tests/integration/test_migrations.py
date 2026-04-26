@@ -8,9 +8,9 @@ def test_all_migrations_applied(migrated_db: str) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 20
+    assert len(versions) == 21
     assert versions[0].startswith("0001")
-    assert versions[-1].startswith("0020")
+    assert versions[-1].startswith("0021")
 
 
 def test_station_delete_cascade_fks(migrated_db: str) -> None:

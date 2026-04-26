@@ -2,8 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, ReasonCode
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 
 
@@ -44,17 +43,18 @@ def test_update_match_status_accepts_reason_code_and_detail() -> None:
     stored = repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert repo._reason_codes[artist.id] == ReasonCode.LOW_CONFIDENCE
-    assert repo._reason_details[artist.id] == "Score 65% — below confidence threshold"
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_detail == "Score 65% — below confidence threshold"
 
 
 def test_update_match_status_reason_args_default_to_none() -> None:
     repo = FakeBroadcastArtistRepository()
     artist = _seed(repo)
     repo.update_match_status(artist.id, MatchStatus.NEEDS_REVIEW)
-    # Default to None — same as if the keys don't exist
-    assert repo._reason_codes.get(artist.id) is None
-    assert repo._reason_details.get(artist.id) is None
+    stored = repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.reason_code is None
+    assert stored.reason_detail is None
 
 
 def test_update_match_status_clears_previous_reason_when_none_passed() -> None:
@@ -69,8 +69,10 @@ def test_update_match_status_clears_previous_reason_when_none_passed() -> None:
         reason_detail="Score 65% — below confidence threshold",
     )
     repo.update_match_status(artist.id, MatchStatus.AUTO_MATCHED)  # clears
-    assert repo._reason_codes[artist.id] is None
-    assert repo._reason_details[artist.id] is None
+    stored = repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.reason_code is None
+    assert stored.reason_detail is None
 
 
 def test_get_by_ids_returns_requested_subset() -> None:

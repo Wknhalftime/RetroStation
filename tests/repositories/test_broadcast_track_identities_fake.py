@@ -2,8 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from backend.domain.broadcast import BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 
 
@@ -35,16 +34,20 @@ def test_update_match_status_accepts_reason_code_and_detail() -> None:
         reason_code=ReasonCode.NO_CANDIDATES,
         reason_detail="No library files found for artist",
     )
-    assert repo._reason_codes[identity.id] == ReasonCode.NO_CANDIDATES
-    assert repo._reason_details[identity.id] == "No library files found for artist"
+    stored = repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.reason_code == ReasonCode.NO_CANDIDATES
+    assert stored.reason_detail == "No library files found for artist"
 
 
 def test_update_match_status_reason_args_default_to_none() -> None:
     repo = FakeBroadcastTrackIdentityRepository()
     identity = _seed(repo)
     repo.update_match_status(identity.id, MatchStatus.NEEDS_REVIEW, tier=None)
-    assert repo._reason_codes.get(identity.id) is None
-    assert repo._reason_details.get(identity.id) is None
+    stored = repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.reason_code is None
+    assert stored.reason_detail is None
 
 
 def test_update_match_status_clears_previous_reason_when_none_passed() -> None:
@@ -60,5 +63,7 @@ def test_update_match_status_clears_previous_reason_when_none_passed() -> None:
     repo.update_match_status(
         identity.id, MatchStatus.AUTO_MATCHED, tier=MatchTier.MUSICBRAINZ_ID_EXACT
     )
-    assert repo._reason_codes[identity.id] is None
-    assert repo._reason_details[identity.id] is None
+    stored = repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.reason_code is None
+    assert stored.reason_detail is None

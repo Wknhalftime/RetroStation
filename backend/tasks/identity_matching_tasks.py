@@ -47,6 +47,7 @@ def identity_matching_task(playlist_id: str) -> None:
                     library_file_repo=PgLibraryFileRepository(conn),
                     rules_repo=PgMappingRuleRepository(conn),
                     mb_client=mb_client,
+                    strong_match_threshold=settings.strong_match_threshold,
                 )
             conn.commit()
 

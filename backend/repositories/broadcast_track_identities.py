@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
-from backend.domain.enums import MatchStatus, MatchTier
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 
 
 class BroadcastTrackIdentityRepository(ABC):
@@ -59,3 +58,24 @@ class BroadcastTrackIdentityRepository(ABC):
         """Set all identities for this artist to AUTO_REJECTED."""
         ...
 
+    @abstractmethod
+    def bulk_defer_by_artist(self, broadcast_artist_id: UUID) -> int:
+        """Set PENDING identities under this artist to NEEDS_REVIEW/DEFERRED_RETRY.
+
+        Mirrors ``bulk_reject_by_artist`` but uses the retryable DEFERRED_RETRY
+        reason code (so the next playlist's reset path picks them back up)
+        instead of the terminal AUTO_REJECTED status. Already-matched identities
+        are left alone. Returns rows changed.
+        """
+        ...
+
+    @abstractmethod
+    def reset_deferred_by_artist_ids(self, artist_ids: list[UUID]) -> int:
+        """Reset NEEDS_REVIEW/DEFERRED_RETRY identities under the given artists
+        back to PENDING. Returns rows reset.
+
+        Empty input returns 0 without hitting the DB. Reason-code-scoped:
+        AUTO_REJECTED rows and non-DEFERRED_RETRY NEEDS_REVIEW rows are
+        untouched.
+        """
+        ...

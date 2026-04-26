@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     mb_auto_link_score: int = 95
     mb_score_gap: int = 10
-    mb_needs_review_threshold: int = 50
+    strong_match_threshold: int = 80
+    min_presentation_score: int = 50
+    broadcast_name_max_len: int = 30
     library_scan_paths: list[str] = []
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

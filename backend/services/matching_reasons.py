@@ -1,8 +1,8 @@
-"""Stable keys and UI formatters for why a match is in NEEDS_REVIEW state.
+"""UI formatters for why a match is in NEEDS_REVIEW state.
 
-`ReasonCode` values are written to `broadcast_artists.reason_code` and
-`track_identities.reason_code`. Do not rename values — they are persisted,
-queried by telemetry, and asserted in characterization tests.
+`ReasonCode` lives in `backend.domain.enums` (domain → services would be a
+layering violation). It is re-exported here so existing imports keep working;
+new code should import it from `backend.domain.enums` directly.
 
 `reason_detail` strings are for curators only. They may include dynamic values
 (score, gap). Keep them in this module so strategies never inline f-strings.
@@ -10,17 +10,15 @@ queried by telemetry, and asserted in characterization tests.
 from __future__ import annotations
 
 import math
-from enum import StrEnum
 
+from backend.domain.enums import ReasonCode
 
-class ReasonCode(StrEnum):
-    LOW_CONFIDENCE = "LOW_CONFIDENCE"
-    AMBIGUOUS_GAP = "AMBIGUOUS_GAP"
-    NO_CANDIDATES = "NO_CANDIDATES"
-    NO_LOCAL_FILES = "NO_LOCAL_FILES"
-    MB_SEARCH_INCONCLUSIVE = "MB_SEARCH_INCONCLUSIVE"
-    MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
-    ORPHANED_IDENTITY = "ORPHANED_IDENTITY"
+__all__ = [
+    "ReasonCode",
+    "format_ambiguous_gap",
+    "format_deferred_retry",
+    "format_low_confidence",
+]
 
 
 def _round_half_up(value: float) -> int:
@@ -38,4 +36,16 @@ def format_ambiguous_gap(gap: float, threshold: float) -> str:
     return (
         f"Top candidates within {_round_half_up(gap)} points "
         f"(gap < {_round_half_up(threshold)} required)"
+    )
+
+
+def format_deferred_retry() -> str:
+    # Path-agnostic on purpose: DEFERRED_RETRY fires both when a non-truncated
+    # name skips MB entirely AND when a truncated name reaches MB but gets no
+    # candidates. The cascade through bulk_defer_by_artist propagates this
+    # same reason to child identities. "Unresolved across all matching tiers"
+    # covers both without misleading curators about which path was taken.
+    return (
+        "Unresolved across all matching tiers — "
+        "deferred for retry on next playlist"
     )

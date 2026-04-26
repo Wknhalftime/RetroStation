@@ -22,11 +22,10 @@ import httpx
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import match_artists_for_playlist
 from backend.services.matching_constants import MB_SCORE_GAP
-from backend.services.matching_reasons import ReasonCode
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
@@ -170,15 +169,15 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     # No Match row on NEEDS_REVIEW (service only writes Match on AUTO_MATCHED).
     assert match_repo.get_by_artist(artist.id) is None
     # NEW behavior: reason is persisted.
-    assert broadcast_artist_repo._reason_codes.get(artist.id) == ReasonCode.LOW_CONFIDENCE
-    detail = broadcast_artist_repo._reason_details.get(artist.id)
-    assert detail is not None
-    assert detail  # non-empty formatted string
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_detail is not None
+    assert stored.reason_detail  # non-empty formatted string
 
 
-def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
-    """When every strategy returns None, the service falls through to
-    NEEDS_REVIEW with ReasonCode.NO_CANDIDATES."""
+def test_match_artists_unresolved_non_truncated_persists_deferred_retry() -> None:
+    """When every strategy returns None for a non-truncated name, the service
+    routes to NEEDS_REVIEW/DEFERRED_RETRY (never NO_CANDIDATES). DEFERRED_RETRY
+    is retryable on next ingestion; NO_CANDIDATES is permanent."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
 
@@ -197,21 +196,23 @@ def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert broadcast_artist_repo._reason_codes.get(artist.id) == ReasonCode.NO_CANDIDATES
-    assert broadcast_artist_repo._reason_details.get(artist.id) is not None
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
+    assert stored.reason_detail is not None
 
 
 def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
     """Covers old _try_mb_match: MB AUTO_MATCHED upserts the canonical and
-    writes a MUSICBRAINZ_API-tier Match row."""
+    writes a MUSICBRAINZ_API-tier Match row. Uses a 30-char name so the
+    Phase-2 truncation gate routes it to the MB tier."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    artist = _pending_artist("OZZY OSBOURNE", broadcast_artist_repo, playlist_id)
+    truncated = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars, alphanum end
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
     mb_client = FakeMbClient(responses={
-        "OZZY OSBOURNE": [
+        truncated: [
             {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
              "sort-name": "Osbourne, Ozzy", "score": 100},
         ],
@@ -416,15 +417,18 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    a1 = _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
-    a2 = _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+    # Use 30-char names so the Phase-2 truncation gate routes them to the MB tier.
+    name_a = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars
+    name_b = "SLAYER REIGN IN BLOOD ALBUM 86"   # 30 chars
+    a1 = _pending_artist(name_a, broadcast_artist_repo, playlist_id)
+    a2 = _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
     mb = FakeMbClient(responses={
-        "Ozzy Osbourne": [
+        name_a: [
             {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
              "sort-name": "Osbourne, Ozzy", "score": 100},
         ],
-        "Slayer": [
+        name_b: [
             {"id": "mbid-slayer", "name": "Slayer", "sort-name": "Slayer", "score": 100},
         ],
     })
@@ -461,7 +465,10 @@ def test_match_artists_empty_bucket_skips_live_call() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("NoSuchArtist", broadcast_artist_repo, playlist_id)
+    # Truncated name so it routes through the MB tier (the whole point of
+    # this test is the [] sentinel inside the search_map; non-truncated names
+    # would skip MB entirely).
+    _pending_artist("NoSuchArtistAaaaaaaaaaaaaaaaaa", broadcast_artist_repo, playlist_id)
     mb = FakeMbClient(responses={})  # empty responses => [] for every name
 
     match_artists_for_playlist(
@@ -495,12 +502,17 @@ def test_match_artists_emits_mb_task_summary() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
-    _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+    # Use 30-char (truncated) names so they route to the MB tier — the
+    # whole point of this test is the live_fetches counter delta in the
+    # mb_task_summary event.
+    name_a = "Ozzy Osbourne The Metal Legen"  # 29 chars
+    name_b = "Slayer Reign In Blood Album 80"  # 30 chars
+    _pending_artist(name_a, broadcast_artist_repo, playlist_id)
+    _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
     mb = FakeMbClient(responses={
-        "Ozzy Osbourne": [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
-        "Slayer": [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
+        name_a: [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
+        name_b: [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
     })
     # Simulate the concrete client's counter behavior so the test asserts a
     # real delta computation.
@@ -548,13 +560,17 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("Flaky", broadcast_artist_repo, playlist_id)
-    _pending_artist("GoodBand", broadcast_artist_repo, playlist_id)
+    # Use 30-char (truncated) names so they route to the MB tier — non-truncated
+    # names skip MB entirely after Phase 2 and the httpx error path never fires.
+    flaky = "Flaky Band That Almost Resolves"  # 31 chars
+    good = "GoodBand With A Long Display Name"  # 33 chars
+    _pending_artist(flaky, broadcast_artist_repo, playlist_id)
+    _pending_artist(good, broadcast_artist_repo, playlist_id)
 
     mb = _RaisingMbClient(
-        responses={"GoodBand": [{"id": "g", "name": "GoodBand",
-                                 "sort-name": "GoodBand", "score": 100}]},
-        error_names={"Flaky"},
+        responses={good: [{"id": "g", "name": "GoodBand",
+                           "sort-name": "GoodBand", "score": 100}]},
+        error_names={flaky},
     )
 
     import contextlib
@@ -579,3 +595,343 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     assert summary_events[0]["distinct_search_keys"] == 2
     assert summary_events[0]["rows_queued"] == 2
 
+
+def test_broadcast_artist_dataclass_carries_reason_code_after_update() -> None:
+    """Reason state is on the dataclass, not in a sidecar. Tests assert via
+    repo.get_by_id(...).reason_code, never via repo._reason_codes."""
+    repo = FakeBroadcastArtistRepository()
+    playlist_id = uuid4()
+    artist = _pending_artist("ARTIST", repo, playlist_id)
+
+    repo.update_match_status(
+        artist.id,
+        MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.LOW_CONFIDENCE,
+        reason_detail="Score 55% — below confidence threshold",
+    )
+
+    stored = repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_detail == "Score 55% — below confidence threshold"
+
+
+def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
+    """Caller passes the artist IDs (typically derived from the current
+    playlist's artist set), not names. ID-keying makes scope explicit and
+    avoids accidental cross-playlist mutation if the API is later misused."""
+    from backend.services.matching_reasons import format_deferred_retry
+
+    repo = FakeBroadcastArtistRepository()
+    playlist_id = uuid4()
+
+    deferred = _pending_artist("ARTIST A", repo, playlist_id)
+    repo.update_match_status(
+        deferred.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+    auto_matched = _pending_artist("ARTIST B", repo, playlist_id)
+    repo.update_match_status(auto_matched.id, MatchStatus.AUTO_MATCHED)
+    other_review = _pending_artist("ARTIST C", repo, playlist_id)
+    repo.update_match_status(
+        other_review.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.LOW_CONFIDENCE,
+        reason_detail="Score 55%",
+    )
+    # Out-of-scope row: DEFERRED_RETRY but its ID is NOT passed in, so it
+    # must remain DEFERRED_RETRY (proves scope is honored).
+    out_of_scope = _pending_artist("ARTIST D", repo, playlist_id)
+    repo.update_match_status(
+        out_of_scope.id, MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+
+    rows_reset = repo.reset_deferred_by_ids(
+        [deferred.id, auto_matched.id, other_review.id]
+    )
+
+    assert rows_reset == 1
+    assert repo.get_by_id(deferred.id).match_status == MatchStatus.PENDING  # type: ignore[union-attr]
+    assert repo.get_by_id(deferred.id).reason_code is None  # type: ignore[union-attr]
+    assert repo.get_by_id(auto_matched.id).match_status == MatchStatus.AUTO_MATCHED  # type: ignore[union-attr]
+    assert repo.get_by_id(other_review.id).match_status == MatchStatus.NEEDS_REVIEW  # type: ignore[union-attr]
+    assert repo.get_by_id(out_of_scope.id).match_status == MatchStatus.NEEDS_REVIEW  # type: ignore[union-attr]
+    assert repo.get_by_id(out_of_scope.id).reason_code == ReasonCode.DEFERRED_RETRY  # type: ignore[union-attr]
+
+
+def test_reset_deferred_by_ids_empty_input_returns_zero() -> None:
+    repo = FakeBroadcastArtistRepository()
+    assert repo.reset_deferred_by_ids([]) == 0
+
+
+def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
+    """Invariant 1 (orchestration owns writes). The MB upsert moved from
+    MusicBrainzApiStrategy into match_artists_for_playlist's result loop.
+    Verify the orchestration calls upsert_musicbrainz_artist with the
+    canonical kwargs whenever a result has mb_candidate AND
+    status == AUTO_MATCHED."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    # 30-char name so the Phase-2 truncation gate routes it to the MB tier.
+    name = "Resolved Name With Long Display"  # 31 chars
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+    mb_client = FakeMbClient(responses={name: [
+        {"id": "mbid-x", "name": "Resolved Name", "score": 100,
+         "sort-name": "Name, Resolved", "disambiguation": "rock band"},
+    ]})
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    # Sanity: artist landed AUTO_MATCHED.
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+
+    upserts = artist_repo.musicbrainz_upserts
+    assert len(upserts) == 1
+    assert upserts[0]["mbid"] == "mbid-x"
+    assert upserts[0]["name"] == "Resolved Name"
+    assert upserts[0]["sort_name"] == "Name, Resolved"
+    assert upserts[0]["normalized_name"] == normalize_artist("Resolved Name")
+    assert upserts[0]["disambiguation"] == "rock band"
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 orchestration: truncated-only MB + DeferredRetryStrategy fallback
+# ---------------------------------------------------------------------------
+
+
+def test_orchestration_non_truncated_unresolved_persists_deferred_retry_no_mb_call() -> None:
+    """Invariant 3: MB is consulted only for likely-truncated names.
+    A clean (non-truncated) name with no local candidates parks in
+    DEFERRED_RETRY without ever calling MB."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    artist = _pending_artist("U2", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
+    assert mb_client.calls == []  # Invariant 3
+
+
+def test_orchestration_truncated_unresolved_calls_mb() -> None:
+    """A truncated name still gets the full MB tier."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    truncated = "A Very Long Truncated Artist"  # 28 chars; within tolerance of 30
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+    mb_client = FakeMbClient(responses={truncated: [
+        {"id": "mb-1", "name": "A Very Long Truncated Artist Name", "score": 96,
+         "sort-name": "Truncated Name", "disambiguation": ""},
+    ]})
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    created = match_repo.get_by_artist(artist.id)
+    assert created is not None
+    assert created.target_id == "mb-1"
+    assert len(artist_repo.musicbrainz_upserts) == 1
+
+
+def test_orchestration_truncated_with_no_mb_candidates_falls_to_deferred() -> None:
+    """Invariant 2: every artist gets a terminal result. Truncated + no MB hits → DEFERRED_RETRY."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()  # no responses → empty for every key
+
+    truncated = "Z" * 30
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+def test_orchestration_local_match_always_wins_over_truncation_check() -> None:
+    """Phase 1 runs for every artist regardless of truncation. A truncated
+    name that resolves locally never reaches the MB tier."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    truncated = "The Beatles That Are Awesome A"  # 30 chars
+    artist_repo.upsert(Artist(
+        id="local-beatles",
+        name=truncated,
+        sort_name=truncated,
+        normalized_name=normalize_artist(truncated),
+        mbid="mbid-beatles",
+    ))
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert mb_client.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Dual cascade: AUTO_REJECTED -> bulk_reject; DEFERRED_RETRY -> bulk_defer
+# ---------------------------------------------------------------------------
+
+
+def test_match_artists_deferred_retry_cascades_to_identity_bulk_defer() -> None:
+    """Invariant 6: cascade isolation. DEFERRED_RETRY artists cascade
+    DEFERRED_RETRY (not AUTO_REJECTED) to their child identities."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    artist = _pending_artist("UNKNOWN ARTIST", broadcast_artist_repo, playlist_id)
+    identity = BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=artist.id,
+        original_title="Song",
+        normalized_title="song",
+        normalized_signature="cascade_deferred_sig",
+    )
+    track_identity_repo.upsert(identity)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=FakeArtistRepository(),
+        match_repo=FakeMatchRepository(),
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=FakeMbClient(),
+    )
+
+    stored_artist = broadcast_artist_repo.get_by_id(artist.id)
+    stored_identity = track_identity_repo.get_by_id(identity.id)
+
+    assert stored_artist is not None
+    assert stored_artist.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored_artist.reason_code == ReasonCode.DEFERRED_RETRY
+
+    assert stored_identity is not None
+    assert stored_identity.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored_identity.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
+    """Invariant 6: _cascade_auto_rejected only touches AUTO_REJECTED rows;
+    _cascade_deferred only touches DEFERRED_RETRY rows. They never overlap."""
+    from backend.services.artist_matching_service import (
+        _cascade_auto_rejected,
+        _cascade_deferred,
+    )
+    from backend.services.matching_reasons import format_deferred_retry
+
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+
+    rejected = _pending_artist("REJECTED", broadcast_artist_repo, playlist_id)
+    deferred = _pending_artist("DEFERRED", broadcast_artist_repo, playlist_id)
+    broadcast_artist_repo.update_match_status(rejected.id, MatchStatus.AUTO_REJECTED)
+    broadcast_artist_repo.update_match_status(
+        deferred.id,
+        MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+
+    rid = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=rejected.id,
+        original_title="A", normalized_title="a", normalized_signature="A",
+    )
+    did = BroadcastTrackIdentity(
+        id=uuid4(), broadcast_artist_id=deferred.id,
+        original_title="B", normalized_title="b", normalized_signature="B",
+    )
+    track_identity_repo.upsert(rid)
+    track_identity_repo.upsert(did)
+
+    _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+    _cascade_deferred([deferred.id], track_identity_repo)
+
+    rid_after = track_identity_repo.get_by_id(rid.id)
+    did_after = track_identity_repo.get_by_id(did.id)
+    assert rid_after is not None and rid_after.match_status == MatchStatus.AUTO_REJECTED
+    assert did_after is not None
+    assert did_after.match_status == MatchStatus.NEEDS_REVIEW
+    assert did_after.reason_code == ReasonCode.DEFERRED_RETRY

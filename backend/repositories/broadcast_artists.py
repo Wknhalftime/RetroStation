@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import MatchStatus
-from backend.services.matching_reasons import ReasonCode
+from backend.domain.enums import MatchStatus, ReasonCode
 
 
 class BroadcastArtistRepository(ABC):
@@ -61,3 +60,16 @@ class BroadcastArtistRepository(ABC):
 
     @abstractmethod
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None: ...
+
+    @abstractmethod
+    def reset_deferred_by_ids(self, artist_ids: list[UUID]) -> int:
+        """Reset NEEDS_REVIEW/DEFERRED_RETRY artists back to PENDING for the
+        given artist IDs. Returns rows reset.
+
+        Caller owns scope: pass only the IDs that should be eligible
+        (typically the current playlist's artist set). Empty input returns
+        0 without hitting the DB. Reason-code-scoped: only DEFERRED_RETRY
+        rows are affected; LOW_CONFIDENCE / AMBIGUOUS_GAP / etc. are left
+        untouched.
+        """
+        ...

@@ -3,12 +3,11 @@ from uuid import uuid4
 
 import pytest
 
-from backend.domain.enums import MatchStatus, MatchTier
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.services.identity_matching_service import (
     IdentityMatchingStrategy,
     IdentityMatchResult,
 )
-from backend.services.matching_reasons import ReasonCode
 
 
 def test_identity_match_result_is_frozen() -> None:
