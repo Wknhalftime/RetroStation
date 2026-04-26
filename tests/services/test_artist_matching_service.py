@@ -646,3 +646,46 @@ def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
 def test_reset_deferred_by_ids_empty_input_returns_zero() -> None:
     repo = FakeBroadcastArtistRepository()
     assert repo.reset_deferred_by_ids([]) == 0
+
+
+def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
+    """Invariant 1 (orchestration owns writes). The MB upsert moved from
+    MusicBrainzApiStrategy into match_artists_for_playlist's result loop.
+    Verify the orchestration calls upsert_musicbrainz_artist with the
+    canonical kwargs whenever a result has mb_candidate AND
+    status == AUTO_MATCHED."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    artist = _pending_artist("Resolved Name", broadcast_artist_repo, playlist_id)
+    mb_client = FakeMbClient(responses={"Resolved Name": [
+        {"id": "mbid-x", "name": "Resolved Name", "score": 100,
+         "sort-name": "Name, Resolved", "disambiguation": "rock band"},
+    ]})
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    # Sanity: artist landed AUTO_MATCHED.
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+
+    upserts = artist_repo.musicbrainz_upserts
+    assert len(upserts) == 1
+    assert upserts[0]["mbid"] == "mbid-x"
+    assert upserts[0]["name"] == "Resolved Name"
+    assert upserts[0]["sort_name"] == "Name, Resolved"
+    assert upserts[0]["normalized_name"] == normalize_artist("Resolved Name")
+    assert upserts[0]["disambiguation"] == "rock band"

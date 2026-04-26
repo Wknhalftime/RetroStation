@@ -62,6 +62,12 @@ class ArtistMatchResult:
 
     reason_code / reason_detail are None for AUTO_MATCHED; populated for
     NEEDS_REVIEW using the stable ReasonCode vocabulary.
+
+    mb_candidate carries the raw MB search result for the orchestration to
+    upsert into the local catalog when status == AUTO_MATCHED. Populated only
+    by MusicBrainzApiStrategy; None for all other strategies. Decoupling the
+    upsert from the strategy keeps the strategy single-responsibility (decide
+    the match) and lets the orchestration own all writes.
     """
 
     status: MatchStatus
@@ -70,6 +76,7 @@ class ArtistMatchResult:
     target_id: str
     reason_code: ReasonCode | None = None
     reason_detail: str | None = None
+    mb_candidate: MbArtistResult | None = None
 
 
 class ArtistMatchingStrategy(Protocol):
@@ -243,11 +250,13 @@ class NormalizationStrategy:
 
 
 class MusicBrainzApiStrategy:
-    """Final artist tier — query MusicBrainz. Caches AUTO_MATCHED results to
-    local artist catalog so subsequent NormalizationStrategy runs hit locally.
+    """Final artist tier — query MusicBrainz.
 
-    Preserves the legacy _try_mb_match side effect: on AUTO_MATCHED, upserts
-    the MB result into the local Artist catalog.
+    Read-only: returns ArtistMatchResult with mb_candidate populated whenever
+    a candidate is selected. The orchestration is responsible for upserting
+    the MB result into the local catalog when status == AUTO_MATCHED so the
+    strategy stays single-responsibility (decide the match) and all writes
+    flow through one layer.
 
     `search_map` short-circuits the live search. When present, bucket key is
     `broadcast_artist.original_name.lower()` — identical to the cache key
@@ -263,14 +272,12 @@ class MusicBrainzApiStrategy:
     def __init__(
         self,
         mb_client: MusicBrainzClientProtocol,
-        artist_repo: ArtistCatalogRepository,
         strong_match_threshold: int = 80,
         mb_score_gap: int = MB_SCORE_GAP,
         mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
         search_map: dict[str, list[MbArtistResult]] | None = None,
     ) -> None:
         self._mb = mb_client
-        self._catalog = artist_repo
         self._strong_match_threshold = strong_match_threshold
         self._gap = mb_score_gap
         self._mb_auto_link_score = mb_auto_link_score
@@ -306,20 +313,6 @@ class MusicBrainzApiStrategy:
             mb_auto_link_score=self._mb_auto_link_score,
         )
 
-        # Preserve legacy side effect: cache the MB result into the local
-        # catalog on AUTO_MATCHED so later NormalizationStrategy runs can
-        # hit locally. Use upsert_musicbrainz_artist so mbid / origin /
-        # normalized_name are populated — the generic upsert leaves them
-        # NULL / LOCAL, which breaks later lookups keyed on those columns.
-        if status == MatchStatus.AUTO_MATCHED:
-            self._catalog.upsert_musicbrainz_artist(
-                mbid=best["id"],
-                name=best["name"],
-                sort_name=best.get("sort-name", best["name"]),
-                normalized_name=normalize_artist(best["name"]),
-                disambiguation=best.get("disambiguation"),
-            )
-
         return ArtistMatchResult(
             status=status,
             tier=MatchTier.MUSICBRAINZ_API,
@@ -327,6 +320,7 @@ class MusicBrainzApiStrategy:
             target_id=best["id"],
             reason_code=rc,
             reason_detail=rd,
+            mb_candidate=best,
         )
 
 
@@ -430,7 +424,7 @@ def match_artists_for_playlist(
             min_presentation_score=min_presentation_score,
         ),
         MusicBrainzApiStrategy(
-            mb_client, artist_repo, strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            mb_client, strong_match_threshold, mb_score_gap, mb_auto_link_score,
             search_map=search_map,
         ),
     ])
@@ -463,6 +457,19 @@ def match_artists_for_playlist(
                     confidence_score=result.confidence_score,
                     match_tier=result.tier,
                 ))
+                # Catalog upsert moved out of MusicBrainzApiStrategy (SRP).
+                # Strategies decide; orchestration writes. Only the MB tier
+                # populates mb_candidate, so this fires only on MB hits.
+                if result.mb_candidate is not None:
+                    artist_repo.upsert_musicbrainz_artist(
+                        mbid=result.mb_candidate["id"],
+                        name=result.mb_candidate["name"],
+                        sort_name=result.mb_candidate.get(
+                            "sort-name", result.mb_candidate["name"]
+                        ),
+                        normalized_name=normalize_artist(result.mb_candidate["name"]),
+                        disambiguation=result.mb_candidate.get("disambiguation"),
+                    )
 
         _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
     finally:

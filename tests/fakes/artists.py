@@ -9,6 +9,9 @@ from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
     def __init__(self) -> None:
         self._data: dict[str, Artist] = {}
+        # Test observability: every upsert_musicbrainz_artist call is recorded
+        # so orchestration tests can assert the SRP-relocated upsert path.
+        self.musicbrainz_upserts: list[dict[str, str | None]] = []
 
     def upsert(self, artist: Artist) -> Artist:
         self._data[artist.id] = artist
@@ -57,6 +60,13 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
+        self.musicbrainz_upserts.append({
+            "mbid": mbid,
+            "name": name,
+            "sort_name": sort_name,
+            "normalized_name": normalized_name,
+            "disambiguation": disambiguation,
+        })
         # Check by mbid first
         for artist in self._data.values():
             if artist.mbid == mbid:
