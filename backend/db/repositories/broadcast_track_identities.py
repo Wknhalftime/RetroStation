@@ -131,7 +131,8 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
         self._conn.execute(
             """UPDATE track_identities
-               SET match_status = %s, match_tier = %s
+               SET match_status = %s, match_tier = %s,
+                   reason_code = NULL, reason_detail = NULL
                WHERE broadcast_artist_id = %s AND match_status = %s""",
             (MatchStatus.AUTO_REJECTED.value, MatchTier.UNCLASSIFIED.value,
              broadcast_artist_id, MatchStatus.PENDING.value),
@@ -157,16 +158,19 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def reset_deferred_by_artist_ids(self, artist_ids: list[UUID]) -> int:
         if not artist_ids:
             return 0
+        # match_tier = NULL matches the initial state of freshly-ingested
+        # PENDING rows (the column has no default and inserts omit it).
+        # Setting UNCLASSIFIED here would drift telemetry/queries that
+        # check tier on PENDING rows.
         cur = self._conn.execute(
             """UPDATE track_identities
-               SET match_status = %s, match_tier = %s,
+               SET match_status = %s, match_tier = NULL,
                    reason_code = NULL, reason_detail = NULL
                WHERE broadcast_artist_id = ANY(%s)
                  AND match_status = %s
                  AND reason_code = %s""",
             (
                 MatchStatus.PENDING.value,
-                MatchTier.UNCLASSIFIED.value,
                 artist_ids,
                 MatchStatus.NEEDS_REVIEW.value,
                 ReasonCode.DEFERRED_RETRY.value,

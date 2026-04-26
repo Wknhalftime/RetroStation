@@ -132,10 +132,12 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 and identity.match_status == MatchStatus.NEEDS_REVIEW
                 and identity.reason_code == ReasonCode.DEFERRED_RETRY
             ):
+                # match_tier = None matches the initial state of fresh PENDING
+                # rows (see Pg impl).
                 self._data[identity_id] = replace(
                     identity,
                     match_status=MatchStatus.PENDING,
-                    match_tier=MatchTier.UNCLASSIFIED,
+                    match_tier=None,
                     reason_code=None,
                     reason_detail=None,
                 )

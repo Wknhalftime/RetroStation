@@ -471,6 +471,20 @@ def _build_truncated_search_map(
     ``coalesce_artist_searches`` with the truncation pre-filter — the
     coalescer's existing httpx error-omit-key semantics are preserved but
     now apply only to the truncated subset, not the full pending list.
+
+    NOTE: there are TWO truncation checks in Phase 2 — this pre-filter and
+    the gate inside ``TruncatedNameMbStrategy``. They have different jobs:
+
+    - This pre-filter is for *efficiency*: only truncated names are added
+      to the search map, so non-truncated names never trigger a coalesced
+      MB search call in the first place.
+    - ``TruncatedNameMbStrategy`` is for *correctness*: it stops
+      ``MusicBrainzApiStrategy`` from falling back to a live ``search_artist``
+      call for any unresolved name absent from the map. Without that gate,
+      non-truncated names would still hit MB at per-row resolve time.
+
+    Both must remain. Removing only one silently re-enables unconstrained
+    MB calls for non-truncated names.
     """
     truncated = [
         a for a in unresolved
@@ -508,7 +522,15 @@ def _run_mb_or_deferred_phase(
     out: dict[UUID, ArtistMatchResult] = {}
     for broadcast_artist in unresolved:
         result = engine.resolve(broadcast_artist)
-        assert result is not None, "Invariant 2: DeferredRetryStrategy is terminal"
+        # Invariant 2: DeferredRetryStrategy is the terminal tier and never
+        # returns None. RuntimeError (not assert) so this stays load-bearing
+        # under python -O, where asserts are stripped.
+        if result is None:
+            raise RuntimeError(
+                "Invariant 2 violated: Phase-2 engine returned None for "
+                f"broadcast_artist {broadcast_artist.id}; DeferredRetryStrategy "
+                "should make every artist terminal."
+            )
         out[broadcast_artist.id] = result
     return out
 
