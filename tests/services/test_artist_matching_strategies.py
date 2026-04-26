@@ -13,9 +13,12 @@ from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import (
+    ArtistMatchResult,
+    DeferredRetryStrategy,
     MappingRuleStrategy,
     MusicBrainzApiStrategy,
     NormalizationStrategy,
+    TruncatedNameMbStrategy,
 )
 from backend.services.matching_constants import MB_SCORE_GAP
 from tests.fakes.mb_client import FakeMbClient
@@ -666,3 +669,69 @@ def test_mb_strategy_search_map_key_is_lowercased() -> None:
     assert result is not None
     assert result.target_id == "mbid-m"
     assert mb.calls == []
+
+
+# ---------------------------------------------------------------------------
+# TruncatedNameMbStrategy + DeferredRetryStrategy
+# ---------------------------------------------------------------------------
+
+
+class _StubInner:
+    """Inner-strategy spy for TruncatedNameMbStrategy tests. Records every
+    apply() call and returns a canned result."""
+
+    def __init__(self, canned: ArtistMatchResult | None) -> None:
+        self.canned = canned
+        self.calls: list[BroadcastArtist] = []
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        self.calls.append(broadcast_artist)
+        return self.canned
+
+
+def test_truncated_strategy_passes_through_when_name_not_truncated() -> None:
+    inner = _StubInner(canned=ArtistMatchResult(
+        status=MatchStatus.AUTO_MATCHED,
+        tier=MatchTier.MUSICBRAINZ_API,
+        confidence_score=100.0,
+        target_id="x",
+    ))
+    strat = TruncatedNameMbStrategy(inner=inner, max_len=30)
+    assert strat.apply(_broadcast_artist("U2", "u2")) is None
+    assert inner.calls == []
+
+
+def test_truncated_strategy_delegates_to_inner_when_name_truncated() -> None:
+    canned = ArtistMatchResult(
+        status=MatchStatus.AUTO_MATCHED,
+        tier=MatchTier.MUSICBRAINZ_API,
+        confidence_score=100.0,
+        target_id="x",
+    )
+    inner = _StubInner(canned=canned)
+    strat = TruncatedNameMbStrategy(inner=inner, max_len=30)
+    truncated = "A" * 30
+    assert strat.apply(_broadcast_artist(truncated, truncated.lower())) is canned
+    assert len(inner.calls) == 1
+
+
+def test_truncated_strategy_returns_none_when_inner_none() -> None:
+    inner = _StubInner(canned=None)
+    strat = TruncatedNameMbStrategy(inner=inner, max_len=30)
+    assert strat.apply(_broadcast_artist("A" * 30, "a" * 30)) is None
+    assert len(inner.calls) == 1
+
+
+class TestDeferredRetryStrategy:
+    def test_always_returns_needs_review_with_deferred_retry_reason(self) -> None:
+        from backend.services.matching_reasons import format_deferred_retry
+
+        result = DeferredRetryStrategy().apply(_broadcast_artist("any", "any"))
+        assert result is not None
+        assert result.status == MatchStatus.NEEDS_REVIEW
+        assert result.tier == MatchTier.UNCLASSIFIED
+        assert result.confidence_score == 0.0
+        assert result.target_id == ""
+        assert result.reason_code == ReasonCode.DEFERRED_RETRY
+        assert result.reason_detail == format_deferred_retry()
+        assert result.mb_candidate is None

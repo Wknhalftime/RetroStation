@@ -79,10 +79,13 @@ def test_tier3_mb_api_auto_matched() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _make_pending_artist("OZZY OSBOURNE", broadcast_artist_repo, playlist_id)
+    # 30-char (truncated) name so the Phase-2 truncation gate routes it
+    # to the MB tier; non-truncated names go straight to DEFERRED_RETRY.
+    name = "OZZY OSBOURNE THE METAL LEGEND"
+    _make_pending_artist(name, broadcast_artist_repo, playlist_id)
 
     mb_client = StubMbClient({
-        "OZZY OSBOURNE": [
+        name: [
             {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
              "sort-name": "Osbourne, Ozzy", "score": 100},
         ]

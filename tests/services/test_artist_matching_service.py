@@ -174,9 +174,10 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     assert stored.reason_detail  # non-empty formatted string
 
 
-def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
-    """When every strategy returns None, the service falls through to
-    NEEDS_REVIEW with ReasonCode.NO_CANDIDATES."""
+def test_match_artists_unresolved_non_truncated_persists_deferred_retry() -> None:
+    """When every strategy returns None for a non-truncated name, the service
+    routes to NEEDS_REVIEW/DEFERRED_RETRY (never NO_CANDIDATES). DEFERRED_RETRY
+    is retryable on next ingestion; NO_CANDIDATES is permanent."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
 
@@ -195,21 +196,23 @@ def test_match_artists_no_candidates_persists_no_candidates_reason() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert stored.reason_code == ReasonCode.NO_CANDIDATES
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
     assert stored.reason_detail is not None
 
 
 def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
     """Covers old _try_mb_match: MB AUTO_MATCHED upserts the canonical and
-    writes a MUSICBRAINZ_API-tier Match row."""
+    writes a MUSICBRAINZ_API-tier Match row. Uses a 30-char name so the
+    Phase-2 truncation gate routes it to the MB tier."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    artist = _pending_artist("OZZY OSBOURNE", broadcast_artist_repo, playlist_id)
+    truncated = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars, alphanum end
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
     mb_client = FakeMbClient(responses={
-        "OZZY OSBOURNE": [
+        truncated: [
             {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
              "sort-name": "Osbourne, Ozzy", "score": 100},
         ],
@@ -414,15 +417,18 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    a1 = _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
-    a2 = _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+    # Use 30-char names so the Phase-2 truncation gate routes them to the MB tier.
+    name_a = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars
+    name_b = "SLAYER REIGN IN BLOOD ALBUM 86"   # 30 chars
+    a1 = _pending_artist(name_a, broadcast_artist_repo, playlist_id)
+    a2 = _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
     mb = FakeMbClient(responses={
-        "Ozzy Osbourne": [
+        name_a: [
             {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
              "sort-name": "Osbourne, Ozzy", "score": 100},
         ],
-        "Slayer": [
+        name_b: [
             {"id": "mbid-slayer", "name": "Slayer", "sort-name": "Slayer", "score": 100},
         ],
     })
@@ -459,7 +465,10 @@ def test_match_artists_empty_bucket_skips_live_call() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("NoSuchArtist", broadcast_artist_repo, playlist_id)
+    # Truncated name so it routes through the MB tier (the whole point of
+    # this test is the [] sentinel inside the search_map; non-truncated names
+    # would skip MB entirely).
+    _pending_artist("NoSuchArtistAaaaaaaaaaaaaaaaaa", broadcast_artist_repo, playlist_id)
     mb = FakeMbClient(responses={})  # empty responses => [] for every name
 
     match_artists_for_playlist(
@@ -493,12 +502,17 @@ def test_match_artists_emits_mb_task_summary() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("Ozzy Osbourne", broadcast_artist_repo, playlist_id)
-    _pending_artist("Slayer", broadcast_artist_repo, playlist_id)
+    # Use 30-char (truncated) names so they route to the MB tier — the
+    # whole point of this test is the live_fetches counter delta in the
+    # mb_task_summary event.
+    name_a = "Ozzy Osbourne The Metal Legen"  # 29 chars
+    name_b = "Slayer Reign In Blood Album 80"  # 30 chars
+    _pending_artist(name_a, broadcast_artist_repo, playlist_id)
+    _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
     mb = FakeMbClient(responses={
-        "Ozzy Osbourne": [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
-        "Slayer": [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
+        name_a: [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
+        name_b: [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
     })
     # Simulate the concrete client's counter behavior so the test asserts a
     # real delta computation.
@@ -546,13 +560,17 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    _pending_artist("Flaky", broadcast_artist_repo, playlist_id)
-    _pending_artist("GoodBand", broadcast_artist_repo, playlist_id)
+    # Use 30-char (truncated) names so they route to the MB tier — non-truncated
+    # names skip MB entirely after Phase 2 and the httpx error path never fires.
+    flaky = "Flaky Band That Almost Resolves"  # 31 chars
+    good = "GoodBand With A Long Display Name"  # 33 chars
+    _pending_artist(flaky, broadcast_artist_repo, playlist_id)
+    _pending_artist(good, broadcast_artist_repo, playlist_id)
 
     mb = _RaisingMbClient(
-        responses={"GoodBand": [{"id": "g", "name": "GoodBand",
-                                 "sort-name": "GoodBand", "score": 100}]},
-        error_names={"Flaky"},
+        responses={good: [{"id": "g", "name": "GoodBand",
+                           "sort-name": "GoodBand", "score": 100}]},
+        error_names={flaky},
     )
 
     import contextlib
@@ -661,8 +679,10 @@ def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
     match_repo = FakeMatchRepository()
     rules_repo = FakeMappingRuleRepository()
 
-    artist = _pending_artist("Resolved Name", broadcast_artist_repo, playlist_id)
-    mb_client = FakeMbClient(responses={"Resolved Name": [
+    # 30-char name so the Phase-2 truncation gate routes it to the MB tier.
+    name = "Resolved Name With Long Display"  # 31 chars
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+    mb_client = FakeMbClient(responses={name: [
         {"id": "mbid-x", "name": "Resolved Name", "score": 100,
          "sort-name": "Name, Resolved", "disambiguation": "rock band"},
     ]})
@@ -689,3 +709,140 @@ def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
     assert upserts[0]["sort_name"] == "Name, Resolved"
     assert upserts[0]["normalized_name"] == normalize_artist("Resolved Name")
     assert upserts[0]["disambiguation"] == "rock band"
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 orchestration: truncated-only MB + DeferredRetryStrategy fallback
+# ---------------------------------------------------------------------------
+
+
+def test_orchestration_non_truncated_unresolved_persists_deferred_retry_no_mb_call() -> None:
+    """Invariant 3: MB is consulted only for likely-truncated names.
+    A clean (non-truncated) name with no local candidates parks in
+    DEFERRED_RETRY without ever calling MB."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    artist = _pending_artist("U2", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
+    assert mb_client.calls == []  # Invariant 3
+
+
+def test_orchestration_truncated_unresolved_calls_mb() -> None:
+    """A truncated name still gets the full MB tier."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    truncated = "A Very Long Truncated Artist"  # 28 chars; within tolerance of 30
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+    mb_client = FakeMbClient(responses={truncated: [
+        {"id": "mb-1", "name": "A Very Long Truncated Artist Name", "score": 96,
+         "sort-name": "Truncated Name", "disambiguation": ""},
+    ]})
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    created = match_repo.get_by_artist(artist.id)
+    assert created is not None
+    assert created.target_id == "mb-1"
+    assert len(artist_repo.musicbrainz_upserts) == 1
+
+
+def test_orchestration_truncated_with_no_mb_candidates_falls_to_deferred() -> None:
+    """Invariant 2: every artist gets a terminal result. Truncated + no MB hits → DEFERRED_RETRY."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()  # no responses → empty for every key
+
+    truncated = "Z" * 30
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+def test_orchestration_local_match_always_wins_over_truncation_check() -> None:
+    """Phase 1 runs for every artist regardless of truncation. A truncated
+    name that resolves locally never reaches the MB tier."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    track_identity_repo = FakeBroadcastTrackIdentityRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    truncated = "The Beatles That Are Awesome A"  # 30 chars
+    artist_repo.upsert(Artist(
+        id="local-beatles",
+        name=truncated,
+        sort_name=truncated,
+        normalized_name=normalize_artist(truncated),
+        mbid="mbid-beatles",
+    ))
+    artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=track_identity_repo,
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert mb_client.calls == []
