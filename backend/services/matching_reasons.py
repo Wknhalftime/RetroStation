@@ -15,8 +15,9 @@ from backend.domain.enums import ReasonCode
 
 __all__ = [
     "ReasonCode",
-    "format_low_confidence",
     "format_ambiguous_gap",
+    "format_deferred_retry",
+    "format_low_confidence",
 ]
 
 
@@ -35,4 +36,11 @@ def format_ambiguous_gap(gap: float, threshold: float) -> str:
     return (
         f"Top candidates within {_round_half_up(gap)} points "
         f"(gap < {_round_half_up(threshold)} required)"
+    )
+
+
+def format_deferred_retry() -> str:
+    return (
+        "Unresolved locally and name is not truncated — "
+        "deferred for retry on next playlist"
     )

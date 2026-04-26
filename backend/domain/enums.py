@@ -131,6 +131,7 @@ class LogCategory(StrEnum):
 class ReasonCode(StrEnum):
     LOW_CONFIDENCE         = "LOW_CONFIDENCE"
     AMBIGUOUS_GAP          = "AMBIGUOUS_GAP"
+    DEFERRED_RETRY         = "DEFERRED_RETRY"
     NO_CANDIDATES          = "NO_CANDIDATES"
     NO_LOCAL_FILES         = "NO_LOCAL_FILES"
     MB_SEARCH_INCONCLUSIVE = "MB_SEARCH_INCONCLUSIVE"

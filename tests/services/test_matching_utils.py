@@ -1,5 +1,7 @@
 from rapidfuzz.fuzz import token_sort_ratio
 
+from backend.domain.enums import ReasonCode
+from backend.services.matching_reasons import format_deferred_retry
 from backend.services.matching_utils import (
     TRUNCATION_TOLERANCE_CHARS,
     is_likely_truncated,
@@ -91,3 +93,14 @@ class TestIsLikelyTruncated:
     def test_tolerance_constant_value(self) -> None:
         # Locks the published value — change requires updating callers.
         assert TRUNCATION_TOLERANCE_CHARS == 2
+
+
+class TestDeferredRetryReason:
+    def test_enum_value_is_stable_string(self) -> None:
+        assert ReasonCode.DEFERRED_RETRY == "DEFERRED_RETRY"
+
+    def test_format_deferred_retry_message_mentions_retry(self) -> None:
+        msg = format_deferred_retry()
+        assert "deferred" in msg.lower()
+        assert "retry" in msg.lower()
+        assert "next playlist" in msg.lower()
