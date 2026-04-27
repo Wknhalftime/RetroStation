@@ -23,8 +23,8 @@ import { firstCandidateMbid } from "@/lib/matcher/candidates";
 
 interface LibraryFile {
   id: string;
-  path: string;
-  title?: string | null;
+  file_path: string;
+  track_title?: string | null;
 }
 
 interface LibraryArtist {

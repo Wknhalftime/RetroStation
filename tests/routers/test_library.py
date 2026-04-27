@@ -49,6 +49,8 @@ def _make_file(
     recording_id: str | None = None,
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING,
     work_id: str | None = None,
+    track_title: str = "Track Title",
+    album_artist_mbid: str | None = None,
 ) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
@@ -59,7 +61,8 @@ def _make_file(
         recording_id=recording_id,
         work_id=work_id,
         audio=AudioMetadata(
-            track_title="Track Title",
+            track_title=track_title,
+            album_artist_mbid=album_artist_mbid,
             release_title="Album Title",
             bitrate=320,
             duration_ms=210_000,
@@ -1755,3 +1758,101 @@ class TestRecalculateSongMasterOrphans:
         assert row is not None
         assert row["selection_method"] == "manual"
         assert row["preferred_file_id"] == lf_orphan.id
+
+
+
+# ---------------------------------------------------------------------------
+# Tests — LibraryFiles search  (/api/v1/library/files)
+# ---------------------------------------------------------------------------
+
+
+class TestLibraryFiles:
+    def test_files_search_returns_id_and_path(self, client, db_conn) -> None:
+        """Response shape contains id, file_path, track_title and total."""
+        repo = PgLibraryFileRepository(db_conn)
+        lf = repo.upsert(_make_file("/music/shape.flac", track_title="Shape Test"))
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files?search=shape")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["id"] == str(lf.id)
+        assert item["file_path"] == "/music/shape.flac"
+        assert item["track_title"] == "Shape Test"
+
+    def test_files_search_filters_by_track_title(self, client, db_conn) -> None:
+        """?search=fragment returns only matching files, ranked best-first."""
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(_make_file("/music/a.flac", track_title="Everybody Hurts"))
+        repo.upsert(_make_file("/music/b.flac", track_title="Losing My Religion"))
+        repo.upsert(_make_file("/music/c.flac", track_title="Man On The Moon"))
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files?search=everybody")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["track_title"] == "Everybody Hurts"
+
+    def test_files_search_case_insensitive(self, client, db_conn) -> None:
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(_make_file("/music/ci.flac", track_title="Everybody Hurts"))
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files?search=EVERYBODY")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+
+    def test_files_search_restrict_by_artist_mbid(self, client, db_conn) -> None:
+        """?artist_mbid=X returns only files belonging to that artist."""
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(
+            _make_file(
+                "/music/rem.flac",
+                track_title="Everybody Hurts",
+                album_artist_mbid="mbid-rem",
+            )
+        )
+        repo.upsert(
+            _make_file(
+                "/music/other.flac",
+                track_title="Everybody Knows",
+                album_artist_mbid="mbid-other",
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get(
+            "/api/v1/library/files?search=everybody&artist_mbid=mbid-rem"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["track_title"] == "Everybody Hurts"
+
+    def test_files_search_empty_returns_all(self, client, db_conn) -> None:
+        """When search is empty the endpoint returns all files (no WHERE predicate)."""
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(_make_file("/music/x.flac", track_title="Alpha"))
+        repo.upsert(_make_file("/music/y.flac", track_title="Beta"))
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+
+    def test_files_search_no_results(self, client, db_conn) -> None:
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(_make_file("/music/z.flac", track_title="Unrelated Track"))
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files?search=xyznomatch")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["items"] == []
