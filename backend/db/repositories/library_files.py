@@ -278,11 +278,11 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return [self._row_to_model(r) for r in rows]
 
     def search_by_artist_name(
-        self, normalized_name: str, limit: int = 100,
+        self, artist_name: str, limit: int = 100,
     ) -> list[LibraryFile]:
         # Empty needle would become "%%" and match every row, poisoning the
         # fuzzy tier with unrelated candidates. Reject up-front.
-        stripped = normalized_name.lower().strip()
+        stripped = artist_name.lower().strip()
         if not stripped:
             return []
         # Escape LIKE metacharacters in the user-supplied needle so an artist

@@ -206,14 +206,19 @@ class IdentityMappingRuleStrategy:
 class ResolvedArtistMbidStrategy:
     """Tier 1 — fused MBID fast path.
 
-    Step A: local library lookup by artist MBID (no API call).
-    Step B: MB recording search (1 API call) — fires only when target_id is a
-            real MusicBrainz MBID. Skipped when target_id is a local catalog
-            UUID (local-only AUTO_MATCHED artist) to avoid invalid arid: queries.
-    Step C: name-based fuzzy fallback — fires when both A and B yield nothing,
-            or when target_id is a local catalog UUID (so Step B is skipped).
-            Handles local-only AUTO_MATCHED artists whose Match.target_id is a
-            local catalog UUID, so get_by_artist_mbid returns empty.
+    Match.target_id may be a real MusicBrainz MBID (most strategies) or a
+    local catalog UUID (NormalizationStrategy exact-match on local-only
+    canonicals). The strategy resolves the authoritative real_mbid first by
+    looking up target_id in the catalog; if found, it reads .mbid from the
+    catalog artist rather than trusting the UUID value.
+
+    Step A: local library lookup by real_mbid (no API call).
+    Step B: MB recording search (1 API call) — fires only when real_mbid is
+            not None. Naturally skipped for true local-only artists.
+    Step C: name-based fuzzy fallback — fires when real_mbid is None (local-
+            only artist with no MB link yet), or when A and B both yield
+            nothing. Uses original_name (not normalized_name) to preserve
+            punctuation for the substring search.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -274,40 +279,52 @@ class ResolvedArtistMbidStrategy:
                 reason_detail="Artist match row has no valid target_id (MBID)",
             )
 
-        # Step A — local library lookup.
-        candidate_files = self._library_file_repo.get_by_artist_mbid(mbid)
-        if candidate_files:
-            local_result = _score_candidates(
-                identity.normalized_title,
-                candidate_files,
-                tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-                strong_match_threshold=self._strong_match_threshold,
-            )
-            if local_result.status == MatchStatus.AUTO_MATCHED:
-                return local_result
-            # Step B escalation.
-            mb_result = self._mb_recording_search(mbid, identity)
-            if mb_result is not None:
-                return mb_result
-            return local_result
+        # Resolve target_id → real MusicBrainz MBID.
+        # target_id may be a local catalog UUID (NormalizationStrategy exact-
+        # match on local-only canonicals) or a real MBID (all other strategies).
+        # Look up by catalog primary key first:
+        #   • Found     → target_id is a local UUID; read catalog_artist.mbid.
+        #                 This uses the authoritative field rather than trusting
+        #                 the UUID value, and naturally handles artists that gain
+        #                 an MB link after the initial match.
+        #   • Not found → target_id is already the MBID; use it directly.
+        catalog_artist = self._catalog_repo.get_by_id(mbid)
+        real_mbid: str | None = (
+            catalog_artist.mbid if catalog_artist is not None else mbid
+        )
 
-        # Step B — MB recording search.
-        # Guard: skip when target_id is a local catalog UUID (not a real MBID).
-        # get_by_id() looks up by the local UUID primary key; if it returns an
-        # artist, target_id is definitely a local UUID, so calling MB's arid:
-        # query with it would be invalid. Only fire Step B when target_id is a
-        # real MusicBrainz artist ID (get_by_id returns None for those).
-        target_is_local_uuid = self._catalog_repo.get_by_id(mbid) is not None
-        if not target_is_local_uuid:
-            mb_result = self._mb_recording_search(mbid, identity)
+        if real_mbid:
+            # Step A — local library lookup by artist MBID.
+            candidate_files = self._library_file_repo.get_by_artist_mbid(real_mbid)
+            if candidate_files:
+                local_result = _score_candidates(
+                    identity.normalized_title,
+                    candidate_files,
+                    tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+                    strong_match_threshold=self._strong_match_threshold,
+                )
+                if local_result.status == MatchStatus.AUTO_MATCHED:
+                    return local_result
+                # Step B escalation: try MB recording search for a better match.
+                mb_result = self._mb_recording_search(real_mbid, identity)
+                if mb_result is not None:
+                    return mb_result
+                return local_result
+
+            # Step B — MB recording search when no local files found by MBID.
+            mb_result = self._mb_recording_search(real_mbid, identity)
             if mb_result is not None:
                 return mb_result
 
         # Step C — name-based fallback.
-        # Fires when target_id is a local catalog UUID (Step B skipped), or when
-        # the MBID exists but MB and local files both yield nothing.
+        # Fires when real_mbid is None (local-only artist with no MB link yet),
+        # or when both A and B yield nothing.
+        # Uses original_name so the DB LOWER(TRIM(artist_name)) LIKE %needle%
+        # search preserves punctuation — e.g. "AC/DC" → "ac/dc" correctly
+        # matches library files stored as "AC/DC", whereas normalized_name
+        # "ac dc" would not.
         name_candidates = self._library_file_repo.search_by_artist_name(
-            artist.normalized_name
+            artist.original_name
         )
         if name_candidates:
             return _score_candidates(
@@ -395,7 +412,7 @@ class BroadcastToLocalStrategy:
             return None
 
         candidate_files = self._library_file_repo.search_by_artist_name(
-            artist.normalized_name
+            artist.original_name
         )
         if not candidate_files:
             return IdentityMatchResult(
@@ -406,7 +423,7 @@ class BroadcastToLocalStrategy:
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=(
                     f"No library files found for artist "
-                    f"'{artist.normalized_name}'"
+                    f"'{artist.original_name}'"
                 ),
             )
         return _score_candidates(

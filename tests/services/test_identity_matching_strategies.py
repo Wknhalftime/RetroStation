@@ -288,28 +288,26 @@ def test_tier1_missing_match_record_returns_missing_match_record_reason() -> Non
     assert result.reason_code == ReasonCode.MISSING_MATCH_RECORD
 
 
-def test_tier1_local_only_target_id_skips_mb_uses_name_search() -> None:
-    """When target_id is a local catalog UUID (no MBID artist), Step B must NOT
-    fire — calling MB's arid: query with a local UUID is invalid. Step C
-    (name-based search) must be used instead, and must AUTO_MATCH when a file
+def test_tier1_local_only_target_id_no_mbid_skips_mb_uses_name_search() -> None:
+    """When target_id is a local catalog UUID for a true local-only artist
+    (catalog.mbid is None), real_mbid resolves to None, so Steps A and B are
+    skipped entirely. Step C (name-based search) must AUTO_MATCH when a file
     with a matching artist_name exists.
     """
     local_artist_uuid = str(uuid4())
 
-    # Seed the catalog repo so get_by_id(local_artist_uuid) returns an artist.
     catalog_repo = FakeArtistRepository()
     catalog_repo.upsert(Artist(
         id=local_artist_uuid,
         name="Van Halen",
         sort_name="Van Halen",
-        mbid=None,  # local-only: no MusicBrainz ID
+        mbid=None,  # local-only: no MusicBrainz ID yet
         normalized_name="van halen",
     ))
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist(name="van halen")
-    # Artist match has target_id = local UUID (not an MBID).
     match_repo.create(Match(
         id=uuid4(),
         artist_id=artist.id,
@@ -318,23 +316,109 @@ def test_tier1_local_only_target_id_skips_mb_uses_name_search() -> None:
         target_id=local_artist_uuid,
         target_type=TargetType.ARTIST,
     ))
-    hit = _lib_file(
-        "/music/vh/jump.flac",
-        track_title="jump",
-        artist_name="van halen",
-    )
+    hit = _lib_file("/music/vh/jump.flac", track_title="jump", artist_name="van halen")
     lib_repo.upsert(hit)
-    mb = FakeMbClient()  # no searches seeded — must NOT be called
+    mb = FakeMbClient()  # must NOT be called
 
     strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, catalog_repo)
-    identity = _identity(artist.id, title="jump")
-    result = strategy.apply(identity, artist)
+    result = strategy.apply(_identity(artist.id, title="jump"), artist)
 
     assert result is not None
     assert result.status == MatchStatus.AUTO_MATCHED
     assert result.tier == MatchTier.LOCAL_FILE_FUZZY
     assert result.library_file_id == hit.id
-    assert mb.calls == []  # Step B must NOT fire for local-only target_id
+    assert mb.calls == []  # Steps A and B must not fire
+
+
+def test_tier1_local_uuid_with_real_mbid_uses_mbid_for_steps_a_b() -> None:
+    """When target_id is a local catalog UUID but catalog_artist.mbid is set,
+    real_mbid resolves to that MBID and Steps A/B fire correctly.
+
+    This covers the case where a local-only artist later gets linked to MB
+    but the match record still stores the local catalog UUID as target_id.
+    """
+    local_artist_uuid = str(uuid4())
+    artist_mbid = "mbid-vh-real"
+
+    catalog_repo = FakeArtistRepository()
+    catalog_repo.upsert(Artist(
+        id=local_artist_uuid,
+        name="Van Halen",
+        sort_name="Van Halen",
+        mbid=artist_mbid,  # now linked to MusicBrainz
+        normalized_name="van halen",
+    ))
+
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    artist = _artist(name="van halen")
+    match_repo.create(Match(
+        id=uuid4(),
+        artist_id=artist.id,
+        confidence_score=100.0,
+        match_tier=MatchTier.NORMALIZATION,
+        target_id=local_artist_uuid,  # still the local UUID from initial match
+        target_type=TargetType.ARTIST,
+    ))
+    # Library file linked via the real MBID (Step A path).
+    hit = _lib_file("/music/vh/jump.flac", track_title="jump", artist_mbid=artist_mbid)
+    lib_repo.upsert(hit)
+    mb = FakeMbClient()
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, catalog_repo)
+    result = strategy.apply(_identity(artist.id, title="jump"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    assert result.library_file_id == hit.id
+
+
+def test_tier1_step_c_uses_original_name_preserving_punctuation() -> None:
+    """Step C must pass original_name to search_by_artist_name, not
+    normalized_name. The DB search does LOWER(TRIM(artist_name)) LIKE %needle%;
+    if normalized_name were used, punctuation stripped by normalize_artist()
+    would cause misses (e.g. "AC/DC" → "ac dc" fails to match "AC/DC" → "ac/dc").
+    """
+    local_artist_uuid = str(uuid4())
+
+    catalog_repo = FakeArtistRepository()
+    catalog_repo.upsert(Artist(
+        id=local_artist_uuid,
+        name="AC/DC",
+        sort_name="AC/DC",
+        mbid=None,
+        normalized_name="ac dc",
+    ))
+
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    # original_name preserves the slash; normalized_name strips it.
+    artist = BroadcastArtist(
+        id=uuid4(),
+        original_name="AC/DC",
+        normalized_name="ac dc",
+        match_status=MatchStatus.AUTO_MATCHED,
+    )
+    match_repo.create(Match(
+        id=uuid4(),
+        artist_id=artist.id,
+        confidence_score=100.0,
+        match_tier=MatchTier.NORMALIZATION,
+        target_id=local_artist_uuid,
+        target_type=TargetType.ARTIST,
+    ))
+    # Library file stored with the original punctuated artist name.
+    hit = _lib_file("/music/acdc/hells_bells.flac", track_title="hells bells",
+                    artist_name="AC/DC")
+    lib_repo.upsert(hit)
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, FakeMbClient(), catalog_repo)
+    result = strategy.apply(_identity(artist.id, title="hells bells"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.library_file_id == hit.id
 
 
 # ---------------------------------------------------------------------------

@@ -26,12 +26,13 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def search_by_artist_name(
-        self, normalized_name: str, limit: int = 100
+        self, artist_name: str, limit: int = 100
     ) -> list[LibraryFile]:
-        """Return library files whose artist name matches normalized_name by
-        substring (case-insensitive). Used by BroadcastToLocalStrategy when the
-        artist MBID is not yet confirmed. Pre-filter step — the calling strategy
-        scores with rapidfuzz.
+        """Return library files whose artist_name contains artist_name as a
+        case-insensitive substring. The implementation lowercases and strips
+        the input internally — callers should pass the original (un-normalized)
+        name so that punctuation (e.g. "AC/DC") is not lost before matching.
+        Pre-filter step — the calling strategy re-scores results with rapidfuzz.
         """
         ...
 

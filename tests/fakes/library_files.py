@@ -39,9 +39,9 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         return [f for f in self._data.values() if f.audio.artist_mbid == artist_mbid]
 
     def search_by_artist_name(
-        self, normalized_name: str, limit: int = 100,
+        self, artist_name: str, limit: int = 100,
     ) -> list[LibraryFile]:
-        needle = normalized_name.strip().lower()
+        needle = artist_name.strip().lower()
         if not needle:
             return []
         hits = [
