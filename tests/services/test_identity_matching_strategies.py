@@ -9,6 +9,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
+from backend.domain.catalog import Artist
 from backend.domain.enums import (
     EnrichmentStatus,
     MatchStatus,
@@ -23,6 +24,7 @@ from backend.services.identity_matching_service import (
     IdentityMappingRuleStrategy,
     ResolvedArtistMbidStrategy,
 )
+from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
@@ -161,7 +163,7 @@ def test_tier1_gates_on_pending_artist_returns_none() -> None:
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     mb = FakeMbClient()
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
 
     artist = _artist(status=MatchStatus.PENDING)
     identity = _identity(artist.id)
@@ -183,7 +185,7 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
         "/m/es.flac", track_title="enter sandman", artist_mbid="mbid-m", work_id="w-es",
     ))
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -217,7 +219,7 @@ def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -244,7 +246,7 @@ def test_tier1_no_local_files_falls_through_to_mb() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -261,7 +263,7 @@ def test_tier1_mb_inconclusive_returns_no_local_files_reason() -> None:
     _seed_artist_match(match_repo, artist.id, "mbid-m")
     mb = FakeMbClient()  # no recording_searches => empty list
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -276,7 +278,7 @@ def test_tier1_missing_match_record_returns_missing_match_record_reason() -> Non
     match_repo = FakeMatchRepository()  # no artist match seeded
     mb = FakeMbClient()
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     artist = _artist(status=MatchStatus.AUTO_MATCHED)
     identity = _identity(artist.id)
     result = strategy.apply(identity, artist)
@@ -284,6 +286,55 @@ def test_tier1_missing_match_record_returns_missing_match_record_reason() -> Non
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
     assert result.reason_code == ReasonCode.MISSING_MATCH_RECORD
+
+
+def test_tier1_local_only_target_id_skips_mb_uses_name_search() -> None:
+    """When target_id is a local catalog UUID (no MBID artist), Step B must NOT
+    fire — calling MB's arid: query with a local UUID is invalid. Step C
+    (name-based search) must be used instead, and must AUTO_MATCH when a file
+    with a matching artist_name exists.
+    """
+    local_artist_uuid = str(uuid4())
+
+    # Seed the catalog repo so get_by_id(local_artist_uuid) returns an artist.
+    catalog_repo = FakeArtistRepository()
+    catalog_repo.upsert(Artist(
+        id=local_artist_uuid,
+        name="Van Halen",
+        sort_name="Van Halen",
+        mbid=None,  # local-only: no MusicBrainz ID
+        normalized_name="van halen",
+    ))
+
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    artist = _artist(name="van halen")
+    # Artist match has target_id = local UUID (not an MBID).
+    match_repo.create(Match(
+        id=uuid4(),
+        artist_id=artist.id,
+        confidence_score=100.0,
+        match_tier=MatchTier.NORMALIZATION,
+        target_id=local_artist_uuid,
+        target_type=TargetType.ARTIST,
+    ))
+    hit = _lib_file(
+        "/music/vh/jump.flac",
+        track_title="jump",
+        artist_name="van halen",
+    )
+    lib_repo.upsert(hit)
+    mb = FakeMbClient()  # no searches seeded — must NOT be called
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, catalog_repo)
+    identity = _identity(artist.id, title="jump")
+    result = strategy.apply(identity, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.tier == MatchTier.LOCAL_FILE_FUZZY
+    assert result.library_file_id == hit.id
+    assert mb.calls == []  # Step B must NOT fire for local-only target_id
 
 
 # ---------------------------------------------------------------------------

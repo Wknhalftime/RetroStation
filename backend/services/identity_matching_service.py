@@ -11,6 +11,7 @@ from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import LibraryFile
 from backend.domain.matching import MappingRule, Match
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.library_files import LibraryFileRepository
@@ -206,11 +207,13 @@ class ResolvedArtistMbidStrategy:
     """Tier 1 — fused MBID fast path.
 
     Step A: local library lookup by artist MBID (no API call).
-    Step B: MB recording search (1 API call) — fires internally when Step A
-            is inconclusive (mid-confidence) or finds no local files.
-    Step C: name-based fuzzy fallback — fires when both A and B yield nothing.
+    Step B: MB recording search (1 API call) — fires only when target_id is a
+            real MusicBrainz MBID. Skipped when target_id is a local catalog
+            UUID (local-only AUTO_MATCHED artist) to avoid invalid arid: queries.
+    Step C: name-based fuzzy fallback — fires when both A and B yield nothing,
+            or when target_id is a local catalog UUID (so Step B is skipped).
             Handles local-only AUTO_MATCHED artists whose Match.target_id is a
-            local catalog UUID (not an MBID), so get_by_artist_mbid returns empty.
+            local catalog UUID, so get_by_artist_mbid returns empty.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -223,11 +226,13 @@ class ResolvedArtistMbidStrategy:
         library_file_repo: LibraryFileRepository,
         match_repo: MatchRepository,
         mb_client: MusicBrainzClientProtocol,
+        catalog_repo: ArtistCatalogRepository,
         strong_match_threshold: int = 80,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
         self._mb_client = mb_client
+        self._catalog_repo = catalog_repo
         self._strong_match_threshold = strong_match_threshold
 
     def apply(
@@ -286,14 +291,21 @@ class ResolvedArtistMbidStrategy:
                 return mb_result
             return local_result
 
-        mb_result = self._mb_recording_search(mbid, identity)
-        if mb_result is not None:
-            return mb_result
+        # Step B — MB recording search.
+        # Guard: skip when target_id is a local catalog UUID (not a real MBID).
+        # get_by_id() looks up by the local UUID primary key; if it returns an
+        # artist, target_id is definitely a local UUID, so calling MB's arid:
+        # query with it would be invalid. Only fire Step B when target_id is a
+        # real MusicBrainz artist ID (get_by_id returns None for those).
+        target_is_local_uuid = self._catalog_repo.get_by_id(mbid) is not None
+        if not target_is_local_uuid:
+            mb_result = self._mb_recording_search(mbid, identity)
+            if mb_result is not None:
+                return mb_result
 
         # Step C — name-based fallback.
-        # Fires when target_id is a local catalog UUID (not an MBID), e.g. when
-        # NormalizationStrategy auto-matched a local-only artist. Also useful
-        # when the MBID exists but no library files have been tagged with it yet.
+        # Fires when target_id is a local catalog UUID (Step B skipped), or when
+        # the MBID exists but MB and local files both yield nothing.
         name_candidates = self._library_file_repo.search_by_artist_name(
             artist.normalized_name
         )
@@ -435,6 +447,7 @@ def match_identities_for_playlist(
     library_file_repo: LibraryFileRepository,
     rules_repo: MappingRuleRepository,
     mb_client: MusicBrainzClientProtocol,
+    catalog_repo: ArtistCatalogRepository,
     strong_match_threshold: int = 80,
 ) -> list[str]:
     """Resolve pending identities for a playlist.
@@ -462,7 +475,8 @@ def match_identities_for_playlist(
     engine = IdentityMatchingEngine([
         IdentityMappingRuleStrategy(rules, library_file_repo),
         ResolvedArtistMbidStrategy(
-            library_file_repo, match_repo, mb_client, strong_match_threshold
+            library_file_repo, match_repo, mb_client, catalog_repo,
+            strong_match_threshold,
         ),
         BroadcastToLocalStrategy(library_file_repo, strong_match_threshold),
     ])

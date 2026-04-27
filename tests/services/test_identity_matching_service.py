@@ -26,6 +26,7 @@ from backend.services.normalization import (
     normalize_artist,
     normalize_title,
 )
+from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
@@ -159,6 +160,7 @@ def test_match_identities_for_playlist_tier0_rule_hit_collects_work_id() -> None
         library_file_repo=lib_repo,
         rules_repo=rules_repo,
         mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == ["work-enter-sandman"]
@@ -213,6 +215,7 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
         library_file_repo=lib_repo,
         rules_repo=rules_repo,
         mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == ["work-enter-sandman"]
@@ -263,6 +266,7 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
         library_file_repo=lib_repo,
         rules_repo=rules_repo,
         mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == []
@@ -291,6 +295,7 @@ def test_match_identities_no_pending_returns_empty() -> None:
         library_file_repo=lib_repo,
         rules_repo=rules_repo,
         mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
     )
     assert work_ids == []
 
@@ -325,6 +330,7 @@ def test_match_identities_skips_orphaned_identity_without_artist() -> None:
         library_file_repo=lib_repo,
         rules_repo=rules_repo,
         mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
     )
     assert work_ids == []
     stored = identity_repo.get_by_id(identity.id)

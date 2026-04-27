@@ -5,6 +5,7 @@ from uuid import UUID
 import structlog
 
 from backend.config import get_settings
+from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_track_identities import (
     PgBroadcastTrackIdentityRepository,
@@ -47,6 +48,7 @@ def identity_matching_task(playlist_id: str) -> None:
                     library_file_repo=PgLibraryFileRepository(conn),
                     rules_repo=PgMappingRuleRepository(conn),
                     mb_client=mb_client,
+                    catalog_repo=PgArtistRepository(conn),
                     strong_match_threshold=settings.strong_match_threshold,
                 )
             conn.commit()
