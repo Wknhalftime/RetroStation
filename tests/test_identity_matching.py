@@ -12,6 +12,7 @@ from backend.services.normalization import (
     normalize_artist,
     normalize_title,
 )
+from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
@@ -134,6 +135,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
         library_file_repo=library_file_repo,
         rules_repo=rules_repo,
         mb_client=FakeMbClient(),
+        catalog_repo=FakeArtistRepository(),
     )
 
     # Identity should be AUTO_MATCHED
@@ -190,6 +192,7 @@ def test_no_library_files_falls_to_needs_review() -> None:
         library_file_repo=library_file_repo,
         rules_repo=rules_repo,
         mb_client=FakeMbClient(),
+        catalog_repo=FakeArtistRepository(),
     )
 
     updated_identity = track_identity_repo.get_by_id(identity.id)
