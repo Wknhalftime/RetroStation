@@ -140,8 +140,9 @@ export function MatcherBrowser() {
 
   function handleLibraryArtistSelect(artist: LibraryArtist) {
     // Prefer mbid; fall back to local catalog UUID for local-only artists.
-    // Trim-aware: an empty-string mbid ("") is treated the same as null.
-    const targetId = artist.mbid?.trim() ? artist.mbid : artist.id;
+    // Trim first so a whitespace-padded MBID is never persisted as-is, and
+    // an all-whitespace value is treated the same as null/empty.
+    const targetId = artist.mbid?.trim() || artist.id;
     handleResolveFromArtistSearch(targetId);
   }
 

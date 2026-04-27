@@ -343,6 +343,18 @@ describe("MatcherBrowser — library search MBID fallback", () => {
     });
     expect(body["target_artist_id"]).toBe("local-uuid-1");
   });
+
+  it("uses the trimmed mbid when mbid contains surrounding whitespace", async () => {
+    // Guards the review finding: checking trim() but passing the untrimmed
+    // original would persist a whitespace-padded id to the backend.
+    mockedApiFetch.mockReset();
+    const { body } = await resolveViaLibrarySearch({
+      id: "local-uuid-1",
+      name: "Ultraspank",
+      mbid: "  mbid-ultra  ",
+    });
+    expect(body["target_artist_id"]).toBe("mbid-ultra");
+  });
 });
 
 describe("MatcherBrowser — pagination", () => {
