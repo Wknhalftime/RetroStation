@@ -208,6 +208,9 @@ class ResolvedArtistMbidStrategy:
     Step A: local library lookup by artist MBID (no API call).
     Step B: MB recording search (1 API call) — fires internally when Step A
             is inconclusive (mid-confidence) or finds no local files.
+    Step C: name-based fuzzy fallback — fires when both A and B yield nothing.
+            Handles local-only AUTO_MATCHED artists whose Match.target_id is a
+            local catalog UUID (not an MBID), so get_by_artist_mbid returns empty.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -286,6 +289,21 @@ class ResolvedArtistMbidStrategy:
         mb_result = self._mb_recording_search(mbid, identity)
         if mb_result is not None:
             return mb_result
+
+        # Step C — name-based fallback.
+        # Fires when target_id is a local catalog UUID (not an MBID), e.g. when
+        # NormalizationStrategy auto-matched a local-only artist. Also useful
+        # when the MBID exists but no library files have been tagged with it yet.
+        name_candidates = self._library_file_repo.search_by_artist_name(
+            artist.normalized_name
+        )
+        if name_candidates:
+            return _score_candidates(
+                identity.normalized_title,
+                name_candidates,
+                tier=MatchTier.LOCAL_FILE_FUZZY,
+                strong_match_threshold=self._strong_match_threshold,
+            )
 
         return IdentityMatchResult(
             status=MatchStatus.NEEDS_REVIEW,

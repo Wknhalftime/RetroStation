@@ -131,6 +131,98 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
     assert created.confidence_score == 100.0
 
 
+def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
+    """Regression: broadcast artist whose name exactly matches a local catalog
+    artist with mbid=None must be AUTO_MATCHED, not loop in DEFERRED_RETRY.
+
+    Previously NormalizationStrategy skipped mbid=None canonicals on the
+    assumption the engine would fall through to MusicBrainzApiStrategy.  But
+    Phase-2 gates MB to truncated names only, so non-truncated names like
+    'VAN HALEN' (9 chars) would spin forever in DEFERRED_RETRY.
+
+    The fix: a second exact-match pass returns AUTO_MATCHED with target_id set
+    to the local catalog UUID.  AUTO_MATCHED requires a good score (100% exact
+    match qualifies) — an MBID is NOT required.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    # Local artist with no MBID (created from library file scan)
+    artist_repo.upsert(Artist(
+        id="local-uuid-van-halen",
+        name="Van Halen",
+        sort_name="Van Halen",
+        mbid=None,
+    ))
+    broadcast_artist = _pending_artist("VAN HALEN", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=FakeMbClient(),
+    )
+
+    stored = broadcast_artist_repo.get_by_id(broadcast_artist.id)
+    assert stored is not None
+    # Must be AUTO_MATCHED — not DEFERRED_RETRY or NEEDS_REVIEW
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    # Match row uses the local catalog UUID as target_id
+    created = match_repo.get_by_artist(broadcast_artist.id)
+    assert created is not None
+    assert created.target_id == "local-uuid-van-halen"
+    assert created.match_tier == MatchTier.NORMALIZATION
+    assert created.confidence_score == 100.0
+
+
+def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> None:
+    """When BOTH an MBID-bearing and a local-only canonical share the same
+    normalized name, the MBID-bearing one wins (exact pass 1 before pass 2)."""
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    artist_repo = FakeArtistRepository()
+    match_repo = FakeMatchRepository()
+
+    # MBID-bearing artist takes priority
+    artist_repo.upsert(Artist(
+        id="local-uuid-vh-mb",
+        name="Van Halen",
+        sort_name="Van Halen",
+        mbid="mbid-van-halen",
+    ))
+    # Local-only artist with same name — should be ignored
+    artist_repo.upsert(Artist(
+        id="local-uuid-vh-local",
+        name="Van Halen",
+        sort_name="Van Halen",
+        mbid=None,
+    ))
+    broadcast_artist = _pending_artist("VAN HALEN", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=FakeMappingRuleRepository(),
+        mb_client=FakeMbClient(),
+    )
+
+    stored = broadcast_artist_repo.get_by_id(broadcast_artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    created = match_repo.get_by_artist(broadcast_artist.id)
+    assert created is not None
+    assert created.target_id == "mbid-van-halen"
+    assert created.match_tier == MatchTier.NORMALIZATION
+
+
 def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     """Updated reason-string baseline: a mid-confidence fuzzy hit now
     persists ReasonCode.LOW_CONFIDENCE + a formatted detail string.
