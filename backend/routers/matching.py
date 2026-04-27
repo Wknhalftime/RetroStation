@@ -487,6 +487,15 @@ async def resolve_artist(
             (artist_id,),
         )
         playlist_rows = await playlist_cur.fetchall()
+        # Commit BEFORE enqueueing. The Huey worker is a separate process
+        # with its own DB connection; if the request transaction hasn't
+        # committed yet, the worker sees the pre-cascade state (children
+        # still NEEDS_REVIEW, stale matches rows present) and skips them
+        # entirely (get_pending_for_playlist filters strictly to
+        # match_status='pending'). get_db_connection's post-yield commit
+        # becomes a no-op after this. Mirrors the commit-before-enqueue
+        # ordering in artist_matching_tasks.py:87-100.
+        await conn.commit()
         for row in playlist_rows:
             identity_matching_task(str(row["playlist_id"]))
     else:

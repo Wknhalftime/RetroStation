@@ -451,6 +451,74 @@ class TestResolveArtist:
         assert artist_match["target_type"] == "artist"
         assert artist_match["match_tier"] == "manual"
 
+    def test_manual_match_commits_before_enqueue(
+        self, client, db_conn, migrated_db, monkeypatch
+    ):
+        """The cascade must commit BEFORE enqueueing identity_matching_task.
+        Otherwise a fast Huey worker (separate process, separate connection)
+        could pick up the task and read stale data — children still
+        NEEDS_REVIEW, not PENDING — and skip them entirely (the worker's
+        get_pending_for_playlist filters strictly to match_status='pending').
+
+        Locks in the ordering invariant: at the moment identity_matching_task
+        is invoked, an independent connection must see the cascade results.
+        Regression check raised in PR #46 review."""
+        from psycopg.rows import dict_row
+
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review_child, confidence_score=83.0)
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, review_child)
+
+        observed: list[tuple[str | None, int]] = []
+
+        def capture_visible_state(_playlist_id: str) -> None:
+            # Open a fresh connection to simulate the Huey worker process.
+            # If the request handler has already committed, the new state is
+            # visible; otherwise the seeded state is.
+            with psycopg.connect(migrated_db, row_factory=dict_row) as fresh:
+                row = fresh.execute(
+                    "SELECT match_status FROM track_identities WHERE id = %s",
+                    (review_child.id,),
+                ).fetchone()
+                match_count = fresh.execute(
+                    "SELECT COUNT(*)::int AS n FROM matches WHERE identity_id = %s",
+                    (review_child.id,),
+                ).fetchone()
+            observed.append(
+                (row["match_status"] if row else None, match_count["n"] if match_count else -1)
+            )
+
+        mock = MagicMock(side_effect=capture_visible_state)
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+
+        assert mock.call_count == 1
+        assert observed == [("pending", 0)], (
+            "Worker view at enqueue time must reflect the committed cascade "
+            f"(pending + 0 matches), not the pre-commit state. Got {observed!r}."
+        )
+
     def test_manual_match_does_not_touch_resolved_children(
         self, client, db_conn, monkeypatch
     ):
