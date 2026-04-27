@@ -519,6 +519,65 @@ class TestResolveArtist:
             f"(pending + 0 matches), not the pre-commit state. Got {observed!r}."
         )
 
+    def test_manual_match_returns_200_when_enqueue_fails(
+        self, client, db_conn, monkeypatch
+    ):
+        """If identity_matching_task raises (Huey backend down, file lock,
+        etc.) AFTER the cascade has committed, the request must still return
+        200 — the user's manual link succeeded, the children are durably
+        flipped to PENDING, and the next /matching/run cycle will pick them
+        up. Returning 500 would tell the curator their link failed when it
+        actually succeeded, prompting confusing retries.
+
+        Regression check raised in PR #46 review (severity: low)."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review_child, confidence_score=83.0)
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, review_child)
+
+        mock = MagicMock(side_effect=RuntimeError("huey backend down"))
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["match_status"] == "manual_matched"
+
+        # Cascade is committed even though the enqueue raised.
+        artist_row = db_conn.execute(
+            "SELECT match_status FROM broadcast_artists WHERE id = %s",
+            (artist.id,),
+        ).fetchone()
+        assert artist_row is not None
+        assert artist_row["match_status"] == "manual_matched"
+
+        child_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (review_child.id,),
+        ).fetchone()
+        assert child_row is not None
+        assert child_row["match_status"] == "pending"
+
+        # The mock was actually called (not bypassed); it just raised.
+        mock.assert_called_once_with(str(playlist.id))
+
     def test_manual_match_does_not_touch_resolved_children(
         self, client, db_conn, monkeypatch
     ):

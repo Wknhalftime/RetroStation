@@ -168,4 +168,27 @@ describe("TitlePanel artist gate", () => {
     });
     expect(screen.getByText(/Resolve the artist first/i)).toBeDefined();
   });
+
+  it("renders title rows when artist is auto_matched", () => {
+    // Regression for PR #46: the broadened queue CTE now surfaces
+    // auto_matched parents that have review-needing children. TitlePanel must
+    // recognise auto_matched as resolved or the curator sees only "Resolve
+    // the artist first" and can't reach the children — defeating the
+    // visibility fix entirely.
+    const artist = makeArtist([
+      makeIdentity({
+        original_title: "Your Disease",
+        match_status: "needs_review",
+        match_tier: "musicbrainz_id_search",
+      }),
+    ]);
+    artist.match_status = "auto_matched";
+    render(<TitlePanel artist={artist} onFileSearch={vi.fn()} />, {
+      wrapper: wrapperFor(makeClient()),
+    });
+    expect(screen.getByText("Your Disease")).toBeDefined();
+    expect(screen.getByRole("button", { name: /Find File/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Reject/i })).toBeDefined();
+    expect(screen.queryByText(/Resolve the artist first/i)).toBeNull();
+  });
 });

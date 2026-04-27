@@ -5,6 +5,7 @@ import json
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
@@ -15,6 +16,8 @@ from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_RE
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
 from backend.tasks.identity_matching_tasks import identity_matching_task
+
+logger = structlog.get_logger()
 
 router = APIRouter()
 
@@ -496,8 +499,26 @@ async def resolve_artist(
         # becomes a no-op after this. Mirrors the commit-before-enqueue
         # ordering in artist_matching_tasks.py:87-100.
         await conn.commit()
+        # Enqueue is fire-and-forget across a transaction boundary the
+        # request handler has already crossed. The cascade DB work is
+        # committed and durable; failing the response would tell the user
+        # their manual link failed when it actually succeeded. If the Huey
+        # backend is unavailable, the worker's next regular run (or a
+        # manual /matching/run) will pick up the now-PENDING children. The
+        # broad except is justified at this top-level handler boundary
+        # (per error-handling.md) because no specific exception type is
+        # reliably knowable across Huey backends (SQLite today, possibly
+        # Redis later).
         for row in playlist_rows:
-            identity_matching_task(str(row["playlist_id"]))
+            try:
+                identity_matching_task(str(row["playlist_id"]))
+            except Exception as exc:  # noqa: BLE001 — top-level boundary; see comment above
+                logger.warning(
+                    "identity_matching_enqueue_failed",
+                    artist_id=str(artist_id),
+                    playlist_id=str(row["playlist_id"]),
+                    error=repr(exc),
+                )
     else:
         # MANUAL_REJECTED: update artist, cascade child identities
         await conn.execute(
