@@ -276,7 +276,7 @@ class ResolvedArtistMbidStrategy:
                 confidence_score=0.0,
                 library_file_id=None,
                 reason_code=ReasonCode.MISSING_MATCH_RECORD,
-                reason_detail="Artist match row has no valid target_id (MBID)",
+                reason_detail="Artist match row has no valid target_id",
             )
 
         # Resolve target_id → real MusicBrainz MBID.

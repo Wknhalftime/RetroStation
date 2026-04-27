@@ -28,10 +28,11 @@ class LibraryFileRepository(ABC):
     def search_by_artist_name(
         self, artist_name: str, limit: int = 100
     ) -> list[LibraryFile]:
-        """Return library files whose artist_name contains artist_name as a
-        case-insensitive substring. The implementation lowercases and strips
-        the input internally — callers should pass the original (un-normalized)
-        name so that punctuation (e.g. "AC/DC") is not lost before matching.
+        """Return library files whose stored artist_name field contains the
+        given search term as a case-insensitive substring. The implementation
+        lowercases and strips the search term internally — callers should pass
+        the original (un-normalized) artist name so that punctuation
+        (e.g. "AC/DC") is not stripped before the substring match.
         Pre-filter step — the calling strategy re-scores results with rapidfuzz.
         """
         ...
