@@ -11,6 +11,37 @@ from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 
 router = APIRouter()
 
+
+def _artist_search_fragments(
+    search: str,
+) -> tuple[str, str, tuple[Any, ...], tuple[Any, ...]]:
+    """Build the SQL fragments and parameter lists for an artist name search.
+
+    Returns ``(where_clause, order_clause, where_params, order_params)`` so
+    that both the count and items queries always use the identical predicate —
+    making drift between the two impossible.
+
+    ``where_params`` feeds the WHERE clause (2 binds when searching, 0 otherwise).
+    ``order_params`` feeds the similarity() call in ORDER BY (1 bind when
+    searching, 0 otherwise) and is only needed by the items query.
+
+    psycopg note: ``%%`` in a Python SQL string literal becomes a single ``%``
+    after psycopg's placeholder pass, so ``LOWER(a.name) %% LOWER(%s)`` reaches
+    Postgres as the trigram ``%`` operator.  The GIN index on ``LOWER(name)``
+    (migration 0022) makes this efficient.  ``similarity()`` is used only in
+    ORDER BY for ranking — not in WHERE — so the index is exercised for
+    filtering via the ``%%`` arm.
+    """
+    if not search:
+        return "", "ORDER BY a.sort_name, a.id", (), ()
+
+    where = (
+        "WHERE LOWER(a.name) %% LOWER(%s) "
+        "OR LOWER(a.name) LIKE LOWER(%s) || '%%'"
+    )
+    order = "ORDER BY similarity(LOWER(a.name), LOWER(%s)) DESC, a.sort_name, a.id"
+    return where, order, (search, search), (search,)
+
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
 
@@ -57,16 +88,20 @@ async def list_artists(
     offset: int = Query(default=0, ge=0),
     search: str = Query(default=""),
 ) -> PaginatedArtists:
-    """Return a paginated list of artists with work and file counts."""
-    where_clause = "WHERE LOWER(a.name) LIKE LOWER(%s)" if search else ""
-    search_param = f"%{search}%" if search else None
+    """Return a paginated list of artists with work and file counts.
+
+    When ``search`` is non-empty, results are filtered and ranked by trigram
+    similarity; see :func:`_artist_search_fragments` for the SQL construction
+    details and the migration-0022 GIN index that makes it efficient.
+    """
+    where_clause, order_clause, where_params, order_params = _artist_search_fragments(search)
 
     count_sql = f"""
-        SELECT COUNT(DISTINCT a.id) AS total
+        SELECT COUNT(*) AS total
         FROM artists a
         {where_clause}
     """
-    count_params: tuple[Any, ...] = (search_param,) if search else ()
+    count_params: tuple[Any, ...] = where_params
     cnt_cur = await conn.execute(count_sql, count_params)
     cnt_row = await cnt_cur.fetchone()
     total: int = cnt_row["total"] if cnt_row else 0
@@ -87,10 +122,10 @@ async def list_artists(
         {where_clause}
         GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
                  a.mbid, a.origin
-        ORDER BY a.sort_name
+        {order_clause}
         LIMIT %s OFFSET %s
     """
-    items_params: tuple[Any, ...] = (search_param, limit, offset) if search else (limit, offset)
+    items_params: tuple[Any, ...] = where_params + order_params + (limit, offset)
 
     items_cur = await conn.execute(items_sql, items_params)
     rows = await items_cur.fetchall()

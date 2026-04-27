@@ -6,9 +6,14 @@ import type { MatchCandidate } from "@/lib/schemas/matches";
 interface ArtistPanelProps {
   artist: QueueArtist;
   onSearchMusicBrainz?: () => void;
+  onSearchLibrary?: () => void;
 }
 
-export function ArtistPanel({ artist, onSearchMusicBrainz }: ArtistPanelProps) {
+export function ArtistPanel({
+  artist,
+  onSearchMusicBrainz,
+  onSearchLibrary,
+}: ArtistPanelProps) {
   const resolveArtist = useResolveArtist();
 
   function handleAccept(candidate: MatchCandidate) {
@@ -96,8 +101,21 @@ export function ArtistPanel({ artist, onSearchMusicBrainz }: ArtistPanelProps) {
           ))}
         </div>
       ) : (
-        <div className="mb-4">
-          <p className="mb-2 text-sm text-gray-400">No candidates found automatically.</p>
+        <p className="mb-2 text-sm text-gray-400">No candidates found automatically.</p>
+      )}
+
+      {/* Manual lookup actions — always visible so curators can override an
+          auto-suggestion or rescue an empty-candidates artist. */}
+      {(onSearchLibrary || onSearchMusicBrainz) && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {onSearchLibrary && (
+            <button
+              onClick={onSearchLibrary}
+              className="rounded bg-gray-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-gray-800"
+            >
+              Search Library…
+            </button>
+          )}
           {onSearchMusicBrainz && (
             <button
               onClick={onSearchMusicBrainz}
