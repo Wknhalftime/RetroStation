@@ -320,10 +320,17 @@ def test_mb_strategy_mid_score_needs_review() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Review fix #A: Match.target_id must be an MBID, not a local UUID.
-# NormalizationStrategy must filter out canonicals with mbid=None (they cannot
-# be used downstream by ResolvedArtistMbidStrategy which feeds
-# library_file_repo.get_by_artist_mbid()).
+# Local-only (mbid=None) canonicals in NormalizationStrategy.
+#
+# Exact pass 2: if the broadcast name exactly matches a local-only canonical,
+# we AUTO_MATCH with target_id = the catalog UUID.  The identity tier's
+# ResolvedArtistMbidStrategy handles this via a name-based fallback (Step C)
+# when get_by_artist_mbid() returns nothing for a non-MBID target_id.
+#
+# Fuzzy pass: local-only canonicals are still filtered out so that a fuzzy
+# near-miss never beats a real MBID-bearing canonical.  If ALL canonicals
+# lack an MBID and none is an exact name match, both passes fall through to
+# MusicBrainzApiStrategy.
 # ---------------------------------------------------------------------------
 
 
