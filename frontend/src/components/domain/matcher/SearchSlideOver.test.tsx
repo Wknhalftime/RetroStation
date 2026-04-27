@@ -157,3 +157,71 @@ describe("SearchSlideOver mb-artist mode", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SearchSlideOver file mode", () => {
+  it("routes search through /api/v1/library/files when mode is 'file'", async () => {
+    mockedApiFetch.mockResolvedValue({ items: [] });
+    render(
+      <SearchSlideOver open={true} onClose={vi.fn()} mode="file" />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    const input = screen.getByRole("searchbox");
+    fireEvent.change(input, { target: { value: "hurts" } });
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/library/files?")
+      );
+    });
+    // Must NOT hit the artists endpoint.
+    expect(mockedApiFetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/library/artists")
+    );
+  });
+
+  it("renders track_title and file_path on each result", async () => {
+    mockedApiFetch.mockResolvedValue({
+      items: [
+        { id: "file-uuid-1", file_path: "/music/x.flac", track_title: "Everybody Hurts" },
+      ],
+    });
+    render(
+      <SearchSlideOver open={true} onClose={vi.fn()} mode="file" />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "everybody" } });
+    await screen.findByText("Everybody Hurts");
+    expect(screen.getByText("/music/x.flac")).toBeTruthy();
+  });
+
+  it("falls back to 'Untitled' when track_title is null", async () => {
+    mockedApiFetch.mockResolvedValue({
+      items: [{ id: "file-uuid-2", file_path: "/music/notitle.flac", track_title: null }],
+    });
+    render(
+      <SearchSlideOver open={true} onClose={vi.fn()} mode="file" />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "notitle" } });
+    await screen.findByText("Untitled");
+    expect(screen.getByText("/music/notitle.flac")).toBeTruthy();
+  });
+
+  it("passes artist_mbid when 'Restrict to confirmed artist' is checked", async () => {
+    mockedApiFetch.mockResolvedValue({ items: [] });
+    render(
+      <SearchSlideOver
+        open={true}
+        onClose={vi.fn()}
+        mode="file"
+        restrictArtistMbid="mbid-rem-xxx"
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "everybody" } });
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("artist_mbid=mbid-rem-xxx")
+      );
+    });
+  });
+});

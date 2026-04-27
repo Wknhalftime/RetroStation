@@ -18,8 +18,8 @@ interface LibraryArtist {
 
 interface LibraryFile {
   id: string;
-  path: string;
-  title?: string | null;
+  file_path: string;
+  track_title?: string | null;
 }
 
 type SearchMode = "artist" | "file" | "mb-artist";
@@ -106,10 +106,11 @@ export function SearchSlideOver({
       params.set("artist_mbid", restrictArtistMbid);
     }
 
+    const apiPath = mode === "file" ? "/api/v1/library/files" : "/api/v1/library/artists";
     apiFetch<
       | { items?: (LibraryArtist | LibraryFile)[]; data?: (LibraryArtist | LibraryFile)[] }
       | (LibraryArtist | LibraryFile)[]
-    >(`/api/v1/library/artists?${params.toString()}`)
+    >(`${apiPath}?${params.toString()}`)
       .then((res) => {
         if (!controller.signal.aborted) {
           if (Array.isArray(res)) {
@@ -169,8 +170,8 @@ export function SearchSlideOver({
           <p className="truncate text-sm text-gray-800">{artist.name}</p>
         ) : (
           <>
-            <p className="truncate text-sm font-medium text-gray-800">{file.title ?? "Untitled"}</p>
-            <p className="truncate text-xs text-gray-400">{file.path}</p>
+            <p className="truncate text-sm font-medium text-gray-800">{file.track_title ?? "Untitled"}</p>
+            <p className="truncate text-xs text-gray-400">{file.file_path}</p>
           </>
         )}
       </button>
