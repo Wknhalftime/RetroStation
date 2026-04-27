@@ -107,3 +107,62 @@ describe("ArtistPanel empty-state CTA", () => {
     expect(screen.queryByRole("button", { name: /Search MusicBrainz/i })).toBeNull();
   });
 });
+
+describe("ArtistPanel Search Library button", () => {
+  it("shows and fires the handler when provided and candidates is empty", () => {
+    const onSearchLibrary = vi.fn();
+    render(
+      <ArtistPanel
+        artist={makeArtist({ candidates: [] })}
+        onSearchLibrary={onSearchLibrary}
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    const button = screen.getByRole("button", { name: /Search Library/i });
+    expect(button).toBeDefined();
+    fireEvent.click(button);
+    expect(onSearchLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("is visible even when auto-candidates already exist (always-visible requirement)", () => {
+    // The button must not be gated on the empty-candidates state — curators
+    // may want to override a poor auto-suggestion with a known library match.
+    const onSearchLibrary = vi.fn();
+    render(
+      <ArtistPanel
+        artist={makeArtist({
+          candidates: [{ mbid: "mbid-1", name: "Some Candidate", score: 70 }],
+        })}
+        onSearchLibrary={onSearchLibrary}
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByRole("button", { name: /Search Library/i })).toBeDefined();
+  });
+
+  it("is hidden when handler is not provided", () => {
+    render(<ArtistPanel artist={makeArtist({ candidates: [] })} />, {
+      wrapper: wrapperFor(makeClient()),
+    });
+    expect(screen.queryByRole("button", { name: /Search Library/i })).toBeNull();
+  });
+
+  it('shows "No candidates found automatically" only in empty-candidates state', () => {
+    const { rerender } = render(
+      <ArtistPanel artist={makeArtist({ candidates: [] })} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByText(/No candidates found automatically/i)).toBeDefined();
+
+    rerender(
+      <QueryClientProvider client={makeClient()}>
+        <ArtistPanel
+          artist={makeArtist({
+            candidates: [{ mbid: "mbid-1", name: "Some Candidate", score: 70 }],
+          })}
+        />
+      </QueryClientProvider>
+    );
+    expect(screen.queryByText(/No candidates found automatically/i)).toBeNull();
+  });
+});

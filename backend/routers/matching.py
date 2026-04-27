@@ -325,8 +325,15 @@ async def resolve_artist(
     """Manually resolve an artist as matched or rejected.
 
     Args:
-        artist_id: UUID of the log_artist to resolve.
-        body: Resolution decision with optional MBID target.
+        artist_id: UUID of the broadcast artist (log entry) to resolve.
+        body: Resolution decision.  For ``MANUAL_MATCHED``, ``target_artist_id``
+            must be provided.  It accepts **either** a MusicBrainz MBID *or* a
+            local catalog UUID (``artists.id``).  The auto-matcher writes both
+            forms to ``matches.target_id`` — MBIDs for artists resolved via
+            MusicBrainz, local UUIDs for local-only canonicals with no MBID
+            (see ``artist_matching_service.py`` exact-pass logic).  Manual
+            resolution from the Resolution Center library-search flow sends the
+            same dual form: ``artist.mbid ?? artist.id`` (trim-aware).
         conn: Async database connection.
         _token: Bearer token (auth check only).
 

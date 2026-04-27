@@ -328,6 +328,35 @@ class TestResolveArtist:
         )
         assert resp.status_code == 422
 
+    def test_manual_match_accepts_local_catalog_uuid(self, client, db_conn):
+        """target_artist_id accepts a local catalog UUID, not just an MBID.
+
+        The auto-matcher writes local artist UUIDs for local-only canonicals
+        (artists.mbid IS NULL) via the NormalizationStrategy exact-pass at
+        artist_matching_service.py.  Manual resolution from the library-search
+        slide-over sends the same form (mbid?.trim() ? mbid : id), so the
+        endpoint must store whatever text value is supplied without validation
+        of its shape.
+        """
+        _, _, artist, _, _ = _seed_review_chain(db_conn)
+        local_catalog_id = str(uuid4())  # UUID string, not an MBID
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={"match_status": "manual_matched", "target_artist_id": local_catalog_id},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["match_status"] == "manual_matched"
+
+        match_row = db_conn.execute(
+            "SELECT target_id, match_tier, confidence_score FROM matches WHERE artist_id = %s",
+            (artist.id,),
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["target_id"] == local_catalog_id
+        assert match_row["match_tier"] == "manual"
+        assert match_row["confidence_score"] == 1.0
+
 
 # ---------------------------------------------------------------------------
 # TestResolveIdentity

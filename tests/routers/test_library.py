@@ -244,6 +244,40 @@ class TestLibraryArtists:
         data = resp.json()
         assert data["total"] == 1
 
+    def test_search_fuzzy_typo(self, client, db_conn) -> None:
+        """Trigram operator surfaces near-typos that bare LIKE %query% would miss.
+
+        "Untraspank" vs "Ultraspank": the first two characters differ (Un vs Ul)
+        so a prefix LIKE would require knowing the correct spelling. Trigram
+        similarity is ~0.7, well above the 0.3 threshold.
+        """
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-trgm",
+            work_mbid="w-trgm",
+            recording_mbid="r-trgm",
+            file_path="/m/trgm.flac",
+            artist_name="Ultraspank",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-other",
+            work_mbid="w-other",
+            recording_mbid="r-other",
+            file_path="/m/other.flac",
+            artist_name="Rolling Stones",
+        )
+
+        resp = client.get("/api/v1/library/artists?search=Untraspank")
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [item["name"] for item in data["items"]]
+        # "Rolling Stones" has negligible trigram overlap and must not appear.
+        assert "Ultraspank" in names
+        assert "Rolling Stones" not in names
+        # Trigram-ranked result should come first.
+        assert data["items"][0]["name"] == "Ultraspank"
+
     def test_pagination_offset(self, client, db_conn) -> None:
         _seed_canonical_chain(
             db_conn,

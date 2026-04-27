@@ -224,6 +224,127 @@ describe("MatcherBrowser — MB search target-artist capture", () => {
 });
 
 
+describe("MatcherBrowser — library search target-artist capture", () => {
+  it("captures the queue artist ID at library-search-open time so a later selection change does not redirect the mutation", async () => {
+    const artistA = makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha");
+    const artistB = makeArtist("00000000-0000-0000-0000-00000000000b", "Beta");
+    const localArtist = { id: "local-uuid-1", name: "Ultraspank", mbid: "mbid-ultra" };
+
+    mockedApiFetch.mockImplementation(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/api/v1/matching/queue")) {
+        return { items: [artistA, artistB], total: 2 };
+      }
+      if (u.includes("/api/v1/library/artists")) {
+        return { items: [localArtist], total: 1 };
+      }
+      if (u.match(/\/api\/v1\/matching\/artists\/[^/]+\/resolve/)) {
+        return { id: "x", match_status: "manual_matched" };
+      }
+      return {};
+    });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    await screen.findByText(/Artists \(2\)/);
+    const sidebar = screen.getByText(/Artists \(2\)/).closest("aside") as HTMLElement;
+    const alphaSidebarButton = within(sidebar).getByRole("button", { name: /Alpha/i });
+    const betaSidebarButton = within(sidebar).getByRole("button", { name: /Beta/i });
+
+    fireEvent.click(alphaSidebarButton);
+    fireEvent.click(await screen.findByRole("button", { name: /Search Library/i }));
+
+    // Change queue selection to Beta WHILE the library slide-over is open.
+    fireEvent.click(betaSidebarButton);
+
+    const libraryAside = screen.getByRole("complementary", { name: /^Search artists$/i });
+    const searchInput = libraryAside.querySelector('input[type="search"]') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "ultra" } });
+
+    const libraryResultButton = await screen.findByRole("button", { name: /Ultraspank/i });
+    fireEvent.click(libraryResultButton);
+
+    // The resolve mutation must hit Alpha's URL, NOT Beta's.
+    await waitFor(() => {
+      const resolveCalls = mockedApiFetch.mock.calls.filter(
+        ([u]) => typeof u === "string" && !!u.match(/\/api\/v1\/matching\/artists\/[^/]+\/resolve/)
+      );
+      expect(resolveCalls.length).toBeGreaterThan(0);
+      const url = resolveCalls[0][0] as string;
+      expect(url).toContain(artistA.id);
+      expect(url).not.toContain(artistB.id);
+    });
+  });
+});
+
+describe("MatcherBrowser — library search MBID fallback", () => {
+  async function resolveViaLibrarySearch(
+    localArtist: { id: string; name: string; mbid: string | null }
+  ): Promise<{ url: string; body: Record<string, unknown> }> {
+    const artist = makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha");
+
+    mockedApiFetch.mockImplementation(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/api/v1/matching/queue")) return { items: [artist], total: 1 };
+      if (u.includes("/api/v1/library/artists")) return { items: [localArtist], total: 1 };
+      if (u.match(/\/api\/v1\/matching\/artists\/[^/]+\/resolve/))
+        return { id: "x", match_status: "manual_matched" };
+      return {};
+    });
+
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await screen.findByText(/Artists \(1\)/);
+    const sidebar = screen.getByText(/Artists \(1\)/).closest("aside") as HTMLElement;
+    fireEvent.click(within(sidebar).getByRole("button", { name: /Alpha/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Search Library/i }));
+
+    const libraryAside = screen.getByRole("complementary", { name: /^Search artists$/i });
+    const searchInput = libraryAside.querySelector('input[type="search"]') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "ultra" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Ultraspank/i }));
+
+    let resolveCall: { url: string; body: Record<string, unknown> } | null = null;
+    await waitFor(() => {
+      const calls = mockedApiFetch.mock.calls.filter(
+        ([u]) => typeof u === "string" && !!u.match(/\/api\/v1\/matching\/artists\/[^/]+\/resolve/)
+      );
+      expect(calls.length).toBeGreaterThan(0);
+      const [url, opts] = calls[0] as [string, { method: string; body: string }];
+      resolveCall = { url, body: JSON.parse(opts.body) as Record<string, unknown> };
+    });
+    return resolveCall!;
+  }
+
+  it("uses artist.mbid as target_artist_id when mbid is a non-empty string", async () => {
+    const { body } = await resolveViaLibrarySearch({
+      id: "local-uuid-1",
+      name: "Ultraspank",
+      mbid: "mbid-ultra",
+    });
+    expect(body["target_artist_id"]).toBe("mbid-ultra");
+  });
+
+  it("falls back to artist.id when mbid is null", async () => {
+    mockedApiFetch.mockReset(); // clear calls from previous test
+    const { body } = await resolveViaLibrarySearch({
+      id: "local-uuid-1",
+      name: "Ultraspank",
+      mbid: null,
+    });
+    expect(body["target_artist_id"]).toBe("local-uuid-1");
+  });
+
+  it("falls back to artist.id when mbid is an empty string", async () => {
+    mockedApiFetch.mockReset();
+    const { body } = await resolveViaLibrarySearch({
+      id: "local-uuid-1",
+      name: "Ultraspank",
+      mbid: "",
+    });
+    expect(body["target_artist_id"]).toBe("local-uuid-1");
+  });
+});
+
 describe("MatcherBrowser — pagination", () => {
   it("navigating to the next page does not reset to page 1 while the new page is loading", async () => {
     const page1Artists = Array.from({ length: 25 }, (_, i) =>

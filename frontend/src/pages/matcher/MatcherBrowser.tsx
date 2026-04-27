@@ -27,6 +27,12 @@ interface LibraryFile {
   title?: string | null;
 }
 
+interface LibraryArtist {
+  id: string;
+  name: string;
+  mbid?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // MatcherBrowser
 // ---------------------------------------------------------------------------
@@ -55,12 +61,18 @@ export function MatcherBrowser() {
   const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null);
   const [slideOverOpen, setSlideOverOpen] = useState(false);
   const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null);
-  const [mbSearchOpen, setMbSearchOpen] = useState(false);
-  // Captures the artist ID at the moment the curator opens MB search.
-  // Without this, switching the queue selection while the slide-over is open
-  // would apply the chosen MB artist to a DIFFERENT queue artist than the
-  // one the search was initiated for — silent data corruption.
-  const [mbSearchTargetArtistId, setMbSearchTargetArtistId] = useState<string | null>(null);
+  // A single discriminated state replaces four separate open/targetId atoms
+  // (mbSearchOpen + mbSearchTargetArtistId + librarySearchOpen +
+  // librarySearchTargetArtistId).  Only one artist-search mode can be active
+  // at a time; null means closed.
+  //
+  // targetArtistId is captured at open-time so a queue-selection change while
+  // the slide-over is open cannot silently redirect the mutation to a different
+  // broadcast artist than the one the curator initiated the search for.
+  const [artistSearch, setArtistSearch] = useState<{
+    mode: "mb-artist" | "artist";
+    targetArtistId: string;
+  } | null>(null);
 
   const artists: QueueArtist[] = data?.items ?? [];
   const total: number = data?.total ?? 0;
@@ -100,27 +112,37 @@ export function MatcherBrowser() {
     setActiveIdentityId(null);
   }
 
-  function handleOpenMbSearch() {
+  function handleOpenArtistSearch(mode: "mb-artist" | "artist") {
     if (!selectedArtist) return;
-    setMbSearchTargetArtistId(selectedArtist.id);
-    setMbSearchOpen(true);
+    setArtistSearch({ mode, targetArtistId: selectedArtist.id });
   }
 
-  function handleCloseMbSearch() {
-    setMbSearchOpen(false);
-    setMbSearchTargetArtistId(null);
+  function handleCloseArtistSearch() {
+    setArtistSearch(null);
+  }
+
+  // Shared resolve path for both MB and library artist search.
+  // target_artist_id accepts either a MusicBrainz MBID or a local catalog UUID
+  // (the backend stores both forms in matches.target_id — see resolve_artist
+  // endpoint and artist_matching_service.py for the dual-form contract).
+  function handleResolveFromArtistSearch(targetId: string) {
+    if (!artistSearch) return;
+    resolveArtist.mutate({
+      id: artistSearch.targetArtistId,
+      resolution: { match_status: "manual_matched", target_artist_id: targetId },
+    });
+    handleCloseArtistSearch();
   }
 
   function handleMbArtistSelect(mb: MbArtistResult) {
-    // Use the artist ID captured at search-open time, not the current
-    // `selectedArtist`. The curator may have navigated to a different
-    // queue artist while the slide-over was open.
-    if (!mbSearchTargetArtistId) return;
-    resolveArtist.mutate({
-      id: mbSearchTargetArtistId,
-      resolution: { match_status: "manual_matched", target_artist_id: mb.id },
-    });
-    handleCloseMbSearch();
+    handleResolveFromArtistSearch(mb.id);
+  }
+
+  function handleLibraryArtistSelect(artist: LibraryArtist) {
+    // Prefer mbid; fall back to local catalog UUID for local-only artists.
+    // Trim-aware: an empty-string mbid ("") is treated the same as null.
+    const targetId = artist.mbid?.trim() ? artist.mbid : artist.id;
+    handleResolveFromArtistSearch(targetId);
   }
 
   function handleRerun() {
@@ -224,7 +246,11 @@ export function MatcherBrowser() {
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {selectedArtist ? (
               <>
-                <ArtistPanel artist={selectedArtist} onSearchMusicBrainz={handleOpenMbSearch} />
+                <ArtistPanel
+                  artist={selectedArtist}
+                  onSearchMusicBrainz={() => handleOpenArtistSearch("mb-artist")}
+                  onSearchLibrary={() => handleOpenArtistSearch("artist")}
+                />
                 <TitlePanel artist={selectedArtist} onFileSearch={handleFileSearch} />
               </>
             ) : (
@@ -244,11 +270,20 @@ export function MatcherBrowser() {
         onSelectFile={handleFileSelect}
       />
 
+      {/* Both artist-search modes share one lifecycle (handleCloseArtistSearch)
+          so there is a single, unambiguous close path regardless of which
+          mode is open. Only one can be open at a time via artistSearch.mode. */}
       <SearchSlideOver
-        open={mbSearchOpen}
-        onClose={handleCloseMbSearch}
+        open={artistSearch?.mode === "mb-artist"}
+        onClose={handleCloseArtistSearch}
         mode="mb-artist"
         onSelectMbArtist={handleMbArtistSelect}
+      />
+      <SearchSlideOver
+        open={artistSearch?.mode === "artist"}
+        onClose={handleCloseArtistSearch}
+        mode="artist"
+        onSelectArtist={handleLibraryArtistSelect}
       />
     </div>
   );
