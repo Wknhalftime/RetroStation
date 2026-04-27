@@ -54,12 +54,15 @@ logger = structlog.get_logger()
 class ArtistMatchResult:
     """Immutable result returned by an ArtistMatchingStrategy.
 
-    target_id is always the artist MBID — required by the downstream MBID-graph
-    identity tier (ResolvedArtistMbidStrategy), which calls
-    library_file_repo.get_by_artist_mbid(Match.target_id). NormalizationStrategy
-    filters out canonicals without an mbid to uphold this contract;
-    MusicBrainzApiStrategy uses the MB API's id; MappingRuleStrategy relies on
-    rules storing MBIDs by convention.
+    target_id for AUTO_MATCHED results is either:
+    - the artist MBID (MusicBrainzApiStrategy, MappingRuleStrategy, and
+      NormalizationStrategy against MBID-bearing canonicals), or
+    - the local catalog UUID (Artist.id) for NormalizationStrategy exact matches
+      against local-only canonicals (mbid=None). In that case the identity tier's
+      ResolvedArtistMbidStrategy falls back to name-based search (Step C) when
+      get_by_artist_mbid finds nothing.
+
+    AUTO_MATCHED requires a good match score — an MBID is NOT required.
 
     reason_code / reason_detail are None for AUTO_MATCHED; populated for
     NEEDS_REVIEW using the stable ReasonCode vocabulary.
@@ -193,10 +196,8 @@ class NormalizationStrategy:
             return None
 
         target = broadcast_artist.normalized_name
-        # Exact pass — only MBID-bearing canonicals are usable downstream by
-        # the identity-tier MBID-graph lookup (get_by_artist_mbid(target_id)).
-        # A local-only canonical (mbid=None) must fall through so the engine
-        # can reach MusicBrainzApiStrategy.
+        # Exact pass 1 — MBID-bearing canonicals: target_id is the MBID so the
+        # identity tier's MBID graph path works with no further changes.
         for c in self._all_canonical:
             if c.mbid is None:
                 continue
@@ -206,6 +207,24 @@ class NormalizationStrategy:
                     tier=MatchTier.NORMALIZATION,
                     confidence_score=100.0,
                     target_id=c.mbid,
+                )
+
+        # Exact pass 2 — local-only canonicals (mbid=None).
+        # AUTO_MATCHED requires a good score — not an MBID. An exact name match
+        # (100%) qualifies. target_id is the local catalog UUID; the identity
+        # tier's ResolvedArtistMbidStrategy falls back to name-based search
+        # (Step C) when get_by_artist_mbid returns no files.
+        # Previously skipped, causing non-truncated names like "VAN HALEN" to
+        # loop in DEFERRED_RETRY because Phase-2 only sends truncated names to MB.
+        for c in self._all_canonical:
+            if c.mbid is not None:
+                continue
+            if normalize_artist(c.name) == target:
+                return ArtistMatchResult(
+                    status=MatchStatus.AUTO_MATCHED,
+                    tier=MatchTier.NORMALIZATION,
+                    confidence_score=100.0,
+                    target_id=c.id,
                 )
 
         # Fuzzy pass — restrict to MBID-bearing canonicals. If none exist,

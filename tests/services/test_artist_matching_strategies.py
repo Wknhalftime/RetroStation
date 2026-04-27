@@ -320,21 +320,34 @@ def test_mb_strategy_mid_score_needs_review() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Review fix #A: Match.target_id must be an MBID, not a local UUID.
-# NormalizationStrategy must filter out canonicals with mbid=None (they cannot
-# be used downstream by ResolvedArtistMbidStrategy which feeds
-# library_file_repo.get_by_artist_mbid()).
+# Local-only (mbid=None) canonicals in NormalizationStrategy.
+#
+# Exact pass 2: if the broadcast name exactly matches a local-only canonical,
+# we AUTO_MATCH with target_id = the catalog UUID.  The identity tier's
+# ResolvedArtistMbidStrategy handles this via a name-based fallback (Step C)
+# when get_by_artist_mbid() returns nothing for a non-MBID target_id.
+#
+# Fuzzy pass: local-only canonicals are still filtered out so that a fuzzy
+# near-miss never beats a real MBID-bearing canonical.  If ALL canonicals
+# lack an MBID and none is an exact name match, both passes fall through to
+# MusicBrainzApiStrategy.
 # ---------------------------------------------------------------------------
 
 
-def test_normalization_exact_hit_without_mbid_falls_through() -> None:
-    """Exact-name canonical with mbid=None must NOT auto-match — it has no
-    MBID so the identity-tier MBID-graph lookup would break silently."""
+def test_normalization_exact_hit_without_mbid_auto_matches() -> None:
+    """Exact-name canonical with mbid=None now AUTO_MATCHes with target_id set
+    to the local catalog UUID. AUTO_MATCHED requires a good score — not an MBID.
+    The identity tier's ResolvedArtistMbidStrategy falls back to name-based
+    search (Step C) when get_by_artist_mbid finds no files."""
     canonical = _canonical("Prince", artist_id="local-uuid-1", mbid=None)
     strategy = NormalizationStrategy(all_canonical=[canonical])
     result = strategy.apply(_broadcast_artist("Prince", "prince"))
 
-    assert result is None
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.tier == MatchTier.NORMALIZATION
+    assert result.confidence_score == 100.0
+    assert result.target_id == "local-uuid-1"  # local catalog UUID, not an MBID
 
 
 def test_normalization_exact_hit_with_mbid_returns_mbid_as_target_id() -> None:
@@ -352,28 +365,39 @@ def test_normalization_exact_hit_with_mbid_returns_mbid_as_target_id() -> None:
 
 def test_normalization_fuzzy_filters_out_canonicals_without_mbid() -> None:
     """Fuzzy pass must skip canonicals with mbid=None even if they would
-    otherwise out-score the mbid-bearing ones."""
-    no_mbid_winner = _canonical("metallica", mbid=None)  # exact would score highest
+    otherwise out-score the mbid-bearing ones.
+
+    The local-only canonical name is deliberately NOT an exact match so that
+    exact pass 2 does not fire; only the fuzzy pass runs, proving it filters
+    out the no-mbid entry and falls back to the MBID-bearing candidate.
+    """
+    # "Metallics" normalizes to "metallics" — not "metallica", so no exact hit.
+    no_mbid_fuzzy = _canonical("Metallics", mbid=None)
     mbid_runner_up = _canonical("metallic", mbid="mbid-metallic-ok")
     strategy = NormalizationStrategy(
-        all_canonical=[no_mbid_winner, mbid_runner_up],
+        all_canonical=[no_mbid_fuzzy, mbid_runner_up],
         strong_match_threshold=80,
         mb_score_gap=10,
     )
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
     assert result is not None
-    # Exact pass skips mbid=None; with only one mbid-bearing candidate left,
-    # fuzzy AUTO_MATCHes it (no competitor check — gap synthesized to 100).
+    # Exact passes find no match; fuzzy pass skips no-mbid, AUTO_MATCHes the
+    # only MBID-bearing candidate (no competitor → gap synthesized to 100).
     assert result.target_id == "mbid-metallic-ok"
     # Sanity: the local UUID of the no-mbid canonical must NEVER appear.
-    assert result.target_id != no_mbid_winner.id
+    assert result.target_id != no_mbid_fuzzy.id
 
 
-def test_normalization_all_candidates_lack_mbid_returns_none() -> None:
-    """If every canonical lacks an mbid, both exact and fuzzy passes fall
-    through so the engine can reach MusicBrainzApiStrategy."""
-    c1 = _canonical("Metallica", mbid=None)
+def test_normalization_all_candidates_lack_mbid_no_exact_match_returns_none() -> None:
+    """If every canonical lacks an mbid AND none are an exact name match,
+    both passes fall through so the engine can reach MusicBrainzApiStrategy.
+
+    Exact pass 2 only fires on normalized-name equality; fuzzy-only local-only
+    canonicals are still filtered out by the fuzzy pass's with_mbid guard.
+    """
+    # Neither "Metallikka" nor "Metallic" normalizes to "metallica".
+    c1 = _canonical("Metallikka", mbid=None)
     c2 = _canonical("Metallic", mbid=None)
     strategy = NormalizationStrategy(all_canonical=[c1, c2])
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))

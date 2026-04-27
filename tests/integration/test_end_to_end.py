@@ -110,6 +110,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
             library_file_repo=FakeLibraryFileRepository(),
             rules_repo=PgMappingRuleRepository(conn),
             mb_client=FakeMbClient(),
+            catalog_repo=PgArtistRepository(conn),
         )
         conn.commit()
 
