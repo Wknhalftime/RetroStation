@@ -5,6 +5,7 @@ import json
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
@@ -14,6 +15,9 @@ from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
+from backend.tasks.identity_matching_tasks import identity_matching_task
+
+logger = structlog.get_logger()
 
 router = APIRouter()
 
@@ -38,10 +42,25 @@ _PROTECTED_STATUSES: list[str] = [
 # module-level ints, never user input.
 _QUEUE_BUCKET_CTE = f"""
 artist_base AS (
+    -- Surface artists in two cases:
+    --   1) The artist itself is review-relevant (PENDING / NEEDS_REVIEW), or
+    --   2) The artist is resolved (e.g. AUTO_MATCHED) but at least one child
+    --      track_identity is review-relevant. Without (2), a curator has no
+    --      way to reach a NEEDS_REVIEW child whose parent the matcher already
+    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45).
+    -- The identity_best CTE below independently filters identities to
+    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) still
+    -- produces the correct triage bucket (its resolved siblings do not
+    -- inflate the headline).
     SELECT id, original_name, normalized_name, match_status,
            artist_candidates, reason_code, reason_detail, created_at
-    FROM broadcast_artists
-    WHERE match_status = ANY(%s)
+    FROM broadcast_artists ba
+    WHERE ba.match_status = ANY(%s)
+       OR EXISTS (
+           SELECT 1 FROM track_identities ti
+           WHERE ti.broadcast_artist_id = ba.id
+             AND ti.match_status = ANY(%s)
+       )
 ),
 identity_best AS (
     -- Mirrors _artist_bucket_from_identities: only review-relevant identities
@@ -218,7 +237,18 @@ async def get_matching_queue(
         ORDER BY created_at, id
         LIMIT %s OFFSET %s
         """,
-        (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket, limit, offset),
+        # Three _QUEUE_STATUSES bindings: artist_base WHERE clause (artist
+        # status), artist_base EXISTS subquery (identity status), identity_best
+        # WHERE clause (identity status, again).
+        (
+            _QUEUE_STATUSES,
+            _QUEUE_STATUSES,
+            _QUEUE_STATUSES,
+            bucket,
+            bucket,
+            limit,
+            offset,
+        ),
     )
     artist_rows = await page_cur.fetchall()
 
@@ -230,7 +260,14 @@ async def get_matching_queue(
             SELECT COUNT(*) AS total FROM artist_bucket
             WHERE %s::text IS NULL OR bucket = %s::text
             """,
-            (_QUEUE_STATUSES, _QUEUE_STATUSES, bucket, bucket),
+            # See page query above for binding count rationale.
+            (
+                _QUEUE_STATUSES,
+                _QUEUE_STATUSES,
+                _QUEUE_STATUSES,
+                bucket,
+                bucket,
+            ),
         )
         count_row = await count_cur.fetchone()
         total = count_row["total"] if count_row else 0
@@ -401,6 +438,87 @@ async def resolve_artist(
                 MatchTier.MANUAL.value,
             ),
         )
+
+        # Cascade: reset review-relevant children so the matcher re-runs them
+        # against the corrected artist target. Without this, NEEDS_REVIEW
+        # children (now visible in the queue via the broadened CTE above)
+        # remain stuck — `get_pending_for_playlist` filters strictly to
+        # PENDING, so a worker re-run alone wouldn't reprocess them. AUTO_*,
+        # MANUAL_*, and *_REJECTED children stay untouched (same philosophy as
+        # _PROTECTED_STATUSES on the MANUAL_REJECTED branch below).
+        await conn.execute(
+            """
+            UPDATE track_identities
+               SET match_status = %s,
+                   match_tier   = NULL,
+                   reason_code  = NULL,
+                   reason_detail = NULL
+             WHERE broadcast_artist_id = %s
+               AND match_status = ANY(%s)
+            """,
+            (
+                MatchStatus.PENDING.value,
+                artist_id,
+                _QUEUE_STATUSES,
+            ),
+        )
+        # Drop stale identity-keyed match rows for ALL children currently
+        # PENDING — covers both previously-PENDING children (clearing earlier
+        # matcher attempts) and the just-reset NEEDS_REVIEW children. The
+        # matcher re-creates fresh ones on the next run.
+        await conn.execute(
+            """
+            DELETE FROM matches
+             WHERE identity_id IN (
+                 SELECT id FROM track_identities
+                  WHERE broadcast_artist_id = %s
+                    AND match_status = %s
+             )
+            """,
+            (artist_id, MatchStatus.PENDING.value),
+        )
+        # Find every playlist that ever played one of this artist's
+        # identities, and enqueue identity matching once per playlist.
+        # Non-blocking Huey enqueue (mirrors artist_matching_tasks.py:100).
+        playlist_cur = await conn.execute(
+            """
+            SELECT DISTINCT pe.playlist_id
+              FROM play_events pe
+              JOIN track_identities ti ON ti.id = pe.identity_id
+             WHERE ti.broadcast_artist_id = %s
+            """,
+            (artist_id,),
+        )
+        playlist_rows = await playlist_cur.fetchall()
+        # Commit BEFORE enqueueing. The Huey worker is a separate process
+        # with its own DB connection; if the request transaction hasn't
+        # committed yet, the worker sees the pre-cascade state (children
+        # still NEEDS_REVIEW, stale matches rows present) and skips them
+        # entirely (get_pending_for_playlist filters strictly to
+        # match_status='pending'). get_db_connection's post-yield commit
+        # becomes a no-op after this. Mirrors the commit-before-enqueue
+        # ordering in artist_matching_tasks.py:87-100.
+        await conn.commit()
+        # Enqueue is fire-and-forget across a transaction boundary the
+        # request handler has already crossed. The cascade DB work is
+        # committed and durable; failing the response would tell the user
+        # their manual link failed when it actually succeeded. If the Huey
+        # backend is unavailable, the worker's next regular run (or a
+        # manual /matching/run) will pick up the now-PENDING children. The
+        # broad except is justified at this top-level handler boundary
+        # (per error-handling.md) because no specific exception type is
+        # reliably knowable across Huey backends (SQLite today, possibly
+        # Redis later).
+        for row in playlist_rows:
+            try:
+                identity_matching_task(str(row["playlist_id"]))
+            except Exception as exc:  # noqa: BLE001 — top-level boundary; see comment above
+                logger.warning(
+                    "identity_matching_enqueue_failed",
+                    artist_id=str(artist_id),
+                    playlist_id=str(row["playlist_id"]),
+                    error=repr(exc),
+                )
     else:
         # MANUAL_REJECTED: update artist, cascade child identities
         await conn.execute(
@@ -441,6 +559,12 @@ async def resolve_identity(
     _token: Token,
 ) -> ResolveResult:
     """Manually resolve a log_identity as matched or rejected.
+
+    Per-song decisions intentionally do not cascade — manually linking one
+    identity to a library file says nothing about sibling identities under the
+    same broadcast_artist (each song is a distinct match decision). Compare
+    with ``resolve_artist``, where MANUAL_MATCHED/MANUAL_REJECTED do cascade
+    because the artist mapping is shared by all children.
 
     Args:
         identity_id: UUID of the log_identity to resolve.

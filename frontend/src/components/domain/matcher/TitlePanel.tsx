@@ -10,9 +10,19 @@ interface TitlePanelProps {
 export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   const resolveIdentity = useResolveIdentity();
 
+  // Mirrors the isResolved flag in ArtistPanel — must include auto_matched
+  // so the queue's broadened CTE (which now surfaces auto_matched parents
+  // with review-needing children) doesn't strand the curator on the
+  // "Resolve the artist first" placeholder. Excludes auto_rejected /
+  // manual_rejected: rejected parents have all non-protected children
+  // cascaded to AUTO_REJECTED by resolve_artist, so a rejected parent with
+  // pending/needs_review children is unreachable in steady state.
+  // ("matched" was a legacy backend status no longer emitted by MatchStatus
+  // — kept here originally as defensive code but never actually returned.)
   const artistResolved =
     artist !== null &&
-    (artist.match_status === "manual_matched" || artist.match_status === "matched");
+    (artist.match_status === "auto_matched" ||
+      artist.match_status === "manual_matched");
 
   if (!artist) {
     return (

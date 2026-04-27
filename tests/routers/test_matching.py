@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
@@ -327,6 +328,339 @@ class TestResolveArtist:
             json={"match_status": "manual_matched"},
         )
         assert resp.status_code == 422
+
+    def test_manual_match_resets_review_children_and_enqueues(
+        self, client, db_conn, monkeypatch
+    ):
+        """MANUAL_MATCHED on an artist must (a) reset all review-relevant
+        children to PENDING, (b) delete their stale match rows, and (c)
+        enqueue identity_matching_task for each affected playlist. This is
+        the cascade fix that lets a curator re-link a wrongly auto-matched
+        artist and have its children re-match against the corrected target.
+        Bug C — paired with the visibility fix."""
+        # Seed:
+        #   - AUTO_MATCHED parent
+        #   - NEEDS_REVIEW child (raw insert with match_tier/reason_code/
+        #     reason_detail populated, mirroring the real Saliva/"Your Disease"
+        #     row) + matches row
+        #   - PENDING child + matches row (verifies broader DELETE scope)
+        #   - station, playlist, one play_event per child
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Your Disease",
+            normalized_title="your disease",
+            normalized_signature=f"{artist.normalized_name}:your disease:{uuid4().hex}",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        # Raw insert so we can populate match_tier / reason_code / reason_detail
+        # — the upsert helper only writes match_status, leaving these NULL by
+        # default. The cascade clears them, so they need to start non-NULL for
+        # the assertion to be meaningful.
+        db_conn.execute(
+            """
+            INSERT INTO track_identities (
+                id, broadcast_artist_id, original_title, normalized_title,
+                normalized_signature, match_status, match_tier,
+                reason_code, reason_detail
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                review_child.id,
+                review_child.broadcast_artist_id,
+                review_child.original_title,
+                review_child.normalized_title,
+                review_child.normalized_signature,
+                review_child.match_status.value,
+                "musicbrainz_id_search",
+                "AMBIGUOUS_GAP",
+                "Top candidates within 0 points (gap < 10 required)",
+            ),
+        )
+        db_conn.commit()
+        _insert_match_row(db_conn, review_child, confidence_score=83.0)
+        pending_child = _insert_identity(
+            db_conn, artist,
+            original_title="Doperide",
+            match_status=MatchStatus.PENDING,
+        )
+        _insert_match_row(db_conn, pending_child, confidence_score=42.0)
+        _insert_event(db_conn, playlist, review_child)
+        _insert_event(db_conn, playlist, pending_child)
+
+        # Stub the enqueue so the test doesn't depend on Huey worker state.
+        # No raising=False — if the dotted path is wrong, fail loudly.
+        mock = MagicMock()
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["match_status"] == "manual_matched"
+
+        # (1) Task enqueued for the playlist that contained either child.
+        mock.assert_called_once_with(str(playlist.id))
+
+        # (2) Both children flipped to PENDING (review_child was NEEDS_REVIEW;
+        #     pending_child was already PENDING — UPDATE is a no-op for it but
+        #     still in the affected set).
+        rows = db_conn.execute(
+            "SELECT id, match_status, match_tier, reason_code, reason_detail "
+            "FROM track_identities WHERE broadcast_artist_id = %s "
+            "ORDER BY original_title",
+            (artist.id,),
+        ).fetchall()
+        assert {r["match_status"] for r in rows} == {"pending"}
+        # match_tier / reason_* must be cleared on the formerly-NEEDS_REVIEW
+        # child so it doesn't carry stale matcher state into the next run.
+        assert all(r["match_tier"] is None for r in rows)
+        assert all(r["reason_code"] is None for r in rows)
+        assert all(r["reason_detail"] is None for r in rows)
+
+        # (3) Stale identity-keyed match rows deleted (both children, not just
+        #     the formerly-NEEDS_REVIEW one).
+        identity_match_rows = db_conn.execute(
+            "SELECT * FROM matches WHERE identity_id = ANY(%s)",
+            ([review_child.id, pending_child.id],),
+        ).fetchall()
+        assert identity_match_rows == []
+
+        # (4) The artist-keyed match row from the upsert is present.
+        artist_match = db_conn.execute(
+            "SELECT target_id, target_type, match_tier "
+            "FROM matches WHERE artist_id = %s",
+            (artist.id,),
+        ).fetchone()
+        assert artist_match is not None
+        assert artist_match["target_id"] == "6e650a01-6489-4dc8-85e1-8ec809dd72a2"
+        assert artist_match["target_type"] == "artist"
+        assert artist_match["match_tier"] == "manual"
+
+    def test_manual_match_commits_before_enqueue(
+        self, client, db_conn, migrated_db, monkeypatch
+    ):
+        """The cascade must commit BEFORE enqueueing identity_matching_task.
+        Otherwise a fast Huey worker (separate process, separate connection)
+        could pick up the task and read stale data — children still
+        NEEDS_REVIEW, not PENDING — and skip them entirely (the worker's
+        get_pending_for_playlist filters strictly to match_status='pending').
+
+        Locks in the ordering invariant: at the moment identity_matching_task
+        is invoked, an independent connection must see the cascade results.
+        Regression check raised in PR #46 review."""
+        from psycopg.rows import dict_row
+
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review_child, confidence_score=83.0)
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, review_child)
+
+        observed: list[tuple[str | None, int]] = []
+
+        def capture_visible_state(_playlist_id: str) -> None:
+            # Open a fresh connection to simulate the Huey worker process.
+            # If the request handler has already committed, the new state is
+            # visible; otherwise the seeded state is.
+            with psycopg.connect(migrated_db, row_factory=dict_row) as fresh:
+                row = fresh.execute(
+                    "SELECT match_status FROM track_identities WHERE id = %s",
+                    (review_child.id,),
+                ).fetchone()
+                match_count = fresh.execute(
+                    "SELECT COUNT(*)::int AS n FROM matches WHERE identity_id = %s",
+                    (review_child.id,),
+                ).fetchone()
+            observed.append(
+                (row["match_status"] if row else None, match_count["n"] if match_count else -1)
+            )
+
+        mock = MagicMock(side_effect=capture_visible_state)
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+
+        assert mock.call_count == 1
+        assert observed == [("pending", 0)], (
+            "Worker view at enqueue time must reflect the committed cascade "
+            f"(pending + 0 matches), not the pre-commit state. Got {observed!r}."
+        )
+
+    def test_manual_match_returns_200_when_enqueue_fails(
+        self, client, db_conn, monkeypatch
+    ):
+        """If identity_matching_task raises (Huey backend down, file lock,
+        etc.) AFTER the cascade has committed, the request must still return
+        200 — the user's manual link succeeded, the children are durably
+        flipped to PENDING, and the next /matching/run cycle will pick them
+        up. Returning 500 would tell the curator their link failed when it
+        actually succeeded, prompting confusing retries.
+
+        Regression check raised in PR #46 review (severity: low)."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review_child, confidence_score=83.0)
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, review_child)
+
+        mock = MagicMock(side_effect=RuntimeError("huey backend down"))
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["match_status"] == "manual_matched"
+
+        # Cascade is committed even though the enqueue raised.
+        artist_row = db_conn.execute(
+            "SELECT match_status FROM broadcast_artists WHERE id = %s",
+            (artist.id,),
+        ).fetchone()
+        assert artist_row is not None
+        assert artist_row["match_status"] == "manual_matched"
+
+        child_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (review_child.id,),
+        ).fetchone()
+        assert child_row is not None
+        assert child_row["match_status"] == "pending"
+
+        # The mock was actually called (not bypassed); it just raised.
+        mock.assert_called_once_with(str(playlist.id))
+
+    def test_manual_match_does_not_touch_resolved_children(
+        self, client, db_conn, monkeypatch
+    ):
+        """MANUAL_MATCHED cascade must leave AUTO_MATCHED, MANUAL_MATCHED,
+        AUTO_REJECTED, and MANUAL_REJECTED children alone. Mirrors the
+        existing test_manual_reject_does_not_cascade_protected invariant."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        # One review-relevant child to trigger the cascade.
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        # Resolved siblings — must remain untouched.
+        auto_matched_child = _insert_identity(
+            db_conn, artist,
+            original_title="Click Click Boom",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        manual_matched_child = _insert_identity(
+            db_conn, artist,
+            original_title="Always",
+            match_status=MatchStatus.MANUAL_MATCHED,
+        )
+        auto_rejected_child = _insert_identity(
+            db_conn, artist,
+            original_title="Faultline",
+            match_status=MatchStatus.AUTO_REJECTED,
+        )
+        manual_rejected_child = _insert_identity(
+            db_conn, artist,
+            original_title="Beg",
+            match_status=MatchStatus.MANUAL_REJECTED,
+        )
+
+        # Need at least one play_event so the playlist lookup is non-empty
+        # (otherwise the cascade enqueue runs zero times — fine for this test
+        # but it doesn't exercise the resolved-child guard).
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, review_child)
+
+        mock = MagicMock()
+        monkeypatch.setattr(
+            "backend.routers.matching.identity_matching_task", mock
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+
+        # Resolved children must keep their original status.
+        for child, expected in [
+            (auto_matched_child, "auto_matched"),
+            (manual_matched_child, "manual_matched"),
+            (auto_rejected_child, "auto_rejected"),
+            (manual_rejected_child, "manual_rejected"),
+        ]:
+            row = db_conn.execute(
+                "SELECT match_status FROM track_identities WHERE id = %s",
+                (child.id,),
+            ).fetchone()
+            assert row is not None
+            assert row["match_status"] == expected, (
+                f"{child.original_title}: expected {expected}, got {row['match_status']}"
+            )
+
+        # Review child flipped to pending.
+        review_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (review_child.id,),
+        ).fetchone()
+        assert review_row is not None
+        assert review_row["match_status"] == "pending"
 
     def test_manual_match_accepts_local_catalog_uuid(self, client, db_conn):
         """target_artist_id accepts a local catalog UUID, not just an MBID.
@@ -780,6 +1114,118 @@ class TestQueueResponseShape:
         assert item["original_name"] == "Review Artist"
         assert item["candidates"] is not None
         assert item["identities"][0]["match_status"] == "pending"
+
+    def test_auto_matched_artist_with_review_child_is_visible(self, client, db_conn):
+        """When an artist is AUTO_MATCHED but has a child identity in
+        NEEDS_REVIEW, the artist must surface in the queue so the curator can
+        resolve the child. Pre-fix the queue CTE filtered artists by
+        match_status IN (PENDING, NEEDS_REVIEW), silently hiding such cases.
+        Bug A regression — the Saliva/"Your Disease" scenario."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="Saliva",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_identity(
+            db_conn, artist,
+            original_title="Your Disease",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        items = data["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["original_name"] == "Saliva"
+        assert item["match_status"] == "auto_matched"
+        assert len(item["identities"]) == 1
+        qi = item["identities"][0]
+        assert qi["original_title"] == "Your Disease"
+        assert qi["match_status"] == "needs_review"
+
+    def test_mixed_status_artist_bucket_excludes_resolved_children_when_parent_resolved(
+        self, client, db_conn
+    ):
+        """AUTO_MATCHED parent with one AUTO_MATCHED child (high score) and one
+        NEEDS_REVIEW child (low score) — the artist surfaces because of the
+        review-relevant child, and its bucket reflects ONLY that child. The
+        AUTO_MATCHED child must not inflate the headline to quick_review."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="Resolved Parent Mixed",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        review_child = _insert_identity(
+            db_conn, artist,
+            original_title="Needs Work",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review_child, confidence_score=45.0)
+        resolved_child = _insert_identity(
+            db_conn, artist,
+            original_title="Already Done",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_match_row(db_conn, resolved_child, confidence_score=95.0)
+
+        # Python-side bucket
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = next(
+            i for i in resp.json()["items"]
+            if i["original_name"] == "Resolved Parent Mixed"
+        )
+        assert item["triage_bucket"] == "blocked"
+
+        # SQL-side bucket filter: artist must survive ?bucket=blocked
+        resp_filtered = client.get("/api/v1/matching/queue?bucket=blocked")
+        assert resp_filtered.status_code == 200
+        names = [i["original_name"] for i in resp_filtered.json()["items"]]
+        assert "Resolved Parent Mixed" in names
+
+    def test_total_includes_auto_matched_artists_with_review_children(
+        self, client, db_conn
+    ):
+        """`total` must count newly-visible AUTO_MATCHED parents whose
+        children are review-relevant — this metric drove pagination before
+        and pre-fix it silently dropped these artists."""
+        # Pre-fix baseline: only an unresolved artist counts
+        artist1 = _insert_artist(
+            db_conn,
+            original_name="Plain Pending",
+            match_status=MatchStatus.PENDING,
+        )
+        _insert_identity(db_conn, artist1, match_status=MatchStatus.PENDING)
+
+        # Newly-visible: AUTO_MATCHED parent with a NEEDS_REVIEW child
+        artist2 = _insert_artist(
+            db_conn,
+            original_name="Auto Parent",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_identity(
+            db_conn, artist2,
+            original_title="Child Needs Review",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+
+        # Childless AUTO_MATCHED artist must still be excluded (regression check
+        # for test_empty_queue's invariant — the EXISTS subquery returns false).
+        _insert_artist(
+            db_conn,
+            original_name="Childless Resolved",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        names = {i["original_name"] for i in data["items"]}
+        assert names == {"Plain Pending", "Auto Parent"}
 
 
 # ---------------------------------------------------------------------------
