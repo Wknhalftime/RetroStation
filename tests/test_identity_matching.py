@@ -112,7 +112,10 @@ def test_tier2_mbid_graph_exact_match() -> None:
         artist_normalized_name=normalize_artist(artist_name),
     )
 
-    # Library file for the same artist/title
+    # Library file for the same artist/title. work_id is set so the
+    # auto-matcher emits it on the returned work_ids list — matches.work_id
+    # is FK to works(id), so the auto-matcher only surfaces real work_ids
+    # (no recording_id stand-in; that would fail the FK on persist).
     lib_file = LibraryFile(
         id=uuid4(),
         file_path="/music/metallica/enter_sandman.flac",
@@ -120,6 +123,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id="rec-enter-sandman",
+        work_id="work-enter-sandman",
         audio=AudioMetadata(
             artist_mbid=canonical_mbid,
             track_title=track_title,
@@ -153,8 +157,10 @@ def test_tier2_mbid_graph_exact_match() -> None:
     # ~84.6 rather than 100. Still AUTO_MATCHED (>=80 with clear gap).
     assert identity_match.confidence_score >= 80
 
-    # recording_id should be in returned work_ids
-    assert "rec-enter-sandman" in work_ids
+    # The seeded work_id is collected for downstream master-selection
+    # recalculation; recording_ids are deliberately NOT used as a work_id
+    # stand-in (would fail the matches.work_id FK to works(id)).
+    assert "work-enter-sandman" in work_ids
 
 
 def test_no_library_files_falls_to_needs_review() -> None:
