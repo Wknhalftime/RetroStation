@@ -144,6 +144,25 @@ def _artist_bucket_from_identities(
 # ---------------------------------------------------------------------------
 
 
+class ProposedMatch(BaseModel):
+    """Best-scoring library_file candidate the matcher chose for an identity.
+
+    Surfaced on `needs_review` cards so a curator can approve in one click
+    without re-searching for the file the matcher already picked.
+
+    `candidate_match_tier` is the tier on the matches row (i.e. how the
+    matcher arrived at this file) and is intentionally distinct from
+    QueueIdentity.match_tier (the curator-facing identity tier).
+    """
+
+    library_file_id: UUID
+    file_path: str
+    track_title: str | None = None
+    release_title: str | None = None
+    recording_mbid: str | None = None
+    candidate_match_tier: str
+
+
 class QueueIdentity(BaseModel):
     """Condensed identity row for the queue response."""
 
@@ -156,6 +175,7 @@ class QueueIdentity(BaseModel):
     triage_bucket: TriageBucket
     reason_code: str | None = None
     reason_detail: str | None = None
+    proposed_match: ProposedMatch | None = None
 
 
 class QueueArtist(BaseModel):
@@ -282,9 +302,17 @@ async def get_matching_queue(
                ti.id, ti.broadcast_artist_id, ti.original_title,
                ti.normalized_title, ti.match_status, ti.match_tier,
                ti.reason_code, ti.reason_detail,
-               m.confidence_score
+               m.confidence_score,
+               m.library_file_id,
+               m.match_tier AS candidate_match_tier,
+               lf.id        AS library_files_joined_id,
+               lf.file_path,
+               lf.track_title,
+               lf.release_title,
+               lf.recording_mbid
         FROM track_identities ti
-        LEFT JOIN matches m ON m.identity_id = ti.id
+        LEFT JOIN matches       m  ON m.identity_id   = ti.id
+        LEFT JOIN library_files lf ON lf.id           = m.library_file_id
         WHERE ti.broadcast_artist_id = ANY(%s)
         ORDER BY ti.id,
                  m.confidence_score DESC NULLS LAST,
@@ -299,6 +327,23 @@ async def get_matching_queue(
     for irow in identity_rows:
         aid = irow["broadcast_artist_id"]
         cs: float | None = irow.get("confidence_score")
+        # Build proposed_match only when the LEFT JOIN to library_files actually
+        # matched a row. Checking library_files_joined_id (rather than
+        # m.library_file_id) correctly leaves proposed_match=None for orphan
+        # FKs — preserves identity visibility in the queue.
+        lf_joined_id = irow.get("library_files_joined_id")
+        proposed: ProposedMatch | None = (
+            ProposedMatch(
+                library_file_id=irow["library_file_id"],
+                file_path=irow["file_path"],
+                track_title=irow.get("track_title"),
+                release_title=irow.get("release_title"),
+                recording_mbid=irow.get("recording_mbid"),
+                candidate_match_tier=irow["candidate_match_tier"],
+            )
+            if lf_joined_id is not None
+            else None
+        )
         identities_by_artist.setdefault(aid, []).append(
             QueueIdentity(
                 id=irow["id"],
@@ -310,6 +355,7 @@ async def get_matching_queue(
                 triage_bucket=_compute_triage_bucket(cs),
                 reason_code=irow.get("reason_code"),
                 reason_detail=irow.get("reason_detail"),
+                proposed_match=proposed,
             )
         )
 

@@ -9,6 +9,28 @@ export const TriageBucketSchema = z.enum(["quick_review", "needs_attention", "bl
 export type TriageBucket = z.infer<typeof TriageBucketSchema>;
 
 // ---------------------------------------------------------------------------
+// Proposed Match
+// ---------------------------------------------------------------------------
+
+// Best-scoring library_file candidate the matcher chose for a needs_review
+// identity. Surfaced on the card so a curator can approve in one click.
+//
+// `library_file_id` and `file_path` are required because the UI binds Approve
+// against the FK and renders a path fallback when track/release are unknown.
+// `track_title`, `release_title`, and `recording_mbid` are nullable on the wire
+// because the corresponding library_files columns are nullable.
+export const ProposedMatchSchema = z.object({
+  library_file_id: z.string().uuid(),
+  file_path: z.string(),
+  track_title: z.string().nullable().optional(),
+  release_title: z.string().nullable().optional(),
+  recording_mbid: z.string().nullable().optional(),
+  candidate_match_tier: z.string(),
+});
+
+export type ProposedMatch = z.infer<typeof ProposedMatchSchema>;
+
+// ---------------------------------------------------------------------------
 // Queue Identity
 // ---------------------------------------------------------------------------
 
@@ -22,6 +44,7 @@ export const QueueIdentitySchema = z.object({
   triage_bucket: TriageBucketSchema,
   reason_code: z.string().nullable().optional(),
   reason_detail: z.string().nullable().optional(),
+  proposed_match: ProposedMatchSchema.nullable().optional(),
 });
 
 export type QueueIdentity = z.infer<typeof QueueIdentitySchema>;
