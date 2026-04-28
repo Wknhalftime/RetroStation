@@ -60,9 +60,14 @@ async def persist_manual_match(
 ) -> str | None:
     """Insert the manual match row inside the caller's transaction.
 
-    Returns the derived ``work_id`` (or ``None`` if the picked file has
-    neither a work_id nor a recording_id linkage) so the caller can
-    dispatch a post-commit master-selection recalc.
+    Returns the picked file's ``library_files.work_id`` (or ``None`` if it
+    is unset) so the caller can dispatch a post-commit master-selection
+    recalc. ``recording_id`` is intentionally NOT consulted as a fallback —
+    ``matches.work_id`` is FK to ``works(id)`` and a recording_id (which
+    lives in ``recordings(id)``) would fail the FK on insert. Migration
+    0011 already backfills ``library_files.work_id`` from
+    ``recordings.work_id`` at scan time, so a NULL here means the
+    underlying work is genuinely unknown.
 
     The caller owns the surrounding ``UPDATE track_identities`` and
     ``DELETE FROM matches WHERE identity_id = %s`` writes plus the commit.

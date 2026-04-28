@@ -31,9 +31,8 @@ class PgMatchRepository(MatchRepository):
 
     def create(self, match: Match) -> Match:
         # Empty-string -> NULL because work_id is FK to works(id); the auto-
-        # matcher's _score_candidates returns "" when neither work_id nor
-        # recording_id is known on the picked candidate (see
-        # identity_matching_service._score_candidates), and "" would fail FK.
+        # matcher's _score_candidates returns "" when the picked candidate
+        # has no work_id, and "" would fail the FK on insert.
         work_id = match.work_id or None
         self._conn.execute(
             """INSERT INTO matches
