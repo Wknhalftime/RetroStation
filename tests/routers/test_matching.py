@@ -852,9 +852,11 @@ class TestResolveIdentity:
 # ---------------------------------------------------------------------------
 # TestResolveIdentityWorkId — migration 0024 wiring
 #
-# Pins the manual-resolve work_id derivation (lf.work_id -> lf.recording_id ->
-# None), the post-commit recalculate_song_masters dispatch, and the failure
-# semantics on both sides of the commit boundary.
+# Pins the manual-resolve work_id derivation (matches.work_id == the picked
+# library_file's work_id, or NULL if it is unset — recording_id is NOT a
+# fallback because matches.work_id is FK to works(id)), the post-commit
+# recalculate_song_masters dispatch, and the failure semantics on both sides
+# of the commit boundary.
 # ---------------------------------------------------------------------------
 
 

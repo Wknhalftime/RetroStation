@@ -246,12 +246,13 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
 # work_id persistence on the matches row (migration 0024)
 # ---------------------------------------------------------------------------
 #
-# _score_candidates returns IdentityMatchResult.work_id with priority
-# best_file.work_id -> best_file.recording_id -> "" (empty when neither
-# is known). The auto-matcher passes that through to Match.work_id; the
-# repository layer normalizes "" -> None for the works(id) FK. These
-# three tests pin all three branches end-to-end through the playlist
-# orchestrator.
+# _score_candidates returns IdentityMatchResult.work_id from best_file.work_id
+# only — empty string when the file has no work_id, never recording_id as a
+# stand-in (matches.work_id is FK to works(id); a recording_id would fail
+# the FK on insert). The auto-matcher passes that through to Match.work_id
+# and the repository layer normalizes "" -> None at the persistence boundary.
+# These three tests pin: work_id present, only recording_id present (still
+# persisted as NULL), and neither present (NULL).
 
 
 def test_match_identities_persists_work_id_when_lib_file_has_work_id() -> None:
