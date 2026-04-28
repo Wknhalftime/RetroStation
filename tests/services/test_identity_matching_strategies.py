@@ -24,6 +24,7 @@ from backend.services.identity_matching_service import (
     IdentityMappingRuleStrategy,
     ResolvedArtistMbidStrategy,
 )
+from backend.services.normalization import normalize_title
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
@@ -65,12 +66,22 @@ def _lib_file(
     path: str,
     *,
     track_title: str | None = None,
+    normalized_title: str | None = None,
     artist_mbid: str | None = None,
     artist_name: str | None = None,
     recording_mbid: str | None = None,
     work_id: str | None = None,
     recording_id: str | None = None,
 ) -> LibraryFile:
+    """Build a LibraryFile fixture matching how library_scan_service populates rows.
+
+    When normalized_title is omitted, default-compute it from track_title via
+    normalize_title() — exactly what the scanner does at ingest. Tests that
+    want to exercise the legacy-no-precomputed-normalized-title path can pass
+    normalized_title="" or override per-test.
+    """
+    if normalized_title is None and track_title is not None:
+        normalized_title = normalize_title(track_title)
     return LibraryFile(
         id=uuid4(),
         file_path=path,
@@ -81,6 +92,7 @@ def _lib_file(
         work_id=work_id,
         audio=AudioMetadata(
             track_title=track_title,
+            normalized_title=normalized_title,
             artist_mbid=artist_mbid,
             artist_name=artist_name,
             recording_mbid=recording_mbid,
@@ -254,6 +266,88 @@ def test_tier1_no_local_files_falls_through_to_mb() -> None:
     assert result.status == MatchStatus.AUTO_MATCHED
     assert result.tier == MatchTier.MUSICBRAINZ_ID_SEARCH
     assert result.library_file_id == hit.id
+
+
+def test_tier1_step_b_tie_keeps_step_a_result() -> None:
+    """Step B escalation must only displace Step A on STRICT score
+    improvement. When both find candidates that score equally, Step A wins —
+    its MUSICBRAINZ_ID_EXACT tier is the more trustworthy label, and its
+    candidate is anchored on the resolved artist MBID rather than a
+    downstream MB recording-search hit (which can pull in cross-artist files
+    when a local tag carries a foreign recording_mbid).
+    """
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    artist = _artist()
+    _seed_artist_match(match_repo, artist.id, "mbid-m")
+
+    # Step A candidate — shared partial-match title scores below
+    # MB_AUTO_LINK_SCORE (95), forcing Step B escalation.
+    step_a = _lib_file(
+        "/m/step_a.flac",
+        track_title="enter completely unrelated extras",
+        artist_mbid="mbid-m",
+    )
+    # Step B candidate — same title (so identical score) but reachable only
+    # via recording_mbid path; Step A does not see it because it lacks
+    # artist_mbid="mbid-m".
+    step_b = _lib_file(
+        "/m/step_b.flac",
+        track_title="enter completely unrelated extras",
+        recording_mbid="rec-abc",
+    )
+    lib_repo.upsert(step_a)
+    lib_repo.upsert(step_b)
+    mb = FakeMbClient(
+        recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
+    )
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    identity = _identity(artist.id, title="enter sandman")
+    result = strategy.apply(identity, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW  # mid-band shared score
+    assert result.tier == MatchTier.MUSICBRAINZ_ID_EXACT  # NOT _SEARCH
+    assert result.library_file_id == step_a.id  # NOT step_b.id
+
+
+def test_tier1_step_b_strictly_better_score_wins() -> None:
+    """Conversely: when Step B genuinely improves on Step A, Step B wins
+    and the result tier flips to MUSICBRAINZ_ID_SEARCH. Guards against
+    a too-aggressive interpretation of the change-2 tie rule.
+    """
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    artist = _artist()
+    _seed_artist_match(match_repo, artist.id, "mbid-m")
+
+    # Step A: partial match (mid-band score), forces Step B.
+    step_a = _lib_file(
+        "/m/step_a.flac",
+        track_title="enter unrelated junk extras here",
+        artist_mbid="mbid-m",
+    )
+    # Step B: exact title, scores 100 — strictly better than Step A.
+    step_b = _lib_file(
+        "/m/step_b.flac",
+        track_title="enter sandman",
+        recording_mbid="rec-abc",
+    )
+    lib_repo.upsert(step_a)
+    lib_repo.upsert(step_b)
+    mb = FakeMbClient(
+        recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
+    )
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    identity = _identity(artist.id, title="enter sandman")
+    result = strategy.apply(identity, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.tier == MatchTier.MUSICBRAINZ_ID_SEARCH
+    assert result.library_file_id == step_b.id
 
 
 def test_tier1_mb_inconclusive_returns_no_local_files_reason() -> None:

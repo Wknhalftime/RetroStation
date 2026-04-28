@@ -30,6 +30,7 @@ from backend.services.matching_reasons import (
 )
 from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
 
@@ -69,6 +70,19 @@ class IdentityMatchingStrategy(Protocol):
     ) -> IdentityMatchResult | None: ...
 
 
+def _candidate_canonical_title(f: LibraryFile) -> str:
+    """Return the library file's canonical-normalized title for scoring.
+
+    Prefers the precomputed audio.normalized_title (set by library_scan_service
+    via normalize_title()). Falls back to canonicalizing the raw track_title
+    on the fly for legacy rows that pre-date title backfill. Ensures both
+    sides of the fuzzy comparison live in the same canonical space — without
+    this, token_sort_ratio runs case-sensitively (no processor is supplied)
+    and scores plain "Halo" vs "halo" at 75 instead of 100.
+    """
+    return f.audio.normalized_title or normalize_title(f.audio.track_title or "")
+
+
 def _score_candidates(
     broadcast_title: str,
     candidates: list[LibraryFile],
@@ -77,8 +91,13 @@ def _score_candidates(
 ) -> IdentityMatchResult:
     """Score candidates against broadcast_title; return best-match result.
 
-    Normalises both sides with normalize_title_for_scoring() before
-    token_sort_ratio. Single-candidate case: gap = 100 (no competition).
+    Both sides arrive canonical-normalized (broadcast_title is the caller's
+    identity.normalized_title; the candidate side comes from
+    _candidate_canonical_title). The scoring helper only layers
+    normalize_title_for_scoring on top — that strip is intentionally NOT part
+    of normalize_title() (see its docstring), because version-bearing
+    parentheticals like "(Live)" are signal in some contexts and noise in
+    fuzzy matching. Single-candidate case: gap = 100 (no competition).
     library_file_id is ALWAYS populated with best_file.id — never None.
     work_id is populated from best_file (work_id or recording_id) so every
     strategy returning from this helper exposes a downstream master-selection
@@ -100,7 +119,7 @@ def _score_candidates(
                 float(
                     token_sort_ratio(
                         norm_bc,
-                        normalize_title_for_scoring(f.audio.track_title or ""),
+                        normalize_title_for_scoring(_candidate_canonical_title(f)),
                     )
                 ),
                 f,
@@ -305,9 +324,19 @@ class ResolvedArtistMbidStrategy:
                 )
                 if local_result.status == MatchStatus.AUTO_MATCHED:
                     return local_result
-                # Step B escalation: try MB recording search for a better match.
+                # Step B escalation: only displace Step A when MB recording
+                # search produces a strictly better score. On equal score,
+                # keep Step A — its MUSICBRAINZ_ID_EXACT tier is the more
+                # trustworthy label, and its candidate is anchored on the
+                # resolved artist MBID rather than a downstream MB recording
+                # hit (which can pull in cross-artist files when a local tag
+                # carries someone else's recording_mbid). Deliberate product
+                # choice; do not "fix" without discussion.
                 mb_result = self._mb_recording_search(real_mbid, identity)
-                if mb_result is not None:
+                if (
+                    mb_result is not None
+                    and mb_result.confidence_score > local_result.confidence_score
+                ):
                     return mb_result
                 return local_result
 

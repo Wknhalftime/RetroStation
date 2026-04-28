@@ -56,9 +56,19 @@ def _lib_file(
     *,
     artist_mbid: str | None = None,
     track_title: str | None = None,
+    normalized_title: str | None = None,
     work_id: str | None = None,
     recording_id: str | None = None,
 ) -> LibraryFile:
+    """Build a LibraryFile fixture matching how library_scan_service populates rows.
+
+    When normalized_title is omitted, default-compute it from track_title via
+    normalize_title() — exactly what the scanner does at ingest. Tests that
+    want to exercise the legacy-no-precomputed-normalized-title path can pass
+    normalized_title="" or override per-test.
+    """
+    if normalized_title is None and track_title is not None:
+        normalized_title = normalize_title(track_title)
     return LibraryFile(
         id=uuid4(),
         file_path=path,
@@ -67,7 +77,11 @@ def _lib_file(
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id=recording_id,
         work_id=work_id,
-        audio=AudioMetadata(artist_mbid=artist_mbid, track_title=track_title),
+        audio=AudioMetadata(
+            artist_mbid=artist_mbid,
+            track_title=track_title,
+            normalized_title=normalized_title,
+        ),
     )
 
 
@@ -219,6 +233,115 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
     )
 
     assert work_ids == ["work-enter-sandman"]
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+
+
+def test_match_identities_tier1_case_mismatched_track_title_auto_matches() -> None:
+    """Regression: broadcast 'Halo' (normalized 'halo') vs library track_title
+    'Halo' must AUTO_MATCH at 100, not NEEDS_REVIEW at 75.
+
+    rapidfuzz.fuzz.token_sort_ratio is case-sensitive when no processor is
+    supplied. Before _score_candidates was symmetrized to use
+    audio.normalized_title (lowercase, accent-stripped via normalize_title),
+    the broadcast side arrived as 'halo' while the library side stayed 'Halo',
+    yielding 2*3/(4+4) = 75% — below MB_AUTO_LINK_SCORE (95) and below
+    strong_match_threshold (80) — so the identity sat in needs_review forever
+    despite the artist being cleanly resolved and the file being a perfect
+    title match. The fixture omits normalized_title so _lib_file's default
+    (normalize_title(track_title)) populates it the way the scanner does.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-soil"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    lib_file = _lib_file(
+        "/music/soil/halo.flac",
+        artist_mbid=canonical_mbid,
+        track_title="Halo",  # raw library tag preserves case
+        work_id="work-halo",
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Halo",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert persisted.confidence_score == 100.0
+    assert persisted.library_file_id == lib_file.id
+
+
+def test_match_identities_legacy_null_normalized_title_falls_back() -> None:
+    """When audio.normalized_title is NULL (legacy / pre-backfill row),
+    _candidate_canonical_title falls back to normalize_title(track_title) so
+    the case-mismatch scoring bug stays fixed even for un-backfilled rows.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-soil"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    lib_file = _lib_file(
+        "/music/soil/halo.flac",
+        artist_mbid=canonical_mbid,
+        track_title="Halo",
+        normalized_title="",  # explicit override: simulate legacy NULL
+        work_id="work-halo",
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Halo",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
     stored = identity_repo.get_by_id(identity.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
