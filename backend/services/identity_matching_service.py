@@ -99,9 +99,14 @@ def _score_candidates(
     parentheticals like "(Live)" are signal in some contexts and noise in
     fuzzy matching. Single-candidate case: gap = 100 (no competition).
     library_file_id is ALWAYS populated with best_file.id — never None.
-    work_id is populated from best_file (work_id or recording_id) so every
-    strategy returning from this helper exposes a downstream master-selection
-    handle without remembering to wire it in. Ties on score break by
+    work_id is the file's own work_id (real works(id) reference) and is "" when
+    the linked work is unknown — it is NOT recording_id as a stand-in (that
+    would fail the matches.work_id FK to works(id) added in migration 0024).
+    Migration 0011 backfills library_files.work_id from recordings.work_id at
+    scan time, so any recording-with-a-work has lib_file.work_id populated.
+    As of migration 0024 work_id is persisted on the matches row by the
+    service's match_repo.create() call — "" is normalized to NULL at the
+    persistence boundary in PgMatchRepository. Ties on score break by
     library_file id for determinism across runs. Caller must ensure
     candidates is non-empty.
     """
@@ -173,7 +178,13 @@ def _score_candidates(
         tier=tier,
         confidence_score=top_score,
         library_file_id=best.id,
-        work_id=best.work_id or best.recording_id or "",
+        # Only the file's real work_id — never recording_id as a stand-in.
+        # matches.work_id is FK to works(id); recording_ids live in
+        # recordings(id) and would fail the FK on persist. Migration 0011
+        # already backfilled library_files.work_id from recordings.work_id,
+        # so any recording-with-a-work has lib_file.work_id populated; a
+        # NULL here means the work is genuinely unknown.
+        work_id=best.work_id or "",
         reason_code=rc,
         reason_detail=rd,
     )
@@ -217,7 +228,9 @@ class IdentityMappingRuleStrategy:
                 tier=MatchTier.MUSICBRAINZ_ID_EXACT,
                 confidence_score=100.0,
                 library_file_id=lib_file.id,
-                work_id=lib_file.work_id or lib_file.recording_id or "",
+                # See _score_candidates: only real work_ids — recording_id
+                # would fail the works(id) FK on the matches row.
+                work_id=lib_file.work_id or "",
             )
         return None
 
@@ -590,6 +603,7 @@ def match_identities_for_playlist(
                 library_file_id=result.library_file_id,
                 confidence_score=result.confidence_score,
                 match_tier=result.tier,
+                work_id=result.work_id or None,
             ))
 
         if result.status == MatchStatus.AUTO_MATCHED:

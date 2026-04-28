@@ -17,6 +17,7 @@ class Match:
     library_file_id: UUID | None = None
     target_id: str | None = None
     target_type: TargetType | None = None
+    work_id: str | None = None
     trace_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

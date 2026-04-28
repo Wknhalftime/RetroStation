@@ -10,8 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
+from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.services.identity_resolution_service import (
+    LibraryFileNotFoundError,
+    persist_manual_match,
+    recalculate_for_work_sync,
+)
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.tasks.artist_matching_tasks import artist_matching_task
@@ -614,7 +620,8 @@ async def resolve_identity(
 
     Args:
         identity_id: UUID of the log_identity to resolve.
-        body: Resolution decision with optional library_file_id.
+        body: Resolution decision. ``library_file_id`` is required for
+            MANUAL_MATCHED.
         conn: Async database connection.
         _token: Bearer token (auth check only).
 
@@ -623,7 +630,8 @@ async def resolve_identity(
 
     Raises:
         HTTPException: 404 if the identity does not exist.
-        HTTPException: 422 if match_status is invalid.
+        HTTPException: 422 if match_status is invalid, library_file_id is
+            missing for MANUAL_MATCHED, or library_file_id does not exist.
     """
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
@@ -632,6 +640,12 @@ async def resolve_identity(
                 "match_status must be MANUAL_MATCHED or"
                 f" MANUAL_REJECTED, got {body.match_status!r}"
             ),
+        )
+
+    if body.match_status == MatchStatus.MANUAL_MATCHED and not body.library_file_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="library_file_id is required for MANUAL_MATCHED",
         )
 
     identity_cur = await conn.execute(
@@ -647,33 +661,64 @@ async def resolve_identity(
     new_status = MatchStatus(body.match_status)
 
     if new_status == MatchStatus.MANUAL_MATCHED:
+        # library_file_id presence is enforced by the 422 guard above; assert
+        # for the type-checker so persist_manual_match's UUID parameter is
+        # satisfied without a runtime cast.
+        assert body.library_file_id is not None  # noqa: S101
+
         # Update log_identity with status and MANUAL tier
         await conn.execute(
             "UPDATE track_identities SET match_status = %s, match_tier = %s WHERE id = %s",
             (new_status.value, MatchTier.MANUAL.value, identity_id),
         )
-        # Delete any existing match for this identity
+        # Delete any existing match for this identity (drops a stale auto
+        # match before the manual replacement is inserted, all inside the
+        # same async transaction so the resolve is atomic).
         await conn.execute(
             "DELETE FROM matches WHERE identity_id = %s",
             (identity_id,),
         )
-        # Create new match row
-        match_id = uuid4()
-        await conn.execute(
-            """
-            INSERT INTO matches
-                (id, identity_id, library_file_id, target_type, confidence_score, match_tier)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                match_id,
-                identity_id,
-                body.library_file_id,
-                TargetType.LIBRARY_FILE.value,
-                1.0,
-                MatchTier.MANUAL.value,
-            ),
-        )
+
+        # Insert the new match with derived work_id INSIDE this transaction.
+        # 422 if the picked library_file_id doesn't exist, so failure is
+        # deterministic instead of waiting for an FK violation to bubble
+        # up as 500.
+        try:
+            work_id = await persist_manual_match(
+                conn, identity_id, body.library_file_id
+            )
+        except LibraryFileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+        # Commit the durable match-state writes BEFORE the cross-connection
+        # recalc step. Mirrors resolve_artist's pre-enqueue commit pattern
+        # (see line 501) — the post-yield commit in get_db_connection
+        # becomes a no-op once this fires.
+        await conn.commit()
+
+        if work_id is not None:
+            settings = get_settings()
+            try:
+                # Outer try is defense-in-depth for thread/cancellation
+                # boundary errors that recalculate_for_work_sync's internal
+                # try cannot reach. Both layers are intentional — do not
+                # collapse into one. The match is already committed at this
+                # point; recalc is best-effort.
+                await asyncio.to_thread(
+                    recalculate_for_work_sync,
+                    settings.database_url,
+                    work_id,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "manual_resolve_recalc_failed",
+                    identity_id=str(identity_id),
+                    work_id=work_id,
+                    exc_info=True,
+                )
     else:
         # MANUAL_REJECTED: update status, delete existing match
         await conn.execute(

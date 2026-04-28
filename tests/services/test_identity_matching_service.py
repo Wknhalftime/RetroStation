@@ -185,6 +185,7 @@ def test_match_identities_for_playlist_tier0_rule_hit_collects_work_id() -> None
     created = match_repo.get_by_identity(identity.id)
     assert created is not None
     assert created.library_file_id == lib_file.id
+    assert created.work_id == "work-enter-sandman"
     assert created.confidence_score == 100.0
     assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
 
@@ -236,6 +237,167 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
     stored = identity_repo.get_by_id(identity.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert persisted.work_id == "work-enter-sandman"
+
+
+# ---------------------------------------------------------------------------
+# work_id persistence on the matches row (migration 0024)
+# ---------------------------------------------------------------------------
+#
+# _score_candidates returns IdentityMatchResult.work_id with priority
+# best_file.work_id -> best_file.recording_id -> "" (empty when neither
+# is known). The auto-matcher passes that through to Match.work_id; the
+# repository layer normalizes "" -> None for the works(id) FK. These
+# three tests pin all three branches end-to-end through the playlist
+# orchestrator.
+
+
+def test_match_identities_persists_work_id_when_lib_file_has_work_id() -> None:
+    """LibraryFile.work_id is set → Match.work_id matches."""
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-metallica"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid=canonical_mbid,
+        track_title="enter sandman",
+        work_id="work-enter-sandman",
+        recording_id="recording-enter-sandman",  # both set; work_id wins
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert persisted.work_id == "work-enter-sandman"
+
+
+def test_match_identities_persists_null_work_id_when_only_recording_id_set() -> None:
+    """LibraryFile.work_id NULL with only recording_id set → Match.work_id is
+    None.
+
+    matches.work_id is FK to works(id); a recording_id is not a work_id and
+    would fail the FK if persisted. Migration 0011 already backfills
+    library_files.work_id from recordings.work_id at scan time, so a NULL
+    lf.work_id at this point means the underlying work is genuinely unknown
+    (the recording either has no work_id or is detached) — NULL is the
+    correct persisted value, not the recording_id.
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-metallica"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid=canonical_mbid,
+        track_title="enter sandman",
+        work_id=None,
+        recording_id="recording-enter-sandman",
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert persisted.work_id is None
+
+
+def test_match_identities_persists_null_work_id_when_neither_present() -> None:
+    """Neither work_id nor recording_id is set → Match.work_id is None
+    (NOT empty string — would violate the works(id) FK).
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-metallica"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    lib_file = _lib_file(
+        "/music/metallica/enter_sandman.flac",
+        artist_mbid=canonical_mbid,
+        track_title="enter sandman",
+        work_id=None,
+        recording_id=None,
+    )
+    lib_repo.upsert(lib_file)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert persisted.work_id is None
 
 
 def test_match_identities_tier1_case_mismatched_track_title_auto_matches() -> None:

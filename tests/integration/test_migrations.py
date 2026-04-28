@@ -8,9 +8,9 @@ def test_all_migrations_applied(migrated_db: str) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 23
+    assert len(versions) == 24
     assert versions[0].startswith("0001")
-    assert versions[-1].startswith("0023")
+    assert versions[-1].startswith("0024")
 
 
 def test_station_delete_cascade_fks(migrated_db: str) -> None:
@@ -96,6 +96,40 @@ def test_matches_library_file_fk_constraint_exists(migrated_db: str) -> None:
               AND constraint_name = 'fk_matches_library_file'
         """).fetchone()
     assert row is not None, "matches.fk_matches_library_file constraint missing"
+
+
+def test_matches_work_id_column_and_index(migrated_db: str) -> None:
+    """Migration 0024 must add matches.work_id (TEXT, FK to works), and the
+    idx_matches_work_id index. Locks the schema invariant against an
+    accidental rename or drop in a future rebase.
+    """
+    with psycopg.connect(migrated_db) as conn:
+        col = conn.execute("""
+            SELECT data_type, is_nullable FROM information_schema.columns
+            WHERE table_name = 'matches' AND column_name = 'work_id'
+        """).fetchone()
+        assert col is not None, "matches.work_id column missing"
+        assert col[0] == "text"
+        assert col[1] == "YES"  # nullable
+
+        fk = conn.execute("""
+            SELECT 1
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.table_name = 'matches'
+              AND tc.constraint_type = 'FOREIGN KEY'
+              AND kcu.column_name = 'work_id'
+        """).fetchone()
+        assert fk is not None, "FK on matches.work_id -> works(id) missing"
+
+        idx = conn.execute("""
+            SELECT 1 FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'matches'
+              AND indexname = 'idx_matches_work_id'
+        """).fetchone()
+        assert idx is not None, "idx_matches_work_id missing"
 
 
 def test_migrations_idempotent(migrated_db: str) -> None:

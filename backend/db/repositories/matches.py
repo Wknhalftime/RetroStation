@@ -24,20 +24,28 @@ class PgMatchRepository(MatchRepository):
             library_file_id=row.get("library_file_id"),
             target_id=row.get("target_id"),
             target_type=TargetType(row["target_type"]) if row.get("target_type") else None,
+            work_id=row.get("work_id"),
             trace_id=row.get("trace_id"),
             created_at=row["created_at"],
         )
 
     def create(self, match: Match) -> Match:
+        # Empty-string -> NULL because work_id is FK to works(id); the auto-
+        # matcher's _score_candidates returns "" when neither work_id nor
+        # recording_id is known on the picked candidate (see
+        # identity_matching_service._score_candidates), and "" would fail FK.
+        work_id = match.work_id or None
         self._conn.execute(
             """INSERT INTO matches
                (id, confidence_score, match_tier, identity_id, artist_id,
-                library_file_id, target_id, target_type, trace_id, created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                library_file_id, target_id, target_type, work_id, trace_id,
+                created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (match.id, match.confidence_score, match.match_tier.value,
              match.identity_id, match.artist_id, match.library_file_id,
              match.target_id,
              match.target_type.value if match.target_type else None,
+             work_id,
              match.trace_id, match.created_at),
         )
         row = self._conn.execute(
