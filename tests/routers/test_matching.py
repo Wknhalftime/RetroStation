@@ -135,6 +135,8 @@ def _insert_library_file(
     track_title: str | None = None,
     release_title: str | None = None,
     recording_mbid: str | None = None,
+    recording_id: str | None = None,
+    work_id: str | None = None,
 ) -> LibraryFile:
     lf = LibraryFile(
         id=uuid4(),
@@ -142,6 +144,8 @@ def _insert_library_file(
         file_hash=uuid4().hex,
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
+        recording_id=recording_id,
+        work_id=work_id,
         audio=AudioMetadata(
             track_title=track_title,
             release_title=release_title,
@@ -151,6 +155,38 @@ def _insert_library_file(
     result = PgLibraryFileRepository(conn).upsert(lf)
     conn.commit()
     return result
+
+
+def _insert_canonical_artist(conn: psycopg.Connection, artist_id: str) -> str:
+    """Minimal canonical artist row for satisfying the works.artist_id FK
+    when tests need a Work to test work_id propagation.
+    """
+    conn.execute(
+        "INSERT INTO artists (id, name, sort_name) VALUES (%s, %s, %s)",
+        (artist_id, f"Artist {artist_id}", f"Artist {artist_id}"),
+    )
+    conn.commit()
+    return artist_id
+
+
+def _insert_work(conn: psycopg.Connection, work_id: str, artist_id: str) -> str:
+    conn.execute(
+        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
+        (work_id, f"Work {work_id}", artist_id),
+    )
+    conn.commit()
+    return work_id
+
+
+def _insert_recording(
+    conn: psycopg.Connection, rec_id: str, work_id: str | None = None
+) -> str:
+    conn.execute(
+        "INSERT INTO recordings (id, title, work_id) VALUES (%s, %s, %s)",
+        (rec_id, f"Recording {rec_id}", work_id),
+    )
+    conn.commit()
+    return rec_id
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +847,222 @@ class TestResolveIdentity:
             json={"match_status": "auto_matched"},
         )
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# TestResolveIdentityWorkId — migration 0024 wiring
+#
+# Pins the manual-resolve work_id derivation (matches.work_id == the picked
+# library_file's work_id, or NULL if it is unset — recording_id is NOT a
+# fallback because matches.work_id is FK to works(id)), the post-commit
+# recalculate_song_masters dispatch, and the failure semantics on both sides
+# of the commit boundary.
+# ---------------------------------------------------------------------------
+
+
+class TestResolveIdentityWorkId:
+    def test_persists_work_id_from_lib_file_work_id(
+        self, client, db_conn, monkeypatch
+    ):
+        """library_files.work_id is set → matches.work_id matches."""
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        artist_id = _insert_canonical_artist(db_conn, "art-w1")
+        work_id = _insert_work(db_conn, "work-w1", artist_id)
+        rec_id = _insert_recording(db_conn, "rec-w1", work_id=work_id)
+        lib_file = _insert_library_file(
+            db_conn, recording_id=rec_id, work_id=work_id
+        )
+
+        # Stub recalc — exercise the wiring without re-running master
+        # selection in the test path.
+        captured: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "backend.routers.matching.recalculate_for_work_sync",
+            lambda db_url, w: captured.append((db_url, w)),
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": str(lib_file.id),
+            },
+        )
+        assert resp.status_code == 200
+
+        match_row = db_conn.execute(
+            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["work_id"] == work_id
+        assert [w for _, w in captured] == [work_id]
+
+    def test_persists_null_work_id_when_only_recording_id_present(
+        self, client, db_conn, monkeypatch
+    ):
+        """library_files.work_id NULL with only recording_id set → matches.work_id
+        is NULL and recalc is skipped.
+
+        matches.work_id is FK to works(id); a recording_id (which lives in
+        recordings(id)) would fail the FK on insert. The auto-matcher used
+        to surface recording_id as a stand-in work_id, but that was always a
+        no-op in recalculate_song_masters and is now an active correctness
+        constraint at persistence time — NULL is the right value when the
+        actual work is unknown.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        rec_id = "rec-only-no-work"
+        _insert_recording(db_conn, rec_id, work_id=None)
+        lib_file = _insert_library_file(
+            db_conn, recording_id=rec_id, work_id=None
+        )
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            "backend.routers.matching.recalculate_for_work_sync",
+            lambda db_url, w: captured.append(w),
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": str(lib_file.id),
+            },
+        )
+        assert resp.status_code == 200
+
+        match_row = db_conn.execute(
+            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["work_id"] is None
+        assert captured == []
+
+    def test_persists_null_work_id_and_skips_recalc_when_neither_present(
+        self, client, db_conn, monkeypatch
+    ):
+        """Neither work_id nor recording_id on the file → matches.work_id is
+        NULL and the recalc dispatch is skipped (no work to recompute).
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        lib_file = _insert_library_file(db_conn)
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            "backend.routers.matching.recalculate_for_work_sync",
+            lambda db_url, w: captured.append(w),
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": str(lib_file.id),
+            },
+        )
+        assert resp.status_code == 200
+
+        match_row = db_conn.execute(
+            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["work_id"] is None
+        assert captured == []
+
+    def test_recalc_failure_does_not_500(self, client, db_conn, monkeypatch):
+        """Side-effect failure post-commit: response is still 200, the match
+        row is durable, status flipped to manual_matched, warning logged.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        artist_id = _insert_canonical_artist(db_conn, "art-fail")
+        work_id = _insert_work(db_conn, "work-fail", artist_id)
+        rec_id = _insert_recording(db_conn, "rec-fail", work_id=work_id)
+        lib_file = _insert_library_file(
+            db_conn, recording_id=rec_id, work_id=work_id
+        )
+
+        def _boom(db_url: str, w: str) -> None:
+            raise RuntimeError("recalc exploded")
+
+        monkeypatch.setattr(
+            "backend.routers.matching.recalculate_for_work_sync", _boom
+        )
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": str(lib_file.id),
+            },
+        )
+        assert resp.status_code == 200
+
+        # Match write was durable — recalc failure must not roll it back.
+        match_row = db_conn.execute(
+            "SELECT work_id, library_file_id FROM matches WHERE identity_id = %s",
+            (identity.id,),
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["work_id"] == work_id
+        assert match_row["library_file_id"] == lib_file.id
+
+        id_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (identity.id,),
+        ).fetchone()
+        assert id_row is not None
+        assert id_row["match_status"] == "manual_matched"
+
+    def test_missing_library_file_id_returns_422(self, client, db_conn):
+        """MANUAL_MATCHED without library_file_id is a contract violation —
+        422 from the validator, no match row written.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={"match_status": "manual_matched"},
+        )
+        assert resp.status_code == 422
+
+        row = db_conn.execute(
+            "SELECT 1 FROM matches WHERE identity_id = %s", (identity.id,)
+        ).fetchone()
+        assert row is None
+
+    def test_unknown_library_file_id_returns_422_and_aborts(
+        self, client, db_conn
+    ):
+        """library_file_id pointing at a non-existent row → deterministic 422
+        from LibraryFileNotFoundError; the surrounding async transaction
+        rolls back so neither the status update nor the prior-match DELETE
+        is observable.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        bogus_id = uuid4()
+
+        resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": str(bogus_id),
+            },
+        )
+        assert resp.status_code == 422
+
+        match_row = db_conn.execute(
+            "SELECT 1 FROM matches WHERE identity_id = %s", (identity.id,)
+        ).fetchone()
+        assert match_row is None
+
+        id_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (identity.id,),
+        ).fetchone()
+        assert id_row is not None
+        # The pre-existing seed status should NOT have flipped to manual_matched.
+        assert id_row["match_status"] != "manual_matched"
 
 
 # ---------------------------------------------------------------------------

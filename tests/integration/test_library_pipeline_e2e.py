@@ -130,12 +130,39 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # Use the first identity title to create a matching library file
         target_title = metallica_identities[0]["original_title"]
 
-        # --- Step 4: Insert a Recording and library file for that artist/title ---
-        # recording_id in library_files is a TEXT FK to recordings.id (an MBID string)
+        # --- Step 4: Insert canonical Artist + Work + Recording + library file ---
+        # matches.work_id is FK to works(id), so the auto-matcher can only
+        # persist a work_id that exists in works(). Seed a real Work (which
+        # itself FKs to artists.id), link the Recording to it, and set
+        # lib_file.work_id so the persisted match row's work_id is satisfied.
+        # The artist_matching rule above resolved Metallica's broadcast row
+        # to "mbid-metallica-lib" but did NOT create that artist in the
+        # canonical artists table — seed it here. Set mbid = id so that
+        # ResolvedArtistMbidStrategy reads catalog_artist.mbid back as the
+        # real MBID and proceeds to the library lookup; leaving mbid NULL
+        # would short-circuit identity matching to NEEDS_REVIEW.
+        conn.execute(
+            "INSERT INTO artists (id, name, sort_name, mbid, origin) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (id) DO NOTHING",
+            (
+                "mbid-metallica-lib",
+                "Metallica",
+                "Metallica",
+                "mbid-metallica-lib",
+                "musicbrainz",
+            ),
+        )
+        work_mbid = "mbid-work-" + uuid4().hex[:8]
+        conn.execute(
+            "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
+            (work_mbid, target_title, "mbid-metallica-lib"),
+        )
         recording_mbid = "mbid-rec-" + uuid4().hex[:8]
         recording = Recording(
             id=recording_mbid,
             title=target_title,
+            work_id=work_mbid,
             needs_enhancement=False,
         )
         PgRecordingRepository(conn).upsert(recording)
@@ -151,6 +178,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
             recording_id=recording_mbid,
+            work_id=work_mbid,
             audio=AudioMetadata(
                 artist_mbid="mbid-metallica-lib",
                 track_title=normalize_title(target_title),
@@ -191,5 +219,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         assert match_row is not None, "No match row found for AUTO_MATCHED identity"
         assert match_row["library_file_id"] == lib_file.id
 
-        # work_ids returned should be non-empty (recording_id of the matched file)
-        assert len(work_ids) >= 1
+        # work_ids returned should contain the seeded work_mbid — the
+        # auto-matcher emits real works(id) refs only (no recording_id
+        # stand-ins) since matches.work_id is FK to works(id).
+        assert work_mbid in work_ids
