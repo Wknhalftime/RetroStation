@@ -17,6 +17,12 @@ import { SearchSlideOver } from "@/components/domain/matcher/SearchSlideOver";
 import type { MbArtistResult, QueueArtist } from "@/lib/schemas/matcher";
 import { firstCandidateMbid } from "@/lib/matcher/candidates";
 
+type Feedback = { kind: "success" | "error"; message: string } | null;
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -50,7 +56,7 @@ export function MatcherBrowser() {
   // state updates here instead.
   const goToPage = (newPage: number) => {
     setPage(newPage);
-    setSelectedArtist(null);
+    setSelectedArtistId(null);
   };
   const offset = (page - 1) * PAGE_SIZE;
   const { data, isLoading, isError, isPlaceholderData } = useMatchingQueue(PAGE_SIZE, offset);
@@ -58,9 +64,15 @@ export function MatcherBrowser() {
   const resolveIdentity = useResolveIdentity();
   const resolveArtist = useResolveArtist();
 
-  const [selectedArtist, setSelectedArtist] = useState<QueueArtist | null>(null);
+  // Selection is held as an id (not a frozen QueueArtist snapshot) so the
+  // right-side panels re-render against the latest queue data after a resolve
+  // mutation invalidates ["matching"] — without this, a curator who resolves
+  // a title would keep seeing a stale NEEDS_REVIEW badge until they clicked
+  // off the artist and back.
+  const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
   const [slideOverOpen, setSlideOverOpen] = useState(false);
   const [activeIdentityId, setActiveIdentityId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
   // A single discriminated state replaces four separate open/targetId atoms
   // (mbSearchOpen + mbSearchTargetArtistId + librarySearchOpen +
   // librarySearchTargetArtistId).  Only one artist-search mode can be active
@@ -78,6 +90,19 @@ export function MatcherBrowser() {
   const total: number = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const selectedArtist: QueueArtist | null = selectedArtistId
+    ? (artists.find((a) => a.id === selectedArtistId) ?? null)
+    : null;
+
+  // Auto-dismiss success banners after 3s; keep errors until the next user
+  // action so the curator has time to read what failed. Re-runs whenever
+  // `feedback` changes, so each new success starts its own timer.
+  useEffect(() => {
+    if (feedback?.kind !== "success") return;
+    const t = setTimeout(() => setFeedback(null), 3000);
+    return () => clearTimeout(t);
+  }, [feedback]);
+
   // Clamp page when `total` shrinks (e.g. after resolving items reduces the queue).
   // Without this a curator on page 3 would fetch offset=50 and see items=[] even
   // though total > 0, wrongly showing the "queue empty" UI.
@@ -94,7 +119,7 @@ export function MatcherBrowser() {
   useEffect(() => {
     if (data != null && total > 0 && !isPlaceholderData && page > totalPages) {
       setPage(totalPages);
-      setSelectedArtist(null);
+      setSelectedArtistId(null);
     }
   }, [page, totalPages, data, total, isPlaceholderData]);
 
@@ -105,10 +130,26 @@ export function MatcherBrowser() {
 
   function handleFileSelect(file: LibraryFile) {
     if (!activeIdentityId) return;
-    resolveIdentity.mutate({
-      id: activeIdentityId,
-      resolution: { match_status: "manual_matched", library_file_id: file.id },
-    });
+    resolveIdentity.mutate(
+      {
+        id: activeIdentityId,
+        resolution: { match_status: "manual_matched", library_file_id: file.id },
+      },
+      {
+        onSuccess: () => {
+          const label = file.track_title?.trim() || file.file_path?.trim();
+          setFeedback({
+            kind: "success",
+            message: label ? `Linked "${label}".` : "Linked file.",
+          });
+        },
+        onError: (err) =>
+          setFeedback({
+            kind: "error",
+            message: `Failed to link file: ${errorMessage(err)}`,
+          }),
+      },
+    );
     setActiveIdentityId(null);
   }
 
@@ -125,17 +166,33 @@ export function MatcherBrowser() {
   // target_artist_id accepts either a MusicBrainz MBID or a local catalog UUID
   // (the backend stores both forms in matches.target_id — see resolve_artist
   // endpoint and artist_matching_service.py for the dual-form contract).
-  function handleResolveFromArtistSearch(targetId: string) {
+  function handleResolveFromArtistSearch(targetId: string, label?: string) {
     if (!artistSearch) return;
-    resolveArtist.mutate({
-      id: artistSearch.targetArtistId,
-      resolution: { match_status: "manual_matched", target_artist_id: targetId },
-    });
+    resolveArtist.mutate(
+      {
+        id: artistSearch.targetArtistId,
+        resolution: { match_status: "manual_matched", target_artist_id: targetId },
+      },
+      {
+        onSuccess: () => {
+          const trimmed = label?.trim();
+          setFeedback({
+            kind: "success",
+            message: trimmed ? `Linked artist "${trimmed}".` : "Linked artist.",
+          });
+        },
+        onError: (err) =>
+          setFeedback({
+            kind: "error",
+            message: `Failed to link artist: ${errorMessage(err)}`,
+          }),
+      },
+    );
     handleCloseArtistSearch();
   }
 
   function handleMbArtistSelect(mb: MbArtistResult) {
-    handleResolveFromArtistSearch(mb.id);
+    handleResolveFromArtistSearch(mb.id, mb.name);
   }
 
   function handleLibraryArtistSelect(artist: LibraryArtist) {
@@ -143,7 +200,7 @@ export function MatcherBrowser() {
     // Trim first so a whitespace-padded MBID is never persisted as-is, and
     // an all-whitespace value is treated the same as null/empty.
     const targetId = artist.mbid?.trim() || artist.id;
-    handleResolveFromArtistSearch(targetId);
+    handleResolveFromArtistSearch(targetId, artist.name);
   }
 
   function handleRerun() {
@@ -152,7 +209,7 @@ export function MatcherBrowser() {
         // Re-run can reshuffle the queue — clear the selection so the right
         // panels don't act on a stale artist that may no longer exist.
         setPage(1);
-        setSelectedArtist(null);
+        setSelectedArtistId(null);
       },
     });
   }
@@ -173,6 +230,21 @@ export function MatcherBrowser() {
           </button>
         }
       />
+
+      {feedback && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "mx-4 mb-2 rounded-md border px-3 py-2 text-sm",
+            feedback.kind === "success"
+              ? "border-green-200 bg-green-50 text-green-700"
+              : "border-red-200 bg-red-50 text-red-700",
+          )}
+        >
+          {feedback.message}
+        </div>
+      )}
 
       {isLoading && (
         <div className="flex flex-1 items-center justify-center">
@@ -208,7 +280,7 @@ export function MatcherBrowser() {
               {artists.map((artist) => (
                 <li key={artist.id}>
                   <button
-                    onClick={() => setSelectedArtist(artist)}
+                    onClick={() => setSelectedArtistId(artist.id)}
                     className={cn(
                       "flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-gray-50",
                       selectedArtist?.id === artist.id && "bg-blue-50"
