@@ -41,12 +41,32 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   }
 
   const identities: QueueIdentity[] = artist.identities ?? [];
+  const isPending = resolveIdentity.isPending;
+
+  function handleApprove(identity: QueueIdentity) {
+    if (!identity.proposed_match) return;
+    resolveIdentity.mutate({
+      id: identity.id,
+      resolution: {
+        match_status: "manual_matched",
+        library_file_id: identity.proposed_match.library_file_id,
+      },
+    });
+  }
 
   function handleReject(identity: QueueIdentity) {
     resolveIdentity.mutate({
       id: identity.id,
       resolution: { match_status: "manual_rejected", library_file_id: null },
     });
+  }
+
+  // Trim a posix/win path down to its filename so the muted file_path line
+  // doesn't dominate the card. Also serves as the title fallback when the
+  // library_files row has no track_title.
+  function basename(p: string): string {
+    const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    return slash >= 0 ? p.slice(slash + 1) : p;
   }
 
   return (
@@ -93,16 +113,50 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
                 <MatchStatusBadge status={identity.match_status} className="shrink-0" />
               </div>
 
+              {identity.proposed_match && (
+                <div
+                  data-testid="proposed-match"
+                  className="mb-2 rounded border border-gray-200 bg-white px-2.5 py-1.5"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                    Proposed match
+                  </p>
+                  <p className="truncate text-sm text-gray-800">
+                    {identity.proposed_match.track_title ||
+                      basename(identity.proposed_match.file_path)}
+                  </p>
+                  {identity.proposed_match.release_title && (
+                    <p className="truncate text-xs text-gray-500">
+                      {identity.proposed_match.release_title}
+                    </p>
+                  )}
+                  <p className="truncate text-xs text-gray-400">
+                    via {identity.proposed_match.candidate_match_tier} ·{" "}
+                    {identity.proposed_match.file_path}
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-2">
+                {identity.proposed_match && identity.match_status === "needs_review" && (
+                  <button
+                    onClick={() => handleApprove(identity)}
+                    disabled={isPending}
+                    className="rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                )}
                 <button
                   onClick={() => onFileSearch(identity.id)}
-                  className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                  disabled={isPending}
+                  className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   Find File
                 </button>
                 <button
                   onClick={() => handleReject(identity)}
-                  disabled={resolveIdentity.isPending}
+                  disabled={isPending}
                   className="rounded border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
                 >
                   Reject

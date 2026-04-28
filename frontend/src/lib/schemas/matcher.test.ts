@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MbArtistResultSchema, QueueArtistSchema, QueueIdentitySchema } from "./matcher";
+import {
+  MbArtistResultSchema,
+  ProposedMatchSchema,
+  QueueArtistSchema,
+  QueueIdentitySchema,
+} from "./matcher";
 
 describe("QueueIdentitySchema", () => {
   it("accepts new fields", () => {
@@ -58,6 +63,91 @@ describe("QueueArtistSchema", () => {
       identities: [],
     });
     expect(parsed.candidates).toBeNull();
+  });
+});
+
+describe("ProposedMatchSchema", () => {
+  it("accepts a fully populated proposed match", () => {
+    const parsed = ProposedMatchSchema.parse({
+      library_file_id: "00000000-0000-0000-0000-0000000000aa",
+      file_path: "/music/prince/two-skins.flac",
+      track_title: "Two Skins",
+      release_title: "Decoded",
+      recording_mbid: "rec-mbid-0001",
+      candidate_match_tier: "musicbrainz_id_search",
+    });
+    expect(parsed.library_file_id).toBe("00000000-0000-0000-0000-0000000000aa");
+    expect(parsed.track_title).toBe("Two Skins");
+  });
+
+  it("accepts null catalog metadata (library_files columns are nullable)", () => {
+    const parsed = ProposedMatchSchema.parse({
+      library_file_id: "00000000-0000-0000-0000-0000000000aa",
+      file_path: "/music/unknown.flac",
+      track_title: null,
+      release_title: null,
+      recording_mbid: null,
+      candidate_match_tier: "vector",
+    });
+    expect(parsed.track_title).toBeNull();
+  });
+
+  it("rejects a non-UUID library_file_id", () => {
+    expect(() =>
+      ProposedMatchSchema.parse({
+        library_file_id: "not-a-uuid",
+        file_path: "/x.flac",
+        candidate_match_tier: "vector",
+      })
+    ).toThrow();
+  });
+});
+
+describe("QueueIdentitySchema with proposed_match", () => {
+  it("accepts a needs_review identity with a proposed_match", () => {
+    const parsed = QueueIdentitySchema.parse({
+      id: "00000000-0000-0000-0000-000000000001",
+      original_title: "Two Skins",
+      normalized_title: "two skins",
+      match_status: "needs_review",
+      match_tier: "musicbrainz_id_search",
+      confidence_score: 78,
+      triage_bucket: "needs_attention",
+      proposed_match: {
+        library_file_id: "00000000-0000-0000-0000-0000000000aa",
+        file_path: "/music/two-skins.flac",
+        track_title: "Two Skins",
+        release_title: "Decoded",
+        recording_mbid: "rec-mbid-0001",
+        candidate_match_tier: "musicbrainz_id_search",
+      },
+    });
+    expect(parsed.proposed_match?.library_file_id).toBe(
+      "00000000-0000-0000-0000-0000000000aa"
+    );
+  });
+
+  it("treats proposed_match as optional and nullable", () => {
+    const a = QueueIdentitySchema.parse({
+      id: "00000000-0000-0000-0000-000000000001",
+      original_title: "x",
+      normalized_title: "x",
+      match_status: "pending",
+      match_tier: null,
+      triage_bucket: "blocked",
+    });
+    expect(a.proposed_match).toBeUndefined();
+
+    const b = QueueIdentitySchema.parse({
+      id: "00000000-0000-0000-0000-000000000001",
+      original_title: "x",
+      normalized_title: "x",
+      match_status: "needs_review",
+      match_tier: null,
+      triage_bucket: "blocked",
+      proposed_match: null,
+    });
+    expect(b.proposed_match).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -21,7 +21,7 @@ from backend.domain.broadcast import (
     BroadcastTrackIdentity,
 )
 from backend.domain.enums import EnrichmentStatus, MatchStatus
-from backend.domain.library import LibraryFile
+from backend.domain.library import AudioMetadata, LibraryFile
 from backend.routers.matching import (
     QueueIdentity,
     _artist_bucket_from_identities,
@@ -129,13 +129,24 @@ def _insert_event(
     return result
 
 
-def _insert_library_file(conn: psycopg.Connection) -> LibraryFile:
+def _insert_library_file(
+    conn: psycopg.Connection,
+    *,
+    track_title: str | None = None,
+    release_title: str | None = None,
+    recording_mbid: str | None = None,
+) -> LibraryFile:
     lf = LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4().hex}.flac",
         file_hash=uuid4().hex,
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
+        audio=AudioMetadata(
+            track_title=track_title,
+            release_title=release_title,
+            recording_mbid=recording_mbid,
+        ),
     )
     result = PgLibraryFileRepository(conn).upsert(lf)
     conn.commit()
@@ -926,14 +937,30 @@ def _insert_match_row(
     conn: psycopg.Connection,
     identity: BroadcastTrackIdentity,
     confidence_score: float,
+    library_file_id: UUID | None = None,
+    match_tier: str = "vector",
 ) -> None:
-    """Insert a matches row for the given identity."""
+    """Insert a matches row for the given identity.
+
+    library_file_id defaults to None to preserve the original behavior — every
+    pre-existing callsite continues to insert a NULL FK. Pass an explicit UUID
+    (e.g. from _insert_library_file) when a test asserts on `proposed_match`.
+    """
     conn.execute(
         """
-        INSERT INTO matches (id, identity_id, target_type, confidence_score, match_tier)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO matches (
+            id, identity_id, library_file_id, target_type,
+            confidence_score, match_tier
+        ) VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (uuid4(), identity.id, "library_file", confidence_score, "vector"),
+        (
+            uuid4(),
+            identity.id,
+            library_file_id,
+            "library_file",
+            confidence_score,
+            match_tier,
+        ),
     )
     conn.commit()
 
@@ -1226,6 +1253,162 @@ class TestQueueResponseShape:
         assert data["total"] == 2
         names = {i["original_name"] for i in data["items"]}
         assert names == {"Plain Pending", "Auto Parent"}
+
+
+# ---------------------------------------------------------------------------
+# TestProposedMatch  (integration — requires DB)
+# ---------------------------------------------------------------------------
+
+
+class TestProposedMatch:
+    """`proposed_match` surfaces the best-scoring library_file candidate so a
+    curator can approve in one click. Three cases matter:
+
+    1. matches.library_file_id points at a real library_files row → populated
+    2. matches.library_file_id IS NULL → None (parity with today's data)
+    3. matches.library_file_id is orphan (no joinable row) → None, AND the
+       identity itself must still be returned (LEFT JOIN guard)
+    """
+
+    def test_populated_when_match_has_library_file(self, client, db_conn):
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        lib_file = _insert_library_file(
+            db_conn,
+            track_title="Two Skins",
+            release_title="Decoded",
+            recording_mbid="rec-mbid-0001",
+        )
+        _insert_match_row(
+            db_conn,
+            identity,
+            confidence_score=78.0,
+            library_file_id=lib_file.id,
+            match_tier="musicbrainz_id_search",
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        qi = item["identities"][0]
+
+        proposed = qi["proposed_match"]
+        assert proposed is not None
+        assert proposed["library_file_id"] == str(lib_file.id)
+        assert proposed["file_path"] == lib_file.file_path
+        assert proposed["track_title"] == "Two Skins"
+        assert proposed["release_title"] == "Decoded"
+        assert proposed["recording_mbid"] == "rec-mbid-0001"
+        assert proposed["candidate_match_tier"] == "musicbrainz_id_search"
+
+    def test_none_when_match_has_null_library_file_id(self, client, db_conn):
+        """A matches row without library_file_id (today's default) → None."""
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        _insert_match_row(db_conn, identity, confidence_score=72.0)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        qi = resp.json()["items"][0]["identities"][0]
+        assert qi["proposed_match"] is None
+        # Confidence is still surfaced so the card can show the score.
+        assert qi["confidence_score"] == pytest.approx(72.0, abs=1e-4)
+
+    def test_orphan_library_file_id_does_not_drop_identity(self, client, db_conn):
+        """LEFT JOIN guard: even if matches.library_file_id points at a missing
+        library_files row, the identity must still be returned (just without a
+        proposed_match).
+
+        Migration 0004 adds an FK on matches.library_file_id, so orphans can't
+        arise in steady state — but the LEFT JOIN remains defensive against
+        future schema changes (e.g. relaxing the FK or adding ON DELETE SET
+        NULL plus an out-of-order delete). We exercise the guard by disabling
+        FK enforcement for this insert via session_replication_role.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        orphan_id = uuid4()
+        # session_replication_role=replica disables FK trigger enforcement on
+        # this connection only; restored to origin immediately after.
+        db_conn.execute("SET session_replication_role = replica")
+        _insert_match_row(
+            db_conn,
+            identity,
+            confidence_score=55.0,
+            library_file_id=orphan_id,
+        )
+        db_conn.execute("SET session_replication_role = origin")
+        db_conn.commit()
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1, "identity must still surface despite orphan FK"
+        qi = items[0]["identities"][0]
+        assert qi["id"] == str(identity.id)
+        assert qi["proposed_match"] is None
+
+    def test_distinct_on_picks_highest_score_with_file(self, client, db_conn):
+        """When several matches exist, DISTINCT ON keeps the highest-confidence
+        row. The proposed_match must reflect that winning row's library_file."""
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        loser = _insert_library_file(db_conn, track_title="Loser")
+        winner = _insert_library_file(db_conn, track_title="Winner")
+        # Lower-score row inserted first, then higher-score winner.
+        _insert_match_row(
+            db_conn, identity, confidence_score=55.0, library_file_id=loser.id
+        )
+        _insert_match_row(
+            db_conn, identity, confidence_score=82.0, library_file_id=winner.id
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        qi = resp.json()["items"][0]["identities"][0]
+        assert qi["confidence_score"] == pytest.approx(82.0, abs=1e-4)
+        assert qi["proposed_match"]["library_file_id"] == str(winner.id)
+        assert qi["proposed_match"]["track_title"] == "Winner"
+
+    def test_approve_via_resolve_identity_uses_queue_proposed_match(
+        self, client, db_conn
+    ):
+        """End-to-end Approve flow: read library_file_id from /queue and POST it
+        to /resolve. The resulting matches row must point at the same file with
+        tier=manual / score=1.0."""
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        lib_file = _insert_library_file(db_conn, track_title="Approve Me")
+        _insert_match_row(
+            db_conn,
+            identity,
+            confidence_score=78.0,
+            library_file_id=lib_file.id,
+            match_tier="musicbrainz_id_search",
+        )
+
+        # Read the proposed match the way the UI does.
+        queue_resp = client.get("/api/v1/matching/queue")
+        proposed = queue_resp.json()["items"][0]["identities"][0]["proposed_match"]
+        assert proposed is not None
+
+        # Approve: POST that library_file_id back to /resolve.
+        resolve_resp = client.post(
+            f"/api/v1/matching/identities/{identity.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "library_file_id": proposed["library_file_id"],
+            },
+        )
+        assert resolve_resp.status_code == 200
+        assert resolve_resp.json()["match_status"] == "manual_matched"
+
+        # Final state: matches row replaced (delete + insert) and points at the
+        # same file the curator saw on the card.
+        rows = db_conn.execute(
+            "SELECT library_file_id, match_tier, confidence_score "
+            "FROM matches WHERE identity_id = %s",
+            (identity.id,),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["library_file_id"] == lib_file.id
+        assert rows[0]["match_tier"] == "manual"
+        assert rows[0]["confidence_score"] == pytest.approx(1.0, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
