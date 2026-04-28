@@ -36,9 +36,19 @@ export function Badge({ children, variant = "default", className }: BadgeProps) 
 
 type MatchStatus = "matched" | "pending" | "conflict" | "unmatched" | string;
 
+// Maps each MatchStatus enum value (backend domain/enums.py) to a badge
+// variant. Resolved states share success/default; needs_review uses warning
+// so the artist sidebar uses the same semantic palette as the title pills
+// in TitlePanel (green = resolved, amber = review-needed, blue = pending).
 const matchStatusVariant: Record<string, BadgeVariant> = {
+  pending: "info",
+  needs_review: "warning",
+  auto_matched: "success",
+  manual_matched: "success",
+  auto_rejected: "default",
+  manual_rejected: "default",
+  // Legacy fall-throughs for any older callers that still emit these literals.
   matched: "success",
-  pending: "warning",
   conflict: "danger",
   unmatched: "default",
 };
