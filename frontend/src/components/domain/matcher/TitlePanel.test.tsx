@@ -51,6 +51,12 @@ function makeIdentity(overrides: Partial<QueueIdentity> = {}): QueueIdentity {
   };
 }
 
+// Distinct ids per row so each card is a unique React key when several
+// identities share an artist (the redesign's partition / sort tests need this).
+function makeIdentityWithId(idSuffix: string, overrides: Partial<QueueIdentity> = {}): QueueIdentity {
+  return makeIdentity({ id: `00000000-0000-0000-0000-0000000000${idSuffix}`, ...overrides });
+}
+
 function makeArtist(identities: QueueIdentity[]): QueueArtist {
   return {
     id: "00000000-0000-0000-0000-000000000001",
@@ -317,6 +323,27 @@ describe("TitlePanel proposed match + Approve", () => {
     expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
   });
 
+  it("hides Approve on a needs_review card whose triage_bucket is blocked", () => {
+    // Blocked items have nothing useful to one-click-approve; the proposed_match,
+    // if any, is by definition low-signal — don't tempt the curator into an
+    // accidental approve. Find File / Reject still work.
+    render(
+      <TitlePanel
+        artist={makeArtist([
+          makeIdentity({
+            triage_bucket: "blocked",
+            proposed_match: makeProposedMatch(),
+          }),
+        ])}
+        onFileSearch={vi.fn()}
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.queryByRole("button", { name: /^Approve$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Find File/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /^Reject$/i })).toBeDefined();
+  });
+
   it("disables Approve, Find File, and Reject when resolveIdentity is pending", () => {
     useResolveIdentityMock.mockReturnValue({ mutate: mutateMock, isPending: true });
     const onFileSearch = vi.fn();
@@ -340,5 +367,161 @@ describe("TitlePanel proposed match + Approve", () => {
     fireEvent.click(reject);
     expect(mutateMock).not.toHaveBeenCalled();
     expect(onFileSearch).not.toHaveBeenCalled();
+  });
+});
+
+describe("TitlePanel sectioning + sorting", () => {
+  beforeEach(() => {
+    // Each test starts with no persisted disclosure preference so default
+    // collapsed-resolved behaviour is deterministic.
+    window.localStorage.clear();
+  });
+
+  it("partitions identities into Needs Review and Resolved sections with counts", () => {
+    const identities = [
+      makeIdentityWithId("01", { match_status: "needs_review", original_title: "A — review" }),
+      makeIdentityWithId("02", { match_status: "auto_matched", original_title: "B — auto" }),
+      makeIdentityWithId("03", { match_status: "manual_matched", original_title: "C — manual" }),
+      makeIdentityWithId("04", { match_status: "auto_rejected", original_title: "D — auto-rej" }),
+      makeIdentityWithId("05", { match_status: "pending", original_title: "E — pending" }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    // Section headers carry a parenthesised count of items in their group.
+    expect(screen.getByRole("heading", { name: /Needs Review \(2\)/i })).toBeDefined();
+    expect(screen.getByRole("heading", { name: /Resolved \(3\)/i })).toBeDefined();
+  });
+
+  it("Resolved section is collapsed by default and toggles aria-expanded on click", () => {
+    const identities = [
+      makeIdentityWithId("01", { match_status: "needs_review", original_title: "Review me" }),
+      makeIdentityWithId("02", { match_status: "auto_matched", original_title: "Already done" }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    const disclosure = screen.getByRole("button", { name: /Resolved/i });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    // Body row not in document while collapsed.
+    expect(screen.queryByText("Already done")).toBeNull();
+    fireEvent.click(disclosure);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Already done")).toBeDefined();
+  });
+
+  it("persists the resolved-section collapse state to localStorage", () => {
+    const identities = [
+      makeIdentityWithId("01", { match_status: "needs_review" }),
+      makeIdentityWithId("02", { match_status: "auto_matched" }),
+    ];
+    const { unmount } = render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/i }));
+    expect(window.localStorage.getItem("matcher.resolved.collapsed")).toBe("false");
+    unmount();
+    // Remount: state should rehydrate as expanded.
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(
+      screen.getByRole("button", { name: /Resolved/i }).getAttribute("aria-expanded")
+    ).toBe("true");
+  });
+
+  it("sorts Needs Review by triage_bucket priority then confidence DESC", () => {
+    const identities = [
+      makeIdentityWithId("01", {
+        original_title: "Blocked-low",
+        triage_bucket: "blocked",
+        confidence_score: 30,
+      }),
+      makeIdentityWithId("02", {
+        original_title: "Quick-92",
+        triage_bucket: "quick_review",
+        confidence_score: 92,
+      }),
+      makeIdentityWithId("03", {
+        original_title: "Quick-70",
+        triage_bucket: "quick_review",
+        confidence_score: 70,
+      }),
+      makeIdentityWithId("04", {
+        original_title: "Attention-60",
+        triage_bucket: "needs_attention",
+        confidence_score: 60,
+      }),
+      makeIdentityWithId("05", {
+        original_title: "Pending-row",
+        match_status: "pending",
+        triage_bucket: "blocked",
+        confidence_score: null,
+      }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    // jsdom doesn't lay out, so we assert DOM source order via
+    // compareDocumentPosition: each subsequent title must follow the previous.
+    const expectedOrder = ["Quick-92", "Quick-70", "Attention-60", "Blocked-low", "Pending-row"];
+    const nodes = expectedOrder.map((t) => screen.getByText(t));
+    for (let i = 1; i < nodes.length; i++) {
+      const rel = nodes[i - 1].compareDocumentPosition(nodes[i]);
+      expect(rel & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+  });
+
+  it("shows a 'no review needed' message when only resolved items remain", () => {
+    const identities = [
+      makeIdentityWithId("01", {
+        match_status: "auto_matched",
+        original_title: "Done one",
+      }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByText(/Nothing left to review/i)).toBeDefined();
+  });
+
+  it("does not render the proposed-match block for resolved rows", () => {
+    const identities = [
+      makeIdentityWithId("01", {
+        match_status: "auto_matched",
+        original_title: "Auto match",
+        proposed_match: makeProposedMatch(),
+      }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    // Open the section so resolved rows are in the DOM.
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/i }));
+    expect(screen.queryByTestId("proposed-match")).toBeNull();
+  });
+
+  it("renders the resolved-state breakdown in the section header", () => {
+    const identities = [
+      makeIdentityWithId("01", { match_status: "auto_matched" }),
+      makeIdentityWithId("02", { match_status: "auto_matched" }),
+      makeIdentityWithId("03", { match_status: "manual_matched" }),
+      makeIdentityWithId("04", { match_status: "manual_rejected" }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    const header = screen.getByRole("button", { name: /Resolved/i });
+    expect(header.textContent).toContain("2 auto");
+    expect(header.textContent).toContain("1 manual");
+    expect(header.textContent).toContain("1 rejected");
   });
 });
