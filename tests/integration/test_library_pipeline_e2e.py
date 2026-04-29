@@ -182,6 +182,8 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
             audio=AudioMetadata(
                 artist_mbid="mbid-metallica-lib",
                 track_title=normalize_title(target_title),
+                artist_name="Metallica",
+                normalized_artist_name="metallica",
             ),
         )
         PgLibraryFileRepository(conn).upsert(lib_file)

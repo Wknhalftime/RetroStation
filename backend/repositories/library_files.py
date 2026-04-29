@@ -25,15 +25,16 @@ class LibraryFileRepository(ABC):
     def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]: ...
 
     @abstractmethod
-    def search_by_artist_name(
-        self, artist_name: str, limit: int = 100
+    def get_by_normalized_artist_name(
+        self, normalized_name: str, limit: int = 100
     ) -> list[LibraryFile]:
-        """Return library files whose stored artist_name field contains the
-        given search term as a case-insensitive substring. The implementation
-        lowercases and strips the search term internally — callers should pass
-        the original (un-normalized) artist name so that punctuation
-        (e.g. "AC/DC") is not stripped before the substring match.
-        Pre-filter step — the calling strategy re-scores results with rapidfuzz.
+        """Return library files whose stored ``normalized_artist_name`` is
+        EXACTLY equal to the given normalized name. Callers pass the broadcast
+        artist's ``normalized_name`` directly — both sides are produced by
+        ``backend.services.normalization.normalize_artist`` so equality is
+        well-defined. Substring matching was deliberately retired to enforce
+        the no-cross-artist invariant in the Resolution Center; recall trade-off
+        (tag spelling drift) is intentional.
         """
         ...
 

@@ -137,7 +137,16 @@ def _insert_library_file(
     recording_mbid: str | None = None,
     recording_id: str | None = None,
     work_id: str | None = None,
+    artist_name: str | None = "Review Artist",
+    normalized_artist_name: str | None = "review artist",
 ) -> LibraryFile:
+    """The /queue endpoint joins library_files.normalized_artist_name against
+    the locked broadcast_artists.normalized_name as the locked-artist guard.
+    Defaults match `_seed_review_chain`'s artist_name="Review Artist" so the
+    common case "I just want any library file" continues to satisfy the JOIN.
+    Pass an explicit normalized_artist_name when seeding a wrong-artist file
+    or pairing the file with a non-default broadcast artist.
+    """
     lf = LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4().hex}.flac",
@@ -150,6 +159,8 @@ def _insert_library_file(
             track_title=track_title,
             release_title=release_title,
             recording_mbid=recording_mbid,
+            artist_name=artist_name,
+            normalized_artist_name=normalized_artist_name,
         ),
     )
     result = PgLibraryFileRepository(conn).upsert(lf)
@@ -1617,6 +1628,48 @@ class TestProposedMatch:
         assert qi["confidence_score"] == pytest.approx(82.0, abs=1e-4)
         assert qi["proposed_match"]["library_file_id"] == str(winner.id)
         assert qi["proposed_match"]["track_title"] == "Winner"
+
+    def test_wrong_artist_match_is_masked_to_none(self, client, db_conn):
+        """Locked-artist invariant: a persisted match pointing at a library
+        file whose normalized_artist_name disagrees with the broadcast
+        artist's normalized_name must surface as proposed_match=None. The
+        identity itself stays in the queue (LEFT JOIN, not INNER); the
+        cross-artist file is suppressed.
+
+        Regression test for the original Hendrix/U2 bug — the data shape
+        the bug produced (matches.library_file_id pointing at a U2 file
+        under an artist named Jimi Hendrix) is replayed here.
+        """
+        _, _, artist, identity, _ = _seed_review_chain(
+            db_conn, artist_name="Jimi Hendrix",
+        )
+        # Cross-artist library file (U2's "Star Spangled Banner") seeded
+        # under a Jimi Hendrix identity — exactly what the buggy matcher
+        # could produce before this fix.
+        wrong_artist_file = _insert_library_file(
+            db_conn,
+            track_title="The Star Spangled Banner",
+            artist_name="U2",
+            normalized_artist_name="u2",
+        )
+        _insert_match_row(
+            db_conn,
+            identity,
+            confidence_score=77.0,
+            library_file_id=wrong_artist_file.id,
+            match_tier="local_file_fuzzy",
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1, "identity stays visible — only proposal masked"
+        qi = items[0]["identities"][0]
+        assert qi["id"] == str(identity.id)
+        assert qi["proposed_match"] is None
+        # confidence_score still surfaces from the matches row so the curator
+        # can see the matcher tried; only the file pointer is suppressed.
+        assert qi["confidence_score"] == pytest.approx(77.0, abs=1e-4)
 
     def test_approve_via_resolve_identity_uses_queue_proposed_match(
         self, client, db_conn

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
@@ -181,7 +181,21 @@ class QueueIdentity(BaseModel):
     triage_bucket: TriageBucket
     reason_code: str | None = None
     reason_detail: str | None = None
-    proposed_match: ProposedMatch | None = None
+    proposed_match: ProposedMatch | None = Field(
+        default=None,
+        description=(
+            "Best-scoring library_file the matcher chose for this identity, "
+            "or null. Reasons it can be null: (1) the matcher has not produced "
+            "a candidate yet; (2) no library_file is currently linked to the "
+            "persisted match row (orphan FK); (3) Resolution Center safety net "
+            "— the persisted match would point at a different artist than the "
+            "locked one and is being suppressed. (3) is additive, not breaking; "
+            "membership and `total` are unchanged. Note: proposed_match may "
+            "remain null when a lower-ranked artist-valid match row exists; "
+            "the queue picks the highest-scored row per identity and treats a "
+            "wrong-artist row as no proposal."
+        ),
+    )
 
 
 class QueueArtist(BaseModel):
@@ -246,6 +260,12 @@ async def get_matching_queue(
 
     The bucket filter (when supplied) is materialised in SQL via a CTE so that
     LIMIT/OFFSET pagination and `total` both reflect the filtered set.
+
+    Locked-artist invariant: a persisted match row whose library_file's
+    normalized_artist_name disagrees with the locked broadcast_artist's
+    normalized_name is suppressed by the LEFT JOIN predicate. The identity
+    still appears in the queue; only proposed_match is masked to null. See
+    QueueIdentity.proposed_match for the full enumeration of null reasons.
     """
     page_cur = await conn.execute(
         f"""
@@ -302,6 +322,15 @@ async def get_matching_queue(
     total = artist_rows[0]["_total"]
     artist_ids = [row["id"] for row in artist_rows]
 
+    # Locked-artist invariant for the Resolution Center: a persisted match
+    # whose library_files.normalized_artist_name disagrees with the locked
+    # broadcast_artists.normalized_name is suppressed by failing the LEFT JOIN
+    # predicate. The identity stays visible (LEFT JOIN ⇒ row survives), but
+    # ProposedMatch is built only when library_files_joined_id is non-null,
+    # so the curator sees no proposal rather than a wrong-artist proposal.
+    # SQL NULL note: `=` on a NULL on either side yields NULL, not TRUE — so
+    # NULL normalized_artist_name on either side is also fail-closed (same
+    # policy as _filter_to_artist in identity_matching_service).
     identities_cur = await conn.execute(
         """
         SELECT DISTINCT ON (ti.id)
@@ -317,8 +346,10 @@ async def get_matching_queue(
                lf.release_title,
                lf.recording_mbid
         FROM track_identities ti
-        LEFT JOIN matches       m  ON m.identity_id   = ti.id
-        LEFT JOIN library_files lf ON lf.id           = m.library_file_id
+        JOIN broadcast_artists ba   ON ba.id = ti.broadcast_artist_id
+        LEFT JOIN matches       m   ON m.identity_id   = ti.id
+        LEFT JOIN library_files lf  ON lf.id           = m.library_file_id
+                                   AND lf.normalized_artist_name = ba.normalized_name
         WHERE ti.broadcast_artist_id = ANY(%s)
         ORDER BY ti.id,
                  m.confidence_score DESC NULLS LAST,
