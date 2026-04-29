@@ -70,6 +70,19 @@ class IdentityMatchingStrategy(Protocol):
     ) -> IdentityMatchResult | None: ...
 
 
+def _filter_to_artist(
+    candidates: list[LibraryFile], artist_normalized_name: str,
+) -> list[LibraryFile]:
+    # Fail closed: a candidate with audio.normalized_artist_name=None is
+    # dropped, never accepted as a wildcard match. Do not relax this rule —
+    # null-as-wildcard would silently re-open the cross-artist hole the
+    # Resolution Center invariant exists to close.
+    return [
+        f for f in candidates
+        if f.audio.normalized_artist_name == artist_normalized_name
+    ]
+
+
 def _candidate_canonical_title(f: LibraryFile) -> str:
     """Return the library file's canonical-normalized title for scoring.
 
@@ -327,7 +340,10 @@ class ResolvedArtistMbidStrategy:
 
         if real_mbid:
             # Step A — local library lookup by artist MBID.
-            candidate_files = self._library_file_repo.get_by_artist_mbid(real_mbid)
+            candidate_files = _filter_to_artist(
+                self._library_file_repo.get_by_artist_mbid(real_mbid),
+                artist.normalized_name,
+            )
             if candidate_files:
                 local_result = _score_candidates(
                     identity.normalized_title,
@@ -343,9 +359,11 @@ class ResolvedArtistMbidStrategy:
                 # trustworthy label, and its candidate is anchored on the
                 # resolved artist MBID rather than a downstream MB recording
                 # hit (which can pull in cross-artist files when a local tag
-                # carries someone else's recording_mbid). Deliberate product
-                # choice; do not "fix" without discussion.
-                mb_result = self._mb_recording_search(real_mbid, identity)
+                # carries someone else's recording_mbid — _filter_to_artist
+                # in _mb_recording_search now enforces that as a hard guard
+                # rather than a comment). Deliberate product choice; do not
+                # "fix" without discussion.
+                mb_result = self._mb_recording_search(real_mbid, identity, artist)
                 if (
                     mb_result is not None
                     and mb_result.confidence_score > local_result.confidence_score
@@ -354,19 +372,20 @@ class ResolvedArtistMbidStrategy:
                 return local_result
 
             # Step B — MB recording search when no local files found by MBID.
-            mb_result = self._mb_recording_search(real_mbid, identity)
+            mb_result = self._mb_recording_search(real_mbid, identity, artist)
             if mb_result is not None:
                 return mb_result
 
         # Step C — name-based fallback.
         # Fires when real_mbid is None (local-only artist with no MB link yet),
-        # or when both A and B yield nothing.
-        # Uses original_name so the DB LOWER(TRIM(artist_name)) LIKE %needle%
-        # search preserves punctuation — e.g. "AC/DC" → "ac/dc" correctly
-        # matches library files stored as "AC/DC", whereas normalized_name
-        # "ac dc" would not.
-        name_candidates = self._library_file_repo.search_by_artist_name(
-            artist.original_name
+        # or when both A and B yield nothing. Uses normalized_name (not
+        # original_name): the repo now requires exact equality on
+        # library_files.normalized_artist_name, both produced by
+        # backend.services.normalization.normalize_artist. The previous
+        # original_name+substring path silently allowed cross-artist matches
+        # (e.g. files tagged "feat. <artist>") and has been retired.
+        name_candidates = self._library_file_repo.get_by_normalized_artist_name(
+            artist.normalized_name
         )
         if name_candidates:
             return _score_candidates(
@@ -391,13 +410,15 @@ class ResolvedArtistMbidStrategy:
         self,
         mbid: str,
         identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
     ) -> IdentityMatchResult | None:
         """Return the best-scored local file across ALL matching MB recordings.
 
         Collects candidates from every MB recording that resolves to a local
         file, then scores them together — so a later recording that scores
         better than an earlier one is still chosen. Returns None only when
-        no MB recording maps to any local file.
+        no MB recording maps to any local file (or all candidates are filtered
+        out by the locked-artist guard).
         """
         recordings = self._mb_client.search_recording(
             artist_mbid=mbid, title=identity.normalized_title
@@ -416,11 +437,15 @@ class ResolvedArtistMbidStrategy:
                     continue
                 seen.add(lib_file.id)
                 all_candidates.append(lib_file)
-        if not all_candidates:
+        # A local file can be tagged with someone else's recording_mbid (cover
+        # versions, mistags, MB recording merges). Drop anything whose
+        # normalized_artist_name does not match the locked broadcast artist.
+        filtered = _filter_to_artist(all_candidates, artist.normalized_name)
+        if not filtered:
             return None
         return _score_candidates(
             identity.normalized_title,
-            all_candidates,
+            filtered,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             strong_match_threshold=self._strong_match_threshold,
         )
@@ -453,8 +478,14 @@ class BroadcastToLocalStrategy:
         }:
             return None
 
-        candidate_files = self._library_file_repo.search_by_artist_name(
-            artist.original_name
+        # Repo enforces equality on normalized_artist_name; _filter_to_artist
+        # is defense-in-depth so a future query loosening can't quietly
+        # reintroduce cross-artist proposals.
+        candidate_files = _filter_to_artist(
+            self._library_file_repo.get_by_normalized_artist_name(
+                artist.normalized_name
+            ),
+            artist.normalized_name,
         )
         if not candidate_files:
             return IdentityMatchResult(

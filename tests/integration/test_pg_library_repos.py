@@ -309,6 +309,7 @@ def _make_file_named(
     *,
     file_path: str,
     artist_name: str | None,
+    normalized_artist_name: str | None = None,
     recording_mbid: str | None = None,
 ) -> LibraryFile:
     return LibraryFile(
@@ -319,30 +320,53 @@ def _make_file_named(
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
             artist_name=artist_name,
+            normalized_artist_name=normalized_artist_name,
             recording_mbid=recording_mbid,
         ),
     )
 
 
-def test_search_by_artist_name_pg(migrated_db: str) -> None:
+def test_get_by_normalized_artist_name_pg(migrated_db: str) -> None:
+    """Equality on normalized_artist_name — substring overlap must NOT match.
+
+    The Resolution Center invariant requires that locking on artist X never
+    surfaces a file by artist Y. The repo therefore enforces equality, not
+    LIKE-substring; "Prince Buster" no longer leaks into a "prince" lookup.
+    """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFileRepository(conn)
         seeds = [
-            ("/p/1.mp3", "Prince", "rec-a"),
-            ("/p/2.mp3", "Prince Buster", None),
-            ("/p/3.mp3", "Madonna", None),
+            ("/p/1.mp3", "Prince",        "prince",        "rec-a"),
+            ("/p/2.mp3", "Prince Buster", "prince buster", None),
+            ("/p/3.mp3", "Madonna",       "madonna",       None),
         ]
-        for path, name, mbid in seeds:
+        for path, name, norm, mbid in seeds:
             repo.upsert(
-                _make_file_named(file_path=path, artist_name=name, recording_mbid=mbid),
+                _make_file_named(
+                    file_path=path,
+                    artist_name=name,
+                    normalized_artist_name=norm,
+                    recording_mbid=mbid,
+                ),
             )
         conn.commit()
 
-        hits = repo.search_by_artist_name("prince", limit=10)
-        assert {h.audio.artist_name for h in hits} == {"Prince", "Prince Buster"}
+        hits = repo.get_by_normalized_artist_name("prince", limit=10)
+        assert {h.audio.artist_name for h in hits} == {"Prince"}
 
-        # Limit is honored.
-        assert len(repo.search_by_artist_name("prince", limit=1)) == 1
+        # Empty input is rejected up-front.
+        assert repo.get_by_normalized_artist_name("", limit=10) == []
+
+        # Limit is honored when multiple rows match exactly.
+        repo.upsert(
+            _make_file_named(
+                file_path="/p/4.mp3",
+                artist_name="Prince",
+                normalized_artist_name="prince",
+            ),
+        )
+        conn.commit()
+        assert len(repo.get_by_normalized_artist_name("prince", limit=1)) == 1
 
 
 def test_get_by_recording_mbid_pg(migrated_db: str) -> None:

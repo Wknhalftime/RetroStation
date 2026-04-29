@@ -277,31 +277,19 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def search_by_artist_name(
-        self, artist_name: str, limit: int = 100,
+    def get_by_normalized_artist_name(
+        self, normalized_name: str, limit: int = 100,
     ) -> list[LibraryFile]:
-        # Empty needle would become "%%" and match every row, poisoning the
-        # fuzzy tier with unrelated candidates. Reject up-front.
-        stripped = artist_name.lower().strip()
-        if not stripped:
+        # Empty input would never legitimately match; reject up-front so a
+        # NULL/empty broadcast artist normalization can't poison results.
+        if not normalized_name:
             return []
-        # Escape LIKE metacharacters in the user-supplied needle so an artist
-        # name literally containing `%` or `_` (e.g. "50%") doesn't silently
-        # become a wildcard that pulls in unrelated rows. ESCAPE '\' pairs with
-        # the explicit backslash escapes below.
-        escaped = (
-            stripped.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
-        needle = f"%{escaped}%"
-        # Prefer exact artist-name matches first, then a stable tie-breaker so
-        # the LIMIT is deterministic and (for prolific artists) the best
-        # candidates are more likely to survive the cap.
         rows = self._conn.execute(
-            r"""SELECT * FROM library_files
-               WHERE LOWER(TRIM(artist_name)) LIKE %s ESCAPE '\'
-               ORDER BY (LOWER(TRIM(artist_name)) = %s) DESC, id ASC
+            """SELECT * FROM library_files
+               WHERE normalized_artist_name = %s
+               ORDER BY id ASC
                LIMIT %s""",
-            (needle, stripped, limit),
+            (normalized_name, limit),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

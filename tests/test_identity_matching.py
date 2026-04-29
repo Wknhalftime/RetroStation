@@ -127,6 +127,8 @@ def test_tier2_mbid_graph_exact_match() -> None:
         audio=AudioMetadata(
             artist_mbid=canonical_mbid,
             track_title=track_title,
+            artist_name=artist_name,
+            normalized_artist_name=normalize_artist(artist_name),
         ),
     )
     library_file_repo.upsert(lib_file)

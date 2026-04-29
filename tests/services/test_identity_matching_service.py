@@ -57,15 +57,21 @@ def _lib_file(
     artist_mbid: str | None = None,
     track_title: str | None = None,
     normalized_title: str | None = None,
+    artist_name: str | None = "Metallica",
+    normalized_artist_name: str | None = "metallica",
     work_id: str | None = None,
     recording_id: str | None = None,
 ) -> LibraryFile:
     """Build a LibraryFile fixture matching how library_scan_service populates rows.
 
     When normalized_title is omitted, default-compute it from track_title via
-    normalize_title() — exactly what the scanner does at ingest. Tests that
-    want to exercise the legacy-no-precomputed-normalized-title path can pass
-    normalized_title="" or override per-test.
+    normalize_title() — exactly what the scanner does at ingest.
+
+    Defaults artist_name="Metallica" / normalized_artist_name="metallica" so
+    fixtures interop with the locked-artist guard added to the matching
+    strategies (see backend/services/identity_matching_service.py
+    _filter_to_artist). Tests in this file all exercise Metallica scenarios;
+    pass an override for cross-artist cases.
     """
     if normalized_title is None and track_title is not None:
         normalized_title = normalize_title(track_title)
@@ -81,6 +87,8 @@ def _lib_file(
             artist_mbid=artist_mbid,
             track_title=track_title,
             normalized_title=normalized_title,
+            artist_name=artist_name,
+            normalized_artist_name=normalized_artist_name,
         ),
     )
 
