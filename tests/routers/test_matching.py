@@ -1465,6 +1465,85 @@ class TestMatchingRun:
         )
         db_conn.commit()
 
+    def test_perform_reset_nulls_reason_metadata_on_reset_rows(
+        self, client, db_conn, monkeypatch
+    ):
+        """When a row transitions back to PENDING, match_tier / reason_code /
+        reason_detail must be cleared so PENDING never carries stale matcher
+        metadata. Matches the convention in resolve_artist's cascade
+        ([matching.py:562-575](backend/routers/matching.py:562)) — "NULL =
+        no reason for pending" is a project-wide invariant.
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        station = _insert_station(db_conn, call_letters="KRSN")
+        playlist = _insert_playlist(db_conn, station)
+        # Artist with stale reason data, NEEDS_REVIEW so it's in the cohort.
+        artist = _insert_artist(
+            db_conn,
+            original_name="Stale Reasons",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        db_conn.execute(
+            "UPDATE broadcast_artists SET reason_code = %s, reason_detail = %s WHERE id = %s",
+            ("LOW_CONFIDENCE", "stale artist reason", artist.id),
+        )
+        db_conn.commit()
+
+        # Identity in NEEDS_REVIEW with stale match_tier + reason fields.
+        identity = _insert_identity(
+            db_conn, artist,
+            original_title="Stale Title",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        db_conn.execute(
+            """
+            UPDATE track_identities
+               SET match_tier    = %s,
+                   reason_code   = %s,
+                   reason_detail = %s
+             WHERE id = %s
+            """,
+            ("musicbrainz_id_search", "LOW_CONFIDENCE", "stale identity reason", identity.id),
+        )
+        db_conn.commit()
+        _insert_event(db_conn, playlist, identity)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+
+        # Identity row: status flipped + all three metadata fields nulled.
+        id_row = db_conn.execute(
+            """
+            SELECT match_status, match_tier, reason_code, reason_detail
+              FROM track_identities WHERE id = %s
+            """,
+            (identity.id,),
+        ).fetchone()
+        assert id_row is not None
+        assert id_row["match_status"] == "pending"
+        assert id_row["match_tier"] is None
+        assert id_row["reason_code"] is None
+        assert id_row["reason_detail"] is None
+
+        # Artist row: status flipped + reason_code/reason_detail nulled.
+        # broadcast_artists has no match_tier column, so we don't assert on it.
+        a_row = db_conn.execute(
+            """
+            SELECT match_status, reason_code, reason_detail
+              FROM broadcast_artists WHERE id = %s
+            """,
+            (artist.id,),
+        ).fetchone()
+        assert a_row is not None
+        assert a_row["match_status"] == "pending"
+        assert a_row["reason_code"] is None
+        assert a_row["reason_detail"] is None
+
     def test_response_shape_has_nested_reset_and_enqueue_keys(self, client):
         """Stable contract: keys present even when zero. No top-level
         `count` or `message` (legacy fields dropped per plan §F).

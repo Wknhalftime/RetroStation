@@ -861,13 +861,21 @@ async def _reset_identities(conn: AsyncConnection[Any]) -> tuple[int, int]:
     before this run. The IS NOT NULL guard on identity_id is defense-in-depth
     against pre-0003-migration deployments that lack the XOR CHECK constraint.
 
+    Also nulls match_tier, reason_code, reason_detail on the reset rows so
+    PENDING never carries stale matcher metadata. Mirrors the convention in
+    resolve_artist's cascade (matching.py:562-575) — "NULL = no reason for
+    pending" is a project-wide invariant, not an opt-in.
+
     Returns (identities_reset, identity_matches_deleted).
     """
     cur = await conn.execute(
         """
         WITH reset_identities AS (
             UPDATE track_identities
-               SET match_status = %s
+               SET match_status  = %s,
+                   match_tier    = NULL,
+                   reason_code   = NULL,
+                   reason_detail = NULL
              WHERE match_status = ANY(%s)
             RETURNING id
         ),
@@ -895,13 +903,23 @@ async def _reset_artists(conn: AsyncConnection[Any]) -> tuple[int, int]:
     0003_matching_layer.sql:17-18 ensures identity-keyed match rows are
     untouched.
 
+    Also nulls reason_code / reason_detail on the reset rows. broadcast_artists
+    has no match_tier column (per migration 0001 — that lives on
+    track_identities and matches only), so only the two reason columns need
+    nulling here. artist_candidates is intentionally preserved: the JSONB
+    payload of MB search results is potentially expensive to recompute and
+    has no "stale" semantics — the next matcher run overwrites it before the
+    curator sees it.
+
     Returns (artists_reset, artist_matches_deleted).
     """
     cur = await conn.execute(
         """
         WITH reset_artists AS (
             UPDATE broadcast_artists
-               SET match_status = %s
+               SET match_status  = %s,
+                   reason_code   = NULL,
+                   reason_detail = NULL
              WHERE match_status = ANY(%s)
             RETURNING id
         ),
