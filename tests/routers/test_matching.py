@@ -1544,6 +1544,75 @@ class TestMatchingRun:
         assert a_row["reason_code"] is None
         assert a_row["reason_detail"] is None
 
+    async def test_release_run_lock_completes_under_cancellation(
+        self, migrated_db: str
+    ):
+        """Cancellation safety contract for `_release_run_lock`: when the
+        calling task is cancelled mid-await, the unlock SQL must still
+        reach Postgres before the function returns. Otherwise a request
+        cancelled during teardown would leak the session-scoped advisory
+        lock onto the pooled connection.
+
+        We exercise this directly — not through the FastAPI endpoint —
+        because forcing cancellation timing through the TestClient would
+        be fragile. Two independent psycopg connections stand in for
+        "request connection (with the lock)" and "external observer".
+        """
+        import asyncio as _asyncio
+
+        from psycopg import AsyncConnection
+        from psycopg.rows import dict_row
+
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+            _release_run_lock,
+        )
+
+        conn_held = await AsyncConnection.connect(migrated_db, row_factory=dict_row)
+        conn_observer = await AsyncConnection.connect(migrated_db, row_factory=dict_row)
+        try:
+            # Acquire on conn_held, mirroring what _try_acquire_run_lock does.
+            await conn_held.execute(
+                "SELECT pg_advisory_lock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            await conn_held.commit()
+
+            # Schedule release as a task and immediately cancel it. The yield
+            # via sleep(0) lets the task reach its first await before cancel
+            # arrives, exercising the asyncio.shield + uncancel + re-raise
+            # path inside _release_run_lock.
+            task = _asyncio.create_task(_release_run_lock(conn_held))
+            await _asyncio.sleep(0)
+            task.cancel()
+
+            with pytest.raises(_asyncio.CancelledError):
+                await task
+
+            # Despite cancellation, the unlock must have completed: a
+            # different session can now acquire.
+            cur = await conn_observer.execute(
+                "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            row = await cur.fetchone()
+            assert row is not None
+            assert row["acquired"] is True, (
+                "Lock was not released by _release_run_lock under cancellation; "
+                "session-scoped advisory lock would leak on pooled connection."
+            )
+
+            # Cleanup: release the lock we just acquired on conn_observer.
+            await conn_observer.execute(
+                "SELECT pg_advisory_unlock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            await conn_observer.commit()
+        finally:
+            await conn_held.close()
+            await conn_observer.close()
+
     def test_response_shape_has_nested_reset_and_enqueue_keys(self, client):
         """Stable contract: keys present even when zero. No top-level
         `count` or `message` (legacy fields dropped per plan §F).

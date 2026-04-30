@@ -838,32 +838,52 @@ async def _release_run_lock(conn: AsyncConnection[Any]) -> None:
     ``_try_acquire_run_lock``. MUST be called in a finally block whenever
     the acquire returned True.
 
-    Cancellation safety: the unlock SQL is wrapped in ``asyncio.shield`` so
-    that if this coroutine is cancelled (e.g., the client disconnects
-    mid-handler), the underlying ``conn.execute`` still runs to completion
-    in the background — Postgres receives the unlock even though we
-    propagate ``CancelledError`` to our caller. Without the shield, a
-    cancellation arriving during the unlock await would leave the
-    session-scoped lock held on the pooled connection, blocking every
-    subsequent /matching/run on that connection until it's recycled.
-
-    ``CancelledError`` is intentionally NOT caught — Python 3.8+ classifies
-    it under ``BaseException`` (not ``Exception``), so ``except Exception``
-    correctly lets it propagate. Catching it would mask cancellation,
-    which the FastAPI/asyncio runtime relies on for clean teardown.
+    Cancellation safety contract: the unlock query is wrapped as a separate
+    task and awaited via ``asyncio.shield`` so cancellation of the calling
+    task cannot abort the underlying ``conn.execute``. If our task IS
+    cancelled mid-await, we ``uncancel`` ourselves, await the inner task
+    to actual completion (so the connection is not returned to the pool
+    mid-query), then re-raise ``CancelledError`` so the framework still
+    sees the cancellation. This guarantees Postgres receives the unlock
+    BEFORE the FastAPI dependency cleanup releases the connection — without
+    this, a cancellation arriving during the unlock would leak the
+    session-scoped lock onto the pooled connection, blocking every
+    subsequent ``/matching/run`` drawing that connection until it's
+    recycled.
 
     Non-cancellation failures are logged but not re-raised — a leaked lock
     is an operational concern, but masking the original handler response
     with an unlock error would be worse UX.
     """
-    try:
-        await asyncio.shield(
-            conn.execute(
-                "SELECT pg_advisory_unlock(%s, %s)",
-                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
-            )
+    inner = asyncio.create_task(
+        conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
         )
-    except Exception as exc:  # noqa: BLE001 — top-level boundary; CancelledError still propagates
+    )
+    try:
+        await asyncio.shield(inner)
+    except asyncio.CancelledError:
+        # We were cancelled mid-await. The shielded inner task is still
+        # running; wait for it to actually complete before returning so
+        # the connection isn't released to the pool mid-query. Uncancel
+        # is required in 3.11+ so the second await can proceed without
+        # immediately re-raising; we then re-raise CancelledError to
+        # propagate the cancellation upward. ``current_task`` is None
+        # only outside the asyncio loop — in our request-handler context
+        # it is always a Task, but we guard defensively.
+        current = asyncio.current_task()
+        if current is not None:
+            current.uncancel()
+        try:
+            await inner
+        except Exception as exc:  # noqa: BLE001 — best-effort post-cancel cleanup
+            logger.warning(
+                "matching_run_lock_release_failed_post_cancel",
+                error=repr(exc),
+            )
+        raise
+    except Exception as exc:  # noqa: BLE001 — top-level boundary; CancelledError handled above
         logger.warning(
             "matching_run_lock_release_failed",
             error=repr(exc),
