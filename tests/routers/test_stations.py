@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
-from uuid import uuid4
+from datetime import UTC, date, datetime, timedelta
+from uuid import UUID, uuid4
 
 import psycopg
+import pytest
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
@@ -124,6 +125,83 @@ def _bulk_insert_events(
             event_params,
         )
     conn.commit()
+
+
+def _insert_artist_and_identity(
+    conn: psycopg.Connection,
+    artist_name: str,
+    title: str,
+    artist_status: MatchStatus = MatchStatus.PENDING,
+    identity_status: MatchStatus = MatchStatus.PENDING,
+) -> tuple[BroadcastArtist, BroadcastTrackIdentity]:
+    """Create a broadcast artist + track identity with configurable match statuses.
+
+    Returns the stored (artist, identity) pair so callers can attach play events
+    to specific identities without re-querying.  Uses upsert so the returned
+    objects always carry the IDs that are actually in the database.
+    """
+    artist = BroadcastArtist(
+        id=uuid4(),
+        original_name=artist_name,
+        normalized_name=artist_name.lower(),
+        match_status=artist_status,
+    )
+    stored_artist = PgBroadcastArtistRepository(conn).upsert(artist)
+
+    identity = BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=stored_artist.id,
+        original_title=title,
+        normalized_title=title.lower(),
+        normalized_signature=f"{artist_name.lower()}:{title.lower()}",
+        match_status=identity_status,
+    )
+    stored_identity = PgBroadcastTrackIdentityRepository(conn).upsert(identity)
+    conn.commit()
+    return stored_artist, stored_identity
+
+
+def _insert_play_events_for_identity(
+    conn: psycopg.Connection,
+    identity: BroadcastTrackIdentity,
+    playlist: BroadcastPlaylist,
+    n: int,
+) -> None:
+    """Insert *n* play events for an existing identity in a given playlist.
+
+    Each event gets a unique played_at (second-level offsets from a fixed base)
+    so the (identity_id, playlist_id, played_at) unique constraint is satisfied.
+    Callers must pass n ≤ 59.
+    """
+    repo = PgBroadcastPlayEventRepository(conn)
+    base = datetime(2001, 1, 1, tzinfo=UTC)
+    for i in range(n):
+        repo.create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=base + timedelta(seconds=i),
+            )
+        )
+    conn.commit()
+
+
+def _insert_identity_with_events(
+    conn: psycopg.Connection,
+    playlist: BroadcastPlaylist,
+    artist_name: str,
+    title: str,
+    n_events: int = 1,
+    artist_status: MatchStatus = MatchStatus.PENDING,
+    identity_status: MatchStatus = MatchStatus.PENDING,
+) -> BroadcastTrackIdentity:
+    """Convenience wrapper: create artist + identity + n play events in one call."""
+    _, identity = _insert_artist_and_identity(
+        conn, artist_name, title, artist_status, identity_status
+    )
+    _insert_play_events_for_identity(conn, identity, playlist, n_events)
+    return identity
 
 
 class TestListStations:
@@ -425,3 +503,280 @@ class TestStationExportM3u:
             json={"date": "2001-03-15"},
         )
         assert resp.status_code == 404
+
+
+class TestMissingMatchesReport:
+    """Integration tests for GET /api/v1/stations/{id}/reports/missing-matches."""
+
+    def _url(self, station_id: UUID, qs: str = "") -> str:
+        base = f"/api/v1/stations/{station_id}/reports/missing-matches"
+        return f"{base}{qs}" if qs else base
+
+    # ------------------------------------------------------------------
+    # Guard rails
+    # ------------------------------------------------------------------
+
+    def test_not_found(self, client):
+        """Unknown station → 404."""
+        resp = client.get(self._url(uuid4()))
+        assert resp.status_code == 404
+
+    def test_empty_station(self, client, db_conn):
+        """Station with no play events returns an empty page, not an error."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["items"] == []
+
+    # ------------------------------------------------------------------
+    # Inclusion / exclusion logic
+    # ------------------------------------------------------------------
+
+    def test_matched_statuses_excluded(self, client, db_conn):
+        """AUTO_MATCHED and MANUAL_MATCHED identities must not appear.
+
+        Both the identity *and* its artist must be matched — if the artist is
+        still PENDING the OR condition would correctly surface the track.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(
+            db_conn, playlist, "Artist A", "Song A",
+            n_events=3,
+            artist_status=MatchStatus.AUTO_MATCHED,
+            identity_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_identity_with_events(
+            db_conn, playlist, "Artist B", "Song B",
+            n_events=3,
+            artist_status=MatchStatus.MANUAL_MATCHED,
+            identity_status=MatchStatus.MANUAL_MATCHED,
+        )
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_all_unresolved_statuses_included(self, client, db_conn):
+        """PENDING, NEEDS_REVIEW, AUTO_REJECTED, MANUAL_REJECTED all appear."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i, status in enumerate([
+            MatchStatus.PENDING,
+            MatchStatus.NEEDS_REVIEW,
+            MatchStatus.AUTO_REJECTED,
+            MatchStatus.MANUAL_REJECTED,
+        ]):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i}", "Song",
+                n_events=1, identity_status=status,
+            )
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 4
+
+    def test_artist_status_triggers_inclusion(self, client, db_conn):
+        """A track with AUTO_MATCHED identity but a PENDING artist must appear.
+
+        The OR condition on artist match_status ensures that an unresolved artist
+        surfaces the track even when the identity pipeline has already matched it.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(
+            db_conn, playlist, "Pending Artist", "Matched Song",
+            n_events=5,
+            artist_status=MatchStatus.PENDING,
+            identity_status=MatchStatus.AUTO_MATCHED,
+        )
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["artist_name"] == "Pending Artist"
+
+    def test_response_shape(self, client, db_conn):
+        """Every required field is present on each item."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(db_conn, playlist, "Artist A", "Song A", n_events=1)
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert set(item.keys()) == {
+            "identity_id", "artist_name", "track_title",
+            "track_status", "play_count", "impact_pct",
+        }
+
+    # ------------------------------------------------------------------
+    # Play counts and impact percentage
+    # ------------------------------------------------------------------
+
+    def test_play_count_correct(self, client, db_conn):
+        """play_count reflects the total number of play events for that identity."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(
+            db_conn, playlist, "The Clash", "London Calling", n_events=7,
+        )
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["play_count"] == 7
+        assert item["impact_pct"] == pytest.approx(100.0, abs=0.01)
+
+    def test_impact_pct_formula(self, client, db_conn):
+        """impact_pct = (identity plays / total plays) * 100, verified numerically.
+
+        4 plays + 1 play → 80 % and 20 % respectively.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(db_conn, playlist, "Artist A", "Big Hit", n_events=4)
+        _insert_identity_with_events(db_conn, playlist, "Artist B", "One Off", n_events=1)
+
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        by_artist = {i["artist_name"]: i for i in resp.json()["items"]}
+        assert by_artist["Artist A"]["impact_pct"] == pytest.approx(80.0, abs=0.01)
+        assert by_artist["Artist B"]["impact_pct"] == pytest.approx(20.0, abs=0.01)
+
+    def test_impact_pct_sums_to_100(self, client, db_conn):
+        """impact_pct values across all identities sum to ~100 %."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i in range(5):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=i + 1,
+            )
+        resp = client.get(self._url(station.id) + "?limit=500")
+        assert resp.status_code == 200
+        total_impact = sum(item["impact_pct"] for item in resp.json()["items"])
+        assert total_impact == pytest.approx(100.0, abs=0.1)
+
+    def test_impact_pct_denominator_spans_pages(self, client, db_conn):
+        """impact_pct is computed over the full unfiltered set, not just the page.
+
+        5 identities each with 1 play → each should show 20 % on every page.
+        The window function guarantees this even when limit < total.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i in range(5):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+            )
+        r1 = client.get(self._url(station.id, "?limit=2&offset=0"))
+        r2 = client.get(self._url(station.id, "?limit=2&offset=2"))
+        assert r1.status_code == r2.status_code == 200
+        # Both pages must report the same full total.
+        assert r1.json()["total"] == 5
+        assert r2.json()["total"] == 5
+        # Every item on every page reflects the full denominator.
+        all_items = r1.json()["items"] + r2.json()["items"]
+        for item in all_items:
+            assert item["impact_pct"] == pytest.approx(20.0, abs=0.01)
+
+    # ------------------------------------------------------------------
+    # Ordering
+    # ------------------------------------------------------------------
+
+    def test_sorted_by_artist_then_title(self, client, db_conn):
+        """Results are ordered alphabetically: artist name first, then track title."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_identity_with_events(db_conn, playlist, "Zappa", "Inca Roads", n_events=1)
+        _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=1)
+        _insert_identity_with_events(db_conn, playlist, "Abba", "Dancing Queen", n_events=1)
+
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        names = [
+            (item["artist_name"], item["track_title"])
+            for item in resp.json()["items"]
+        ]
+        assert names == [
+            ("Abba", "Dancing Queen"),
+            ("Abba", "Waterloo"),
+            ("Zappa", "Inca Roads"),
+        ]
+
+    # ------------------------------------------------------------------
+    # Pagination
+    # ------------------------------------------------------------------
+
+    def test_pagination_total_and_page_size(self, client, db_conn):
+        """total reflects the full result set; items is capped to limit."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i in range(5):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+            )
+        resp = client.get(self._url(station.id, "?limit=2&offset=0"))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+
+    def test_pagination_last_page(self, client, db_conn):
+        """An offset past the last full page returns the remaining items only."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i in range(5):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+            )
+        resp = client.get(self._url(station.id, "?limit=2&offset=4"))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["items"]) == 1
+
+    # ------------------------------------------------------------------
+    # Station isolation and cross-playlist aggregation
+    # ------------------------------------------------------------------
+
+    def test_excludes_other_station(self, client, db_conn):
+        """Play events from a different station must not appear in this report."""
+        station_a = _insert_station(db_conn, "KAZR-FM")
+        station_b = _insert_station(db_conn, "KIOA-FM")
+        playlist_a = _insert_playlist(db_conn, station_a)
+        playlist_b = _insert_playlist(db_conn, station_b)
+        _insert_identity_with_events(
+            db_conn, playlist_a, "Artist A", "Song A", n_events=10,
+        )
+        _insert_identity_with_events(
+            db_conn, playlist_b, "Artist B", "Song B", n_events=5,
+        )
+
+        resp = client.get(self._url(station_a.id))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["artist_name"] == "Artist A"
+        assert data["items"][0]["play_count"] == 10
+
+    def test_cross_playlist_play_counts_aggregated(self, client, db_conn):
+        """The same identity played via two playlists: counts are summed correctly.
+
+        3 plays in morning.csv + 2 plays in evening.csv → play_count = 5.
+        The GROUP BY ti.id in the SQL aggregates across all playlist membership.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist_a = _insert_playlist(db_conn, station, name="morning.csv")
+        playlist_b = _insert_playlist(db_conn, station, name="evening.csv")
+
+        _, identity = _insert_artist_and_identity(
+            db_conn, "The Clash", "London Calling",
+        )
+        _insert_play_events_for_identity(db_conn, identity, playlist_a, n=3)
+        _insert_play_events_for_identity(db_conn, identity, playlist_b, n=2)
+
+        resp = client.get(self._url(station.id))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["play_count"] == 5
+        assert data["items"][0]["impact_pct"] == pytest.approx(100.0, abs=0.01)

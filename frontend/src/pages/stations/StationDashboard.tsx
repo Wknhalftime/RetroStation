@@ -14,11 +14,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
+import { MissingMatchesReport } from "@/components/domain/stations/MissingMatchesReport";
 import { useStation, useUpdateStation } from "@/api/stations";
 import { useUploadPlaylist, useUploadPlaylists } from "@/api/ingestion";
 import { usePlaylists } from "@/api/playlists";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
+
+type DashboardTab = "overview" | "missing-matches";
 
 type UploadStatus =
   | { kind: "idle" }
@@ -29,6 +32,7 @@ type UploadStatus =
 export function StationDashboard() {
   const { station_id } = useParams<{ station_id: string }>();
   const [showEdit, setShowEdit] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
     kind: "idle",
   });
@@ -196,6 +200,14 @@ export function StationDashboard() {
     ? `${station.call_letters} — ${station.name}`
     : station.call_letters;
 
+  const tabClass = (tab: DashboardTab) =>
+    [
+      "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+      activeTab === tab
+        ? "border-indigo-600 text-indigo-600"
+        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
+    ].join(" ");
+
   return (
     <div className="space-y-6">
       {/* Back link */}
@@ -223,6 +235,24 @@ export function StationDashboard() {
         }
       />
 
+      {/* Tab bar */}
+      <div className="flex border-b border-gray-200">
+        <button type="button" className={tabClass("overview")} onClick={() => setActiveTab("overview")}>
+          Overview
+        </button>
+        <button type="button" className={tabClass("missing-matches")} onClick={() => setActiveTab("missing-matches")}>
+          Missing Matches
+        </button>
+      </div>
+
+      {/* Missing Matches tab panel */}
+      {activeTab === "missing-matches" && station_id && (
+        <MissingMatchesReport stationId={station_id} />
+      )}
+
+      {/* Overview tab panel */}
+      {activeTab === "overview" && (
+        <>
       {/* Info cards */}
       <div className="grid gap-4 sm:grid-cols-3">
         {/* Format */}
@@ -346,20 +376,22 @@ export function StationDashboard() {
         </div>
       )}
 
-      {/* Edit modal */}
-      <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
-        <StationForm
-          initial={{
-            call_letters: station.call_letters,
-            name: station.name,
-            city: station.city,
-            format_name: station.format_name,
-          }}
-          onSubmit={(data) => handleUpdate(data as StationUpdate)}
-          onCancel={() => setShowEdit(false)}
-          isPending={updateMutation.isPending}
-        />
-      </Modal>
+        {/* Edit modal */}
+        <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
+          <StationForm
+            initial={{
+              call_letters: station.call_letters,
+              name: station.name,
+              city: station.city,
+              format_name: station.format_name,
+            }}
+            onSubmit={(data) => handleUpdate(data as StationUpdate)}
+            onCancel={() => setShowEdit(false)}
+            isPending={updateMutation.isPending}
+          />
+        </Modal>
+        </>
+      )}
     </div>
   );
 }
