@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -14,11 +15,14 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
+import { MissingMatchesReport } from "@/components/domain/stations/MissingMatchesReport";
 import { useStation, useUpdateStation } from "@/api/stations";
 import { useUploadPlaylist, useUploadPlaylists } from "@/api/ingestion";
 import { usePlaylists } from "@/api/playlists";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
+
+type DashboardTab = "overview" | "missing-matches";
 
 type UploadStatus =
   | { kind: "idle" }
@@ -28,7 +32,9 @@ type UploadStatus =
 
 export function StationDashboard() {
   const { station_id } = useParams<{ station_id: string }>();
+  const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
     kind: "idle",
   });
@@ -74,6 +80,7 @@ export function StationDashboard() {
               message: result.message ?? "Upload started successfully.",
             });
             if (fileInputRef.current) fileInputRef.current.value = "";
+            void queryClient.invalidateQueries({ queryKey: ["stations", station_id] });
           },
           onError: (err) => {
             setUploadStatus({
@@ -146,6 +153,7 @@ export function StationDashboard() {
           });
           if (fileInputRef.current) fileInputRef.current.value = "";
           if (folderInputRef.current) folderInputRef.current.value = "";
+          void queryClient.invalidateQueries({ queryKey: ["stations", station_id] });
         },
         onError: (err) => {
           setUploadStatus({
@@ -196,6 +204,14 @@ export function StationDashboard() {
     ? `${station.call_letters} — ${station.name}`
     : station.call_letters;
 
+  const tabClass = (tab: DashboardTab) =>
+    [
+      "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+      activeTab === tab
+        ? "border-indigo-600 text-indigo-600"
+        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
+    ].join(" ");
+
   return (
     <div className="space-y-6">
       {/* Back link */}
@@ -223,8 +239,26 @@ export function StationDashboard() {
         }
       />
 
-      {/* Info cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* Tab bar */}
+      <div className="flex border-b border-gray-200">
+        <button type="button" className={tabClass("overview")} onClick={() => setActiveTab("overview")}>
+          Overview
+        </button>
+        <button type="button" className={tabClass("missing-matches")} onClick={() => setActiveTab("missing-matches")}>
+          Missing Matches
+        </button>
+      </div>
+
+      {/* Missing Matches tab panel */}
+      {activeTab === "missing-matches" && station_id && (
+        <MissingMatchesReport stationId={station_id} />
+      )}
+
+      {/* Overview tab panel */}
+      {activeTab === "overview" && (
+        <>
+          {/* Info cards */}
+          <div className="grid gap-4 sm:grid-cols-3">
         {/* Format */}
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-500">
@@ -346,7 +380,10 @@ export function StationDashboard() {
         </div>
       )}
 
-      {/* Edit modal */}
+        </>
+      )}
+
+      {/* Edit modal — outside tab panels so it works on any active tab */}
       <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
         <StationForm
           initial={{

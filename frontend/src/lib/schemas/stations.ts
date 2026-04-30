@@ -62,3 +62,23 @@ export const StationPaginatedEventsSchema = z.object({
   total: z.number(),
 });
 export type StationPaginatedEvents = z.infer<typeof StationPaginatedEventsSchema>;
+
+// ---------------------------------------------------------------------------
+// Missing Matches report shapes
+// ---------------------------------------------------------------------------
+
+export const MissingMatchItemSchema = z.object({
+  identity_id: z.string().uuid(),
+  artist_name: z.string(),
+  track_title: z.string(),
+  track_status: z.string(),
+  play_count: z.number(),
+  impact_pct: z.number(),
+});
+export type MissingMatchItem = z.infer<typeof MissingMatchItemSchema>;
+
+export const PaginatedMissingMatchesSchema = z.object({
+  items: z.array(MissingMatchItemSchema),
+  total: z.number(),
+});
+export type PaginatedMissingMatches = z.infer<typeof PaginatedMissingMatchesSchema>;

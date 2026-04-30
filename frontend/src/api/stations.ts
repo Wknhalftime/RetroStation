@@ -6,6 +6,7 @@ import type {
   StationCreate,
   StationUpdate,
   StationPaginatedEvents,
+  PaginatedMissingMatches,
 } from "@/lib/schemas/stations";
 
 const STATIONS_KEY = ["stations"] as const;
@@ -14,6 +15,8 @@ const stationBroadcastDaysKey = (stationId: string) =>
   ["stations", stationId, "broadcast-days"] as const;
 const stationEventsKey = (stationId: string, date: string, limit: number, offset: number) =>
   ["stations", stationId, "events", { date, limit, offset }] as const;
+const stationMissingMatchesKey = (stationId: string, limit: number, offset: number) =>
+  ["stations", stationId, "missing-matches", { limit, offset }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -55,6 +58,21 @@ export function useStationEvents(
         `/api/v1/stations/${stationId}/events?date=${date}&limit=${limit}&offset=${offset}`
       ),
     enabled: Boolean(stationId) && Boolean(date),
+  });
+}
+
+export function useMissingMatchesReport(
+  stationId: string | undefined,
+  limit: number,
+  offset: number
+) {
+  return useQuery<PaginatedMissingMatches>({
+    queryKey: stationMissingMatchesKey(stationId ?? "", limit, offset),
+    queryFn: () =>
+      apiFetch<PaginatedMissingMatches>(
+        `/api/v1/stations/${stationId}/reports/missing-matches?limit=${limit}&offset=${offset}`
+      ),
+    enabled: Boolean(stationId),
   });
 }
 

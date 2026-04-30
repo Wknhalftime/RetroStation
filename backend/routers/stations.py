@@ -83,6 +83,28 @@ class StationExportM3uBody(BaseModel):
     date: date
 
 
+class MissingMatchItem(BaseModel):
+    """One row in the Missing Matches report.
+
+    Includes every unresolved identity (track OR artist status is not matched)
+    found across all playlists belonging to this station.
+    """
+
+    identity_id: UUID
+    artist_name: str
+    track_title: str
+    track_status: str
+    play_count: int
+    impact_pct: float
+
+
+class PaginatedMissingMatches(BaseModel):
+    """Paginated wrapper for the Missing Matches report."""
+
+    items: list[MissingMatchItem]
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -335,6 +357,128 @@ async def get_station_events_by_date(
         for row in rows
     ]
     return StationPaginatedEvents(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Missing Matches report endpoint
+# ---------------------------------------------------------------------------
+
+#: Statuses considered "unresolved" for the purposes of the missing-matches report.
+_UNRESOLVED_STATUSES = (
+    "pending",
+    "needs_review",
+    "auto_rejected",
+    "manual_rejected",
+)
+
+
+@router.get("/{station_id}/reports/missing-matches", response_model=PaginatedMissingMatches)
+async def get_missing_matches_report(
+    station_id: UUID,
+    conn: DbConn,
+    _token: Token,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> PaginatedMissingMatches:
+    """Paginated report of unresolved track identities for a station.
+
+    An identity is included when either its own match_status OR its parent
+    artist's match_status is one of: pending, needs_review, auto_rejected,
+    manual_rejected.
+
+    Rows are sorted alphabetically by artist name then track title.  Impact
+    percentage is computed as (identity play-count / total play-count across
+    all identities in the report) × 100, using a SQL window function so the
+    denominator is always the full unfiltered set regardless of the page being
+    requested.
+    """
+    await _require_station(conn, station_id)
+
+    # psycopg3 requires = ANY(%s) with a list for multi-value membership tests.
+    unresolved = list(_UNRESOLVED_STATUSES)
+
+    # Separate count query so total is correct even when offset >= total rows.
+    # Using COUNT(*) OVER() in the items query would return 0 on an empty page,
+    # making it impossible to distinguish "no unresolved tracks" from "page past end".
+    count_cur = await conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM (
+            SELECT ti.id
+            FROM track_identities ti
+            JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+            JOIN play_events       pe ON pe.identity_id = ti.id
+            JOIN playlists         pl ON pl.id = pe.playlist_id
+            WHERE pl.station_id = %s
+              AND (
+                  ti.match_status = ANY(%s)
+                  OR ba.match_status = ANY(%s)
+              )
+            GROUP BY ti.id
+        ) sub
+        """,
+        (station_id, unresolved, unresolved),
+    )
+    count_row = await count_cur.fetchone()
+    total = int(count_row["total"]) if count_row else 0
+
+    # Paginated items query. SUM(play_count) OVER() is evaluated before
+    # LIMIT/OFFSET in PostgreSQL, so impact_pct always reflects the full
+    # unfiltered denominator regardless of the current page.
+    items_cur = await conn.execute(
+        """
+        WITH missing AS (
+            SELECT
+                ti.id                AS identity_id,
+                ba.original_name     AS artist_name,
+                ti.original_title    AS track_title,
+                ti.match_status      AS track_status,
+                COUNT(pe.id)         AS play_count
+            FROM track_identities ti
+            JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+            JOIN play_events       pe ON pe.identity_id = ti.id
+            JOIN playlists         pl ON pl.id = pe.playlist_id
+            WHERE pl.station_id = %s
+              AND (
+                  ti.match_status = ANY(%s)
+                  OR ba.match_status = ANY(%s)
+              )
+            GROUP BY
+                ti.id,
+                ba.original_name,
+                ti.original_title,
+                ti.match_status
+        )
+        SELECT
+            identity_id,
+            artist_name,
+            track_title,
+            track_status,
+            play_count,
+            ROUND(
+                play_count * 100.0 / NULLIF(SUM(play_count) OVER (), 0),
+                2
+            ) AS impact_pct
+        FROM missing
+        ORDER BY artist_name, track_title
+        LIMIT %s OFFSET %s
+        """,
+        (station_id, unresolved, unresolved, limit, offset),
+    )
+    rows = await items_cur.fetchall()
+
+    items = [
+        MissingMatchItem(
+            identity_id=row["identity_id"],
+            artist_name=row["artist_name"],
+            track_title=row["track_title"],
+            track_status=row["track_status"],
+            play_count=int(row["play_count"]),
+            impact_pct=float(row["impact_pct"] or 0.0),
+        )
+        for row in rows
+    ]
+    return PaginatedMissingMatches(items=items, total=total)
 
 
 def _generate_station_m3u_sync(
