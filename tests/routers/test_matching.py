@@ -1382,6 +1382,89 @@ class TestMatchingRun:
         ).fetchone()
         assert row is not None and row["match_status"] == "pending"
 
+    def test_perform_reset_returns_409_when_lock_held_by_other_session(
+        self, client, db_conn, monkeypatch
+    ):
+        """A second /matching/run with perform_reset=true must get 409 while
+        another session is mid-run. We simulate that by holding the advisory
+        lock on a separate connection (db_conn) — when the request handler's
+        async pool connection tries to acquire, it sees a foreign holder and
+        returns False, producing 409.
+
+        This is the contract the augmentcode review asked us to widen to
+        cover the full handler (reset + select + enqueue), not just the reset
+        transaction. Holding the lock externally simulates "another /run is
+        in any phase" without needing actual concurrency.
+        """
+        # Imported here to avoid pulling private constants into the module
+        # top — the test deliberately couples to the lock key shape.
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+        )
+
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        # Hold the lock on a different session.
+        db_conn.execute(
+            "SELECT pg_advisory_lock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        db_conn.commit()
+
+        try:
+            resp = client.post(
+                "/api/v1/matching/run", json={"perform_reset": True}
+            )
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "matching_run_in_progress"
+        finally:
+            db_conn.execute(
+                "SELECT pg_advisory_unlock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            db_conn.commit()
+
+    def test_perform_reset_releases_lock_on_success(
+        self, client, db_conn, monkeypatch
+    ):
+        """After a successful /matching/run, the lock is released and a
+        subsequent /matching/run can acquire it. Guards against the leaked-
+        lock failure mode where a missed finally-block release would block
+        all future runs.
+        """
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+        )
+
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        # First run, perform_reset=True.
+        resp1 = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp1.status_code == 202
+
+        # Lock is now released. A different session should be able to
+        # try-acquire it without contention.
+        cur = db_conn.execute(
+            "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        row = cur.fetchone()
+        assert row is not None and row["acquired"] is True
+        # Release for cleanup so we don't leak across tests.
+        db_conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        db_conn.commit()
+
     def test_response_shape_has_nested_reset_and_enqueue_keys(self, client):
         """Stable contract: keys present even when zero. No top-level
         `count` or `message` (legacy fields dropped per plan §F).

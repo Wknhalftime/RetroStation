@@ -813,19 +813,43 @@ class RunMatchingRequest(BaseModel):
 
 
 async def _try_acquire_run_lock(conn: AsyncConnection[Any]) -> bool:
-    """Acquire the transaction-scoped advisory lock for /matching/run.
+    """Acquire the SESSION-scoped advisory lock for /matching/run.
 
-    Two-int4 variant: avoids signed-bigint coercion edge cases. Auto-released
-    on transaction commit/rollback, so there's no leak risk if the handler
-    raises. Returns True if the lock was acquired, False if a concurrent
-    /matching/run holds it.
+    Two-int4 variant: avoids signed-bigint coercion edge cases. The lock
+    must span the entire handler (reset transaction + post-commit SELECT +
+    Huey enqueue) so a second concurrent run gets 409 across the full
+    duration, not just the reset transaction. Caller MUST pair this with a
+    finally-block call to ``_release_run_lock`` — otherwise the lock leaks
+    onto the pooled connection and persists across subsequent requests
+    until that connection is recycled.
+
+    Returns True if acquired, False if a concurrent /matching/run holds it.
     """
     cur = await conn.execute(
-        "SELECT pg_try_advisory_xact_lock(%s, %s) AS acquired",
+        "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
         (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
     )
     row = await cur.fetchone()
     return bool(row["acquired"]) if row else False
+
+
+async def _release_run_lock(conn: AsyncConnection[Any]) -> None:
+    """Release the session-scoped advisory lock acquired by
+    ``_try_acquire_run_lock``. MUST be called in a finally block whenever
+    the acquire returned True. Failures are logged but not re-raised — a
+    leaked lock is an operational concern, but masking the original handler
+    response with an unlock error would be worse UX.
+    """
+    try:
+        await conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+    except Exception as exc:  # noqa: BLE001 — top-level boundary; leak is operational
+        logger.warning(
+            "matching_run_lock_release_failed",
+            error=repr(exc),
+        )
 
 
 async def _reset_identities(conn: AsyncConnection[Any]) -> tuple[int, int]:
@@ -993,24 +1017,39 @@ async def run_matching(
     start_ms = time.monotonic()
     identities_reset = identity_matches_deleted = 0
     artists_reset = artist_matches_deleted = 0
+    lock_held = False
 
-    if body.perform_reset:
-        # Reset block runs in its own transaction; legacy path keeps the
-        # original non-transactional select to preserve byte-identical behavior.
-        async with conn.transaction():
-            if not await _try_acquire_run_lock(conn):
+    try:
+        if body.perform_reset:
+            # Acquire BEFORE the transaction so the lock spans the reset
+            # commit AND the post-commit SELECT + enqueue. A second
+            # concurrent /run reaching any of those phases gets 409.
+            lock_held = await _try_acquire_run_lock(conn)
+            if not lock_held:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="matching_run_in_progress",
                 )
-            identities_reset, identity_matches_deleted = await _reset_identities(conn)
-            artists_reset, artist_matches_deleted = await _reset_artists(conn)
-        # Transaction committed; advisory lock released.
-        playlist_ids = await _select_playlists_with_pending_identities_or_artists(conn)
-    else:
-        playlist_ids = await _select_playlists_with_pending_artists(conn)
+            # Reset runs in its own transaction so the row writes commit
+            # before enqueue (matches the codebase's commit-before-enqueue
+            # contract — Huey workers on a separate connection must see
+            # the committed PENDING state, not a snapshot mid-reset).
+            async with conn.transaction():
+                identities_reset, identity_matches_deleted = await _reset_identities(conn)
+                artists_reset, artist_matches_deleted = await _reset_artists(conn)
+            playlist_ids = await _select_playlists_with_pending_identities_or_artists(conn)
+        else:
+            playlist_ids = await _select_playlists_with_pending_artists(conn)
 
-    failed_playlist_ids = _enqueue_playlists(playlist_ids)
+        failed_playlist_ids = _enqueue_playlists(playlist_ids)
+    finally:
+        # Always release if held — including on the HTTPException path above
+        # (won't fire there since we raise before lock_held is set True) and
+        # any unexpected error during reset/select/enqueue. Skipped when
+        # acquire returned False so the contending request doesn't unlock
+        # the lock the FIRST request still holds.
+        if lock_held:
+            await _release_run_lock(conn)
 
     duration_ms = int((time.monotonic() - start_ms) * 1000)
     matches_deleted = identity_matches_deleted + artist_matches_deleted
