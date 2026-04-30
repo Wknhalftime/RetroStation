@@ -1082,25 +1082,560 @@ class TestResolveIdentityWorkId:
 
 
 class TestMatchingRun:
-    def test_accepted(self, client):
+    def test_accepted_no_body(self, client):
         resp = client.post("/api/v1/matching/run")
         assert resp.status_code == 202
+        # Response is the new structured shape even with empty body.
+        data = resp.json()
+        assert data["status"] == "accepted"
+        assert data["reset"]["performed"] is False
+        assert data["reset"]["identities_reset"] == 0
+        assert data["reset"]["artists_reset"] == 0
+        assert data["reset"]["matches_deleted"] == 0
+        assert data["enqueue"]["playlists_queued"] >= 0
+        assert data["enqueue"]["enqueue_failures"] == 0
 
-    def test_returns_count(self, client, db_conn):
-        # Seed two playlists with unresolved artists (distinct stations to avoid unique violation)
-        for i in range(2):
-            station = _insert_station(db_conn, call_letters=f"KRUN-{i}")
-            playlist = _insert_playlist(db_conn, station, name=f"run_{i}.csv")
-            artist = _insert_artist(db_conn, original_name=f"Run Artist {i}")
-            identity = _insert_identity(db_conn, artist)
-            _insert_event(db_conn, playlist, identity)
+    def test_default_mode_enqueues_unresolved_artists_only(
+        self, client, db_conn, monkeypatch
+    ):
+        """Without perform_reset, behavior is byte-identical to legacy /run:
+        only playlists with NEEDS_REVIEW/PENDING artists are enqueued.
+        Playlists whose artist is already resolved are NOT enqueued, even
+        if they have NEEDS_REVIEW children. This guards the default-mode
+        contract.
+        """
+        # Mock enqueue so we can observe what was queued.
+        enqueue_calls: list[str] = []
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task",
+            lambda playlist_id: enqueue_calls.append(playlist_id),
+        )
+
+        # Playlist A: NEEDS_REVIEW artist (legacy SHOULD enqueue).
+        station_a = _insert_station(db_conn, call_letters="KAAA")
+        playlist_a = _insert_playlist(db_conn, station_a, name="a.csv")
+        artist_a = _insert_artist(
+            db_conn, original_name="Unresolved", match_status=MatchStatus.NEEDS_REVIEW
+        )
+        identity_a = _insert_identity(db_conn, artist_a)
+        _insert_event(db_conn, playlist_a, identity_a)
+
+        # Playlist B: AUTO_MATCHED artist with NEEDS_REVIEW child (legacy
+        # SHOULD NOT enqueue — this is the regression that perform_reset
+        # fixes).
+        station_b = _insert_station(db_conn, call_letters="KBBB")
+        playlist_b = _insert_playlist(db_conn, station_b, name="b.csv")
+        artist_b = _insert_artist(
+            db_conn, original_name="Resolved", match_status=MatchStatus.AUTO_MATCHED
+        )
+        identity_b = _insert_identity(
+            db_conn, artist_b, match_status=MatchStatus.NEEDS_REVIEW,
+            original_title="Stale Title",
+        )
+        _insert_event(db_conn, playlist_b, identity_b)
 
         resp = client.post("/api/v1/matching/run")
+        assert resp.status_code == 202
+        assert str(playlist_a.id) in enqueue_calls
+        assert str(playlist_b.id) not in enqueue_calls
+        assert resp.json()["reset"]["performed"] is False
+        assert resp.json()["reset"]["identities_reset"] == 0
+
+    def test_perform_reset_rewinds_review_and_rejected_drops_matches(
+        self, client, db_conn, monkeypatch
+    ):
+        """NEEDS_REVIEW and AUTO_REJECTED identities transition to PENDING
+        and their matches rows are deleted. AUTO_MATCHED identities (and
+        their matches rows) are untouched.
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        station = _insert_station(db_conn, call_letters="KRRR")
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn, original_name="Reset Artist", match_status=MatchStatus.AUTO_MATCHED
+        )
+        # A — NEEDS_REVIEW + stale matches row (cohort).
+        a = _insert_identity(
+            db_conn, artist, original_title="A", match_status=MatchStatus.NEEDS_REVIEW
+        )
+        _insert_match_row(db_conn, a, confidence_score=89.0)
+        _insert_event(db_conn, playlist, a)
+        # B — AUTO_MATCHED + matches row (NOT cohort).
+        b = _insert_identity(
+            db_conn, artist, original_title="B", match_status=MatchStatus.AUTO_MATCHED
+        )
+        _insert_match_row(db_conn, b, confidence_score=99.0)
+        _insert_event(db_conn, playlist, b)
+        # C — AUTO_REJECTED + matches row (cohort, library-growth case).
+        c = _insert_identity(
+            db_conn, artist, original_title="C", match_status=MatchStatus.AUTO_REJECTED
+        )
+        _insert_match_row(db_conn, c, confidence_score=0.0)
+        _insert_event(db_conn, playlist, c)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
         assert resp.status_code == 202
         data = resp.json()
-        assert "count" in data
-        assert isinstance(data["count"], int)
-        assert data["count"] >= 1
+        assert data["reset"]["performed"] is True
+        assert data["reset"]["identities_reset"] == 2  # A and C
+        assert data["reset"]["matches_deleted"] == 2
+
+        # Cohort rows now PENDING; matches rows gone.
+        a_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s", (a.id,)
+        ).fetchone()
+        assert a_row is not None and a_row["match_status"] == "pending"
+        a_match = db_conn.execute(
+            "SELECT 1 FROM matches WHERE identity_id = %s", (a.id,)
+        ).fetchone()
+        assert a_match is None
+
+        c_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s", (c.id,)
+        ).fetchone()
+        assert c_row is not None and c_row["match_status"] == "pending"
+
+        # AUTO_MATCHED row + its match are UNTOUCHED.
+        b_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s", (b.id,)
+        ).fetchone()
+        assert b_row is not None and b_row["match_status"] == "auto_matched"
+        b_match = db_conn.execute(
+            "SELECT confidence_score FROM matches WHERE identity_id = %s", (b.id,)
+        ).fetchone()
+        assert b_match is not None
+        assert float(b_match["confidence_score"]) == 99.0
+
+    def test_perform_reset_preserves_manual_decisions(
+        self, client, db_conn, monkeypatch
+    ):
+        """MANUAL_MATCHED and MANUAL_REJECTED rows are sacred: status and
+        their matches rows must survive a reset.
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        station = _insert_station(db_conn, call_letters="KMMM")
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn,
+            original_name="Manual Artist",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        manual_matched = _insert_identity(
+            db_conn, artist,
+            original_title="MM",
+            match_status=MatchStatus.MANUAL_MATCHED,
+        )
+        _insert_match_row(db_conn, manual_matched, confidence_score=100.0)
+        _insert_event(db_conn, playlist, manual_matched)
+        manual_rejected = _insert_identity(
+            db_conn, artist,
+            original_title="MR",
+            match_status=MatchStatus.MANUAL_REJECTED,
+        )
+        _insert_event(db_conn, playlist, manual_rejected)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+
+        mm = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (manual_matched.id,),
+        ).fetchone()
+        assert mm is not None and mm["match_status"] == "manual_matched"
+        # Match row preserved untouched.
+        mm_match = db_conn.execute(
+            "SELECT confidence_score FROM matches WHERE identity_id = %s",
+            (manual_matched.id,),
+        ).fetchone()
+        assert mm_match is not None
+        assert float(mm_match["confidence_score"]) == 100.0
+
+        mr = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (manual_rejected.id,),
+        ).fetchone()
+        assert mr is not None and mr["match_status"] == "manual_rejected"
+
+    def test_perform_reset_enqueues_playlists_under_resolved_artists(
+        self, client, db_conn, monkeypatch
+    ):
+        """Central regression fix: a playlist whose ONLY pending work is a
+        NEEDS_REVIEW identity under an AUTO_MATCHED artist must be enqueued
+        when perform_reset=true. Today's /run skips it.
+        """
+        enqueue_calls: list[str] = []
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task",
+            lambda playlist_id: enqueue_calls.append(playlist_id),
+        )
+
+        station = _insert_station(db_conn, call_letters="KEEE")
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn,
+            original_name="POD-like",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        identity = _insert_identity(
+            db_conn, artist,
+            original_title="Stale Title",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, identity, confidence_score=89.0)
+        _insert_event(db_conn, playlist, identity)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+        assert str(playlist.id) in enqueue_calls
+        assert resp.json()["enqueue"]["playlists_queued"] >= 1
+
+    def test_perform_reset_no_op_when_nothing_resettable(
+        self, client, db_conn, monkeypatch
+    ):
+        """No identities or artists in resettable states → reset counts are
+        zero, response is 202, enqueue list is empty (no orphan playlists).
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        # Only AUTO_MATCHED rows exist — nothing to reset.
+        station = _insert_station(db_conn, call_letters="KNNN")
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn,
+            original_name="All Resolved",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        identity = _insert_identity(
+            db_conn, artist,
+            original_title="Done",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_event(db_conn, playlist, identity)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["reset"]["performed"] is True
+        assert data["reset"]["identities_reset"] == 0
+        assert data["reset"]["artists_reset"] == 0
+        assert data["reset"]["matches_deleted"] == 0
+        assert data["enqueue"]["playlists_queued"] == 0
+
+    def test_perform_reset_collects_enqueue_failures(
+        self, client, db_conn, monkeypatch
+    ):
+        """When Huey enqueue raises, the response is still 202 with the
+        failure surfaced in enqueue.enqueue_failures and
+        failed_playlist_ids. The reset transaction is durable regardless.
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task",
+            MagicMock(side_effect=RuntimeError("huey backend down")),
+        )
+
+        # Seed a playlist with a NEEDS_REVIEW identity so reset finds work.
+        station = _insert_station(db_conn, call_letters="KFFF")
+        playlist = _insert_playlist(db_conn, station)
+        artist = _insert_artist(
+            db_conn,
+            original_name="Failing",
+            match_status=MatchStatus.AUTO_MATCHED,
+        )
+        identity = _insert_identity(
+            db_conn, artist,
+            original_title="Will Fail",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_event(db_conn, playlist, identity)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        # Reset committed regardless of enqueue failure.
+        assert data["reset"]["identities_reset"] == 1
+        # All enqueues failed → playlists_queued is 0, failures is the count.
+        assert data["enqueue"]["playlists_queued"] == 0
+        assert data["enqueue"]["enqueue_failures"] >= 1
+        assert str(playlist.id) in data["enqueue"]["failed_playlist_ids"]
+        # Reset side-effect is durable (track_identities row flipped).
+        row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (identity.id,),
+        ).fetchone()
+        assert row is not None and row["match_status"] == "pending"
+
+    def test_perform_reset_returns_409_when_lock_held_by_other_session(
+        self, client, db_conn, monkeypatch
+    ):
+        """A second /matching/run with perform_reset=true must get 409 while
+        another session is mid-run. We simulate that by holding the advisory
+        lock on a separate connection (db_conn) — when the request handler's
+        async pool connection tries to acquire, it sees a foreign holder and
+        returns False, producing 409.
+
+        This is the contract the augmentcode review asked us to widen to
+        cover the full handler (reset + select + enqueue), not just the reset
+        transaction. Holding the lock externally simulates "another /run is
+        in any phase" without needing actual concurrency.
+        """
+        # Imported here to avoid pulling private constants into the module
+        # top — the test deliberately couples to the lock key shape.
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+        )
+
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        # Hold the lock on a different session.
+        db_conn.execute(
+            "SELECT pg_advisory_lock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        db_conn.commit()
+
+        try:
+            resp = client.post(
+                "/api/v1/matching/run", json={"perform_reset": True}
+            )
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "matching_run_in_progress"
+        finally:
+            db_conn.execute(
+                "SELECT pg_advisory_unlock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            db_conn.commit()
+
+    def test_perform_reset_releases_lock_on_success(
+        self, client, db_conn, monkeypatch
+    ):
+        """After a successful /matching/run, the lock is released and a
+        subsequent /matching/run can acquire it. Guards against the leaked-
+        lock failure mode where a missed finally-block release would block
+        all future runs.
+        """
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+        )
+
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        # First run, perform_reset=True.
+        resp1 = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp1.status_code == 202
+
+        # Lock is now released. A different session should be able to
+        # try-acquire it without contention.
+        cur = db_conn.execute(
+            "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        row = cur.fetchone()
+        assert row is not None and row["acquired"] is True
+        # Release for cleanup so we don't leak across tests.
+        db_conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+        db_conn.commit()
+
+    def test_perform_reset_nulls_reason_metadata_on_reset_rows(
+        self, client, db_conn, monkeypatch
+    ):
+        """When a row transitions back to PENDING, match_tier / reason_code /
+        reason_detail must be cleared so PENDING never carries stale matcher
+        metadata. Matches the convention in resolve_artist's cascade
+        ([matching.py:562-575](backend/routers/matching.py:562)) — "NULL =
+        no reason for pending" is a project-wide invariant.
+        """
+        monkeypatch.setattr(
+            "backend.routers.matching.artist_matching_task", lambda _pid: None
+        )
+
+        station = _insert_station(db_conn, call_letters="KRSN")
+        playlist = _insert_playlist(db_conn, station)
+        # Artist with stale reason data, NEEDS_REVIEW so it's in the cohort.
+        artist = _insert_artist(
+            db_conn,
+            original_name="Stale Reasons",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        db_conn.execute(
+            "UPDATE broadcast_artists SET reason_code = %s, reason_detail = %s WHERE id = %s",
+            ("LOW_CONFIDENCE", "stale artist reason", artist.id),
+        )
+        db_conn.commit()
+
+        # Identity in NEEDS_REVIEW with stale match_tier + reason fields.
+        identity = _insert_identity(
+            db_conn, artist,
+            original_title="Stale Title",
+            match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        db_conn.execute(
+            """
+            UPDATE track_identities
+               SET match_tier    = %s,
+                   reason_code   = %s,
+                   reason_detail = %s
+             WHERE id = %s
+            """,
+            ("musicbrainz_id_search", "LOW_CONFIDENCE", "stale identity reason", identity.id),
+        )
+        db_conn.commit()
+        _insert_event(db_conn, playlist, identity)
+
+        resp = client.post(
+            "/api/v1/matching/run", json={"perform_reset": True}
+        )
+        assert resp.status_code == 202
+
+        # Identity row: status flipped + all three metadata fields nulled.
+        id_row = db_conn.execute(
+            """
+            SELECT match_status, match_tier, reason_code, reason_detail
+              FROM track_identities WHERE id = %s
+            """,
+            (identity.id,),
+        ).fetchone()
+        assert id_row is not None
+        assert id_row["match_status"] == "pending"
+        assert id_row["match_tier"] is None
+        assert id_row["reason_code"] is None
+        assert id_row["reason_detail"] is None
+
+        # Artist row: status flipped + reason_code/reason_detail nulled.
+        # broadcast_artists has no match_tier column, so we don't assert on it.
+        a_row = db_conn.execute(
+            """
+            SELECT match_status, reason_code, reason_detail
+              FROM broadcast_artists WHERE id = %s
+            """,
+            (artist.id,),
+        ).fetchone()
+        assert a_row is not None
+        assert a_row["match_status"] == "pending"
+        assert a_row["reason_code"] is None
+        assert a_row["reason_detail"] is None
+
+    async def test_release_run_lock_completes_under_cancellation(
+        self, migrated_db: str
+    ):
+        """Cancellation safety contract for `_release_run_lock`: when the
+        calling task is cancelled mid-await, the unlock SQL must still
+        reach Postgres before the function returns. Otherwise a request
+        cancelled during teardown would leak the session-scoped advisory
+        lock onto the pooled connection.
+
+        We exercise this directly — not through the FastAPI endpoint —
+        because forcing cancellation timing through the TestClient would
+        be fragile. Two independent psycopg connections stand in for
+        "request connection (with the lock)" and "external observer".
+        """
+        import asyncio as _asyncio
+
+        from psycopg import AsyncConnection
+        from psycopg.rows import dict_row
+
+        from backend.routers.matching import (
+            _MATCHING_LOCK_CLASS_ID,
+            _MATCHING_RUN_LOCK_OBJ_ID,
+            _release_run_lock,
+        )
+
+        conn_held = await AsyncConnection.connect(migrated_db, row_factory=dict_row)
+        conn_observer = await AsyncConnection.connect(migrated_db, row_factory=dict_row)
+        try:
+            # Acquire on conn_held, mirroring what _try_acquire_run_lock does.
+            await conn_held.execute(
+                "SELECT pg_advisory_lock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            await conn_held.commit()
+
+            # Schedule release as a task and immediately cancel it. The yield
+            # via sleep(0) lets the task reach its first await before cancel
+            # arrives, exercising the asyncio.shield + uncancel + re-raise
+            # path inside _release_run_lock.
+            task = _asyncio.create_task(_release_run_lock(conn_held))
+            await _asyncio.sleep(0)
+            task.cancel()
+
+            with pytest.raises(_asyncio.CancelledError):
+                await task
+
+            # Despite cancellation, the unlock must have completed: a
+            # different session can now acquire.
+            cur = await conn_observer.execute(
+                "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            row = await cur.fetchone()
+            assert row is not None
+            assert row["acquired"] is True, (
+                "Lock was not released by _release_run_lock under cancellation; "
+                "session-scoped advisory lock would leak on pooled connection."
+            )
+
+            # Cleanup: release the lock we just acquired on conn_observer.
+            await conn_observer.execute(
+                "SELECT pg_advisory_unlock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
+            await conn_observer.commit()
+        finally:
+            await conn_held.close()
+            await conn_observer.close()
+
+    def test_response_shape_has_nested_reset_and_enqueue_keys(self, client):
+        """Stable contract: keys present even when zero. No top-level
+        `count` or `message` (legacy fields dropped per plan §F).
+        """
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": False})
+        assert resp.status_code == 202
+        data = resp.json()
+        assert set(data.keys()) == {"status", "reset", "enqueue"}
+        assert set(data["reset"].keys()) == {
+            "performed",
+            "identities_reset",
+            "artists_reset",
+            "matches_deleted",
+        }
+        assert set(data["enqueue"].keys()) == {
+            "playlists_queued",
+            "enqueue_failures",
+            "failed_playlist_ids",
+        }
+        assert data["enqueue"]["failed_playlist_ids"] == []
+        # Legacy fields removed.
+        assert "count" not in data
+        assert "message" not in data
 
 
 # ---------------------------------------------------------------------------

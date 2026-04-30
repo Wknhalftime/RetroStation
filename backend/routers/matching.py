@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
@@ -39,6 +40,33 @@ _PROTECTED_STATUSES: list[str] = [
     MatchStatus.MANUAL_MATCHED.value,
     MatchStatus.MANUAL_REJECTED.value,
 ]
+
+# Statuses that /matching/run with perform_reset=true rewinds back to PENDING.
+# Excludes AUTO_MATCHED (confirmed), MANUAL_MATCHED + MANUAL_REJECTED (curator
+# decisions are sacred). PENDING is included so any orphan matches row from a
+# crashed prior run is also dropped — see plan section C "write amplification".
+_RESETTABLE_IDENTITY_STATUSES: list[str] = [
+    MatchStatus.PENDING.value,
+    MatchStatus.NEEDS_REVIEW.value,
+    MatchStatus.AUTO_REJECTED.value,
+]
+_RESETTABLE_ARTIST_STATUSES: list[str] = [
+    MatchStatus.PENDING.value,
+    MatchStatus.NEEDS_REVIEW.value,
+    MatchStatus.AUTO_REJECTED.value,
+]
+
+# Two-int4 advisory-lock key for /matching/run single-flight protection.
+# class_id 0x4D415443 == ASCII 'MATC' (1296126275) reserves a namespace for
+# this router; obj_id 1 is the run-lock slot. Future advisory locks under the
+# same class can use obj_id 2, 3, ... without collision. Both fit cleanly in
+# signed int4 — avoids driver-level bigint coercion edge cases.
+_MATCHING_LOCK_CLASS_ID: int = 0x4D415443
+_MATCHING_RUN_LOCK_OBJ_ID: int = 1
+
+# Cap on enqueue.failed_playlist_ids returned in the /matching/run response.
+# Beyond this, the structured log line is the audit trail.
+_MAX_FAILED_PLAYLIST_IDS_IN_RESPONSE: int = 50
 
 
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
@@ -769,25 +797,195 @@ async def resolve_identity(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/run", status_code=status.HTTP_202_ACCEPTED)
-async def run_matching(
-    conn: DbConn,
-    _token: Token,
-) -> dict[str, Any]:
-    """Trigger artist-matching tasks for all playlists with unresolved artists.
+class RunMatchingRequest(BaseModel):
+    """Body for POST /matching/run.
 
-    Finds all playlists that have at least one log_artist in PENDING or
-    NEEDS_REVIEW state (via track_identities → play_events join), then fires a
-    background Huey task for each.
+    perform_reset=False (default): legacy behavior — enqueue artist matching for
+    every playlist with an unresolved artist. No state mutation.
 
-    Args:
-        conn: Async database connection.
-        _token: Bearer token (auth check only).
-
-    Returns:
-        A dict with a confirmation message and the number of tasks queued.
+    perform_reset=True: also rewind every non-finalized identity and artist
+    (PENDING, NEEDS_REVIEW, AUTO_REJECTED) back to PENDING and drop their
+    stale matches rows, then enqueue. Manual decisions and AUTO_MATCHED are
+    preserved.
     """
-    playlists_cur = await conn.execute(
+
+    perform_reset: bool = False
+
+
+async def _try_acquire_run_lock(conn: AsyncConnection[Any]) -> bool:
+    """Acquire the SESSION-scoped advisory lock for /matching/run.
+
+    Two-int4 variant: avoids signed-bigint coercion edge cases. The lock
+    must span the entire handler (reset transaction + post-commit SELECT +
+    Huey enqueue) so a second concurrent run gets 409 across the full
+    duration, not just the reset transaction. Caller MUST pair this with a
+    finally-block call to ``_release_run_lock`` — otherwise the lock leaks
+    onto the pooled connection and persists across subsequent requests
+    until that connection is recycled.
+
+    Returns True if acquired, False if a concurrent /matching/run holds it.
+    """
+    cur = await conn.execute(
+        "SELECT pg_try_advisory_lock(%s, %s) AS acquired",
+        (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+    )
+    row = await cur.fetchone()
+    return bool(row["acquired"]) if row else False
+
+
+async def _release_run_lock(conn: AsyncConnection[Any]) -> None:
+    """Release the session-scoped advisory lock acquired by
+    ``_try_acquire_run_lock``. MUST be called in a finally block whenever
+    the acquire returned True.
+
+    Cancellation safety contract: the unlock query is wrapped as a separate
+    task and awaited via ``asyncio.shield`` so cancellation of the calling
+    task cannot abort the underlying ``conn.execute``. If our task IS
+    cancelled mid-await, we ``uncancel`` ourselves, await the inner task
+    to actual completion (so the connection is not returned to the pool
+    mid-query), then re-raise ``CancelledError`` so the framework still
+    sees the cancellation. This guarantees Postgres receives the unlock
+    BEFORE the FastAPI dependency cleanup releases the connection — without
+    this, a cancellation arriving during the unlock would leak the
+    session-scoped lock onto the pooled connection, blocking every
+    subsequent ``/matching/run`` drawing that connection until it's
+    recycled.
+
+    Non-cancellation failures are logged but not re-raised — a leaked lock
+    is an operational concern, but masking the original handler response
+    with an unlock error would be worse UX.
+    """
+    inner = asyncio.create_task(
+        conn.execute(
+            "SELECT pg_advisory_unlock(%s, %s)",
+            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        )
+    )
+    try:
+        await asyncio.shield(inner)
+    except asyncio.CancelledError:
+        # We were cancelled mid-await. The shielded inner task is still
+        # running; wait for it to actually complete before returning so
+        # the connection isn't released to the pool mid-query. Uncancel
+        # is required in 3.11+ so the second await can proceed without
+        # immediately re-raising; we then re-raise CancelledError to
+        # propagate the cancellation upward. ``current_task`` is None
+        # only outside the asyncio loop — in our request-handler context
+        # it is always a Task, but we guard defensively.
+        current = asyncio.current_task()
+        if current is not None:
+            current.uncancel()
+        try:
+            await inner
+        except Exception as exc:  # noqa: BLE001 — best-effort post-cancel cleanup
+            logger.warning(
+                "matching_run_lock_release_failed_post_cancel",
+                error=repr(exc),
+            )
+        raise
+    except Exception as exc:  # noqa: BLE001 — top-level boundary; CancelledError handled above
+        logger.warning(
+            "matching_run_lock_release_failed",
+            error=repr(exc),
+        )
+
+
+async def _reset_identities(conn: AsyncConnection[Any]) -> tuple[int, int]:
+    """Cohort-scoped identity reset.
+
+    Captures the exact set of rows transitioning back to PENDING via
+    UPDATE ... RETURNING, then DELETEs only matches keyed to those IDs.
+    Status-based DELETE alone could remove rows that were already PENDING
+    before this run. The IS NOT NULL guard on identity_id is defense-in-depth
+    against pre-0003-migration deployments that lack the XOR CHECK constraint.
+
+    Also nulls match_tier, reason_code, reason_detail on the reset rows so
+    PENDING never carries stale matcher metadata. Mirrors the convention in
+    resolve_artist's cascade (matching.py:562-575) — "NULL = no reason for
+    pending" is a project-wide invariant, not an opt-in.
+
+    Returns (identities_reset, identity_matches_deleted).
+    """
+    cur = await conn.execute(
+        """
+        WITH reset_identities AS (
+            UPDATE track_identities
+               SET match_status  = %s,
+                   match_tier    = NULL,
+                   reason_code   = NULL,
+                   reason_detail = NULL
+             WHERE match_status = ANY(%s)
+            RETURNING id
+        ),
+        deleted_identity_matches AS (
+            DELETE FROM matches
+             WHERE identity_id IN (SELECT id FROM reset_identities)
+               AND identity_id IS NOT NULL
+            RETURNING id
+        )
+        SELECT
+            (SELECT COUNT(*) FROM reset_identities)         AS identities_reset,
+            (SELECT COUNT(*) FROM deleted_identity_matches) AS identity_matches_deleted
+        """,
+        (MatchStatus.PENDING.value, _RESETTABLE_IDENTITY_STATUSES),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return 0, 0
+    return int(row["identities_reset"]), int(row["identity_matches_deleted"])
+
+
+async def _reset_artists(conn: AsyncConnection[Any]) -> tuple[int, int]:
+    """Cohort-scoped artist reset. Mirrors _reset_identities for the artist
+    side. The matches.artist_id IS NOT NULL guard plus the XOR CHECK at
+    0003_matching_layer.sql:17-18 ensures identity-keyed match rows are
+    untouched.
+
+    Also nulls reason_code / reason_detail on the reset rows. broadcast_artists
+    has no match_tier column (per migration 0001 — that lives on
+    track_identities and matches only), so only the two reason columns need
+    nulling here. artist_candidates is intentionally preserved: the JSONB
+    payload of MB search results is potentially expensive to recompute and
+    has no "stale" semantics — the next matcher run overwrites it before the
+    curator sees it.
+
+    Returns (artists_reset, artist_matches_deleted).
+    """
+    cur = await conn.execute(
+        """
+        WITH reset_artists AS (
+            UPDATE broadcast_artists
+               SET match_status  = %s,
+                   reason_code   = NULL,
+                   reason_detail = NULL
+             WHERE match_status = ANY(%s)
+            RETURNING id
+        ),
+        deleted_artist_matches AS (
+            DELETE FROM matches
+             WHERE artist_id IN (SELECT id FROM reset_artists)
+               AND artist_id IS NOT NULL
+            RETURNING id
+        )
+        SELECT
+            (SELECT COUNT(*) FROM reset_artists)         AS artists_reset,
+            (SELECT COUNT(*) FROM deleted_artist_matches) AS artist_matches_deleted
+        """,
+        (MatchStatus.PENDING.value, _RESETTABLE_ARTIST_STATUSES),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return 0, 0
+    return int(row["artists_reset"]), int(row["artist_matches_deleted"])
+
+
+async def _select_playlists_with_pending_artists(
+    conn: AsyncConnection[Any],
+) -> list[UUID]:
+    """Legacy /matching/run selection — playlists with any review-relevant
+    artist. Used when perform_reset=False to preserve byte-identical behavior.
+    """
+    cur = await conn.execute(
         """
         SELECT DISTINCT le.playlist_id
         FROM play_events le
@@ -797,16 +995,148 @@ async def run_matching(
         """,
         (_QUEUE_STATUSES,),
     )
-    rows = await playlists_cur.fetchall()
+    rows = await cur.fetchall()
+    return [row["playlist_id"] for row in rows]
 
-    for row in rows:
-        artist_matching_task(str(row["playlist_id"]))
 
-    count = len(rows)
+async def _select_playlists_with_pending_identities_or_artists(
+    conn: AsyncConnection[Any],
+) -> list[UUID]:
+    """Reset-mode selection — playlists touched by any pending artist OR any
+    pending identity. After _reset_identities/_reset_artists, all resettable
+    rows are PENDING, so both UNION arms hit match_status='pending'. UNION
+    (without ALL) deduplicates across arms; per-arm DISTINCT is redundant.
+    Explicit-join shape avoids correlated-subquery planner pitfalls.
+    """
+    cur = await conn.execute(
+        """
+        SELECT pe.playlist_id
+          FROM play_events pe
+          JOIN track_identities ti ON ti.id = pe.identity_id
+          JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+         WHERE ba.match_status = %s
+        UNION
+        SELECT pe.playlist_id
+          FROM play_events pe
+          JOIN track_identities ti ON ti.id = pe.identity_id
+         WHERE ti.match_status = %s
+        """,
+        (MatchStatus.PENDING.value, MatchStatus.PENDING.value),
+    )
+    rows = await cur.fetchall()
+    return [row["playlist_id"] for row in rows]
+
+
+def _enqueue_playlists(playlist_ids: list[UUID]) -> list[UUID]:
+    """Fire-and-forget Huey enqueue for each playlist. Collects per-playlist
+    failures (Huey backend transient errors) and returns them so the response
+    can surface partial failures. Mirrors the resolve_artist enqueue contract
+    at the top-level boundary — bare-except is justified because no specific
+    exception type is reliably knowable across Huey backends.
+    """
+    failures: list[UUID] = []
+    for pid in playlist_ids:
+        try:
+            artist_matching_task(str(pid))
+        except Exception as exc:  # noqa: BLE001 — top-level fire-and-forget boundary
+            logger.warning(
+                "matching_run_enqueue_failed",
+                playlist_id=str(pid),
+                error=repr(exc),
+            )
+            failures.append(pid)
+    return failures
+
+
+@router.post("/run", status_code=status.HTTP_202_ACCEPTED)
+async def run_matching(
+    conn: DbConn,
+    _token: Token,
+    body: RunMatchingRequest = Body(default_factory=RunMatchingRequest),  # noqa: B008
+) -> dict[str, Any]:
+    """Trigger artist-matching tasks across playlists.
+
+    Default (perform_reset=False): finds all playlists with at least one
+    artist in PENDING/NEEDS_REVIEW state and fires a Huey artist-matching
+    task per playlist. Identities under already-resolved artists are NOT
+    re-evaluated; existing matches rows are NOT deleted.
+
+    With perform_reset=True: first rewinds every non-finalized identity and
+    artist (PENDING, NEEDS_REVIEW, AUTO_REJECTED) back to PENDING and drops
+    their matches rows, then enqueues every playlist that now has pending
+    work. AUTO_MATCHED, MANUAL_MATCHED, and MANUAL_REJECTED rows are
+    preserved untouched. Single-flight via Postgres advisory lock — a
+    concurrent reset returns 409.
+
+    Returns a structured response with reset and enqueue counts.
+    """
+    start_ms = time.monotonic()
+    identities_reset = identity_matches_deleted = 0
+    artists_reset = artist_matches_deleted = 0
+    lock_held = False
+
+    try:
+        if body.perform_reset:
+            # Acquire BEFORE the transaction so the lock spans the reset
+            # commit AND the post-commit SELECT + enqueue. A second
+            # concurrent /run reaching any of those phases gets 409.
+            lock_held = await _try_acquire_run_lock(conn)
+            if not lock_held:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="matching_run_in_progress",
+                )
+            # Reset runs in its own transaction so the row writes commit
+            # before enqueue (matches the codebase's commit-before-enqueue
+            # contract — Huey workers on a separate connection must see
+            # the committed PENDING state, not a snapshot mid-reset).
+            async with conn.transaction():
+                identities_reset, identity_matches_deleted = await _reset_identities(conn)
+                artists_reset, artist_matches_deleted = await _reset_artists(conn)
+            playlist_ids = await _select_playlists_with_pending_identities_or_artists(conn)
+        else:
+            playlist_ids = await _select_playlists_with_pending_artists(conn)
+
+        failed_playlist_ids = _enqueue_playlists(playlist_ids)
+    finally:
+        # Always release if held — including on the HTTPException path above
+        # (won't fire there since we raise before lock_held is set True) and
+        # any unexpected error during reset/select/enqueue. Skipped when
+        # acquire returned False so the contending request doesn't unlock
+        # the lock the FIRST request still holds.
+        if lock_held:
+            await _release_run_lock(conn)
+
+    duration_ms = int((time.monotonic() - start_ms) * 1000)
+    matches_deleted = identity_matches_deleted + artist_matches_deleted
+    queued = len(playlist_ids) - len(failed_playlist_ids)
+
+    logger.info(
+        "matching_run_complete",
+        perform_reset=body.perform_reset,
+        identities_reset=identities_reset,
+        artists_reset=artists_reset,
+        matches_deleted=matches_deleted,
+        playlists_queued=queued,
+        enqueue_failures=len(failed_playlist_ids),
+        duration_ms=duration_ms,
+    )
+
     return {
         "status": "accepted",
-        "message": f"Artist matching queued for {count} playlist(s)",
-        "count": count,
+        "reset": {
+            "performed": body.perform_reset,
+            "identities_reset": identities_reset,
+            "artists_reset": artists_reset,
+            "matches_deleted": matches_deleted,
+        },
+        "enqueue": {
+            "playlists_queued": queued,
+            "enqueue_failures": len(failed_playlist_ids),
+            "failed_playlist_ids": sorted(str(pid) for pid in failed_playlist_ids)[
+                :_MAX_FAILED_PLAYLIST_IDS_IN_RESPONSE
+            ],
+        },
     }
 
 
