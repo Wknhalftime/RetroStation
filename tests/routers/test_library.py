@@ -51,6 +51,7 @@ def _make_file(
     work_id: str | None = None,
     track_title: str = "Track Title",
     album_artist_mbid: str | None = None,
+    artist_name: str | None = None,
 ) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
@@ -63,6 +64,7 @@ def _make_file(
         audio=AudioMetadata(
             track_title=track_title,
             album_artist_mbid=album_artist_mbid,
+            artist_name=artist_name,
             release_title="Album Title",
             bitrate=320,
             duration_ms=210_000,
@@ -1767,10 +1769,16 @@ class TestRecalculateSongMasterOrphans:
 
 
 class TestLibraryFiles:
-    def test_files_search_returns_id_and_path(self, client, db_conn) -> None:
-        """Response shape contains id, file_path, track_title and total."""
+    def test_files_search_returns_id_path_and_artist(self, client, db_conn) -> None:
+        """Response shape contains id, file_path, track_title, artist_name and total."""
         repo = PgLibraryFileRepository(db_conn)
-        lf = repo.upsert(_make_file("/music/shape.flac", track_title="Shape Test"))
+        lf = repo.upsert(
+            _make_file(
+                "/music/shape.flac",
+                track_title="Shape Test",
+                artist_name="Shape Artist",
+            )
+        )
         db_conn.commit()
 
         resp = client.get("/api/v1/library/files?search=shape")
@@ -1782,6 +1790,29 @@ class TestLibraryFiles:
         assert item["id"] == str(lf.id)
         assert item["file_path"] == "/music/shape.flac"
         assert item["track_title"] == "Shape Test"
+        assert item["artist_name"] == "Shape Artist"
+
+    def test_files_search_returns_null_artist_when_untagged(self, client, db_conn) -> None:
+        """Files with no artist_name tag return artist_name=None.
+
+        The frontend hides the artist line entirely when null/empty, so this
+        contract must hold to avoid rendering a phantom blank line.
+        """
+        repo = PgLibraryFileRepository(db_conn)
+        repo.upsert(
+            _make_file(
+                "/music/untagged.flac",
+                track_title="Untagged Track",
+                artist_name=None,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/files?search=untagged")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["artist_name"] is None
 
     def test_files_search_filters_by_track_title(self, client, db_conn) -> None:
         """?search=fragment returns only matching files, ranked best-first."""
