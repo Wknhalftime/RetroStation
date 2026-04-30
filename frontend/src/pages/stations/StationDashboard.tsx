@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -31,6 +32,7 @@ type UploadStatus =
 
 export function StationDashboard() {
   const { station_id } = useParams<{ station_id: string }>();
+  const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
@@ -78,6 +80,7 @@ export function StationDashboard() {
               message: result.message ?? "Upload started successfully.",
             });
             if (fileInputRef.current) fileInputRef.current.value = "";
+            void queryClient.invalidateQueries({ queryKey: ["stations", station_id] });
           },
           onError: (err) => {
             setUploadStatus({
@@ -150,6 +153,7 @@ export function StationDashboard() {
           });
           if (fileInputRef.current) fileInputRef.current.value = "";
           if (folderInputRef.current) folderInputRef.current.value = "";
+          void queryClient.invalidateQueries({ queryKey: ["stations", station_id] });
         },
         onError: (err) => {
           setUploadStatus({

@@ -394,15 +394,37 @@ async def get_missing_matches_report(
     """
     await _require_station(conn, station_id)
 
-    # Single-pass CTE: aggregate play counts per identity, then apply window
-    # functions to derive impact_pct and total_rows before LIMIT/OFFSET.
-    # Window functions are evaluated before LIMIT/OFFSET in PostgreSQL, so the
-    # denominator (SUM(play_count) OVER ()) and row count always reflect the
-    # full result set, not just the current page.
-    #
-    # psycopg3 requires = ANY(%s) with a list for multi-value membership tests;
-    # IN %s is not supported.
+    # psycopg3 requires = ANY(%s) with a list for multi-value membership tests.
     unresolved = list(_UNRESOLVED_STATUSES)
+
+    # Separate count query so total is correct even when offset >= total rows.
+    # Using COUNT(*) OVER() in the items query would return 0 on an empty page,
+    # making it impossible to distinguish "no unresolved tracks" from "page past end".
+    count_cur = await conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM (
+            SELECT ti.id
+            FROM track_identities ti
+            JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+            JOIN play_events       pe ON pe.identity_id = ti.id
+            JOIN playlists         pl ON pl.id = pe.playlist_id
+            WHERE pl.station_id = %s
+              AND (
+                  ti.match_status = ANY(%s)
+                  OR ba.match_status = ANY(%s)
+              )
+            GROUP BY ti.id
+        ) sub
+        """,
+        (station_id, unresolved, unresolved),
+    )
+    count_row = await count_cur.fetchone()
+    total = int(count_row["total"]) if count_row else 0
+
+    # Paginated items query. SUM(play_count) OVER() is evaluated before
+    # LIMIT/OFFSET in PostgreSQL, so impact_pct always reflects the full
+    # unfiltered denominator regardless of the current page.
     items_cur = await conn.execute(
         """
         WITH missing AS (
@@ -433,11 +455,10 @@ async def get_missing_matches_report(
             track_title,
             track_status,
             play_count,
-            COUNT(*)    OVER ()                                           AS total_rows,
             ROUND(
                 play_count * 100.0 / NULLIF(SUM(play_count) OVER (), 0),
                 2
-            )                                                             AS impact_pct
+            ) AS impact_pct
         FROM missing
         ORDER BY artist_name, track_title
         LIMIT %s OFFSET %s
@@ -445,8 +466,6 @@ async def get_missing_matches_report(
         (station_id, unresolved, unresolved, limit, offset),
     )
     rows = await items_cur.fetchall()
-
-    total = int(rows[0]["total_rows"]) if rows else 0
 
     items = [
         MissingMatchItem(

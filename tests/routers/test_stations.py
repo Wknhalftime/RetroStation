@@ -734,6 +734,25 @@ class TestMissingMatchesReport:
         assert data["total"] == 5
         assert len(data["items"]) == 1
 
+    def test_pagination_offset_beyond_end(self, client, db_conn):
+        """offset >= total must still return the correct total, not 0.
+
+        This guards against the COUNT(*) OVER() approach where an empty page
+        (no rows returned) would incorrectly report total=0, making it
+        indistinguishable from 'station has no missing matches'.
+        """
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        for i in range(3):
+            _insert_identity_with_events(
+                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+            )
+        resp = client.get(self._url(station.id, "?limit=10&offset=100"))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3       # full count preserved
+        assert data["items"] == []      # page is empty
+
     # ------------------------------------------------------------------
     # Station isolation and cross-playlist aggregation
     # ------------------------------------------------------------------
