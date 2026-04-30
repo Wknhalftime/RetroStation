@@ -836,16 +836,34 @@ async def _try_acquire_run_lock(conn: AsyncConnection[Any]) -> bool:
 async def _release_run_lock(conn: AsyncConnection[Any]) -> None:
     """Release the session-scoped advisory lock acquired by
     ``_try_acquire_run_lock``. MUST be called in a finally block whenever
-    the acquire returned True. Failures are logged but not re-raised — a
-    leaked lock is an operational concern, but masking the original handler
-    response with an unlock error would be worse UX.
+    the acquire returned True.
+
+    Cancellation safety: the unlock SQL is wrapped in ``asyncio.shield`` so
+    that if this coroutine is cancelled (e.g., the client disconnects
+    mid-handler), the underlying ``conn.execute`` still runs to completion
+    in the background — Postgres receives the unlock even though we
+    propagate ``CancelledError`` to our caller. Without the shield, a
+    cancellation arriving during the unlock await would leave the
+    session-scoped lock held on the pooled connection, blocking every
+    subsequent /matching/run on that connection until it's recycled.
+
+    ``CancelledError`` is intentionally NOT caught — Python 3.8+ classifies
+    it under ``BaseException`` (not ``Exception``), so ``except Exception``
+    correctly lets it propagate. Catching it would mask cancellation,
+    which the FastAPI/asyncio runtime relies on for clean teardown.
+
+    Non-cancellation failures are logged but not re-raised — a leaked lock
+    is an operational concern, but masking the original handler response
+    with an unlock error would be worse UX.
     """
     try:
-        await conn.execute(
-            "SELECT pg_advisory_unlock(%s, %s)",
-            (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+        await asyncio.shield(
+            conn.execute(
+                "SELECT pg_advisory_unlock(%s, %s)",
+                (_MATCHING_LOCK_CLASS_ID, _MATCHING_RUN_LOCK_OBJ_ID),
+            )
         )
-    except Exception as exc:  # noqa: BLE001 — top-level boundary; leak is operational
+    except Exception as exc:  # noqa: BLE001 — top-level boundary; CancelledError still propagates
         logger.warning(
             "matching_run_lock_release_failed",
             error=repr(exc),
