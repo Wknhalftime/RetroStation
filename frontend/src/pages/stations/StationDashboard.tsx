@@ -253,8 +253,8 @@ export function StationDashboard() {
       {/* Overview tab panel */}
       {activeTab === "overview" && (
         <>
-      {/* Info cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+          {/* Info cards */}
+          <div className="grid gap-4 sm:grid-cols-3">
         {/* Format */}
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-500">
@@ -376,22 +376,23 @@ export function StationDashboard() {
         </div>
       )}
 
-        {/* Edit modal */}
-        <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
-          <StationForm
-            initial={{
-              call_letters: station.call_letters,
-              name: station.name,
-              city: station.city,
-              format_name: station.format_name,
-            }}
-            onSubmit={(data) => handleUpdate(data as StationUpdate)}
-            onCancel={() => setShowEdit(false)}
-            isPending={updateMutation.isPending}
-          />
-        </Modal>
         </>
       )}
+
+      {/* Edit modal — outside tab panels so it works on any active tab */}
+      <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Station">
+        <StationForm
+          initial={{
+            call_letters: station.call_letters,
+            name: station.name,
+            city: station.city,
+            format_name: station.format_name,
+          }}
+          onSubmit={(data) => handleUpdate(data as StationUpdate)}
+          onCancel={() => setShowEdit(false)}
+          isPending={updateMutation.isPending}
+        />
+      </Modal>
     </div>
   );
 }
