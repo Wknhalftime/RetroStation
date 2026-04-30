@@ -98,10 +98,41 @@ export function useMbArtistSearch(query: string) {
   });
 }
 
+// Mirrors the backend RunMatchingRequest body. perform_reset=true triggers
+// the cohort-scoped rewind of NEEDS_REVIEW + AUTO_REJECTED rows back to
+// PENDING (manual decisions and AUTO_MATCHED are preserved) before enqueue.
+export interface RunMatchingRequest {
+  perform_reset?: boolean;
+}
+
+// Mirrors the backend response. `count` and `message` were dropped — use the
+// nested fields directly. `failed_playlist_ids` is sorted lexicographically
+// and capped at 50 server-side.
+export interface RunMatchingResponse {
+  status: "accepted";
+  reset: {
+    performed: boolean;
+    identities_reset: number;
+    artists_reset: number;
+    matches_deleted: number;
+  };
+  enqueue: {
+    playlists_queued: number;
+    enqueue_failures: number;
+    failed_playlist_ids: string[];
+  };
+}
+
 export function useRerunMatching() {
   const queryClient = useQueryClient();
-  return useMutation<unknown, Error, void>({
-    mutationFn: () => apiFetch<unknown>("/api/v1/matching/run", { method: "POST" }),
+  return useMutation<RunMatchingResponse, Error, RunMatchingRequest | void>({
+    mutationFn: (variables) => {
+      const body: RunMatchingRequest = variables ?? {};
+      return apiFetch<RunMatchingResponse>("/api/v1/matching/run", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["matching"] });
     },
