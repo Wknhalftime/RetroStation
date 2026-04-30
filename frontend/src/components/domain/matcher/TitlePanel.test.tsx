@@ -18,8 +18,15 @@ const useResolveIdentityMock = vi.fn(() => ({
   isPending: false,
 }));
 
+const unmatchMutateMock = vi.fn();
+const useUnmatchIdentityMock = vi.fn(() => ({
+  mutate: unmatchMutateMock,
+  isPending: false,
+}));
+
 vi.mock("@/api/matcher", () => ({
   useResolveIdentity: () => useResolveIdentityMock(),
+  useUnmatchIdentity: () => useUnmatchIdentityMock(),
 }));
 
 import { TitlePanel } from "./TitlePanel";
@@ -74,6 +81,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default hook return — overridden per-test for the pending case.
   useResolveIdentityMock.mockReturnValue({ mutate: mutateMock, isPending: false });
+  useUnmatchIdentityMock.mockReturnValue({
+    mutate: unmatchMutateMock,
+    isPending: false,
+  });
 });
 
 function makeProposedMatch(overrides: Partial<ProposedMatch> = {}): ProposedMatch {
@@ -523,5 +534,68 @@ describe("TitlePanel sectioning + sorting", () => {
     expect(header.textContent).toContain("2 auto");
     expect(header.textContent).toContain("1 manual");
     expect(header.textContent).toContain("1 rejected");
+  });
+});
+
+describe("TitlePanel Unmatch action", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("clicking Unmatch on a resolved row fires unmatchIdentity with the row id", () => {
+    const target = makeIdentityWithId("0a", {
+      match_status: "manual_matched",
+      original_title: "Manual hit",
+    });
+    render(
+      <TitlePanel artist={makeArtist([target])} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    // Resolved section is collapsed by default — expand it.
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/i }));
+
+    const button = screen.getByRole("button", { name: /Unmatch Manual hit/i });
+    fireEvent.click(button);
+
+    expect(unmatchMutateMock).toHaveBeenCalledTimes(1);
+    expect(unmatchMutateMock).toHaveBeenCalledWith({ id: target.id });
+  });
+
+  it("renders an Unmatch button on every resolved status (matched and rejected)", () => {
+    const identities = [
+      makeIdentityWithId("01", { match_status: "auto_matched", original_title: "AutoM" }),
+      makeIdentityWithId("02", { match_status: "manual_matched", original_title: "ManualM" }),
+      makeIdentityWithId("03", { match_status: "auto_rejected", original_title: "AutoR" }),
+      makeIdentityWithId("04", { match_status: "manual_rejected", original_title: "ManualR" }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/i }));
+
+    expect(screen.getByRole("button", { name: /Unmatch AutoM/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Unmatch ManualM/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Unmatch AutoR/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Unmatch ManualR/i })).toBeDefined();
+  });
+
+  it("disables the Unmatch button while either mutation is pending", () => {
+    useUnmatchIdentityMock.mockReturnValue({
+      mutate: unmatchMutateMock,
+      isPending: true,
+    });
+    const target = makeIdentityWithId("01", {
+      match_status: "auto_matched",
+      original_title: "While pending",
+    });
+    render(
+      <TitlePanel artist={makeArtist([target])} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Resolved/i }));
+
+    const button = screen.getByRole("button", { name: /Unmatch While pending/i });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 });

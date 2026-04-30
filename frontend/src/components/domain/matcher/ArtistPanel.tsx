@@ -1,7 +1,14 @@
 import { MatchStatusBadge } from "@/components/ui/Badge";
-import { useResolveArtist } from "@/api/matcher";
+import { useResolveArtist, useUnmatchArtist } from "@/api/matcher";
 import type { QueueArtist } from "@/lib/schemas/matcher";
 import type { MatchCandidate } from "@/lib/schemas/matches";
+
+const FINALIZED_ARTIST_STATUSES = new Set([
+  "auto_matched",
+  "manual_matched",
+  "auto_rejected",
+  "manual_rejected",
+]);
 
 interface ArtistPanelProps {
   artist: QueueArtist;
@@ -15,6 +22,7 @@ export function ArtistPanel({
   onSearchLibrary,
 }: ArtistPanelProps) {
   const resolveArtist = useResolveArtist();
+  const unmatchArtist = useUnmatchArtist();
 
   // The queue's broadened CTE now surfaces AUTO_MATCHED / MANUAL_MATCHED
   // parents that have at least one review-relevant child. For those rows the
@@ -31,6 +39,9 @@ export function ArtistPanel({
   const isResolved =
     artist.match_status === "auto_matched" ||
     artist.match_status === "manual_matched";
+  // Unmatch is offered for any finalized state (matched OR rejected). Reverts
+  // the artist + every child identity to needs_review with USER_UNMATCHED.
+  const isFinalized = FINALIZED_ARTIST_STATUSES.has(artist.match_status);
 
   function handleAccept(candidate: MatchCandidate) {
     resolveArtist.mutate({
@@ -49,6 +60,10 @@ export function ArtistPanel({
     });
   }
 
+  function handleUnmatch() {
+    unmatchArtist.mutate({ id: artist.id });
+  }
+
   // Parse candidates — each item in the array may be null or a plain record.
   // We cast to MatchCandidate only when mbid + name exist.
   const candidates: MatchCandidate[] = (artist.candidates ?? []).flatMap((raw) => {
@@ -65,7 +80,7 @@ export function ArtistPanel({
     ];
   });
 
-  const isPending = resolveArtist.isPending;
+  const isPending = resolveArtist.isPending || unmatchArtist.isPending;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5">
@@ -160,6 +175,21 @@ export function ArtistPanel({
           className="w-full rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
           Reject Artist
+        </button>
+      )}
+
+      {/* Unmatch is destructive but reversible: reverts the artist plus every
+          child identity to needs_review (regardless of child status). Hidden
+          until the artist itself is in a finalized state — pending /
+          needs_review have nothing to revert and the backend would 409. */}
+      {isFinalized && (
+        <button
+          onClick={handleUnmatch}
+          disabled={isPending}
+          className="mt-2 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+          aria-label={`Unmatch artist ${artist.original_name}`}
+        >
+          Unmatch artist (also unmatches all songs)
         </button>
       )}
     </div>

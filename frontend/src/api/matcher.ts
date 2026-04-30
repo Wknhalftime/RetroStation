@@ -71,6 +71,41 @@ export function useResolveIdentity() {
   });
 }
 
+// Unmatch reverts a finalized match (auto/manual matched or rejected) back to
+// NEEDS_REVIEW with reason_code=USER_UNMATCHED. The matches row is hard-deleted
+// server-side. Unmatching an artist cascades to ALL child identities regardless
+// of status — see backend/routers/matching.py::unmatch_artist.
+
+interface UnmatchVariables {
+  id: string;
+}
+
+export function useUnmatchArtist() {
+  const queryClient = useQueryClient();
+  return useMutation<ResolveResult, Error, UnmatchVariables>({
+    mutationFn: ({ id }) =>
+      apiFetch<ResolveResult>(`/api/v1/matching/artists/${id}/unmatch`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["matching"] });
+    },
+  });
+}
+
+export function useUnmatchIdentity() {
+  const queryClient = useQueryClient();
+  return useMutation<ResolveResult, Error, UnmatchVariables>({
+    mutationFn: ({ id }) =>
+      apiFetch<ResolveResult>(`/api/v1/matching/identities/${id}/unmatch`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["matching"] });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // MusicBrainz artist search
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
-from backend.domain.enums import MatchStatus, MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.services.identity_resolution_service import (
     LibraryFileNotFoundError,
     persist_manual_match,
@@ -38,6 +38,17 @@ _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDIN
 # Statuses that remain when cascading a MANUAL_REJECTED artist
 _PROTECTED_STATUSES: list[str] = [
     MatchStatus.MANUAL_MATCHED.value,
+    MatchStatus.MANUAL_REJECTED.value,
+]
+
+# Source statuses eligible for /unmatch. Pending and needs_review are not
+# "unmatchable" — they have nothing to revert. Manual children are NOT
+# protected on the artist cascade path (intentional: unmatching an artist
+# wipes the slate for every child regardless of status).
+_UNMATCHABLE_STATUSES: list[str] = [
+    MatchStatus.AUTO_MATCHED.value,
+    MatchStatus.MANUAL_MATCHED.value,
+    MatchStatus.AUTO_REJECTED.value,
     MatchStatus.MANUAL_REJECTED.value,
 ]
 
@@ -790,6 +801,156 @@ async def resolve_identity(
         )
 
     return ResolveResult(id=identity_id, match_status=new_status.value)
+
+
+# ---------------------------------------------------------------------------
+# POST /artists/{artist_id}/unmatch
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/artists/{artist_id}/unmatch",
+    response_model=ResolveResult,
+)
+async def unmatch_artist(
+    artist_id: UUID,
+    conn: DbConn,
+    _token: Token,
+) -> ResolveResult:
+    """Revert a finalized artist match back to NEEDS_REVIEW.
+
+    Cascades to ALL child identities regardless of status — every child is
+    set to NEEDS_REVIEW with reason_code=USER_UNMATCHED, and every match row
+    keyed to either the artist or any of its children is deleted. This is
+    intentionally more aggressive than ``resolve_artist``'s
+    MANUAL_REJECTED cascade (which protects manual children); unmatching an
+    artist is the curator saying "throw the whole tree out and start over."
+
+    Raises:
+        HTTPException: 404 if the artist does not exist.
+        HTTPException: 409 if the artist's current ``match_status`` is not
+            in :data:`_UNMATCHABLE_STATUSES` (i.e. PENDING / NEEDS_REVIEW).
+    """
+    artist_cur = await conn.execute(
+        "SELECT match_status FROM broadcast_artists WHERE id = %s",
+        (artist_id,),
+    )
+    artist_row = await artist_cur.fetchone()
+    if artist_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artist {artist_id} not found",
+        )
+    if artist_row["match_status"] not in _UNMATCHABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Artist {artist_id} is in {artist_row['match_status']!r}; "
+                "only finalized matches can be unmatched"
+            ),
+        )
+
+    needs_review = MatchStatus.NEEDS_REVIEW.value
+    user_unmatched = ReasonCode.USER_UNMATCHED.value
+
+    await conn.execute(
+        """
+        UPDATE broadcast_artists
+           SET match_status  = %s,
+               reason_code   = %s,
+               reason_detail = NULL
+         WHERE id = %s
+        """,
+        (needs_review, user_unmatched, artist_id),
+    )
+    await conn.execute(
+        """
+        UPDATE track_identities
+           SET match_status  = %s,
+               match_tier    = NULL,
+               reason_code   = %s,
+               reason_detail = NULL
+         WHERE broadcast_artist_id = %s
+        """,
+        (needs_review, user_unmatched, artist_id),
+    )
+    await conn.execute(
+        """
+        DELETE FROM matches
+         WHERE artist_id = %s
+            OR identity_id IN (
+                SELECT id FROM track_identities
+                 WHERE broadcast_artist_id = %s
+            )
+        """,
+        (artist_id, artist_id),
+    )
+
+    return ResolveResult(id=artist_id, match_status=needs_review)
+
+
+# ---------------------------------------------------------------------------
+# POST /identities/{identity_id}/unmatch
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/identities/{identity_id}/unmatch",
+    response_model=ResolveResult,
+)
+async def unmatch_identity(
+    identity_id: UUID,
+    conn: DbConn,
+    _token: Token,
+) -> ResolveResult:
+    """Revert a finalized identity match back to NEEDS_REVIEW.
+
+    Per-song unmatch — does not touch sibling identities or the parent
+    artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
+
+    Raises:
+        HTTPException: 404 if the identity does not exist.
+        HTTPException: 409 if the identity's current ``match_status`` is
+            not in :data:`_UNMATCHABLE_STATUSES`.
+    """
+    identity_cur = await conn.execute(
+        "SELECT match_status FROM track_identities WHERE id = %s",
+        (identity_id,),
+    )
+    identity_row = await identity_cur.fetchone()
+    if identity_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Identity {identity_id} not found",
+        )
+    if identity_row["match_status"] not in _UNMATCHABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Identity {identity_id} is in {identity_row['match_status']!r}; "
+                "only finalized matches can be unmatched"
+            ),
+        )
+
+    needs_review = MatchStatus.NEEDS_REVIEW.value
+
+    await conn.execute(
+        """
+        UPDATE track_identities
+           SET match_status  = %s,
+               match_tier    = NULL,
+               reason_code   = %s,
+               reason_detail = NULL
+         WHERE id = %s
+        """,
+        (needs_review, ReasonCode.USER_UNMATCHED.value, identity_id),
+    )
+    await conn.execute(
+        "DELETE FROM matches WHERE identity_id = %s",
+        (identity_id,),
+    )
+
+    return ResolveResult(id=identity_id, match_status=needs_review)
 
 
 # ---------------------------------------------------------------------------

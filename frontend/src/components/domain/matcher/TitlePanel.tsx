@@ -10,7 +10,7 @@ import {
   Clock,
   X,
 } from "lucide-react";
-import { useResolveIdentity } from "@/api/matcher";
+import { useResolveIdentity, useUnmatchIdentity } from "@/api/matcher";
 import { cn } from "@/lib/utils";
 import type { QueueArtist, QueueIdentity, TriageBucket } from "@/lib/schemas/matcher";
 
@@ -172,6 +172,7 @@ function reviewChipFor(identity: QueueIdentity): ReviewChip {
 
 export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   const resolveIdentity = useResolveIdentity();
+  const unmatchIdentity = useUnmatchIdentity();
   const [resolvedCollapsed, setResolvedCollapsed] = useLocalStorageCollapsed();
 
   // Mirrors the isResolved flag in ArtistPanel — must include auto_matched
@@ -202,7 +203,7 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   }
 
   const identities: QueueIdentity[] = artist.identities ?? [];
-  const isPending = resolveIdentity.isPending;
+  const isPending = resolveIdentity.isPending || unmatchIdentity.isPending;
   const { review: reviewIdentities, resolved: resolvedIdentities } =
     partitionByReviewState(identities);
   const sortedReview = sortReviewIdentities(reviewIdentities);
@@ -224,6 +225,10 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
       id: identity.id,
       resolution: { match_status: "manual_rejected", library_file_id: null },
     });
+  }
+
+  function handleUnmatch(identity: QueueIdentity) {
+    unmatchIdentity.mutate({ id: identity.id });
   }
 
   if (identities.length === 0) {
@@ -255,6 +260,7 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
             onToggle={() => setResolvedCollapsed(!resolvedCollapsed)}
             isPending={isPending}
             onReject={handleReject}
+            onUnmatch={handleUnmatch}
             onFileSearch={onFileSearch}
           />
         )}
@@ -454,6 +460,7 @@ interface ResolvedSectionProps {
   onToggle: () => void;
   isPending: boolean;
   onReject: (id: QueueIdentity) => void;
+  onUnmatch: (id: QueueIdentity) => void;
   onFileSearch: (identityId: string) => void;
 }
 
@@ -464,6 +471,7 @@ function ResolvedSection({
   onToggle,
   isPending,
   onReject,
+  onUnmatch,
   onFileSearch,
 }: ResolvedSectionProps) {
   // Build a muted breakdown shown in the header even when collapsed.
@@ -517,6 +525,7 @@ function ResolvedSection({
               identity={identity}
               isPending={isPending}
               onReject={onReject}
+              onUnmatch={onUnmatch}
               onFileSearch={onFileSearch}
             />
           ))}
@@ -530,10 +539,17 @@ interface ResolvedRowProps {
   identity: QueueIdentity;
   isPending: boolean;
   onReject: (id: QueueIdentity) => void;
+  onUnmatch: (id: QueueIdentity) => void;
   onFileSearch: (identityId: string) => void;
 }
 
-function ResolvedRow({ identity, isPending, onReject, onFileSearch }: ResolvedRowProps) {
+function ResolvedRow({
+  identity,
+  isPending,
+  onReject,
+  onUnmatch,
+  onFileSearch,
+}: ResolvedRowProps) {
   const isMatched =
     identity.match_status === "auto_matched" || identity.match_status === "manual_matched";
   const isRejected =
@@ -598,6 +614,14 @@ function ResolvedRow({ identity, isPending, onReject, onFileSearch }: ResolvedRo
             Find File
           </button>
         )}
+        <button
+          onClick={() => onUnmatch(identity)}
+          disabled={isPending}
+          className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+          aria-label={`Unmatch ${identity.original_title}`}
+        >
+          Unmatch
+        </button>
       </span>
     </div>
   );
