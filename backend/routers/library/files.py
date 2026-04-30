@@ -70,6 +70,7 @@ class LibraryFileSummary(BaseModel):
     id: UUID
     file_path: str
     track_title: str | None
+    artist_name: str | None = None
 
 
 class PaginatedLibraryFiles(BaseModel):
@@ -111,7 +112,7 @@ async def list_files(
     total: int = cnt_row["total"] if cnt_row else 0
 
     items_sql = f"""
-        SELECT id, file_path, track_title
+        SELECT id, file_path, track_title, artist_name
         FROM library_files
         {where_clause}
         {order_clause}
@@ -126,6 +127,7 @@ async def list_files(
             id=row["id"],
             file_path=row["file_path"],
             track_title=row.get("track_title"),
+            artist_name=row.get("artist_name"),
         )
         for row in rows
     ]

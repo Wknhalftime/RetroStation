@@ -20,6 +20,7 @@ interface LibraryFile {
   id: string;
   file_path: string;
   track_title?: string | null;
+  artist_name?: string | null;
 }
 
 type SearchMode = "artist" | "file" | "mb-artist";
@@ -171,6 +172,9 @@ export function SearchSlideOver({
         ) : (
           <>
             <p className="truncate text-sm font-medium text-gray-800">{file.track_title ?? "Untitled"}</p>
+            {file.artist_name && (
+              <p className="truncate text-xs text-gray-500">{file.artist_name}</p>
+            )}
             <p className="truncate text-xs text-gray-400">{file.file_path}</p>
           </>
         )}
