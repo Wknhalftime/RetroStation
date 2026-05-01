@@ -28,12 +28,15 @@ export function MissingMatchesReport({ stationId, callLetters }: MissingMatchesR
   const [offset, setOffset] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
 
-  /** Escape a single CSV field per RFC 4180. */
+  /** Escape a single CSV field per RFC 4180, and neutralise formula-injection
+   *  characters (=, +, -, @) that spreadsheet apps may evaluate as formulas. */
   function escapeCsvField(value: string): string {
-    if (/[",\n\r]/.test(value)) {
-      return `"${value.replace(/"/g, '""')}"`;
+    // Prefix formula-trigger characters with a tab to defuse them.
+    const safe = /^[=+\-@]/.test(value) ? `\t${value}` : value;
+    if (/[",\n\r]/.test(safe)) {
+      return `"${safe.replace(/"/g, '""')}"`;
     }
-    return value;
+    return safe;
   }
 
   /** Build a CSV string from a list of MissingMatchItem records. */
