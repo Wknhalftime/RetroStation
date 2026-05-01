@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useMissingMatchesReport } from "@/api/stations";
+import { useMissingMatchesReport, fetchAllMissingMatchesForExport } from "@/api/stations";
+import type { MissingMatchItem } from "@/lib/schemas/stations";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -16,14 +17,61 @@ const PAGE_SIZE = 50;
 
 interface MissingMatchesReportProps {
   stationId: string;
+  callLetters?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function MissingMatchesReport({ stationId }: MissingMatchesReportProps) {
+export function MissingMatchesReport({ stationId, callLetters }: MissingMatchesReportProps) {
   const [offset, setOffset] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
+
+  /** Escape a single CSV field per RFC 4180. */
+  function escapeCsvField(value: string): string {
+    if (/[",\n\r]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  }
+
+  /** Build a CSV string from a list of MissingMatchItem records. */
+  function buildCsv(items: MissingMatchItem[]): string {
+    const header = "Artist,Track Title,Track Status,Total Plays,Impact %";
+    const rows = items.map((item) =>
+      [
+        escapeCsvField(item.artist_name),
+        escapeCsvField(item.track_title),
+        escapeCsvField(item.track_status),
+        String(item.play_count),
+        item.impact_pct.toFixed(2),
+      ].join(",")
+    );
+    return [header, ...rows].join("\n");
+  }
+
+  const handleExportCsv = async () => {
+    if (!stationId || isExporting) return;
+    setIsExporting(true);
+    try {
+      const items = await fetchAllMissingMatchesForExport(stationId);
+      const csv = buildCsv(items);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${callLetters ?? stationId}-missing-matches.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("CSV export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Reset to first page if stationId ever changes (defensive; unlikely in use)
   useEffect(() => {
@@ -83,6 +131,15 @@ export function MissingMatchesReport({ stationId }: MissingMatchesReportProps) {
         <p className="text-sm text-gray-400">
           Page {page} of {totalPages}
         </p>
+        <button
+          type="button"
+          onClick={() => { void handleExportCsv(); }}
+          disabled={isExporting}
+          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download className="h-4 w-4" />
+          {isExporting ? "Exporting…" : "Export CSV"}
+        </button>
       </div>
 
       {/* Table */}
