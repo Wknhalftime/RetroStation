@@ -97,15 +97,22 @@ artist_base AS (
     -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) still
     -- produces the correct triage bucket (its resolved siblings do not
     -- inflate the headline).
+    -- The search predicate sits here (vs. the page query) so pagination,
+    -- the `total` window count, and the empty-page count fallback all see
+    -- the same filtered artist set. Special LIKE chars in the user's term
+    -- (percent, underscore, and the bang we use as the escape marker) are
+    -- pre-escaped by _normalize_search; the ESCAPE '!' clause then makes
+    -- them match literally.
     SELECT id, original_name, normalized_name, match_status,
            artist_candidates, reason_code, reason_detail, created_at
     FROM broadcast_artists ba
-    WHERE ba.match_status = ANY(%s)
-       OR EXISTS (
-           SELECT 1 FROM track_identities ti
-           WHERE ti.broadcast_artist_id = ba.id
-             AND ti.match_status = ANY(%s)
-       )
+    WHERE (ba.match_status = ANY(%s)
+        OR EXISTS (
+            SELECT 1 FROM track_identities ti
+            WHERE ti.broadcast_artist_id = ba.id
+              AND ti.match_status = ANY(%s)
+        ))
+      AND (%s::text IS NULL OR ba.original_name ILIKE '%%' || %s || '%%' ESCAPE '!')
 ),
 identity_best AS (
     -- Mirrors _artist_bucket_from_identities: only review-relevant identities
@@ -142,6 +149,35 @@ artist_bucket AS (
 
 
 TriageBucket = Literal["quick_review", "needs_attention", "blocked"]
+
+
+# Sort modes for the queue endpoint. Mapped to a static ORDER BY clause —
+# values are inlined into the page-query f-string, so any new mode added here
+# must be a trusted SQL fragment, never user input.
+QueueSort = Literal["created_at", "name"]
+
+_SORT_CLAUSES: dict[str, str] = {
+    "created_at": "ORDER BY created_at, id",
+    "name": "ORDER BY LOWER(original_name), id",
+}
+
+
+# Pre-escape characters that ILIKE treats as metacharacters so a user's literal
+# `%`, `_`, or `!` matches itself rather than acting as a wildcard / escape
+# trigger. Pairs with `ESCAPE '!'` in the artist_base predicate. `!` is chosen
+# over `\` to sidestep PostgreSQL's standard_conforming_strings ambiguity for
+# backslash literals — `'!' ` is the same single character regardless of mode.
+def _normalize_search(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    trimmed = raw.strip()
+    if not trimmed:
+        return None
+    return (
+        trimmed.replace("!", "!!")
+        .replace("%", "!%")
+        .replace("_", "!_")
+    )
 
 
 def _compute_triage_bucket(score: float | None) -> TriageBucket:
@@ -291,6 +327,8 @@ async def get_matching_queue(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     bucket: TriageBucket | None = Query(default=None),  # noqa: B008
+    search: str | None = Query(default=None, max_length=200),  # noqa: B008
+    sort: QueueSort = Query(default="created_at"),  # noqa: B008
 ) -> MatchingQueue:
     """Return paginated artists that need curator review.
 
@@ -300,12 +338,21 @@ async def get_matching_queue(
     The bucket filter (when supplied) is materialised in SQL via a CTE so that
     LIMIT/OFFSET pagination and `total` both reflect the filtered set.
 
+    `search` is a case-insensitive substring match against
+    broadcast_artists.original_name. It is applied inside artist_base (the
+    same place as the queue-status filter) so pagination, the `total` window
+    count, and the empty-page count fallback all reference the same filtered
+    set. `sort=name` orders alphabetically by original_name; default is the
+    historical created_at, id order.
+
     Locked-artist invariant: a persisted match row whose library_file's
     normalized_artist_name disagrees with the locked broadcast_artist's
     normalized_name is suppressed by the LEFT JOIN predicate. The identity
     still appears in the queue; only proposed_match is masked to null. See
     QueueIdentity.proposed_match for the full enumeration of null reasons.
     """
+    search_term = _normalize_search(search)
+    order_by = _SORT_CLAUSES[sort]
     page_cur = await conn.execute(
         f"""
         WITH {_QUEUE_BUCKET_CTE},
@@ -319,15 +366,23 @@ async def get_matching_queue(
         )
         SELECT *, COUNT(*) OVER () AS _total
         FROM filtered
-        ORDER BY created_at, id
+        {order_by}
         LIMIT %s OFFSET %s
         """,
-        # Three _QUEUE_STATUSES bindings: artist_base WHERE clause (artist
-        # status), artist_base EXISTS subquery (identity status), identity_best
-        # WHERE clause (identity status, again).
+        # Bind order, top-to-bottom through the SQL:
+        #   artist_base WHERE       — _QUEUE_STATUSES (artist status)
+        #   artist_base EXISTS      — _QUEUE_STATUSES (identity status)
+        #   artist_base name guard  — search_term (NULL check)
+        #   artist_base ILIKE       — search_term (pattern)
+        #   identity_best WHERE     — _QUEUE_STATUSES (identity status, again)
+        #   filtered WHERE NULL     — bucket
+        #   filtered WHERE eq       — bucket
+        #   LIMIT / OFFSET          — limit / offset
         (
             _QUEUE_STATUSES,
             _QUEUE_STATUSES,
+            search_term,
+            search_term,
             _QUEUE_STATUSES,
             bucket,
             bucket,
@@ -345,10 +400,13 @@ async def get_matching_queue(
             SELECT COUNT(*) AS total FROM artist_bucket
             WHERE %s::text IS NULL OR bucket = %s::text
             """,
-            # See page query above for binding count rationale.
+            # Same artist_base/identity_best bind order as the page query,
+            # then the two `bucket` bindings for the count's WHERE.
             (
                 _QUEUE_STATUSES,
                 _QUEUE_STATUSES,
+                search_term,
+                search_term,
                 _QUEUE_STATUSES,
                 bucket,
                 bucket,

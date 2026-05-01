@@ -13,18 +13,39 @@ import type {
 // Query keys
 // ---------------------------------------------------------------------------
 
-const matchingQueueKey = (limit: number, offset: number) =>
-  ["matching", "queue", { limit, offset }] as const;
+export type QueueSort = "created_at" | "name";
+
+const matchingQueueKey = (
+  limit: number,
+  offset: number,
+  search: string,
+  sort: QueueSort,
+) => ["matching", "queue", { limit, offset, search, sort }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 
-export function useMatchingQueue(limit = 50, offset = 0) {
+export function useMatchingQueue(
+  limit = 50,
+  offset = 0,
+  search: string = "",
+  sort: QueueSort = "created_at",
+) {
+  // Trim once and feed both the cache key and the URL through the same value
+  // so "  prince" and "prince" share a cache entry and a single request.
+  const trimmedSearch = search.trim();
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    sort,
+  });
+  if (trimmedSearch.length > 0) {
+    params.set("search", trimmedSearch);
+  }
   return useQuery<MatchingQueue>({
-    queryKey: matchingQueueKey(limit, offset),
-    queryFn: () =>
-      apiFetch<MatchingQueue>(`/api/v1/matching/queue?limit=${limit}&offset=${offset}`),
+    queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort),
+    queryFn: () => apiFetch<MatchingQueue>(`/api/v1/matching/queue?${params.toString()}`),
     placeholderData: keepPreviousData,
   });
 }
