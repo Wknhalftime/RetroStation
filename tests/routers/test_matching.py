@@ -281,6 +281,121 @@ class TestMatchingQueue:
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
+    def test_search_filters_by_substring_case_insensitive(self, client, db_conn):
+        _insert_artist(db_conn, original_name="Prince")
+        _insert_artist(db_conn, original_name="The Princess and the Frog")
+        _insert_artist(db_conn, original_name="Madonna")
+
+        resp = client.get("/api/v1/matching/queue?search=prince")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Both "Prince" and "The Princess..." contain the substring case-insensitively.
+        names = sorted(item["original_name"] for item in data["items"])
+        assert names == ["Prince", "The Princess and the Frog"]
+        assert data["total"] == 2
+
+    def test_search_total_reflects_filtered_count(self, client, db_conn):
+        _insert_artist(db_conn, original_name="Alpha")
+        _insert_artist(db_conn, original_name="Beta")
+        _insert_artist(db_conn, original_name="Gamma")
+
+        resp = client.get("/api/v1/matching/queue?search=alpha&limit=1&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["original_name"] == "Alpha"
+
+    def test_search_escapes_like_wildcards(self, client, db_conn):
+        # `_` and `%` are LIKE metacharacters. _normalize_search must escape
+        # them so the search term matches them literally instead of expanding
+        # to "any character" / "any substring".
+        _insert_artist(db_conn, original_name="100% Pure")
+        _insert_artist(db_conn, original_name="Plain Name")
+
+        # Bare `%` would have matched everything; with escaping it matches
+        # only the row containing a literal `%`.
+        resp = client.get("/api/v1/matching/queue?search=%25")  # url-encoded %
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [item["original_name"] for item in data["items"]]
+        assert names == ["100% Pure"]
+        assert data["total"] == 1
+
+        # Bare `_` would have matched any single character; with escaping it
+        # only matches a literal underscore.
+        resp = client.get("/api/v1/matching/queue?search=_")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_search_empty_string_treated_as_no_filter(self, client, db_conn):
+        _insert_artist(db_conn, original_name="One")
+        _insert_artist(db_conn, original_name="Two")
+
+        resp = client.get("/api/v1/matching/queue?search=")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+
+        resp = client.get("/api/v1/matching/queue?search=%20%20")  # whitespace only
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+
+    def test_search_no_match_returns_empty(self, client, db_conn):
+        _insert_artist(db_conn, original_name="Madonna")
+
+        resp = client.get("/api/v1/matching/queue?search=zzznotfound")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["items"] == []
+
+    def test_sort_by_name_returns_alphabetical_order(self, client, db_conn):
+        # Insert in non-alphabetical order; default sort=created_at would
+        # preserve insertion order, so this differentiates the two modes.
+        _insert_artist(db_conn, original_name="Charlie")
+        _insert_artist(db_conn, original_name="alpha")  # lowercase - case-insensitive sort
+        _insert_artist(db_conn, original_name="Bravo")
+
+        resp = client.get("/api/v1/matching/queue?sort=name")
+        assert resp.status_code == 200
+        names = [item["original_name"] for item in resp.json()["items"]]
+        assert names == ["alpha", "Bravo", "Charlie"]
+
+    def test_sort_by_name_holds_across_pages(self, client, db_conn):
+        names_in = ["Delta", "Alpha", "Charlie", "Bravo"]
+        for n in names_in:
+            _insert_artist(db_conn, original_name=n)
+
+        page1 = client.get("/api/v1/matching/queue?sort=name&limit=2&offset=0").json()
+        page2 = client.get("/api/v1/matching/queue?sort=name&limit=2&offset=2").json()
+        ordered = [item["original_name"] for item in page1["items"]] + [
+            item["original_name"] for item in page2["items"]
+        ]
+        assert ordered == ["Alpha", "Bravo", "Charlie", "Delta"]
+
+    def test_default_sort_returns_all_without_alpha_order(self, client, db_conn):
+        # No sort/search params — must return all artists. The default order
+        # is created_at, id; since separate-transaction NOW() resolution can
+        # collide on fast systems we don't pin a specific ordering here, only
+        # that membership is preserved and that the result is NOT (necessarily)
+        # alphabetical — the alphabetical case is covered by the sort=name tests.
+        for n in ["Charlie", "Alpha", "Bravo"]:
+            _insert_artist(db_conn, original_name=n)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert sorted(item["original_name"] for item in data["items"]) == [
+            "Alpha",
+            "Bravo",
+            "Charlie",
+        ]
+
+    def test_invalid_sort_value_returns_422(self, client, db_conn):
+        resp = client.get("/api/v1/matching/queue?sort=bogus")
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # TestResolveArtist

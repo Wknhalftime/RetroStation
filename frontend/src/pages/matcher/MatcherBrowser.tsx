@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
@@ -10,6 +10,7 @@ import {
   useRerunMatching,
   useResolveArtist,
   useResolveIdentity,
+  type QueueSort,
   type RunMatchingResponse,
 } from "@/api/matcher";
 import { ConflictError } from "@/api/client";
@@ -73,6 +74,21 @@ interface LibraryArtist {
 }
 
 // ---------------------------------------------------------------------------
+// Debounce hook
+// Mirrors the pattern in pages/library/ArtistBrowser.tsx — keep the two in
+// sync if behaviour ever changes.
+// ---------------------------------------------------------------------------
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
+// ---------------------------------------------------------------------------
 // MatcherBrowser
 // ---------------------------------------------------------------------------
 
@@ -80,6 +96,9 @@ const PAGE_SIZE = 25;
 
 export function MatcherBrowser() {
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebounce(searchInput, 300);
+  const [sort, setSort] = useState<QueueSort>("created_at");
 
   // Switching pages can scroll the selected artist off-screen (the right-side
   // panels would otherwise keep acting on an artist not shown in the list).
@@ -91,8 +110,23 @@ export function MatcherBrowser() {
     setPage(newPage);
     setSelectedArtistId(null);
   };
+
+  // Whenever the active search term or sort mode changes, jump back to page 1
+  // and drop the selection — the previously selected artist may not appear in
+  // the new filtered/sorted view, and right-side panels would otherwise act
+  // on a row not shown in the sidebar.
+  useEffect(() => {
+    setPage(1);
+    setSelectedArtistId(null);
+  }, [debouncedSearch, sort]);
+
   const offset = (page - 1) * PAGE_SIZE;
-  const { data, isLoading, isError, isPlaceholderData } = useMatchingQueue(PAGE_SIZE, offset);
+  const { data, isLoading, isError, isPlaceholderData } = useMatchingQueue(
+    PAGE_SIZE,
+    offset,
+    debouncedSearch,
+    sort,
+  );
   const rerunMatching = useRerunMatching();
   const resolveIdentity = useResolveIdentity();
   const resolveArtist = useResolveArtist();
@@ -302,7 +336,11 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && total === 0 && (
+      {/* When the queue has truly never had data (no search active and total
+          is zero), show the centered empty state. If a search is active we
+          fall through to the sidebar so the curator can edit/clear the term
+          even when the filtered result is empty. */}
+      {!isLoading && !isError && total === 0 && debouncedSearch.length === 0 && (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             title="Queue is empty"
@@ -311,16 +349,61 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && total > 0 && (
+      {!isLoading && !isError && (total > 0 || debouncedSearch.length > 0) && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left — artist list */}
           <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
-            <div className="border-b border-gray-100 px-4 py-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-                Artists ({artists.length})
-              </p>
+            <div className="space-y-2 border-b border-gray-100 px-4 py-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                  Artists ({artists.length})
+                </p>
+                {/* Sort toggle. Two-button segmented control — small enough that
+                    a select would feel heavyweight; both options always visible. */}
+                <div className="flex gap-0.5 rounded-md bg-gray-100 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSort("created_at")}
+                    className={cn(
+                      "rounded px-2 py-0.5",
+                      sort === "created_at"
+                        ? "bg-white font-medium text-gray-800 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700",
+                    )}
+                  >
+                    Recent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSort("name")}
+                    className={cn(
+                      "rounded px-2 py-0.5",
+                      sort === "name"
+                        ? "bg-white font-medium text-gray-800 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700",
+                    )}
+                  >
+                    Name
+                  </button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Search artists…"
+                  className="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-7 pr-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
             </div>
             <ul className="flex-1 overflow-y-auto">
+              {artists.length === 0 && (
+                <li className="px-4 py-6 text-center text-xs text-gray-400">
+                  No artists match this search.
+                </li>
+              )}
               {artists.map((artist) => (
                 <li key={artist.id}>
                   <button
