@@ -831,38 +831,44 @@ async def unmatch_artist(
         HTTPException: 409 if the artist's current ``match_status`` is not
             in :data:`_UNMATCHABLE_STATUSES` (i.e. PENDING / NEEDS_REVIEW).
     """
-    artist_cur = await conn.execute(
-        "SELECT match_status FROM broadcast_artists WHERE id = %s",
-        (artist_id,),
-    )
-    artist_row = await artist_cur.fetchone()
-    if artist_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Artist {artist_id} not found",
-        )
-    if artist_row["match_status"] not in _UNMATCHABLE_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Artist {artist_id} is in {artist_row['match_status']!r}; "
-                "only finalized matches can be unmatched"
-            ),
-        )
-
     needs_review = MatchStatus.NEEDS_REVIEW.value
     user_unmatched = ReasonCode.USER_UNMATCHED.value
 
-    await conn.execute(
+    # Atomic gate: a single UPDATE...WHERE id AND match_status closes the
+    # SELECT-then-UPDATE TOCTOU window where a concurrent /resolve could
+    # transition the row between our read and our write. RETURNING tells us
+    # whether the gate matched; on no-match we issue a separate SELECT solely
+    # to distinguish 404 (row gone) from 409 (row exists, wrong state).
+    artist_cur = await conn.execute(
         """
         UPDATE broadcast_artists
            SET match_status  = %s,
                reason_code   = %s,
                reason_detail = NULL
          WHERE id = %s
+           AND match_status = ANY(%s)
+        RETURNING id
         """,
-        (needs_review, user_unmatched, artist_id),
+        (needs_review, user_unmatched, artist_id, _UNMATCHABLE_STATUSES),
     )
+    if await artist_cur.fetchone() is None:
+        existing = await conn.execute(
+            "SELECT match_status FROM broadcast_artists WHERE id = %s",
+            (artist_id,),
+        )
+        existing_row = await existing.fetchone()
+        if existing_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Artist {artist_id} not found",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Artist {artist_id} is in {existing_row['match_status']!r}; "
+                "only finalized matches can be unmatched"
+            ),
+        )
     await conn.execute(
         """
         UPDATE track_identities
@@ -913,28 +919,10 @@ async def unmatch_identity(
         HTTPException: 409 if the identity's current ``match_status`` is
             not in :data:`_UNMATCHABLE_STATUSES`.
     """
-    identity_cur = await conn.execute(
-        "SELECT match_status FROM track_identities WHERE id = %s",
-        (identity_id,),
-    )
-    identity_row = await identity_cur.fetchone()
-    if identity_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Identity {identity_id} not found",
-        )
-    if identity_row["match_status"] not in _UNMATCHABLE_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Identity {identity_id} is in {identity_row['match_status']!r}; "
-                "only finalized matches can be unmatched"
-            ),
-        )
-
     needs_review = MatchStatus.NEEDS_REVIEW.value
 
-    await conn.execute(
+    # See unmatch_artist for the atomic-gate rationale.
+    identity_cur = await conn.execute(
         """
         UPDATE track_identities
            SET match_status  = %s,
@@ -942,9 +930,35 @@ async def unmatch_identity(
                reason_code   = %s,
                reason_detail = NULL
          WHERE id = %s
+           AND match_status = ANY(%s)
+        RETURNING id
         """,
-        (needs_review, ReasonCode.USER_UNMATCHED.value, identity_id),
+        (
+            needs_review,
+            ReasonCode.USER_UNMATCHED.value,
+            identity_id,
+            _UNMATCHABLE_STATUSES,
+        ),
     )
+    if await identity_cur.fetchone() is None:
+        existing = await conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (identity_id,),
+        )
+        existing_row = await existing.fetchone()
+        if existing_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Identity {identity_id} not found",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Identity {identity_id} is in {existing_row['match_status']!r}; "
+                "only finalized matches can be unmatched"
+            ),
+        )
+
     await conn.execute(
         "DELETE FROM matches WHERE identity_id = %s",
         (identity_id,),
