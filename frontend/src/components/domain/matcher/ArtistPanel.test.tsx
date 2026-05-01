@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { QueueArtist } from "@/lib/schemas/matcher";
@@ -164,5 +164,49 @@ describe("ArtistPanel Search Library button", () => {
       </QueryClientProvider>
     );
     expect(screen.queryByText(/No candidates found automatically/i)).toBeNull();
+  });
+});
+
+describe("ArtistPanel Unmatch action", () => {
+  it("does not render Unmatch when artist is in pending or needs_review", () => {
+    render(<ArtistPanel artist={makeArtist({ match_status: "pending" })} />, {
+      wrapper: wrapperFor(makeClient()),
+    });
+    expect(screen.queryByRole("button", { name: /Unmatch artist/i })).toBeNull();
+  });
+
+  it.each([
+    ["auto_matched"],
+    ["manual_matched"],
+    ["auto_rejected"],
+    ["manual_rejected"],
+  ] as const)(
+    "renders Unmatch when artist is %s",
+    (status) => {
+      render(<ArtistPanel artist={makeArtist({ match_status: status })} />, {
+        wrapper: wrapperFor(makeClient()),
+      });
+      expect(screen.getByRole("button", { name: /Unmatch artist/i })).toBeDefined();
+    }
+  );
+
+  it("clicking Unmatch posts to the unmatch endpoint with the artist id", async () => {
+    mockedApiFetch.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      match_status: "needs_review",
+    });
+    render(
+      <ArtistPanel artist={makeArtist({ match_status: "manual_matched" })} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    const button = screen.getByRole("button", { name: /Unmatch artist/i });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        "/api/v1/matching/artists/00000000-0000-0000-0000-000000000001/unmatch",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
   });
 });
