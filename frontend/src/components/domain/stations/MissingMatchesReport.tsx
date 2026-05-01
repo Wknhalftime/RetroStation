@@ -67,7 +67,10 @@ export function MissingMatchesReport({ stationId, callLetters }: MissingMatchesR
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${callLetters ?? stationId}-missing-matches.csv`;
+      // `??` would let an empty call sign through; use `||` after trimming so
+      // a blank string falls back to the station id.
+      const filenamePrefix = callLetters?.trim() || stationId;
+      a.download = `${filenamePrefix}-missing-matches.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
