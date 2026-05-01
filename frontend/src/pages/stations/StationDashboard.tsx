@@ -251,7 +251,7 @@ export function StationDashboard() {
 
       {/* Missing Matches tab panel */}
       {activeTab === "missing-matches" && station_id && (
-        <MissingMatchesReport stationId={station_id} />
+        <MissingMatchesReport stationId={station_id} callLetters={station.call_letters} />
       )}
 
       {/* Overview tab panel */}

@@ -7,6 +7,7 @@ import type {
   StationUpdate,
   StationPaginatedEvents,
   PaginatedMissingMatches,
+  MissingMatchItem,
 } from "@/lib/schemas/stations";
 
 const STATIONS_KEY = ["stations"] as const;
@@ -74,6 +75,29 @@ export function useMissingMatchesReport(
       ),
     enabled: Boolean(stationId),
   });
+}
+
+// ---------------------------------------------------------------------------
+// CSV export helper — fetches all pages (max 500 per request)
+// ---------------------------------------------------------------------------
+
+export async function fetchAllMissingMatchesForExport(
+  stationId: string
+): Promise<MissingMatchItem[]> {
+  const BATCH = 500;
+  const all: MissingMatchItem[] = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await apiFetch<PaginatedMissingMatches>(
+      `/api/v1/stations/${stationId}/reports/missing-matches?limit=${BATCH}&offset=${offset}`
+    );
+    all.push(...page.items);
+    if (all.length >= page.total || page.items.length === 0) break;
+    offset += BATCH;
+  }
+
+  return all;
 }
 
 // ---------------------------------------------------------------------------
