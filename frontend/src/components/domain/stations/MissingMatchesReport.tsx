@@ -31,9 +31,12 @@ export function MissingMatchesReport({ stationId, callLetters }: MissingMatchesR
   /** Escape a single CSV field per RFC 4180, and neutralise formula-injection
    *  characters (=, +, -, @) that spreadsheet apps may evaluate as formulas. */
   function escapeCsvField(value: string): string {
-    // Prefix formula-trigger characters with a tab to defuse them.
-    const safe = /^[=+\-@]/.test(value) ? `\t${value}` : value;
-    if (/[",\n\r]/.test(safe)) {
+    // Prefix formula-trigger characters with a tab to defuse them. Excel only
+    // honours the tab defuse when the field is wrapped in quotes, so force
+    // quoting for formula-prefixed values in addition to RFC 4180 cases.
+    const isFormula = /^[=+\-@]/.test(value);
+    const safe = isFormula ? `\t${value}` : value;
+    if (isFormula || /[",\n\r]/.test(safe)) {
       return `"${safe.replace(/"/g, '""')}"`;
     }
     return safe;
@@ -68,7 +71,9 @@ export function MissingMatchesReport({ stationId, callLetters }: MissingMatchesR
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Defer revocation: Safari/iOS start the download asynchronously after
+      // click(), so revoking immediately can cancel it.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error("CSV export failed:", err);
     } finally {
