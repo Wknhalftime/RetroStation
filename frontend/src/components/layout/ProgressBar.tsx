@@ -2,6 +2,7 @@ import { CheckCircle, XCircle, X } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
 import { useProgressStore } from "@/store/progressStore";
 import type { TaskInfo } from "@/lib/schemas/tasks";
+import { getWarningText } from "@/lib/taskWarnings";
 import { cn } from "@/lib/utils";
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -30,6 +31,7 @@ function getPercent(progressData: Record<string, unknown>): number | null {
 function TaskProgressRow({ task }: { task: TaskInfo }) {
   const label = getLabel(task.task_type);
   const percent = task.status === "running" ? getPercent(task.progress_data) : null;
+  const warningText = getWarningText(task.progress_data);
 
   return (
     <div
@@ -65,8 +67,13 @@ function TaskProgressRow({ task }: { task: TaskInfo }) {
         </span>
       )}
 
-      {task.status === "completed" && task.progress_data?.warning != null && (
-        <span className="text-xs text-amber-600 ml-1">— No audio files found</span>
+      {task.status === "completed" && warningText !== null && (
+        <span
+          className="text-xs text-amber-600 ml-1 truncate max-w-md"
+          title={warningText}
+        >
+          — {warningText}
+        </span>
       )}
 
       {task.status === "running" && (
@@ -117,6 +124,7 @@ export function ProgressBar() {
   if (activeTask === null) return null;
 
   const label = getLabel(activeTask.task_type);
+  const warningText = getWarningText(activeTask.progress_data);
 
   return (
     <div className={containerClasses}>
@@ -147,8 +155,13 @@ export function ProgressBar() {
           </span>
         )}
 
-        {status === "COMPLETED" && activeTask?.progress_data?.warning != null && (
-          <span className="text-xs text-amber-600 ml-1">— No audio files found</span>
+        {status === "COMPLETED" && warningText !== null && (
+          <span
+            className="text-xs text-amber-600 ml-1 truncate max-w-md"
+            title={warningText}
+          >
+            — {warningText}
+          </span>
         )}
 
         {extraCount > 0 && (
