@@ -1,7 +1,11 @@
 """
-Folder hash service — Merkle-tree-like change detection for library directories.
+Folder hash service — per-folder change detection for library directories.
 
-Uses mtime + file size (not content hashing) for fast change detection.
+Each folder's hash covers only the audio files directly inside it, using
+mtime + size (not content hashing) so a poll is a directory walk of stats.
+Child folders are deliberately NOT folded in: the targeted scan that acts
+on a changed folder is non-recursive, so an ancestor lighting up because a
+descendant changed would send the scanner somewhere with nothing to do.
 """
 from __future__ import annotations
 
@@ -26,18 +30,11 @@ def canonicalize_path(path: str) -> str:
     return unicodedata.normalize("NFC", normalized)
 
 
-def compute_folder_hash(
-    folder_path: Path,
-    child_hashes: list[str] | None = None,
-) -> str:
-    """Compute a hash for a folder based on mtime+size of audio files and child hashes.
-
-    Args:
-        folder_path: Path to the directory.
-        child_hashes: Pre-computed hashes of child folders (sorted).
+def compute_folder_hash(folder_path: Path) -> str:
+    """Hash the name, mtime and size of every audio file directly in a folder.
 
     Returns:
-        SHA-256 hex digest representing the folder's current state.
+        SHA-256 hex digest representing the folder's own current state.
     """
     file_parts: list[str] = []
     try:
@@ -52,48 +49,22 @@ def compute_folder_hash(
     except OSError as exc:
         logger.warning("compute_folder_hash_scandir_failed", path=str(folder_path), error=str(exc))
 
-    parts = sorted(child_hashes or []) + sorted(file_parts)
-    combined = "\n".join(parts).encode("utf-8")
+    combined = "\n".join(sorted(file_parts)).encode("utf-8")
     return hashlib.sha256(combined).hexdigest()
 
 
-def coalesce_paths(paths: list[str]) -> list[str]:
-    """Merge child paths into parent paths where the parent is also in the list.
-
-    If both /music/jazz and /music/jazz/miles are changed, keep only /music/jazz.
-    """
-    if not paths:
-        return []
-
-    sorted_paths = sorted(paths)
-    result: list[str] = []
-
-    for path in sorted_paths:
-        normalized = path.rstrip("/").rstrip("\\")
-        # Check if any already-added path is a parent of this one
-        if any(
-            normalized.startswith(r + "/") or normalized.startswith(r + "\\")
-            for r in result
-        ):
-            continue
-        result.append(normalized)
-
-    return result
-
-
 def _walk_folder_paths(root: Path) -> tuple[dict[str, str], list[str]]:
-    """Walk root bottom-up; return (folder_hashes, all_dirs)."""
+    """Walk root bottom-up; return (folder_hashes, all_dirs).
+
+    Bottom-up so ``all_dirs`` reversed is parents-before-children, which
+    ``_sync_new_folders`` relies on to resolve ``parent_id``.
+    """
     folder_hashes: dict[str, str] = {}
     all_dirs: list[str] = []
-    for dirpath, dirnames, _filenames in os.walk(str(root), topdown=False):
+    for dirpath, _dirnames, _filenames in os.walk(str(root), topdown=False):
         canonical = canonicalize_path(dirpath)
         all_dirs.append(canonical)
-        child_hashes = [
-            folder_hashes[canonicalize_path(os.path.join(dirpath, d))]
-            for d in sorted(dirnames)
-            if canonicalize_path(os.path.join(dirpath, d)) in folder_hashes
-        ]
-        folder_hashes[canonical] = compute_folder_hash(Path(dirpath), child_hashes)
+        folder_hashes[canonical] = compute_folder_hash(Path(dirpath))
     return folder_hashes, all_dirs
 
 

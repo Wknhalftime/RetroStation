@@ -64,6 +64,38 @@ class TestWatcherPollNoChanges:
             mock_scan.assert_not_called()
 
 
+class TestWatcherPollPassesEveryChangedFolder:
+    @patch("backend.tasks.library_watcher_tasks.connect_sync")
+    @patch(
+        "backend.tasks.library_watcher_tasks.diff_tree",
+        return_value=(["/music/jazz", "/music/jazz/miles"], []),
+    )
+    @patch("backend.tasks.library_watcher_tasks.library_scan_files_task")
+    def test_nested_changed_folders_are_not_collapsed(
+        self, mock_scan: MagicMock, _mock_diff: MagicMock, mock_connect: MagicMock,
+    ) -> None:
+        """The targeted scan is non-recursive, so collapsing a child into its
+        parent would scan the parent (nothing to do) and drop the child."""
+        from tests.fakes.user_settings import FakeUserSettingRepository
+
+        mock_conn = MagicMock()
+        mock_connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        mock_connect.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("backend.tasks.library_watcher_tasks.RepositoryFactory") as mock_factory:
+            mock_factory.return_value.user_settings = FakeUserSettingRepository(
+                initial={"local_path_prefix": "/music"},
+            )
+            folders = mock_factory.return_value.library_folders
+            folders.get_folders_with_staged_hashes.return_value = set()
+
+            from backend.tasks.library_watcher_tasks import library_watcher_poll
+            library_watcher_poll.call_local()
+
+        scanned_paths = mock_scan.call_args[0][0]
+        assert sorted(scanned_paths) == ["/music/jazz", "/music/jazz/miles"]
+
+
 class TestWatcherPollUsesSettingValue:
     """Prove that the .value unwrap works end-to-end using FakeUserSettingRepository."""
 

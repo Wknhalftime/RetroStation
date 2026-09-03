@@ -21,7 +21,7 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
-from backend.services.folder_hash_service import coalesce_paths, diff_tree
+from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
@@ -52,8 +52,6 @@ def library_watcher_poll() -> None:
         if not changed:
             return
 
-        coalesced = coalesce_paths(changed)
-
         # Stage pending hashes with a task ID.  pending is already
         # (folder_id, new_hash) tuples from diff_tree — no extra query.
         task_id = uuid.uuid4().hex
@@ -62,12 +60,15 @@ def library_watcher_poll() -> None:
 
         logger.info(
             "watcher_poll_changes_detected",
-            changed=len(coalesced),
+            changed=len(changed),
             task_id=task_id,
         )
 
-        # Fire-and-forget: enqueue targeted scan
-        library_scan_files_task(coalesced, task_id)
+        # Every changed folder is scanned individually. diff_tree reports
+        # only folders whose own files changed and the scan is non-recursive,
+        # so there is nothing to collapse — a parent never stands in for a
+        # child.
+        library_scan_files_task(changed, task_id)
 
 
 @huey.task()  # type: ignore[untyped-decorator]

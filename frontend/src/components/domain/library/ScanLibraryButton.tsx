@@ -15,15 +15,26 @@ export function ScanLibraryButton() {
 
   function handleClick() {
     if (!localPath) return;
+    // A full scan reads every byte of every file to rebuild the index. The
+    // watcher already picks up new and changed folders every few minutes,
+    // so this is rarely what someone wants on an existing library.
+    const proceed = window.confirm(
+      `Scan Library re-reads every audio file under ${localPath} to rebuild ` +
+        "the index. On a large library that takes hours.\n\n" +
+        "New and changed folders are picked up automatically every few " +
+        "minutes without this.\n\nRun a full scan anyway?"
+    );
+    if (!proceed) return;
     scanMutation.mutate({ root_path: localPath });
   }
 
-  // Determine tooltip for disabled states
   let tooltip: string | undefined;
   if (!hasPath) {
     tooltip = "Configure your library path in Settings first";
   } else if (hasRunningScan) {
     tooltip = "Scan in progress";
+  } else {
+    tooltip = "Full re-index: reads every file. Changes are picked up automatically.";
   }
 
   const button = (
