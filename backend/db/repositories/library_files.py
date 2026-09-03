@@ -80,6 +80,11 @@ _UPSERT_SQL = """
 """
 
 
+def _like_literal(text: str) -> str:
+    """Escape LIKE metacharacters (``\\``, ``%``, ``_``) so *text* matches only itself."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
     return (
         file.id,
@@ -279,16 +284,20 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         """Return all files directly in folder_path (not in subfolders).
 
         Handles both ``/`` and ``\\`` separators so queries work on Windows
-        (where stored paths use backslashes) and POSIX alike.
+        (where stored paths use backslashes) and POSIX alike. The prefix is
+        escaped for LIKE: backslash is PostgreSQL's default escape character,
+        so an unescaped Windows prefix ending in ``\\`` turned the trailing
+        ``\\%`` into a literal percent sign and matched nothing at all.
         """
         stripped = folder_path.rstrip("/").rstrip("\\")
         sep = "\\" if "\\" in stripped else "/"
-        prefix = stripped + sep
+        prefix = _like_literal(stripped + sep)
+        sep_literal = _like_literal(sep)
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE file_path LIKE %s
                  AND file_path NOT LIKE %s""",
-            (prefix + "%", prefix + "%" + sep + "%"),
+            (prefix + "%", prefix + "%" + sep_literal + "%"),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
