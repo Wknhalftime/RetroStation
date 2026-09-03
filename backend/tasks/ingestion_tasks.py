@@ -18,6 +18,7 @@ from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.services.ingestion_service import (
     CsvDecodeError,
+    CsvSchemaError,
     DuplicatePlaylistError,
     IngestionResult,
     count_csv_rows,
@@ -37,7 +38,7 @@ def _build_running_progress(
 def _build_completed_progress(
     result: IngestionResult, total: int, filename: str
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "processed": result.rows_processed,
         "skipped": result.rows_skipped,
         "total": total,
@@ -48,6 +49,32 @@ def _build_completed_progress(
         "events_created": result.events_created,
         "broadcast_days_created": result.broadcast_days_created,
     }
+    # A run that dropped rows still committed the rest, so it stays
+    # COMPLETED — but it must not look clean. `warning` is the existing
+    # progress_data convention (see library_scan_tasks) the frontend
+    # renders in amber alongside a successful task.
+    if result.rows_skipped > 0:
+        payload["warning"] = "rows_skipped"
+        payload["skip_reasons"] = dict(result.skip_reasons)
+    return payload
+
+
+# Exception type → stable code the frontend can branch on without parsing
+# the human-readable message. Unmapped types fall through to `None`, which
+# keeps the raw message as the only detail.
+_ERROR_CODES: tuple[tuple[type[Exception], str], ...] = (
+    (DuplicatePlaylistError, "duplicate_playlist"),
+    (CsvSchemaError, "csv_schema_mismatch"),
+    (CsvDecodeError, "csv_decode_failed"),
+)
+
+
+def _classify_error_code(exc: Exception) -> str | None:
+    """Return the stable error code for ``exc``, or ``None`` if unmapped."""
+    for exc_type, code in _ERROR_CODES:
+        if isinstance(exc, exc_type):
+            return code
+    return None
 
 
 def _build_failed_progress(
@@ -283,9 +310,7 @@ def ingestion_task(
         return task_id
 
     except Exception as exc:
-        error_code: str | None = None
-        if isinstance(exc, DuplicatePlaylistError):
-            error_code = "duplicate_playlist"
+        error_code = _classify_error_code(exc)
 
         if progress_repo is not None:
             # Shadow guard: we're already in the top-level error handler
@@ -351,6 +376,7 @@ def ingestion_task(
 # exception types via this path. Silences "imported but unused" linting.
 __all__ = [
     "CsvDecodeError",
+    "CsvSchemaError",
     "DuplicatePlaylistError",
     "ingestion_task",
 ]
