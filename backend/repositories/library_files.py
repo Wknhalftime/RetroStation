@@ -75,3 +75,12 @@ class LibraryFileRepository(ABC):
         """Return all files with the given content hash."""
         ...
 
+    @abstractmethod
+    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
+        """Record the on-disk size and mtime without touching any other column.
+
+        Used to backfill rows indexed before stat tracking existed, once a
+        scan has established the file is unchanged.
+        """
+        ...
+

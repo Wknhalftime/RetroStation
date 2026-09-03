@@ -21,7 +21,7 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
-from backend.services.folder_hash_service import coalesce_paths, diff_tree
+from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
@@ -52,8 +52,6 @@ def library_watcher_poll() -> None:
         if not changed:
             return
 
-        coalesced = coalesce_paths(changed)
-
         # Stage pending hashes with a task ID.  pending is already
         # (folder_id, new_hash) tuples from diff_tree — no extra query.
         task_id = uuid.uuid4().hex
@@ -62,12 +60,15 @@ def library_watcher_poll() -> None:
 
         logger.info(
             "watcher_poll_changes_detected",
-            changed=len(coalesced),
+            changed=len(changed),
             task_id=task_id,
         )
 
-        # Fire-and-forget: enqueue targeted scan
-        library_scan_files_task(coalesced, task_id)
+        # Every changed folder is scanned individually. diff_tree reports
+        # only folders whose own files changed and the scan is non-recursive,
+        # so there is nothing to collapse — a parent never stands in for a
+        # child.
+        library_scan_files_task(changed, task_id)
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -137,47 +138,51 @@ def library_scan_files_task(
             total_written += result.files_written
             library_conn.commit()
 
-            # Grouping pass for files in this folder without a work_id
-            if result.files_written > 0:
-                folder_files = repos.library_files.get_by_folder_path(
-                    folder_path,
-                )
-                for lf in folder_files:
-                    if lf.work_id is not None:
-                        continue
-                    # Per-file commit so a single file's failure never rolls
-                    # back previously successful grouping writes in this
-                    # folder. Narrow to expected per-file failure modes;
-                    # mirrors library_scan_tasks.py's grouping loop. Logic
-                    # bugs propagate to the task boundary instead of being
-                    # logged per-file and continuing.
-                    try:
-                        grouping = assign_work(
-                            lf,
-                            artist_repo=repos.artists,
-                            work_repo=repos.works,
-                            library_file_repo=repos.library_files,
-                            recording_repo=repos.recordings,
-                            song_master_repo=repos.song_masters,
+            # Grouping pass for every file in this folder without a work_id —
+            # not only when this visit wrote something. A file can lose its
+            # work_id without its content changing (an interrupted full scan
+            # did exactly that to thousands of rows), and the next visit is
+            # the place to repair it. One indexed SELECT per folder; a no-op
+            # loop when everything is already grouped.
+            folder_files = repos.library_files.get_by_folder_path(
+                folder_path,
+            )
+            for lf in folder_files:
+                if lf.work_id is not None:
+                    continue
+                # Per-file commit so a single file's failure never rolls
+                # back previously successful grouping writes in this
+                # folder. Narrow to expected per-file failure modes;
+                # mirrors library_scan_tasks.py's grouping loop. Logic
+                # bugs propagate to the task boundary instead of being
+                # logged per-file and continuing.
+                try:
+                    grouping = assign_work(
+                        lf,
+                        artist_repo=repos.artists,
+                        work_repo=repos.works,
+                        library_file_repo=repos.library_files,
+                        recording_repo=repos.recordings,
+                        song_master_repo=repos.song_masters,
+                    )
+                    if grouping:
+                        repos.library_files.update_work_id(
+                            lf.id, grouping.work_id,
                         )
-                        if grouping:
-                            repos.library_files.update_work_id(
-                                lf.id, grouping.work_id,
+                        if grouping.recording_id:
+                            repos.library_files.update_recording_link(
+                                lf.id,
+                                grouping.recording_id,
+                                EnrichmentStatus.PENDING,
                             )
-                            if grouping.recording_id:
-                                repos.library_files.update_recording_link(
-                                    lf.id,
-                                    grouping.recording_id,
-                                    EnrichmentStatus.PENDING,
-                                )
-                        library_conn.commit()
-                    except (psycopg.Error, ValueError, OSError):
-                        library_conn.rollback()
-                        logger.warning(
-                            "watcher_grouping_failed",
-                            file_id=str(lf.id),
-                            exc_info=True,
-                        )
+                    library_conn.commit()
+                except (psycopg.Error, ValueError, OSError):
+                    library_conn.rollback()
+                    logger.warning(
+                        "watcher_grouping_failed",
+                        file_id=str(lf.id),
+                        exc_info=True,
+                    )
 
             progress_repo.upsert(
                 TaskProgress(
@@ -201,6 +206,7 @@ def library_scan_files_task(
                 folder=folder_path,
                 written=result.files_written,
                 skipped=result.files_skipped,
+                stat_backfilled=result.files_stat_backfilled,
                 missing=result.files_missing,
                 reappeared=result.files_reappeared,
                 quarantined=result.quarantined,

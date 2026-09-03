@@ -17,6 +17,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         if existing:
             if existing.file_hash == file.file_hash:
                 file.enrichment_status = existing.enrichment_status
+            # Mirrors the PG COALESCE: a fresh extraction carries no links,
+            # and must not erase the ones grouping/enrichment already built.
+            if file.work_id is None:
+                file.work_id = existing.work_id
+            if file.recording_id is None:
+                file.recording_id = existing.recording_id
             file.file_status = FileStatus.PRESENT
             self._data[existing.id] = file
             return file
@@ -118,6 +124,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
 
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.file_hash == file_hash]
+
+    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
+        if file_id in self._data:
+            self._data[file_id] = dataclasses.replace(
+                self._data[file_id], file_size=file_size, file_mtime_ns=file_mtime_ns,
+            )
 
     def reset_failed_enrichments(self) -> int:
         count = 0

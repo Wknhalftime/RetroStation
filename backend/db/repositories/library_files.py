@@ -11,6 +11,112 @@ from backend.domain.library import AudioMetadata, LibraryFile
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
+# Shared by `upsert` and `upsert_write_only`; they differ only in whether
+# the row is read back afterwards.
+_UPSERT_SQL = """
+    INSERT INTO library_files (
+        id, file_path, file_hash, format, enrichment_status,
+        trace_id, recording_id, recording_mbid, artist_mbid,
+        album_artist_mbid, release_mbid, release_title, release_type,
+        release_type_secondary, release_status, track_title,
+        track_number, disc_number, duration_ms, bitrate, raw_metadata,
+        artist_name, normalized_artist_name, normalized_title,
+        work_id, file_size, file_mtime_ns,
+        indexed_at
+    ) VALUES (
+        %s, %s, %s, %s, %s,
+        %s, %s, %s, %s,
+        %s, %s, %s, %s,
+        %s, %s, %s,
+        %s, %s, %s, %s, %s,
+        %s, %s, %s,
+        %s, %s, %s,
+        NOW()
+    )
+    ON CONFLICT (file_path) DO UPDATE SET
+        file_hash              = EXCLUDED.file_hash,
+        format                 = EXCLUDED.format,
+        enrichment_status      = CASE
+            WHEN library_files.file_hash = EXCLUDED.file_hash
+            THEN library_files.enrichment_status
+            ELSE EXCLUDED.enrichment_status
+        END,
+        file_status            = 'present',
+        trace_id               = EXCLUDED.trace_id,
+        -- A fresh tag extraction carries no links. Keep the ones grouping
+        -- and enrichment already built, even across a content change: a
+        -- retag is not a new song. A caller that means to relink passes
+        -- an explicit value.
+        recording_id           = COALESCE(
+            EXCLUDED.recording_id, library_files.recording_id),
+        work_id                = COALESCE(
+            EXCLUDED.work_id, library_files.work_id),
+        recording_mbid         = EXCLUDED.recording_mbid,
+        artist_mbid            = EXCLUDED.artist_mbid,
+        album_artist_mbid      = EXCLUDED.album_artist_mbid,
+        release_mbid           = EXCLUDED.release_mbid,
+        release_title          = EXCLUDED.release_title,
+        release_type           = EXCLUDED.release_type,
+        release_type_secondary = EXCLUDED.release_type_secondary,
+        release_status         = EXCLUDED.release_status,
+        track_title            = EXCLUDED.track_title,
+        track_number           = EXCLUDED.track_number,
+        disc_number            = EXCLUDED.disc_number,
+        duration_ms            = EXCLUDED.duration_ms,
+        bitrate                = EXCLUDED.bitrate,
+        raw_metadata           = EXCLUDED.raw_metadata,
+        normalized_artist_name = COALESCE(
+            NULLIF(TRIM(EXCLUDED.normalized_artist_name), ''),
+            library_files.normalized_artist_name),
+        normalized_title       = COALESCE(
+            NULLIF(TRIM(EXCLUDED.normalized_title), ''),
+            library_files.normalized_title),
+        artist_name            = COALESCE(
+            NULLIF(TRIM(EXCLUDED.artist_name), ''),
+            library_files.artist_name),
+        file_size              = EXCLUDED.file_size,
+        file_mtime_ns          = EXCLUDED.file_mtime_ns,
+        indexed_at             = NOW()
+"""
+
+
+def _like_literal(text: str) -> str:
+    """Escape LIKE metacharacters (``\\``, ``%``, ``_``) so *text* matches only itself."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
+    return (
+        file.id,
+        file.file_path,
+        file.file_hash,
+        file.format,
+        file.enrichment_status.value,
+        file.trace_id,
+        file.recording_id,
+        file.audio.recording_mbid,
+        file.audio.artist_mbid,
+        file.audio.album_artist_mbid,
+        file.audio.release_mbid,
+        file.audio.release_title,
+        file.audio.release_type.value if file.audio.release_type else None,
+        file.audio.release_type_secondary,
+        file.audio.release_status.value if file.audio.release_status else None,
+        file.audio.track_title,
+        file.audio.track_number,
+        file.audio.disc_number,
+        file.audio.duration_ms,
+        file.audio.bitrate,
+        json.dumps(file.audio.raw_metadata)
+        if file.audio.raw_metadata is not None else None,
+        file.audio.artist_name,
+        file.audio.normalized_artist_name,
+        file.audio.normalized_title,
+        file.work_id,
+        file.file_size,
+        file.file_mtime_ns,
+    )
+
 
 class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
@@ -55,100 +161,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             trace_id=row.get("trace_id"),
             recording_id=row.get("recording_id"),
             work_id=row.get("work_id"),
+            file_size=row.get("file_size"),
+            file_mtime_ns=row.get("file_mtime_ns"),
             audio=audio,
         )
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
-        self._conn.execute(
-            """
-            INSERT INTO library_files (
-                id, file_path, file_hash, format, enrichment_status,
-                trace_id, recording_id, recording_mbid, artist_mbid,
-                album_artist_mbid, release_mbid, release_title, release_type,
-                release_type_secondary, release_status, track_title,
-                track_number, disc_number, duration_ms, bitrate, raw_metadata,
-                artist_name, normalized_artist_name, normalized_title,
-                work_id,
-                indexed_at
-            ) VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                NOW()
-            )
-            ON CONFLICT (file_path) DO UPDATE SET
-                file_hash              = EXCLUDED.file_hash,
-                format                 = EXCLUDED.format,
-                enrichment_status      = CASE
-                    WHEN library_files.file_hash = EXCLUDED.file_hash
-                    THEN library_files.enrichment_status
-                    ELSE EXCLUDED.enrichment_status
-                END,
-                file_status            = 'present',
-                trace_id               = EXCLUDED.trace_id,
-                recording_id           = EXCLUDED.recording_id,
-                recording_mbid         = EXCLUDED.recording_mbid,
-                artist_mbid            = EXCLUDED.artist_mbid,
-                album_artist_mbid      = EXCLUDED.album_artist_mbid,
-                release_mbid           = EXCLUDED.release_mbid,
-                release_title          = EXCLUDED.release_title,
-                release_type           = EXCLUDED.release_type,
-                release_type_secondary = EXCLUDED.release_type_secondary,
-                release_status         = EXCLUDED.release_status,
-                track_title            = EXCLUDED.track_title,
-                track_number           = EXCLUDED.track_number,
-                disc_number            = EXCLUDED.disc_number,
-                duration_ms            = EXCLUDED.duration_ms,
-                bitrate                = EXCLUDED.bitrate,
-                raw_metadata           = EXCLUDED.raw_metadata,
-                work_id                = CASE
-                    WHEN library_files.file_hash = EXCLUDED.file_hash
-                    THEN library_files.work_id
-                    ELSE NULL
-                END,
-                normalized_artist_name = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.normalized_artist_name), ''),
-                    library_files.normalized_artist_name),
-                normalized_title       = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.normalized_title), ''),
-                    library_files.normalized_title),
-                artist_name            = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.artist_name), ''),
-                    library_files.artist_name),
-                indexed_at             = NOW()
-            """,
-            (
-                file.id,
-                file.file_path,
-                file.file_hash,
-                file.format,
-                file.enrichment_status.value,
-                file.trace_id,
-                file.recording_id,
-                file.audio.recording_mbid,
-                file.audio.artist_mbid,
-                file.audio.album_artist_mbid,
-                file.audio.release_mbid,
-                file.audio.release_title,
-                file.audio.release_type.value if file.audio.release_type else None,
-                file.audio.release_type_secondary,
-                file.audio.release_status.value if file.audio.release_status else None,
-                file.audio.track_title,
-                file.audio.track_number,
-                file.audio.disc_number,
-                file.audio.duration_ms,
-                file.audio.bitrate,
-                json.dumps(file.audio.raw_metadata)
-                if file.audio.raw_metadata is not None else None,
-                file.audio.artist_name,
-                file.audio.normalized_artist_name,
-                file.audio.normalized_title,
-                file.work_id,
-            ),
-        )
+        self._conn.execute(_UPSERT_SQL, _upsert_params(file))
         row = self._conn.execute(
             "SELECT * FROM library_files WHERE file_path = %s",
             (file.file_path,),
@@ -159,96 +178,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
 
     def upsert_write_only(self, file: LibraryFile) -> None:
         """INSERT or UPDATE a library file without reading back the row."""
-        self._conn.execute(
-            """
-            INSERT INTO library_files (
-                id, file_path, file_hash, format, enrichment_status,
-                trace_id, recording_id, recording_mbid, artist_mbid,
-                album_artist_mbid, release_mbid, release_title, release_type,
-                release_type_secondary, release_status, track_title,
-                track_number, disc_number, duration_ms, bitrate, raw_metadata,
-                artist_name, normalized_artist_name, normalized_title,
-                work_id,
-                indexed_at
-            ) VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                NOW()
-            )
-            ON CONFLICT (file_path) DO UPDATE SET
-                file_hash              = EXCLUDED.file_hash,
-                format                 = EXCLUDED.format,
-                enrichment_status      = CASE
-                    WHEN library_files.file_hash = EXCLUDED.file_hash
-                    THEN library_files.enrichment_status
-                    ELSE EXCLUDED.enrichment_status
-                END,
-                file_status            = 'present',
-                trace_id               = EXCLUDED.trace_id,
-                recording_id           = EXCLUDED.recording_id,
-                recording_mbid         = EXCLUDED.recording_mbid,
-                artist_mbid            = EXCLUDED.artist_mbid,
-                album_artist_mbid      = EXCLUDED.album_artist_mbid,
-                release_mbid           = EXCLUDED.release_mbid,
-                release_title          = EXCLUDED.release_title,
-                release_type           = EXCLUDED.release_type,
-                release_type_secondary = EXCLUDED.release_type_secondary,
-                release_status         = EXCLUDED.release_status,
-                track_title            = EXCLUDED.track_title,
-                track_number           = EXCLUDED.track_number,
-                disc_number            = EXCLUDED.disc_number,
-                duration_ms            = EXCLUDED.duration_ms,
-                bitrate                = EXCLUDED.bitrate,
-                raw_metadata           = EXCLUDED.raw_metadata,
-                work_id                = CASE
-                    WHEN library_files.file_hash = EXCLUDED.file_hash
-                    THEN library_files.work_id
-                    ELSE NULL
-                END,
-                normalized_artist_name = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.normalized_artist_name), ''),
-                    library_files.normalized_artist_name),
-                normalized_title       = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.normalized_title), ''),
-                    library_files.normalized_title),
-                artist_name            = COALESCE(
-                    NULLIF(TRIM(EXCLUDED.artist_name), ''),
-                    library_files.artist_name),
-                indexed_at             = NOW()
-            """,
-            (
-                file.id,
-                file.file_path,
-                file.file_hash,
-                file.format,
-                file.enrichment_status.value,
-                file.trace_id,
-                file.recording_id,
-                file.audio.recording_mbid,
-                file.audio.artist_mbid,
-                file.audio.album_artist_mbid,
-                file.audio.release_mbid,
-                file.audio.release_title,
-                file.audio.release_type.value if file.audio.release_type else None,
-                file.audio.release_type_secondary,
-                file.audio.release_status.value if file.audio.release_status else None,
-                file.audio.track_title,
-                file.audio.track_number,
-                file.audio.disc_number,
-                file.audio.duration_ms,
-                file.audio.bitrate,
-                json.dumps(file.audio.raw_metadata)
-                if file.audio.raw_metadata is not None else None,
-                file.audio.artist_name,
-                file.audio.normalized_artist_name,
-                file.audio.normalized_title,
-                file.work_id,
-            ),
-        )
+        self._conn.execute(_UPSERT_SQL, _upsert_params(file))
 
     def get_by_id(self, file_id: UUID) -> LibraryFile | None:
         row = self._conn.execute(
@@ -354,16 +284,20 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         """Return all files directly in folder_path (not in subfolders).
 
         Handles both ``/`` and ``\\`` separators so queries work on Windows
-        (where stored paths use backslashes) and POSIX alike.
+        (where stored paths use backslashes) and POSIX alike. The prefix is
+        escaped for LIKE: backslash is PostgreSQL's default escape character,
+        so an unescaped Windows prefix ending in ``\\`` turned the trailing
+        ``\\%`` into a literal percent sign and matched nothing at all.
         """
         stripped = folder_path.rstrip("/").rstrip("\\")
         sep = "\\" if "\\" in stripped else "/"
-        prefix = stripped + sep
+        prefix = _like_literal(stripped + sep)
+        sep_literal = _like_literal(sep)
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE file_path LIKE %s
                  AND file_path NOT LIKE %s""",
-            (prefix + "%", prefix + "%" + sep + "%"),
+            (prefix + "%", prefix + "%" + sep_literal + "%"),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
@@ -379,6 +313,12 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         self._conn.execute(
             "UPDATE library_files SET work_id = %s WHERE id = %s",
             (work_id, str(file_id)),
+        )
+
+    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
+        self._conn.execute(
+            "UPDATE library_files SET file_size = %s, file_mtime_ns = %s WHERE id = %s",
+            (file_size, file_mtime_ns, str(file_id)),
         )
 
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:

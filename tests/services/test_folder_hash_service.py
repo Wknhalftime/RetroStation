@@ -6,7 +6,6 @@ from pathlib import Path
 
 from backend.services.folder_hash_service import (
     canonicalize_path,
-    coalesce_paths,
     compute_folder_hash,
     diff_tree,
 )
@@ -47,33 +46,18 @@ class TestComputeFolderHash:
         h2 = compute_folder_hash(tmp_path)
         assert h1 == h2
 
-    def test_includes_child_hashes(self, tmp_path: Path) -> None:
-        h1 = compute_folder_hash(tmp_path, child_hashes=["child_hash_1"])
-        h2 = compute_folder_hash(tmp_path, child_hashes=["child_hash_2"])
-        assert h1 != h2
+    def test_ignores_changes_inside_subfolders(self, tmp_path: Path) -> None:
+        """A folder's hash covers only its own audio files, never a child's.
 
-
-class TestCoalescePaths:
-    def test_parent_subsumes_child(self) -> None:
-        paths = ["/music/jazz", "/music/jazz/miles", "/music/jazz/coltrane"]
-        result = coalesce_paths(paths)
-        assert result == ["/music/jazz"]
-
-    def test_siblings_preserved(self) -> None:
-        paths = ["/music/jazz", "/music/rock"]
-        result = coalesce_paths(paths)
-        assert set(result) == {"/music/jazz", "/music/rock"}
-
-    def test_empty_list(self) -> None:
-        assert coalesce_paths([]) == []
-
-    def test_single_path(self) -> None:
-        assert coalesce_paths(["/music"]) == ["/music"]
-
-    def test_deep_nesting(self) -> None:
-        paths = ["/a", "/a/b", "/a/b/c", "/a/b/c/d"]
-        result = coalesce_paths(paths)
-        assert result == ["/a"]
+        The targeted scan is non-recursive, so a parent must not light up
+        when only a child changed — that would send the scanner to a folder
+        with nothing to do and leave the real change unindexed.
+        """
+        sub = tmp_path / "jazz"
+        sub.mkdir()
+        h1 = compute_folder_hash(tmp_path)
+        (sub / "track.flac").write_bytes(b"\x00" * 100)
+        assert compute_folder_hash(tmp_path) == h1
 
 
 class TestCanonicalizePath:
@@ -124,6 +108,46 @@ class TestDiffTree:
 
         changes, pending = diff_tree(str(tmp_path), repo)
         assert changes == []
+
+    def test_change_in_leaf_reports_only_that_leaf(self, tmp_path: Path) -> None:
+        """Ancestors are not reported.
+
+        This is the regression that made the watcher useless on a real
+        library: a Merkle-style hash marked every ancestor up to the root as
+        changed, the list collapsed to the root, and the non-recursive scan
+        of the root indexed nothing while committing the new baseline.
+        """
+        miles = tmp_path / "jazz" / "miles"
+        miles.mkdir(parents=True)
+        (miles / "so_what.flac").write_bytes(b"\x00" * 100)
+
+        repo = FakeLibraryFolderRepository()
+        diff_tree(str(tmp_path), repo)
+
+        (miles / "blue.flac").write_bytes(b"\x00" * 200)
+
+        changes, _ = diff_tree(str(tmp_path), repo)
+        assert changes == [canonicalize_path(str(miles))]
+
+    def test_folder_with_null_baseline_is_reported_changed(self, tmp_path: Path) -> None:
+        """NULL stored hash means "never verified under the current scheme".
+
+        The migration that switched to files-only hashing nulls every
+        baseline so each folder is re-checked exactly once, then settles.
+        """
+        jazz = tmp_path / "jazz"
+        jazz.mkdir()
+        (jazz / "track.flac").write_bytes(b"\x00" * 100)
+
+        repo = FakeLibraryFolderRepository()
+        diff_tree(str(tmp_path), repo)
+
+        folder = repo.get_by_path(canonicalize_path(str(jazz)))
+        assert folder is not None
+        folder.folder_hash = None
+
+        changes, _ = diff_tree(str(tmp_path), repo)
+        assert canonicalize_path(str(jazz)) in changes
 
     def test_nonexistent_root_returns_empty(self) -> None:
         repo = FakeLibraryFolderRepository()

@@ -43,6 +43,12 @@ class LibraryFile:
     trace_id: str | None = None
     recording_id: str | None = None
     work_id: str | None = None
+    # On-disk size and mtime at the moment the file was last read. An
+    # incremental scan compares these against a fresh stat() and skips the
+    # file unread when they match. None on rows indexed before these were
+    # recorded; the scanner backfills them on its next visit.
+    file_size: int | None = None
+    file_mtime_ns: int | None = None
     audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 
