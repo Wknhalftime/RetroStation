@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import structlog
 
-from backend.domain.catalog import Recording
+from backend.domain.catalog import MusicBrainzId, Recording
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
@@ -79,6 +79,14 @@ def _upsert_recording_with_work(
     return work_id
 
 
+def _mark_files_failed(
+    pending_files: list[LibraryFile], files: LibraryFileRepository
+) -> None:
+    """Mark files FAILED so the next enrichment run's pending query skips them."""
+    for library_file in pending_files:
+        files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
+
+
 def _link_file_to_recording(
     library_file: LibraryFile,
     recording_mbid: str,
@@ -111,18 +119,23 @@ def enrich_by_release(
 
     Looks up the release once, extracts artist/recordings/works, then links
     each pending file to its Recording row. Returns the count of files enriched.
+    A malformed release_mbid (e.g. a corrupt tag) fails its files without a
+    lookup — MusicBrainz would answer 400, a permanent failure.
     """
     pending_files = enrichment_queries.get_pending_enrichment_by_release(release_mbid)
     if not pending_files:
         return 0
 
-    release_data = mb_client.lookup_release(release_mbid)
+    release_id = MusicBrainzId.parse(release_mbid)
+    if release_id is None:
+        logger.warning("malformed_release_mbid", release_mbid=release_mbid)
+        _mark_files_failed(pending_files, files)
+        return 0
+
+    release_data = mb_client.lookup_release(release_id.value)
     if release_data is None:
         logger.warning("mb_release_lookup_failed", release_mbid=release_mbid)
-        for library_file in pending_files:
-            files.update_recording_link(
-                library_file.id, None, EnrichmentStatus.FAILED
-            )
+        _mark_files_failed(pending_files, files)
         return 0
 
     artist_credits: list[MbArtistCredit] = release_data.get("artist-credit", [])
@@ -194,18 +207,23 @@ def enrich_by_recording(
     """Enrich pending library files that have a recording_mbid but no release_mbid.
 
     Looks up the recording directly. Returns count of files enriched.
+    A malformed recording_mbid fails its files without a lookup, as in
+    enrich_by_release.
     """
     pending_files = enrichment_queries.get_pending_enrichment_by_recording(recording_mbid)
     if not pending_files:
         return 0
 
-    rec_data = mb_client.lookup_recording(recording_mbid)
+    recording_id = MusicBrainzId.parse(recording_mbid)
+    if recording_id is None:
+        logger.warning("malformed_recording_mbid", recording_mbid=recording_mbid)
+        _mark_files_failed(pending_files, files)
+        return 0
+
+    rec_data = mb_client.lookup_recording(recording_id.value)
     if rec_data is None:
         logger.warning("mb_recording_lookup_failed", recording_mbid=recording_mbid)
-        for library_file in pending_files:
-            files.update_recording_link(
-                library_file.id, None, EnrichmentStatus.FAILED
-            )
+        _mark_files_failed(pending_files, files)
         return 0
 
     artist_credits: list[MbArtistCredit] = rec_data.get("artist-credit", [])
