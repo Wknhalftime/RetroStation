@@ -110,6 +110,14 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 result.append(f)
         return result
 
+    def get_path_statuses_under(self, root: str) -> dict[str, FileStatus]:
+        base = Path(root)
+        return {
+            f.file_path: f.file_status
+            for f in self._data.values()
+            if base in Path(f.file_path).parents
+        }
+
     def mark_missing(self, file_path: str) -> None:
         for f in self._data.values():
             if f.file_path == file_path:

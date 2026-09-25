@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.enums import EnrichmentStatus
+from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import LibraryFile
 
 
@@ -63,6 +63,11 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]: ...
+
+    @abstractmethod
+    def get_path_statuses_under(self, root: str) -> dict[str, FileStatus]:
+        """Path -> status of every file anywhere beneath *root* (recursive)."""
+        ...
 
     @abstractmethod
     def mark_missing(self, file_path: str) -> None: ...

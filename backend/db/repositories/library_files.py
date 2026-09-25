@@ -85,6 +85,22 @@ def _like_literal(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _dir_like_prefix(folder_path: str) -> tuple[str, str]:
+    """(escaped ``folder + sep`` LIKE prefix, escaped separator) for *folder_path*.
+
+    Handles both ``/`` and ``\\`` separators so queries work on Windows
+    (where stored paths use backslashes) and POSIX alike. Escaped for LIKE:
+    backslash is PostgreSQL's default escape character, so an unescaped
+    Windows prefix ending in ``\\`` turned the trailing ``\\%`` into a
+    literal percent sign and matched nothing at all. The separator comes
+    from the path as given: a drive root ``X:\\`` strips to ``X:``, which
+    alone would pick ``/`` and match nothing.
+    """
+    sep = "\\" if "\\" in folder_path else "/"
+    stripped = folder_path.rstrip("/").rstrip("\\")
+    return _like_literal(stripped + sep), _like_literal(sep)
+
+
 def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
     return (
         file.id,
@@ -281,20 +297,8 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return {r["enrichment_status"]: r["cnt"] for r in rows}
 
     def get_by_folder_path(self, folder_path: str) -> list[LibraryFile]:
-        """Return all files directly in folder_path (not in subfolders).
-
-        Handles both ``/`` and ``\\`` separators so queries work on Windows
-        (where stored paths use backslashes) and POSIX alike. The prefix is
-        escaped for LIKE: backslash is PostgreSQL's default escape character,
-        so an unescaped Windows prefix ending in ``\\`` turned the trailing
-        ``\\%`` into a literal percent sign and matched nothing at all.
-        """
-        # Separator from the path as given: a drive root ``X:\\`` strips to
-        # ``X:``, which alone would pick ``/`` and match nothing.
-        sep = "\\" if "\\" in folder_path else "/"
-        stripped = folder_path.rstrip("/").rstrip("\\")
-        prefix = _like_literal(stripped + sep)
-        sep_literal = _like_literal(sep)
+        """Return all files directly in folder_path (not in subfolders)."""
+        prefix, sep_literal = _dir_like_prefix(folder_path)
         rows = self._conn.execute(
             """SELECT * FROM library_files
                WHERE file_path LIKE %s
@@ -302,6 +306,15 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             (prefix + "%", prefix + "%" + sep_literal + "%"),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def get_path_statuses_under(self, root: str) -> dict[str, FileStatus]:
+        """Path -> status of every file anywhere beneath *root*, without full rows."""
+        prefix, _sep = _dir_like_prefix(root)
+        rows = self._conn.execute(
+            "SELECT file_path, file_status FROM library_files WHERE file_path LIKE %s",
+            (prefix + "%",),
+        ).fetchall()
+        return {r["file_path"]: FileStatus(r["file_status"]) for r in rows}
 
     def mark_missing(self, file_path: str) -> None:
         self._conn.execute(
