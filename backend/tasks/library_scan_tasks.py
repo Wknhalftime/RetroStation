@@ -25,7 +25,9 @@ from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import (
     adopt_moved_row,
+    clear_resolved_quarantine,
     mark_unseen_missing,
+    quarantine_once,
     scan_directory,
 )
 from backend.services.repository_factory import RepositoryFactory
@@ -63,6 +65,8 @@ def _run_scan(
     files_relocated = 0
     pending_writes = 0
     written_files: list[LibraryFile] = []
+    # Read cleanly but could not be stored; quarantined like a parse failure.
+    insert_failed: set[str] = set()
 
     # Stored paths use the OS separator; a root typed as ``D:/Music``
     # would otherwise match none of them.
@@ -96,13 +100,12 @@ def _run_scan(
                 "file_insert_failed_quarantined",
                 file_path=lf.file_path, exc_info=True,
             )
-            repos.library_quarantine.create_write_only(
-                LibraryQuarantine(
-                    id=lf.id,
-                    file_path=lf.file_path,
-                    error_message="metadata contains invalid characters",
-                )
+            quarantine_once(
+                repos.library_quarantine,
+                lf.file_path,
+                "metadata contains invalid characters",
             )
+            insert_failed.add(lf.file_path)
             pending_writes = 1  # quarantine row is only uncommitted write
             return
         files_written += 1
@@ -113,7 +116,7 @@ def _run_scan(
 
     def on_quarantine(entry: LibraryQuarantine) -> None:
         nonlocal pending_writes, quarantine_written
-        repos.library_quarantine.create_write_only(entry)
+        quarantine_once(repos.library_quarantine, entry.file_path, entry.error_message)
         quarantine_written += 1
         pending_writes += 1
         if pending_writes >= chunk_size:
@@ -153,10 +156,19 @@ def _run_scan(
     # Quarantined files are still on disk, so they count as seen.
     seen_paths = {lf.file_path for lf in scanned} | {q.file_path for q in quarantined}
     files_missing = mark_unseen_missing(root, seen_paths, repos.library_files)
+    # Same rule as marking missing: a walk that saw nothing judges nothing.
+    quarantine_cleared = 0
+    if seen_paths:
+        quarantine_cleared = clear_resolved_quarantine(
+            repos.library_quarantine.get_paths_under(str(root)),
+            {q.file_path for q in quarantined} | insert_failed,
+            repos.library_quarantine,
+        )
     logger.info(
         "scan_reconciled",
         relocated=files_relocated,
         marked_missing=files_missing,
+        quarantine_cleared=quarantine_cleared,
     )
 
     # Build folder tree so library_folders is populated even on first scan

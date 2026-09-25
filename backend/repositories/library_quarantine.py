@@ -15,3 +15,13 @@ class LibraryQuarantineRepository(ABC):
 
     @abstractmethod
     def get_by_path(self, file_path: str) -> LibraryQuarantine | None: ...
+
+    @abstractmethod
+    def get_paths_under(self, root: str) -> set[str]:
+        """Paths of every entry anywhere beneath *root* (recursive)."""
+        ...
+
+    @abstractmethod
+    def delete_by_path(self, file_path: str) -> None:
+        """Remove every entry for *file_path*, including historical duplicates."""
+        ...

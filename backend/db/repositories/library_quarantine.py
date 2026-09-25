@@ -4,6 +4,7 @@ from typing import Any
 
 import psycopg
 
+from backend.db.repositories.path_prefix import dir_like_prefix
 from backend.domain.library import LibraryQuarantine
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
 
@@ -55,3 +56,16 @@ class PgLibraryQuarantineRepository(LibraryQuarantineRepository):
             (file_path,),
         ).fetchone()
         return self._row_to_model(row) if row else None
+
+    def get_paths_under(self, root: str) -> set[str]:
+        prefix, _sep = dir_like_prefix(root)
+        rows = self._conn.execute(
+            "SELECT DISTINCT file_path FROM library_quarantine WHERE file_path LIKE %s",
+            (prefix + "%",),
+        ).fetchall()
+        return {r["file_path"] for r in rows}
+
+    def delete_by_path(self, file_path: str) -> None:
+        self._conn.execute(
+            "DELETE FROM library_quarantine WHERE file_path = %s", (file_path,),
+        )
