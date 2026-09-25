@@ -4,8 +4,8 @@ import csv
 import hashlib
 import io
 import posixpath
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -44,12 +44,30 @@ _PROGRESS_REPORT_INTERVAL = 100
 # Columns that must be non-empty for a CSV row to be ingestible.
 _REQUIRED_COLUMNS = ("Artist", "Title", "Played")
 
+# Machine-readable reasons a single row was dropped. Surfaced to the
+# operator via IngestionResult.skip_reasons so a partially-bad file can
+# explain itself instead of just reporting a bare skipped count.
+SKIP_EXTRA_FIELDS = "extra_fields"
+SKIP_BLANK_REQUIRED_FIELD = "blank_required_field"
+
+
+@dataclass(frozen=True)
+class _RowExtraction:
+    """Outcome of validating one raw CSV row.
+
+    Exactly one of the two attributes is set: ``row`` on acceptance,
+    ``skip_reason`` on rejection.
+    """
+
+    row: dict[str, str] | None = None
+    skip_reason: str | None = None
+
 
 def _extract_ingestible_row(
     raw_row: Mapping[object, object],
-) -> dict[str, str] | None:
-    """Return a stripped, string-keyed row ready for ingestion, or
-    ``None`` if the row is malformed or missing required data.
+) -> _RowExtraction:
+    """Return a stripped, string-keyed row ready for ingestion, or the
+    reason the row was rejected.
 
     Collapses ``csv.DictReader``'s edge cases at a single boundary so
     downstream code can assume plain strings:
@@ -65,15 +83,15 @@ def _extract_ingestible_row(
       reject.
     """
     if None in raw_row:
-        return None
+        return _RowExtraction(skip_reason=SKIP_EXTRA_FIELDS)
     stripped = {
         key: value.strip()
         for key, value in raw_row.items()
         if isinstance(key, str) and isinstance(value, str)
     }
     if not all(stripped.get(column) for column in _REQUIRED_COLUMNS):
-        return None
-    return stripped
+        return _RowExtraction(skip_reason=SKIP_BLANK_REQUIRED_FIELD)
+    return _RowExtraction(row=stripped)
 
 
 class IngestionError(Exception):
@@ -86,6 +104,39 @@ class CsvDecodeError(IngestionError):
 
 class DuplicatePlaylistError(IngestionError):
     """Raised when a CSV with the same content hash has already been ingested."""
+
+
+class CsvSchemaError(IngestionError):
+    """Raised when a CSV header is missing columns ingestion requires.
+
+    Distinct from a row-level skip: a header mismatch rejects every row,
+    so failing loudly here is the difference between an actionable error
+    and an upload that "succeeds" with zero events.
+    """
+
+
+def _validate_header(fieldnames: Sequence[str] | None) -> None:
+    """Raise :class:`CsvSchemaError` unless every required column is present.
+
+    Checked before any write so a mis-exported file cannot leave an orphan
+    playlist row behind. The message names both what is missing and what was
+    actually found — the operator needs their own header echoed back to spot
+    a near-miss such as a ``Log Date`` / ``Time Played`` pair standing in for
+    a single ``Played`` column.
+    """
+    if not fieldnames:
+        raise CsvSchemaError(
+            "CSV has no header row; expected columns: "
+            f"{', '.join(_REQUIRED_COLUMNS)}."
+        )
+    present = {name.strip() for name in fieldnames if name}
+    missing = [column for column in _REQUIRED_COLUMNS if column not in present]
+    if missing:
+        raise CsvSchemaError(
+            f"CSV is missing required column(s): {', '.join(missing)}. "
+            f"Found: {', '.join(fieldnames)}. "
+            "Every row would be rejected, so nothing was imported."
+        )
 
 
 def _decode_csv_bytes(file_bytes: bytes) -> str:
@@ -131,14 +182,16 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
 def count_csv_rows(file_bytes: bytes) -> int:
     """Return the number of valid (ingestible) rows in a CSV payload.
 
-    Shares :func:`_decode_csv_bytes` with ``ingest_csv`` so encoding
-    handling is identical. Propagates :class:`CsvDecodeError` — callers
-    (the task layer) treat a decode failure as a terminal FAILED state
+    Shares :func:`_decode_csv_bytes` and :func:`_validate_header` with
+    ``ingest_csv`` so encoding and schema handling are identical.
+    Propagates :class:`CsvDecodeError` and :class:`CsvSchemaError` —
+    callers (the task layer) treat either as a terminal FAILED state
     rather than silently degrading to a zero total.
     """
     text = _decode_csv_bytes(file_bytes)
     reader = csv.DictReader(io.StringIO(text))
-    return sum(1 for row in reader if _extract_ingestible_row(row) is not None)
+    _validate_header(reader.fieldnames)
+    return sum(1 for row in reader if _extract_ingestible_row(row).row is not None)
 
 
 @dataclass
@@ -150,6 +203,8 @@ class IngestionResult:
     identities_created: int = 0
     events_created: int = 0
     broadcast_days_created: int = 0
+    # Skip-reason code → count. Empty when nothing was skipped.
+    skip_reasons: dict[str, int] = field(default_factory=dict)
 
 
 def ingest_csv(
@@ -186,6 +241,11 @@ def ingest_csv(
 
     text = _decode_csv_bytes(file_bytes)
 
+    # Schema check precedes every write: a header mismatch rejects all rows,
+    # and an orphan playlist for a file that imported nothing is worse than
+    # no playlist at all.
+    _validate_header(csv.DictReader(io.StringIO(text)).fieldnames)
+
     # Content hash for deduplication
     content_hash = hashlib.sha256(file_bytes).hexdigest()
 
@@ -216,9 +276,12 @@ def ingest_csv(
         on_row_processed(0)
 
     for raw_row in reader:
-        row = _extract_ingestible_row(raw_row)
+        extraction = _extract_ingestible_row(raw_row)
+        row = extraction.row
         if row is None:
             result.rows_skipped += 1
+            reason = extraction.skip_reason or SKIP_BLANK_REQUIRED_FIELD
+            result.skip_reasons[reason] = result.skip_reasons.get(reason, 0) + 1
             continue
         raw_artist = row["Artist"]
         raw_title = row["Title"]
@@ -297,12 +360,13 @@ def ingest_csv(
         on_row_processed(result.rows_processed)
 
     if result.rows_skipped > 0:
-        logger.info(
+        logger.warning(
             "ingestion_rows_skipped",
             playlist_id=result.playlist_id,
             filename=file_name,
             skipped=result.rows_skipped,
             processed=result.rows_processed,
+            skip_reasons=result.skip_reasons,
         )
 
     logger.info(
