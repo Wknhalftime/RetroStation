@@ -108,6 +108,14 @@ class TestWellTaggedMp3:
         assert lf.audio.raw_metadata is not None
         assert len(lf.audio.raw_metadata) > 0
 
+    def test_file_stat_captured(self) -> None:
+        """Size + mtime are what lets the next scan skip this file unread."""
+        path = _require(WELL_TAGGED)
+        lf = extract_tags(path)
+        st = path.stat()
+        assert lf.file_size == st.st_size
+        assert lf.file_mtime_ns == st.st_mtime_ns
+
 
 # ---------------------------------------------------------------------------
 # partial_tags.mp3 — Tier 2: title/artist, no MBIDs

@@ -1,13 +1,16 @@
 """
-Folder hash service — Merkle-tree-like change detection for library directories.
+Folder hash service — per-folder change detection for library directories.
 
-Uses mtime + file size (not content hashing) for fast change detection.
+Each folder's hash covers only the audio files directly inside it, using
+mtime + size (not content hashing) so a poll is a directory walk of stats.
+Child folders are deliberately NOT folded in: the targeted scan that acts
+on a changed folder is non-recursive, so an ancestor lighting up because a
+descendant changed would send the scanner somewhere with nothing to do.
 """
 from __future__ import annotations
 
 import hashlib
 import os
-import unicodedata
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -21,23 +24,22 @@ logger = structlog.get_logger()
 
 
 def canonicalize_path(path: str) -> str:
-    """Normalize a path for consistent DB storage and comparison."""
-    normalized = os.path.normpath(path)
-    return unicodedata.normalize("NFC", normalized)
+    """Normalize a path's separators and dot segments for DB storage and comparison.
+
+    Unicode is left exactly as the filesystem spells it. NTFS treats NFC
+    and NFD spellings as different names, so folding a folder copied from
+    macOS (NFD) to NFC produced a path that named nothing on disk, and
+    that folder was never scanned. It must also match file paths, which
+    are stored as listed.
+    """
+    return os.path.normpath(path)
 
 
-def compute_folder_hash(
-    folder_path: Path,
-    child_hashes: list[str] | None = None,
-) -> str:
-    """Compute a hash for a folder based on mtime+size of audio files and child hashes.
-
-    Args:
-        folder_path: Path to the directory.
-        child_hashes: Pre-computed hashes of child folders (sorted).
+def compute_folder_hash(folder_path: Path) -> str:
+    """Hash the name, mtime and size of every audio file directly in a folder.
 
     Returns:
-        SHA-256 hex digest representing the folder's current state.
+        SHA-256 hex digest representing the folder's own current state.
     """
     file_parts: list[str] = []
     try:
@@ -52,49 +54,65 @@ def compute_folder_hash(
     except OSError as exc:
         logger.warning("compute_folder_hash_scandir_failed", path=str(folder_path), error=str(exc))
 
-    parts = sorted(child_hashes or []) + sorted(file_parts)
-    combined = "\n".join(parts).encode("utf-8")
+    combined = "\n".join(sorted(file_parts)).encode("utf-8")
     return hashlib.sha256(combined).hexdigest()
 
 
-def coalesce_paths(paths: list[str]) -> list[str]:
-    """Merge child paths into parent paths where the parent is also in the list.
+# What compute_folder_hash returns for a folder with no audio files. A
+# folder that has vanished from disk is diffed as this, so it is reported
+# (and its files marked missing) once, then stays quiet.
+EMPTY_FOLDER_HASH = hashlib.sha256(b"").hexdigest()
 
-    If both /music/jazz and /music/jazz/miles are changed, keep only /music/jazz.
+
+def _walk_folder_paths(root: Path) -> tuple[dict[str, str], list[str], list[str]]:
+    """Walk root bottom-up; return (folder_hashes, all_dirs, unlistable_dirs).
+
+    Bottom-up so ``all_dirs`` reversed is parents-before-children, which
+    ``_sync_new_folders`` relies on to resolve ``parent_id``. os.walk skips
+    a directory it cannot list; ``unlistable_dirs`` records those so their
+    subtree is not mistaken for deleted.
     """
-    if not paths:
-        return []
-
-    sorted_paths = sorted(paths)
-    result: list[str] = []
-
-    for path in sorted_paths:
-        normalized = path.rstrip("/").rstrip("\\")
-        # Check if any already-added path is a parent of this one
-        if any(
-            normalized.startswith(r + "/") or normalized.startswith(r + "\\")
-            for r in result
-        ):
-            continue
-        result.append(normalized)
-
-    return result
-
-
-def _walk_folder_paths(root: Path) -> tuple[dict[str, str], list[str]]:
-    """Walk root bottom-up; return (folder_hashes, all_dirs)."""
     folder_hashes: dict[str, str] = {}
     all_dirs: list[str] = []
-    for dirpath, dirnames, _filenames in os.walk(str(root), topdown=False):
+    unlistable: list[str] = []
+
+    def _record_unlistable(exc: OSError) -> None:
+        logger.warning("diff_tree_walk_failed", path=exc.filename, error=str(exc))
+        if exc.filename is not None:
+            unlistable.append(canonicalize_path(str(exc.filename)))
+
+    for dirpath, _dirnames, _filenames in os.walk(
+        str(root), topdown=False, onerror=_record_unlistable,
+    ):
         canonical = canonicalize_path(dirpath)
         all_dirs.append(canonical)
-        child_hashes = [
-            folder_hashes[canonicalize_path(os.path.join(dirpath, d))]
-            for d in sorted(dirnames)
-            if canonicalize_path(os.path.join(dirpath, d)) in folder_hashes
-        ]
-        folder_hashes[canonical] = compute_folder_hash(Path(dirpath), child_hashes)
-    return folder_hashes, all_dirs
+        folder_hashes[canonical] = compute_folder_hash(Path(dirpath))
+    return folder_hashes, all_dirs, unlistable
+
+
+def _is_within(path: str, ancestor: str) -> bool:
+    prefix = ancestor if ancestor.endswith(os.sep) else ancestor + os.sep
+    return path == ancestor or path.startswith(prefix)
+
+
+def _vanished_folder_hashes(
+    root: str,
+    folder_hashes: dict[str, str],
+    existing_folders: dict[str, LibraryFolder],
+    unlistable: list[str],
+) -> dict[str, str]:
+    """Known folders under *root* that the walk no longer sees, hashed as empty.
+
+    Folders outside the root are left alone (the root setting may have
+    moved), as is anything under a directory the walk could not list.
+    """
+    return {
+        path: EMPTY_FOLDER_HASH
+        for path in existing_folders
+        if path not in folder_hashes
+        and _is_within(path, root)
+        and not any(_is_within(path, bad) for bad in unlistable)
+    }
 
 
 def _sync_new_folders(
@@ -164,7 +182,7 @@ def diff_tree(
         return [], []
 
     is_first_run = not folder_repo.has_any()
-    folder_hashes, all_dirs = _walk_folder_paths(root)
+    folder_hashes, all_dirs, unlistable = _walk_folder_paths(root)
     existing_folders: dict[str, LibraryFolder] = {
         f.full_path: f for f in folder_repo.get_all()
     }
@@ -177,7 +195,10 @@ def diff_tree(
         return [], []
 
     in_flight_ids = in_flight_ids or set()
-    changed, pending = _compute_diff(folder_hashes, existing_folders, in_flight_ids)
+    vanished = _vanished_folder_hashes(str(root), folder_hashes, existing_folders, unlistable)
+    changed, pending = _compute_diff(
+        {**folder_hashes, **vanished}, existing_folders, in_flight_ids,
+    )
 
     if in_flight_ids:
         logger.info("watcher_poll_skipped_in_flight", skipped=len(in_flight_ids))

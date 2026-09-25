@@ -96,3 +96,54 @@ def test_get_by_recording_mbid_returns_all_duplicates() -> None:
     repo.upsert(_file("Prince", recording_mbid="rec-dup"))
     got = repo.get_by_recording_mbid("rec-dup")
     assert len(got) == 2
+
+
+def test_upsert_keeps_links_when_incoming_row_has_none() -> None:
+    """A fresh tag extraction carries no work/recording link. Re-upserting it
+    must not erase links the grouping and enrichment passes already built —
+    even when the content hash changed (a retag is not a new song)."""
+    repo = FakeLibraryFileRepository()
+    original = _file("Prince")
+    original.work_id = "work-1"
+    original.recording_id = "rec-1"
+    repo.upsert(original)
+
+    fresh = LibraryFile(
+        id=uuid4(), file_path=original.file_path, file_hash="retagged", format="mp3",
+    )
+    repo.upsert(fresh)
+
+    got = repo.get_by_path(original.file_path)
+    assert got is not None
+    assert got.work_id == "work-1"
+    assert got.recording_id == "rec-1"
+
+
+def test_upsert_explicit_links_replace_existing() -> None:
+    repo = FakeLibraryFileRepository()
+    original = _file("Prince")
+    original.work_id = "work-1"
+    repo.upsert(original)
+
+    relinked = LibraryFile(
+        id=uuid4(), file_path=original.file_path, file_hash=original.file_hash,
+        format="mp3", work_id="work-2",
+    )
+    repo.upsert(relinked)
+
+    got = repo.get_by_path(original.file_path)
+    assert got is not None
+    assert got.work_id == "work-2"
+
+
+def test_update_file_stat_records_size_and_mtime() -> None:
+    repo = FakeLibraryFileRepository()
+    f = _file("Prince")
+    repo.upsert(f)
+
+    repo.update_file_stat(f.id, file_size=4096, file_mtime_ns=1_700_000_000_000_000_000)
+
+    got = repo.get_by_id(f.id)
+    assert got is not None
+    assert got.file_size == 4096
+    assert got.file_mtime_ns == 1_700_000_000_000_000_000
