@@ -533,9 +533,7 @@ def _is_gone_or_same_file(old: Path, new: Path) -> bool:
         return False
 
 
-def _moved_from(
-    lf: LibraryFile, path: Path, file_repo: LibraryFileRepository,
-) -> LibraryFile | None:
+def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
     """The row this newly seen file was moved or renamed from, if any.
 
     A row with identical content whose own file is still on disk is a
@@ -543,10 +541,46 @@ def _moved_from(
     """
     for candidate in file_repo.get_by_hash(lf.file_hash):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
-            Path(candidate.file_path), path,
+            Path(candidate.file_path), Path(lf.file_path),
         ):
             return candidate
     return None
+
+
+def adopt_moved_row(lf: LibraryFile, file_repo: LibraryFileRepository) -> str | None:
+    """Repoint the row *lf* was moved or renamed from at *lf*'s path.
+
+    For a path the DB has no row for. Keeps the old row's id and every
+    grouping/enrichment link that a bare insert would leave behind.
+    Returns the old path, or None when *lf* is not a move.
+    """
+    origin = _moved_from(lf, file_repo)
+    if origin is None:
+        return None
+    file_repo.relocate(origin.id, lf.file_path)
+    return origin.file_path
+
+
+def mark_unseen_missing(
+    root: Path, seen_paths: set[str], file_repo: LibraryFileRepository,
+) -> int:
+    """Mark PRESENT files under *root* that a complete walk did not see as MISSING.
+
+    A walk that saw nothing marks nothing: a root that is absent, or an
+    empty mount-point folder, almost always means a drive that is not
+    plugged in, not a library that was deleted. Returns the count marked.
+    """
+    if not seen_paths:
+        logger.warning("mark_unseen_missing_skipped_empty_walk", root=str(root))
+        return 0
+    unseen = [
+        path
+        for path, status in file_repo.get_path_statuses_under(str(root)).items()
+        if status == FileStatus.PRESENT and path not in seen_paths
+    ]
+    for path in unseen:
+        file_repo.mark_missing(path)
+    return len(unseen)
 
 
 def _index_new_file(
@@ -563,13 +597,12 @@ def _index_new_file(
     lf = _extract_tags_safe(path, str(path), quarantine_repo, result)
     if lf is None:
         return None
-    origin = _moved_from(lf, path, file_repo)
-    if origin is not None:
-        file_repo.relocate(origin.id, lf.file_path)
+    moved_from = adopt_moved_row(lf, file_repo)
+    if moved_from is not None:
         result.files_relocated += 1
     file_repo.upsert(lf)
     result.files_written += 1
-    return origin.file_path if origin is not None else None
+    return moved_from
 
 
 def _restore_reappeared_file(

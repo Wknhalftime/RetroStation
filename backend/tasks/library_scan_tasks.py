@@ -23,7 +23,11 @@ from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
-from backend.services.library_scan_service import scan_directory
+from backend.services.library_scan_service import (
+    adopt_moved_row,
+    mark_unseen_missing,
+    scan_directory,
+)
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
@@ -56,8 +60,16 @@ def _run_scan(
     files_written = 0
     files_committed = 0
     quarantine_written = 0
+    files_relocated = 0
     pending_writes = 0
     written_files: list[LibraryFile] = []
+
+    # Stored paths use the OS separator; a root typed as ``D:/Music``
+    # would otherwise match none of them.
+    root = Path(root_path)
+    # Paths already indexed, so a path seen for the first time can be
+    # checked for being a moved or renamed file before it is inserted.
+    known_paths = repos.library_files.get_path_statuses_under(str(root))
 
     # --- Callbacks ---
 
@@ -68,8 +80,12 @@ def _run_scan(
         pending_writes = 0
 
     def on_file(lf: LibraryFile) -> None:
-        nonlocal pending_writes, files_written
+        nonlocal pending_writes, files_written, files_relocated
         try:
+            if lf.file_path not in known_paths and adopt_moved_row(
+                lf, repos.library_files,
+            ) is not None:
+                files_relocated += 1
             repos.library_files.upsert_write_only(lf)
         except psycopg.Error:
             # Bad metadata (e.g. null bytes) can poison the transaction.
@@ -123,8 +139,8 @@ def _run_scan(
         )
 
     # --- Run scan with callbacks ---
-    scan_directory(
-        Path(root_path),
+    scanned, quarantined = scan_directory(
+        root,
         on_progress=on_progress,
         on_file=on_file,
         on_quarantine=on_quarantine,
@@ -133,6 +149,15 @@ def _run_scan(
     # Flush any remaining scan writes before folder-tree pass
     if pending_writes > 0:
         _flush_chunk()
+
+    # Quarantined files are still on disk, so they count as seen.
+    seen_paths = {lf.file_path for lf in scanned} | {q.file_path for q in quarantined}
+    files_missing = mark_unseen_missing(root, seen_paths, repos.library_files)
+    logger.info(
+        "scan_reconciled",
+        relocated=files_relocated,
+        marked_missing=files_missing,
+    )
 
     # Build folder tree so library_folders is populated even on first scan
     diff_tree(root_path, repos.library_folders)
