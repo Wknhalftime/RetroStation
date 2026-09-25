@@ -1,0 +1,65 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab?fmt=json&inc=aliases%2Btags
+  response:
+    body:
+      string: "{\"gender-id\":null,\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"gender\":null,\"sort-name\":\"Metallica\",\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"isnis\":[\"0000000122939631\"],\"area\":{\"disambiguation\":\"\",\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"type-id\":null,\"type\":null,\"iso-3166-1-codes\":[\"US\"],\"sort-name\":\"United
+        States\"},\"end-area\":null,\"aliases\":[{\"name\":\"Metalica\",\"locale\":null,\"ended\":false,\"end\":null,\"begin\":null,\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"sort-name\":\"Metalica\",\"type\":\"Search
+        hint\",\"primary\":null},{\"ended\":false,\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"begin\":null,\"end\":null},{\"ended\":false,\"locale\":\"ja\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"primary\":true,\"type\":\"Artist
+        name\",\"end\":null,\"begin\":null,\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\"},{\"ended\":false,\"locale\":\"ko_KR\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"primary\":true,\"type\":null,\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"end\":null,\"type-id\":null,\"begin\":null}],\"begin-area\":{\"type\":null,\"sort-name\":\"Los
+        Angeles\",\"type-id\":null,\"disambiguation\":\"\",\"id\":\"1f40c6e1-47ba-4e35-996f-fe6ee5840e62\",\"name\":\"Los
+        Angeles\"},\"type\":\"Group\",\"name\":\"Metallica\",\"life-span\":{\"ended\":false,\"begin\":\"1981-10-28\",\"end\":null},\"disambiguation\":\"\",\"ipis\":[],\"tags\":[{\"name\":\"american\",\"count\":7},{\"count\":20,\"name\":\"hard
+        rock\"},{\"name\":\"heavy metal\",\"count\":41},{\"count\":33,\"name\":\"metal\"},{\"count\":1,\"name\":\"rockgruppe\"},{\"name\":\"thrash
+        metal\",\"count\":66}],\"country\":\"US\"}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '1573'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Fri, 25 Sep 2026 22:58:38 GMT
+      etag:
+      - W/"57f434d94d5ce2b0055f22a7855648ff"
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      transfer-encoding:
+      - chunked
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '751'
+      x-ratelimit-reset:
+      - '1790377118'
+      x-runtime:
+      - '0.038878'
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,104 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/?query=arid%3A65f4f0c5%5C-ef9e%5C-490c%5C-aee3%5C-909e7ae6b2ab+AND+recording%3A%22Enter+Sandman%22&fmt=json&limit=5
+  response:
+    body:
+      string: "{\"created\":\"2026-09-25T22:56:11.036Z\",\"count\":760,\"offset\":0,\"recordings\":[{\"id\":\"cd3ed501-4798-4423-9113-b9bea2d5df16\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+        Sandman\",\"length\":400000,\"disambiguation\":\"live\",\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"2017\",\"releases\":[{\"id\":\"762ad044-3b86-4b6e-b94e-5bcf1e4604ec\",\"status-id\":\"1156806e-d06a-38bd-83f0-cf2284a808b9\",\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"count\":1,\"title\":\"Classics
+        Live, Volume 2\",\"status\":\"Bootleg\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"f7e0d94b-8ea1-41c5-8727-9e452b0450b8\",\"type-id\":\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Classics
+        Live, Volume 2\",\"primary-type\":\"Album\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2017\",\"country\":\"XE\",\"release-events\":[{\"date\":\"2017\",\"area\":{\"id\":\"89a675c2-3e37-3518-b83c-418bad59a85a\",\"name\":\"Europe\",\"sort-name\":\"Europe\",\"iso-3166-1-codes\":[\"XE\"]}}],\"track-count\":12,\"media\":[{\"id\":\"9d6e4807-0d22-3902-a49c-98a568d5cfc2\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"1b4e13e9-7b5f-4f3d-abcb-f2a2c19f371c\",\"number\":\"1\",\"title\":\"Enter
+        Sandman\",\"length\":400000}],\"track-count\":12,\"track-offset\":0}]}]},{\"id\":\"ba6476c4-870f-4f15-8e47-08302625aa08\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+        Sandman\",\"length\":831146,\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"2023-10-27\",\"releases\":[{\"id\":\"3637d79b-60a6-4700-9bc4-9a73b0624b74\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"count\":2,\"title\":\"2023-08-13:
+        Stade olympique, Montr\xE9al, Qc\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"69166da5-c6e4-4006-a45c-f5d05ccafea1\",\"type-id\":\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"2023-08-13:
+        Stade olympique, Montr\xE9al, Qc\",\"primary-type\":\"Album\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2023-10-27\",\"country\":\"US\",\"release-events\":[{\"date\":\"2023-10-27\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":17,\"media\":[{\"id\":\"e1645b61-6f9a-3140-83d7-8e12406519a9\",\"position\":2,\"format\":\"CD\",\"track\":[{\"id\":\"141502de-94c1-4cc3-818d-2b2f4b26948c\",\"number\":\"8\",\"title\":\"Enter
+        Sandman\",\"length\":831146}],\"track-count\":8,\"track-offset\":7}]}]},{\"id\":\"4d7a8167-4738-429b-8175-3882e12b24ef\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+        Sandman\",\"length\":328000,\"disambiguation\":\"live, 1992-01-11: ARCO Arena,
+        Sacramento, CA, USA\",\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"1992\",\"releases\":[{\"id\":\"c25b00be-2ac2-4556-9a20-7f79e91a05fa\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"count\":1,\"title\":\"Live
+        at Arco Arena, Sacramento, CA, 01/11/92\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"2b2b6f4f-2f22-4077-80f4-bf6fae18d69b\",\"type-id\":\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Live
+        in Concert\",\"primary-type\":\"Album\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"1992\",\"country\":\"US\",\"release-events\":[{\"date\":\"1992\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":26,\"media\":[{\"id\":\"5077341d-5a04-3040-9893-636ffed560f9\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"4593536b-3c7f-4523-878a-900565e61144\",\"number\":\"2\",\"title\":\"Enter
+        Sandman\",\"length\":328000}],\"track-count\":26,\"track-offset\":1}]}]},{\"id\":\"3edac058-cf57-4175-8650-a74ca61652a4\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+        Sandman\",\"length\":397649,\"disambiguation\":\"live, 2014-03-27: Estadio
+        Monumental, Santiago, Chile\",\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"2020-04-15\",\"releases\":[{\"id\":\"14192825-deb8-4d57-b971-85128228517c\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"count\":1,\"title\":\"Live
+        in Chile (1993 \u2013 2017)\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"79dc0daa-a3b7-4231-bf1a-368ee84c3409\",\"type-id\":\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Live
+        in Chile (1993 \u2013 2017)\",\"primary-type\":\"Album\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2020-04-15\",\"country\":\"CL\",\"release-events\":[{\"date\":\"2020-04-15\",\"area\":{\"id\":\"82d5f4d6-aed4-3ff5-81d1-5363ac6e97a7\",\"name\":\"Chile\",\"sort-name\":\"Chile\",\"iso-3166-1-codes\":[\"CL\"]}}],\"track-count\":18,\"media\":[{\"id\":\"42ab0269-dd59-3d45-8d89-9e3ad8c25676\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"ff999cfe-6af2-4b54-afb3-03265cccdf4b\",\"number\":\"18\",\"title\":\"Enter
+        Sandman (live In Santiago, Chile - April 1st, 2017)\",\"length\":397649}],\"track-count\":18,\"track-offset\":17}]}],\"isrcs\":[\"QMKHM1900416\"]},{\"id\":\"b39ed042-a79b-47b0-a42e-67c4185ddcd3\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+        Sandman\",\"length\":395000,\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"2014\",\"releases\":[{\"id\":\"235a8456-034a-45e7-b0a2-1676ce6eccff\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"count\":53,\"title\":\"By
+        Request\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"cb5ecc81-8bc1-47ba-ad33-269e97a95926\",\"type-id\":\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"By
+        Request\",\"primary-type\":\"Album\",\"secondary-types\":[\"Compilation\",\"Live\"],\"secondary-type-ids\":[\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\",\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2014\",\"country\":\"US\",\"release-events\":[{\"date\":\"2014\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":568,\"media\":[{\"id\":\"34a3a240-2c81-39c4-869a-b3223e517794\",\"position\":51,\"format\":\"CD-R\",\"track\":[{\"id\":\"347e5e4f-8934-4514-afff-0bbc07ff3521\",\"number\":\"6\",\"title\":\"Enter
+        Sandman\",\"length\":395000}],\"track-count\":10,\"track-offset\":5}]}]}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '11099'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Fri, 25 Sep 2026 22:58:35 GMT
+      etag:
+      - '"ZWI5NTRlMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Fri, 25 Sep 2026 22:56:03 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - STALE
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '318'
+      x-ratelimit-reset:
+      - '1790377115'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

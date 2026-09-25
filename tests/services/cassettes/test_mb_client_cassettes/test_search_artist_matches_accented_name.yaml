@@ -1,0 +1,141 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=Beyonc%C3%A9&fmt=json&limit=10
+  response:
+    body:
+      string: "{\"created\":\"2026-09-25T22:56:06.609Z\",\"count\":21,\"offset\":0,\"artists\":[{\"id\":\"859d0860-d480-4efd-970c-c05d5f1776b8\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":100,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"Beyonc\xE9\",\"sort-name\":\"Beyonc\xE9\",\"gender\":\"female\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"c920948b-83e3-40b7-8fe9-9ab5abaac55b\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Houston\",\"sort-name\":\"Houston\",\"life-span\":{\"ended\":null}},\"ipis\":[\"00341826274\"],\"isnis\":[\"0000000114914936\"],\"life-span\":{\"begin\":\"1981-09-04\",\"ended\":null},\"aliases\":[{\"sort-name\":\"\u78A7\u6602\u7D72\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u78A7\u6602\u7D72\",\"locale\":\"zh_Hant_TW\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Beyonc\xE9\",\"name\":\"Beyonc\xE9\",\"locale\":\"zh_Hans_CN\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Knowles-Carter,
+        Beyonc\xE9\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beyonc\xE9
+        Knowles-Carter\",\"locale\":\"en\",\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\u30D3\u30E8\u30F3\u30BB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30D3\u30E8\u30F3\u30BB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Beyonce\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Beyonce\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Beyonce'\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Beyonce'\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"B1C\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"B1C\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Knowles-Carter,
+        Beyonc\xE9 Giselle\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Beyonc\xE9
+        Giselle Knowles-Carter\",\"locale\":\"en\",\"type\":\"Legal name\",\"primary\":null,\"begin-date\":\"2008-04-04\",\"end-date\":null},{\"sort-name\":\"Knowles,
+        Beyonc\xE9 Giselle\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Beyonc\xE9
+        Giselle Knowles\",\"locale\":\"en\",\"type\":\"Legal name\",\"primary\":null,\"begin-date\":\"1981-09-04\",\"end-date\":\"2008-04-03\"},{\"sort-name\":\"Knowles,
+        Beyonc\xE9\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beyonc\xE9
+        Knowles\",\"locale\":\"en\",\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Queen
+        Bey\",\"name\":\"Queen Bey\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":20,\"name\":\"pop\"},{\"count\":0,\"name\":\"rap\"},{\"count\":5,\"name\":\"dance\"},{\"count\":2,\"name\":\"house\"},{\"count\":2,\"name\":\"american\"},{\"count\":3,\"name\":\"vocalist\"},{\"count\":2,\"name\":\"singer-songwriter\"},{\"count\":5,\"name\":\"hip
+        hop\"},{\"count\":-2,\"name\":\"hard rock\"},{\"count\":1,\"name\":\"funk\"},{\"count\":2,\"name\":\"country\"},{\"count\":1,\"name\":\"bass\"},{\"count\":0,\"name\":\"actress\"},{\"count\":7,\"name\":\"soul\"},{\"count\":1,\"name\":\"electropop\"},{\"count\":2,\"name\":\"disco\"},{\"count\":-2,\"name\":\"rnb\"},{\"count\":1,\"name\":\"pianist\"},{\"count\":1,\"name\":\"americana\"},{\"count\":0,\"name\":\"director\"},{\"count\":1,\"name\":\"southern
+        hip hop\"},{\"count\":0,\"name\":\"icon\"},{\"count\":3,\"name\":\"2000s\"},{\"count\":5,\"name\":\"dance-pop\"},{\"count\":2,\"name\":\"adult
+        contemporary\"},{\"count\":0,\"name\":\"pop rock\"},{\"count\":8,\"name\":\"pop
+        rap\"},{\"count\":1,\"name\":\"neo soul\"},{\"count\":1,\"name\":\"progressive
+        house\"},{\"count\":1,\"name\":\"club\"},{\"count\":2,\"name\":\"dancer\"},{\"count\":-3,\"name\":\"hip
+        hop rnb and dance hall\"},{\"count\":1,\"name\":\"hip hop soul\"},{\"count\":1,\"name\":\"contemporary
+        country\"},{\"count\":2,\"name\":\"teen pop\"},{\"count\":2,\"name\":\"pop
+        soul\"},{\"count\":1,\"name\":\"sxsw\"},{\"count\":1,\"name\":\"top 100\"},{\"count\":3,\"name\":\"grammy
+        winner\"},{\"count\":16,\"name\":\"r&b\"},{\"count\":0,\"name\":\"singer/songwriter\"},{\"count\":8,\"name\":\"contemporary
+        r&b\"},{\"count\":3,\"name\":\"2010s\"},{\"count\":-1,\"name\":\"mbs-333\"},{\"count\":0,\"name\":\"art
+        pop\"},{\"count\":2,\"name\":\"alternative r&b\"},{\"count\":0,\"name\":\"moombahton\"},{\"count\":2,\"name\":\"trap\"},{\"count\":1,\"name\":\"slim
+        thug\"},{\"count\":-2,\"name\":\"contemporary pop\"},{\"count\":1,\"name\":\"future
+        bass\"},{\"count\":1,\"name\":\"top 10\"},{\"count\":1,\"name\":\"texas rapper\"},{\"count\":3,\"name\":\"2020s\"},{\"count\":1,\"name\":\"texas
+        music\"},{\"count\":0,\"name\":\"nuno\"},{\"count\":2,\"name\":\"cultural
+        icon\"},{\"count\":-1,\"name\":\"businesswoman\"},{\"count\":-1,\"name\":\"philanthropist\"},{\"count\":1,\"name\":\"houston
+        texas music\"},{\"count\":1,\"name\":\"best female artist\"},{\"count\":1,\"name\":\"top
+        5\"},{\"count\":1,\"name\":\"best female emcee\"},{\"count\":1,\"name\":\"best
+        female rapper\"}]},{\"id\":\"569f3f0d-ba19-42f8-a12d-a69a6caf9fe1\",\"score\":62,\"name\":\"Beyonce
+        Bowels\",\"sort-name\":\"Beyonce Bowels\",\"disambiguation\":\"pornogrind,
+        featured on GUT track\",\"life-span\":{\"ended\":null}},{\"id\":\"4873f47c-9e07-4125-b1e0-74b02a3aebb3\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":62,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"Beyonce
+        Sullivan\",\"sort-name\":\"Sullivan, Beyonce\",\"gender\":\"female\",\"area\":{\"id\":\"e96f1c0d-721b-470d-a9c4-0aa2d89cf9e7\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Dallas\",\"sort-name\":\"Dallas\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"also
+        goes by Beysul\",\"ipis\":[\"01032430223\"],\"life-span\":{\"ended\":null},\"aliases\":[{\"sort-name\":\"Beyonce
+        Sullivan\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beyonce
+        Sullivan\",\"locale\":null,\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Sullivan,
+        Beyonce Kai\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Beyonce
+        Kai Sullivan\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Beysul\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beysul\",\"locale\":null,\"type\":\"Artist
+        name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Bey
+        Sul\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Bey
+        Sul\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}]},{\"id\":\"77859b9b-c15f-48fb-adf5-198f5027488c\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":62,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"Beyonce
+        Louis\",\"sort-name\":\"Louis, Beyonce\",\"gender\":\"female\",\"area\":{\"id\":\"4a9aeb42-3763-4234-8fb8-1167ac1dfdfe\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Miami\",\"sort-name\":\"Miami\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"US
+        R&B artist\",\"ipis\":[\"00397946389\"],\"life-span\":{\"ended\":null},\"aliases\":[{\"sort-name\":\"Beyonce
+        Louis\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beyonce
+        Louis\",\"locale\":null,\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Louis,
+        Beyonce L.\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Beyonce
+        L. Louis\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"BLou\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"BLou\",\"locale\":null,\"type\":\"Artist
+        name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"B
+        Lou\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"B Lou\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Bey
+        Lou\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Bey
+        Lou\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}]},{\"id\":\"cf71e106-1003-4390-8477-cf268229df66\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":53,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"LUDMILLA\",\"sort-name\":\"LUDMILLA\",\"gender\":\"female\",\"country\":\"BR\",\"area\":{\"id\":\"f45b47f8-5796-386e-b172-6c31b009a5d8\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Brazil\",\"sort-name\":\"Brazil\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"9443d4f5-668c-4f30-96bd-6caf831de30f\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Rio
+        de Janeiro\",\"sort-name\":\"Rio de Janeiro\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Brazilian
+        singer\",\"ipis\":[\"00714635744\",\"00714635842\"],\"isnis\":[\"0000000466975652\"],\"life-span\":{\"begin\":\"1995-04-24\",\"ended\":null},\"aliases\":[{\"sort-name\":\"MC
+        Ludmilla\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"MC
+        Ludmilla\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"MC
+        Beyonc\xE9\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"MC
+        Beyonc\xE9\",\"locale\":null,\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Silva,
+        Ludmilla Oliveira da\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Ludmilla
+        Oliveira da Silva\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null}]},{\"id\":\"16b6e943-bb61-471d-ba53-689a453e54fb\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":49,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"M\u0103d\u0103lina\",\"sort-name\":\"M\u0103d\u0103lina\",\"gender\":\"female\",\"country\":\"RO\",\"area\":{\"id\":\"61ed84b8-5a10-30a7-8376-ccd51801d6d1\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Romania\",\"sort-name\":\"Romania\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"61ed84b8-5a10-30a7-8376-ccd51801d6d1\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Romania\",\"sort-name\":\"Romania\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Romanian
+        manele singer\",\"isnis\":[\"0000000475675985\"],\"life-span\":{\"begin\":\"1992-04-08\",\"ended\":null},\"aliases\":[{\"sort-name\":\"Beyonce
+        de Rom\xE2nia\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Beyonce
+        de Rom\xE2nia\",\"locale\":null,\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Dumitriu,
+        M\u0103d\u0103lina Georgiana\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"M\u0103d\u0103lina
+        Georgiana Dumitriu\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":0,\"name\":\"romanian\"},{\"count\":2,\"name\":\"romanian
+        singer\"}]},{\"id\":\"4a865087-4319-44cb-afe9-bc6ca51b1523\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":44,\"name\":\"THE
+        CARTERS\",\"sort-name\":\"CARTERS, The\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Beyonc\xE9
+        & JAY-Z\",\"life-span\":{\"begin\":\"2018\",\"ended\":null},\"tags\":[{\"count\":1,\"name\":\"trap\"},{\"count\":1,\"name\":\"contemporary
+        r&b\"},{\"count\":1,\"name\":\"hip hop\"},{\"count\":1,\"name\":\"grammy winner\"}]},{\"id\":\"7d2dedfb-1369-4912-a7a5-7a7cc4ef0e66\",\"type\":\"Character\",\"type-id\":\"5c1375b0-f18d-3db7-a164-a49d7a63773f\",\"score\":43,\"gender-id\":\"93452b5a-a947-30c8-934f-6a4056b151c2\",\"name\":\"Bayonse\",\"sort-name\":\"Bayonse\",\"gender\":\"female\",\"disambiguation\":\"Parody
+        of Beyonc\xE9\",\"life-span\":{\"ended\":null}},{\"id\":\"89c7edd7-31b6-4102-9085-b6ef693812ac\",\"score\":43,\"name\":\"Blue
+        Ivy\",\"sort-name\":\"Blue Ivy\",\"disambiguation\":\"not Beyonc\xE9\u2019s
+        daughter\",\"life-span\":{\"ended\":null}},{\"id\":\"a4b21b12-f6ca-421f-98e5-bd056ccba3a5\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":41,\"name\":\"The
+        Mamas\",\"sort-name\":\"Mamas, The\",\"disambiguation\":\"Beyonc\xE9's backing
+        vocal group\",\"life-span\":{\"begin\":\"2006\",\"end\":\"2018\",\"ended\":true}}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '11858'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Fri, 25 Sep 2026 22:58:31 GMT
+      etag:
+      - '"YWEyMTJjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Fri, 25 Sep 2026 22:54:42 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - STALE
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '43'
+      x-ratelimit-reset:
+      - '1790377111'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,106 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=Guns+N%27+Roses&fmt=json&limit=10
+  response:
+    body:
+      string: "{\"created\":\"2026-09-25T22:56:08.833Z\",\"count\":6576,\"offset\":0,\"artists\":[{\"id\":\"eeb1195b-f213-4ce1-b28c-8565211f8e43\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":100,\"name\":\"Guns
+        N\u2019 Roses\",\"sort-name\":\"Guns N\u2019 Roses\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"1f40c6e1-47ba-4e35-996f-fe6ee5840e62\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Los
+        Angeles\",\"sort-name\":\"Los Angeles\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"American
+        hard rock band from Los Angeles\",\"isnis\":[\"0000000121589641\"],\"life-span\":{\"begin\":\"1985-03\",\"ended\":null},\"aliases\":[{\"sort-name\":\"\u30AC\u30F3\u30BA\u30FB\u30A2\u30F3\u30C9\u30FB\u30ED\u30FC\u30BC\u30BA\",\"name\":\"\u30AC\u30F3\u30BA\u30FB\u30A2\u30F3\u30C9\u30FB\u30ED\u30FC\u30BC\u30BA\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        and Roses\",\"name\":\"Guns and Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        -N- Roses\",\"name\":\"Guns -N- Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"guns
+        'n' roses\",\"name\":\"guns 'n' roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns'N
+        Roses\",\"name\":\"Guns'N Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns'N'Roses\",\"name\":\"Guns'N'Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"GNR\",\"name\":\"GNR\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns\xB4n
+        Roses\",\"name\":\"Guns\xB4n Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Gn'R\",\"name\":\"Gn'R\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        'N Roses\",\"name\":\"Guns 'N Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        N'Roses\",\"name\":\"Guns N'Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        N\xB4 Roses\",\"name\":\"Guns N\xB4 Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        N Roses\",\"name\":\"Guns N Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        & Roses\",\"name\":\"Guns & Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Guns
+        'N' Roses\",\"name\":\"Guns 'N' Roses\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":4,\"name\":\"rock\"},{\"count\":5,\"name\":\"heavy
+        metal\"},{\"count\":-2,\"name\":\"industrial rock\"},{\"count\":0,\"name\":\"metal\"},{\"count\":-1,\"name\":\"american\"},{\"count\":1,\"name\":\"punk
+        rock\"},{\"count\":-1,\"name\":\"band\"},{\"count\":31,\"name\":\"hard rock\"},{\"count\":0,\"name\":\"folk
+        rock\"},{\"count\":2,\"name\":\"art rock\"},{\"count\":-1,\"name\":\"acoustic
+        rock\"},{\"count\":-1,\"name\":\"pop rock\"},{\"count\":1,\"name\":\"arena
+        rock\"},{\"count\":-1,\"name\":\"piano rock\"},{\"count\":9,\"name\":\"glam
+        metal\"},{\"count\":1,\"name\":\"aor\"},{\"count\":-1,\"name\":\"glam\"},{\"count\":-2,\"name\":\"classic
+        pop and rock\"},{\"count\":0,\"name\":\"glam punk\"},{\"count\":-2,\"name\":\"pop/rock\"},{\"count\":-2,\"name\":\"patience\"},{\"count\":-2,\"name\":\"+usa
+        (california:los angeles)\"},{\"count\":-1,\"name\":\"2008 universal fire victim\"},{\"count\":0,\"name\":\"estados
+        unidos\"}]},{\"id\":\"7e042aab-e8dc-476e-8b67-c366337857a5\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":72,\"name\":\"Machine
+        Guns N Roses\",\"sort-name\":\"Machine Guns N Roses\",\"begin-area\":{\"id\":\"e5936529-76b1-449e-a2e9-6ed98fe8d0d9\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Salt
+        Lake City\",\"sort-name\":\"Salt Lake City\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"2014-04-22\",\"ended\":null}},{\"id\":\"07a3e342-cfe2-494b-a548-47db4c228322\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":65,\"name\":\"Ultimate
+        Guns 'n Roses Tribute\",\"sort-name\":\"Ultimate Guns 'n Roses Tribute\",\"disambiguation\":\"Netherlands\",\"life-span\":{\"ended\":null}},{\"id\":\"31d15e77-5e14-499d-ba5d-88712831cf6c\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":57,\"name\":\"Shotguns
+        N Roses\",\"sort-name\":\"Shotguns N Roses\",\"begin-area\":{\"id\":\"a647136e-1680-4456-bd3a-750752331141\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Charlotte\",\"sort-name\":\"Charlotte\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Guns
+        N' Roses Tribute Band\",\"life-span\":{\"begin\":\"2023-08-23\",\"ended\":null}},{\"id\":\"8140aed3-7fba-402d-974b-abff5cdcf8d7\",\"score\":54,\"name\":\"Garden
+        of Roses\",\"sort-name\":\"Garden of Roses (Guns N\u2018 Roses tribute)\",\"country\":\"DE\",\"area\":{\"id\":\"85752fda-13c4-31a3-bee5-0e5cb1f51dad\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Germany\",\"sort-name\":\"Germany\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"85752fda-13c4-31a3-bee5-0e5cb1f51dad\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Germany\",\"sort-name\":\"Germany\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"2012-06-23\",\"ended\":null}},{\"id\":\"6c1efc5f-39fb-4b43-8855-1b841e20a855\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Guns
+        Celebration\",\"sort-name\":\"Guns Celebration\",\"begin-area\":{\"id\":\"1cea178f-a39e-466f-b628-a6ed56446681\",\"type\":\"Subdivision\",\"type-id\":\"fd3d44c5-80a1-3842-9745-2c4972d35afa\",\"name\":\"Rovigo\",\"sort-name\":\"Rovigo\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Italians
+        Guns n Roses tribute\",\"life-span\":{\"begin\":\"2010\",\"ended\":null}},{\"id\":\"a73670d6-6bd8-4d40-bd22-503fab668950\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Crazy
+        Guns\",\"sort-name\":\"Crazy Guns\",\"area\":{\"id\":\"81720a5e-f81e-4eff-9e09-d52f04e290f7\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Concepci\xF3n\",\"sort-name\":\"Concepci\xF3n\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Guns
+        N' Roses tribute band\",\"life-span\":{\"begin\":\"2025\",\"ended\":null}},{\"id\":\"5e7a7026-dfc5-4aba-8496-95140716f3db\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":54,\"gender-id\":\"36d3d30a-839d-3eda-8cb3-29be4384e4a9\",\"name\":\"Slash\",\"sort-name\":\"Slash\",\"gender\":\"male\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"b0b860b3-35d3-414b-b734-7e5b1c41ea70\",\"type\":\"District\",\"type-id\":\"84039871-5e47-38ca-a66a-45e512c8290f\",\"name\":\"Hampstead\",\"sort-name\":\"Hampstead\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Guns
+        N\u2019 Roses guitarist\",\"ipis\":[\"00127521396\",\"00439710448\"],\"life-span\":{\"begin\":\"1965-07-23\",\"ended\":null},\"aliases\":[{\"sort-name\":\"Hudson,
+        Saul\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"Saul
+        Hudson\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":1,\"name\":\"rock\"},{\"count\":1,\"name\":\"hard
+        rock\"},{\"count\":0,\"name\":\"slash\"},{\"count\":1,\"name\":\"hardrock\"},{\"count\":2,\"name\":\"blues\"},{\"count\":3,\"name\":\"heavy
+        metal\"}]},{\"id\":\"48d93a46-f708-489d-89e6-735ffcc4e641\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Reckless
+        Roses\",\"sort-name\":\"Reckless Roses\",\"country\":\"HU\",\"area\":{\"id\":\"312bc5bb-7e43-3e63-81c6-b4d712b37b2c\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Hungary\",\"sort-name\":\"Hungary\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Guns
+        'n Roses tribute band\",\"life-span\":{\"ended\":null}},{\"id\":\"5457f795-d723-4b95-8faa-7b7057cd452a\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":53,\"name\":\"Guns
+        n' Hoses\",\"sort-name\":\"Guns n' Hoses\",\"disambiguation\":\"All Female
+        Guns n' Roses Tribue Band\",\"life-span\":{\"begin\":\"2011-07-11\",\"ended\":null}}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '8046'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Fri, 25 Sep 2026 22:58:32 GMT
+      etag:
+      - '"NzRlMTJjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Fri, 25 Sep 2026 22:54:42 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - STALE
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '391'
+      x-ratelimit-reset:
+      - '1790377113'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

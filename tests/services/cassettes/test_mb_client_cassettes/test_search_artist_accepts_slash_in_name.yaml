@@ -1,0 +1,110 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=AC%2FDC&fmt=json&limit=10
+  response:
+    body:
+      string: "{\"created\":\"2026-09-25T22:56:05.524Z\",\"count\":1313,\"offset\":0,\"artists\":[{\"id\":\"66c662b6-6e2f-4930-8610-912e24c63ed1\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":100,\"name\":\"AC/DC\",\"sort-name\":\"AC/DC\",\"country\":\"AU\",\"area\":{\"id\":\"106e0bec-b638-3b37-b731-f53d507dc00e\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Australia\",\"sort-name\":\"Australia\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"3f179da4-83c6-4a28-a627-e46b4a8ff1ed\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Sydney\",\"sort-name\":\"Sydney\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Australian
+        hard rock band\",\"ipis\":[\"00133076008\"],\"isnis\":[\"000000012271298X\"],\"life-span\":{\"begin\":\"1973-11\",\"ended\":null},\"aliases\":[{\"sort-name\":\"AC/DC\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"AC/DC\",\"locale\":null,\"type\":\"Artist
+        name\",\"primary\":null,\"begin-date\":\"1973-11\",\"end-date\":null},{\"sort-name\":\"AC|DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC|DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Akka
+        Dakka\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Akka
+        Dakka\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Acca
+        Dacca\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Acca
+        Dacca\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC.DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC.DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\u26A1\uFE0EDC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\u26A1\uFE0EDC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"ACDC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"ACDC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC-DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC-DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\u26A1DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\u26A1DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC?DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC?DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\\\\DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\\\\DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC
+        DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":19,\"name\":\"rock\"},{\"count\":0,\"name\":\"heavy
+        metal\"},{\"count\":-3,\"name\":\"metal\"},{\"count\":-2,\"name\":\"australian\"},{\"count\":-3,\"name\":\"band\"},{\"count\":50,\"name\":\"hard
+        rock\"},{\"count\":-1,\"name\":\"relaxed\"},{\"count\":12,\"name\":\"blues
+        rock\"},{\"count\":-6,\"name\":\"glam rock\"},{\"count\":2,\"name\":\"classic
+        rock\"},{\"count\":-2,\"name\":\"1980s\"},{\"count\":-2,\"name\":\"1970s\"},{\"count\":-4,\"name\":\"arena
+        rock\"},{\"count\":2,\"name\":\"rock and roll\"},{\"count\":-3,\"name\":\"english\"},{\"count\":-2,\"name\":\"australia\"},{\"count\":-3,\"name\":\"blues-rock\"},{\"count\":-3,\"name\":\"classic
+        pop and rock\"},{\"count\":-3,\"name\":\"australie\"},{\"count\":-3,\"name\":\"australien\"},{\"count\":-3,\"name\":\"best\"},{\"count\":-3,\"name\":\"best
+        rock\"},{\"count\":-2,\"name\":\"australian rock\"},{\"count\":-3,\"name\":\"capa\"},{\"count\":-1,\"name\":\"rock
+        & roll\"},{\"count\":-3,\"name\":\"want to listen\"},{\"count\":-3,\"name\":\"volts\"},{\"count\":0,\"name\":\"hard
+        & heavy\"},{\"count\":-4,\"name\":\"+australia (sydney)\"},{\"count\":-1,\"name\":\"not
+        acoustic\"},{\"count\":-1,\"name\":\"not sad\"},{\"count\":-1,\"name\":\"not
+        electronic\"},{\"count\":-1,\"name\":\"not happy\"},{\"count\":-1,\"name\":\"not
+        aggressive\"},{\"count\":-1,\"name\":\"not party\"}]},{\"id\":\"74a1057a-4e64-43c5-b882-f21debe0a323\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":73,\"name\":\"AC/DC
+        UK\",\"sort-name\":\"AC/DC UK\",\"country\":\"GB\",\"area\":{\"id\":\"8a754a16-0027-3a29-b6d7-2b40ea0481ed\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        Kingdom\",\"sort-name\":\"United Kingdom\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"AC/DC
+        tribute band\",\"isnis\":[\"0000000523602626\"],\"life-span\":{\"begin\":\"2008\",\"ended\":null},\"aliases\":[{\"sort-name\":\"AcDc
+        Uk\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AcDc
+        Uk\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Ac
+        Dc Uk\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Ac
+        Dc Uk\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}]},{\"id\":\"664567ea-8526-4e81-9853-0adc79014ca4\",\"score\":72,\"name\":\"DJ
+        AC-DC\",\"sort-name\":\"AC-DC, DJ\",\"disambiguation\":\"Italian dance project\",\"life-span\":{\"ended\":null},\"aliases\":[{\"sort-name\":\"DJ
+        ACDC\",\"name\":\"DJ ACDC\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":1,\"name\":\"acdc\"}]},{\"id\":\"c14c7fb1-35ba-4e2a-a754-038f7808d502\",\"score\":72,\"name\":\"AC/DC
+        Pauli\",\"sort-name\":\"AC/DC Pauli\",\"life-span\":{\"ended\":null}},{\"id\":\"fe66a494-f26b-45c0-a0ce-70b42466f2ae\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":72,\"name\":\"Illegitimate
+        AC/DC\",\"sort-name\":\"Illegitimate AC/DC\",\"area\":{\"id\":\"b8474363-15ac-4943-9c73-c2665199982d\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Sonoma\",\"sort-name\":\"Sonoma\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"b8474363-15ac-4943-9c73-c2665199982d\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Sonoma\",\"sort-name\":\"Sonoma\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"2017-10-17\",\"ended\":null},\"tags\":[{\"count\":1,\"name\":\"tribute\"},{\"count\":1,\"name\":\"ac/dc\"}]},{\"id\":\"89df5809-b1f9-425c-9c65-1169d5181d17\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":72,\"name\":\"Almost
+        AC/DC\",\"sort-name\":\"Almost AC/DC\",\"disambiguation\":\"Danish AC/DC cover
+        band\",\"life-span\":{\"ended\":null}},{\"id\":\"836ab7ad-3430-4e04-bde2-3c2f56c42a98\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":72,\"name\":\"AC/DC
+        Show\",\"sort-name\":\"AC/DC Show\",\"country\":\"LT\",\"area\":{\"id\":\"0785dc14-96af-3dc4-bde4-dcdfc2e2d0d6\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Lithuania\",\"sort-name\":\"Lithuania\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Lithuanian
+        tribute to AC/DC\",\"life-span\":{\"ended\":null}},{\"id\":\"2fce51f1-799d-4fb2-a79f-d4bfa04ca5cb\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":72,\"name\":\"AC/DC
+        Jam\",\"sort-name\":\"AC/DC Jam\",\"area\":{\"id\":\"e0e3c82a-aea8-48d3-beda-9e587db0b969\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Copenhagen\",\"sort-name\":\"Copenhagen\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"e0e3c82a-aea8-48d3-beda-9e587db0b969\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Copenhagen\",\"sort-name\":\"Copenhagen\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"1990\",\"ended\":null}},{\"id\":\"fcea6221-df8c-480a-abcd-d3ca7a335192\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":64,\"name\":\"AC/DC
+        Revival Band\",\"sort-name\":\"AC/DC Revival Band\",\"area\":{\"id\":\"6e997717-e806-4ee9-aa9e-9cd8b11f7e9b\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Brno\",\"sort-name\":\"Brno\",\"life-span\":{\"ended\":null}},\"life-span\":{\"ended\":null}},{\"id\":\"55ab8431-37fc-480a-8057-f16ced61e685\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":64,\"name\":\"The
+        AC/DC Experience\",\"sort-name\":\"The AC/DC Experience\",\"country\":\"GB\",\"area\":{\"id\":\"8a754a16-0027-3a29-b6d7-2b40ea0481ed\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        Kingdom\",\"sort-name\":\"United Kingdom\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"AC/DC
+        Experience\",\"life-span\":{\"ended\":null}}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '8090'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Fri, 25 Sep 2026 22:58:30 GMT
+      etag:
+      - '"NzRlMTJjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Fri, 25 Sep 2026 22:54:42 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - STALE
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '70'
+      x-ratelimit-reset:
+      - '1790377110'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

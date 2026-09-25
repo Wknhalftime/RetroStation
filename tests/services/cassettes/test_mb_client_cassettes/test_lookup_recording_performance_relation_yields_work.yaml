@@ -1,0 +1,59 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/3edac058-cf57-4175-8650-a74ca61652a4?fmt=json&inc=artist-credits%2Bwork-rels
+  response:
+    body:
+      string: '{"video":false,"first-release-date":"2020-04-15","relations":[{"ended":true,"attribute-values":{},"work":{"title":"Enter
+        Sandman","type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","language":"eng","languages":["eng"],"id":"e5f97e53-ed4d-3721-afb5-5c47dda08782","attributes":[],"disambiguation":"","iswcs":["T-070.052.075-7"],"type":"Song"},"type":"performance","target-credit":"","attributes":["live"],"attribute-ids":{"live":"70007db6-a8bc-46d7-a770-80e6a0bb551a"},"source-credit":"","direction":"forward","type-id":"a3005666-a872-32c3-ad06-98af558e99b0","target-type":"work","end":"2014-03-27","begin":"2014-03-27"}],"title":"Enter
+        Sandman","length":397649,"disambiguation":"live, 2014-03-27: Estadio Monumental,
+        Santiago, Chile","id":"3edac058-cf57-4175-8650-a74ca61652a4","artist-credit":[{"artist":{"country":"US","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","sort-name":"Metallica","disambiguation":"","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","name":"Metallica","type":"Group"},"name":"Metallica","joinphrase":""}]}'
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '1027'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Fri, 25 Sep 2026 22:58:36 GMT
+      etag:
+      - W/"033ca71755eea1c9b1dccc1e8729c9e0"
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      transfer-encoding:
+      - chunked
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '863'
+      x-ratelimit-reset:
+      - '1790377116'
+      x-runtime:
+      - '0.034490'
+    status:
+      code: 200
+      message: OK
+version: 1
