@@ -140,11 +140,16 @@ class PgWorkRepository(WorkRepository):
     def get_candidates_by_normalized_artist(
         self, normalized_artist_name: str, limit: int = 100,
     ) -> list[tuple[str, str]]:
+        # Join through `artists.normalized_name` so orphan works (no attached
+        # library_files yet) still appear as fuzzy-match candidates — this is
+        # what prevents a second, byte-identical work from being created when
+        # local grouping can't find the first. `artists.normalized_name` has
+        # a unique index (migration 0011) so the lookup is O(log n).
         rows = self._conn.execute(
-            """SELECT DISTINCT w.id, w.title
+            """SELECT w.id, w.title
                FROM works w
-               JOIN library_files lf ON lf.work_id = w.id
-               WHERE lf.normalized_artist_name = %s
+               JOIN artists a ON a.id = w.artist_id
+               WHERE a.normalized_name = %s
                ORDER BY w.title
                LIMIT %s""",
             (normalized_artist_name, limit),
