@@ -377,7 +377,31 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     (re.compile(r"deluxe|bonus|anniversary|\bspecial\b|\blimited\b"), VersionType.EDITION),
     (re.compile(r"\balt\b|alternate|alternative"), VersionType.ALTERNATE),
     (re.compile(r"\bmono\b|\bstereo\b"), VersionType.FORMAT),
+    # Broad catch-alls for common bracketed version indicators not covered above.
+    # Order here matters: placed AFTER every specific rule so existing
+    # classifications (ORIGINAL, LIVE, ACOUSTIC, …) still win.
+    (re.compile(r"\bversion\b"),  VersionType.REMIX),
+    (re.compile(r"\bamended\b"),  VersionType.REMIX),
+    (re.compile(r"\bbootleg\b"),  VersionType.REMIX),
+    (re.compile(r"\bvideo\b"),    VersionType.REMIX),
+    (re.compile(r"\bstudio\b"),   VersionType.REMIX),
+    (re.compile(r"\bintro\b"),    VersionType.REMIX),
+    (re.compile(r"\bcut\b"),      VersionType.REMIX),
+    (re.compile(r"\bfade\b"),     VersionType.REMIX),
+    # Spanish-language last-resort catch-alls. Placed last so English / structural
+    # rules above get first shot. `versión` keeps its accent because
+    # classify_version_descriptor lowercases but does NOT strip accents, so
+    # `\bversion\b` above does not match the accented form.
+    (re.compile(r"\bversi[oó]n\b"),            VersionType.REMIX),
+    (re.compile(r"\ben\s+(?:vivo|directo)\b"), VersionType.REMIX),
+    (re.compile(r"\bac[uú]stic[oa]\b"),        VersionType.REMIX),
 ]
+
+
+# Library-injected identity suffix: `_ALTLEN-2`, `_ALTLEN10`, etc.
+# Not bracketed, so extract_version_tags cannot see it; handled by a pre-pass
+# in extract_version_info. Treated as a REMIX version tag per user direction.
+_ALTLEN_RE = re.compile(r"\s*_ALTLEN-?\d+\s*$", re.IGNORECASE)
 
 
 def classify_version_descriptor(descriptor: str) -> VersionType:
@@ -415,7 +439,14 @@ def extract_version_info(raw_title: str) -> tuple[str, VersionType]:
 
     Falls back to (raw_title, VersionType.ORIGINAL) when no version
     descriptor is found.
+
+    Pre-pass: library-injected `_ALTLEN-\\d+` identity suffix is stripped from
+    the raw title before extraction and counts as REMIX if nothing else claims it.
     """
+    had_altlen = bool(_ALTLEN_RE.search(raw_title))
+    if had_altlen:
+        raw_title = _ALTLEN_RE.sub("", raw_title).rstrip()
+
     base, tags = extract_version_tags(raw_title)
     if tags:
         vtype = classify_version_descriptor(tags[0])
@@ -433,6 +464,9 @@ def extract_version_info(raw_title: str) -> tuple[str, VersionType]:
         vtype = classify_version_descriptor(embed_tag)
         if vtype != VersionType.UNKNOWN:
             return base_embed, vtype
+
+    if had_altlen:
+        return raw_title, VersionType.REMIX
 
     return raw_title, VersionType.ORIGINAL
 

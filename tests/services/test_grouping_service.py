@@ -376,3 +376,24 @@ def test_create_local_work_idempotent_on_normalized_title() -> None:
     ).id
     works = repos["work_repo"].get_by_artist(artist_id)
     assert len(works) == 1
+
+def test_album_version_collapses_to_base_work() -> None:
+    """A file tagged `(Album Version)` lands on the same work as the plain file.
+
+    Before the fix, `_VERSION_RULES` had no rule matching `album version`,
+    so `Down In A Hole (Album Version)` kept the suffix in its base title
+    and grouping created a second work beside plain `Down In A Hole`.
+    """
+    repos = _make_repos()
+    _plain, plain_work = _seed_file_in_work(
+        repos, artist_name="Alice In Chains", track_title="Down In A Hole",
+    )
+    result = assign_work(
+        _make_file(
+            artist_name="Alice In Chains",
+            track_title="Down In A Hole (Album Version)",
+        ),
+        **repos,
+    )
+    assert result is not None
+    assert result.work_id == plain_work
