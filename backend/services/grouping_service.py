@@ -120,9 +120,20 @@ def _create_local_work(
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
 ) -> str:
-    """Create a local artist + work + song master; return the new work_id."""
+    """Create a local artist + work + song master; return the new work_id.
+
+    Belt-and-braces idempotency: even after artist upsert, check whether an
+    existing work for this artist already normalizes to the same title. This
+    guards against fuzzy_match returning None due to a threshold miss on a
+    title that would normalize identically (the Alice In Chains 'Would?'
+    duplication pattern).
+    """
     raw_artist = file.audio.artist_name or ""
     artist_id = artist_repo.upsert_local_artist(raw_artist, norm_artist)
+    norm_base = normalize_title(base_title)
+    for existing in work_repo.get_by_artist(artist_id):
+        if normalize_title(existing.title) == norm_base:
+            return existing.id
     work_id = work_repo.create_local(base_title, artist_id)
     song_master_repo.upsert(
         SongMaster(

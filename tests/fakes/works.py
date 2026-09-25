@@ -2,12 +2,16 @@ from uuid import uuid4
 
 from backend.domain.catalog import Work
 from backend.domain.enums import CatalogSource
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.works import WorkRepository
 
 
 class FakeWorkRepository(WorkRepository):
     def __init__(self) -> None:
         self._data: dict[str, Work] = {}
+        # Candidate lookup resolves a normalized artist name to an artist id,
+        # which is the artist repo's job; tests wire one in via set_artist_repo.
+        self._artist_repo: ArtistCatalogRepository | None = None
 
     def upsert(self, work: Work) -> Work:
         self._data[work.id] = work
@@ -68,24 +72,22 @@ class FakeWorkRepository(WorkRepository):
     def get_candidates_by_normalized_artist(
         self, normalized_artist_name: str, limit: int = 100,
     ) -> list[tuple[str, str]]:
-        # Need access to library files to filter by artist — use stored ref
-        if not hasattr(self, "_library_file_repo"):
+        # Mirrors PgWorkRepository: resolve normalized artist name → artist_id
+        # via the artist repo, then return every work for that artist (including
+        # orphan works with no attached library_files).
+        if self._artist_repo is None:
             return []
-        artist_work_ids: set[str] = set()
-        for f in self._library_file_repo._data.values():
-            if (
-                f.audio.normalized_artist_name == normalized_artist_name
-                and f.work_id is not None
-            ):
-                artist_work_ids.add(f.work_id)
+        artist = self._artist_repo.get_by_normalized_name(normalized_artist_name)
+        if artist is None:
+            return []
         result = [
             (w.id, w.title)
             for w in self._data.values()
-            if w.id in artist_work_ids
+            if w.artist_id == artist.id
         ]
         result.sort(key=lambda x: x[1])
         return result[:limit]
 
-    def set_library_file_repo(self, repo: object) -> None:
-        """Inject library file repo reference for candidate lookup."""
-        self._library_file_repo = repo  # type: ignore[assignment]
+    def set_artist_repo(self, repo: ArtistCatalogRepository) -> None:
+        """Inject the artist repo the candidate lookup resolves names through."""
+        self._artist_repo = repo

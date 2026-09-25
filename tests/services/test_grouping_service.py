@@ -24,9 +24,10 @@ from tests.fakes.works import FakeWorkRepository
 def _make_repos() -> dict:
     work_repo = FakeWorkRepository()
     lib_repo = FakeLibraryFileRepository()
-    work_repo.set_library_file_repo(lib_repo)
+    artist_repo = FakeArtistRepository()
+    work_repo.set_artist_repo(artist_repo)
     return dict(
-        artist_repo=FakeArtistRepository(),
+        artist_repo=artist_repo,
         work_repo=work_repo,
         library_file_repo=lib_repo,
         recording_repo=FakeRecordingRepository(),
@@ -67,13 +68,15 @@ def _seed_file_in_work(
         track_title=track_title,
         file_hash=file_hash,
     )
-    work_id = repos["work_repo"].create_local(track_title, "seed-artist")
+    norm_artist = normalize_artist(artist_name)
+    artist_id = repos["artist_repo"].upsert_local_artist(artist_name, norm_artist)
+    work_id = repos["work_repo"].create_local(track_title, artist_id)
     f = dataclasses.replace(
         f,
         work_id=work_id,
         audio=dataclasses.replace(
             f.audio,
-            normalized_artist_name=normalize_artist(artist_name),
+            normalized_artist_name=norm_artist,
             normalized_title=normalize_title(track_title),
         ),
     )
@@ -319,3 +322,57 @@ def test_step4_creates_work_with_base_title() -> None:
     work = repos["work_repo"].get_by_id(result.work_id)
     assert work is not None
     assert work.title == "Brand New Song"
+
+
+# ---------------------------------------------------------------------------
+# Dedup regressions — Alice In Chains duplicate-works bug
+# ---------------------------------------------------------------------------
+
+
+def test_orphan_work_found_by_candidate_query() -> None:
+    """A work with no attached library_files is still a fuzzy-match candidate.
+
+    Before the fix, `get_candidates_by_normalized_artist` joined `library_files`,
+    so orphan works were invisible — a second byte-identical work got created.
+    """
+    repos = _make_repos()
+    # Seed artist + work WITHOUT attaching a library_files row.
+    norm_artist = normalize_artist("Alice In Chains")
+    artist_id = repos["artist_repo"].upsert_local_artist(
+        "Alice In Chains", norm_artist,
+    )
+    existing_work = repos["work_repo"].create_local("Would?", artist_id)
+
+    result = assign_work(
+        _make_file(artist_name="Alice In Chains", track_title="Would?"),
+        **repos,
+    )
+    assert result is not None
+    assert result.work_id == existing_work
+
+
+def test_create_local_work_idempotent_on_normalized_title() -> None:
+    """Even if fuzzy-match scores below threshold, create_local short-circuits.
+
+    Belt-and-braces guard: _create_local_work does one last `get_by_artist`
+    sweep comparing normalized titles before inserting.
+    """
+    repos = _make_repos()
+    # First assignment creates the work.
+    r1 = assign_work(
+        _make_file(artist_name="Alice In Chains", track_title="Would?"),
+        **repos,
+    )
+    # Second assignment with the same normalized title MUST reuse, not create.
+    r2 = assign_work(
+        _make_file(artist_name="Alice In Chains", track_title="Would?"),
+        **repos,
+    )
+    assert r1 is not None and r2 is not None
+    assert r1.work_id == r2.work_id
+    # Only one work total for the artist.
+    artist_id = repos["artist_repo"].get_by_normalized_name(
+        normalize_artist("Alice In Chains"),
+    ).id
+    works = repos["work_repo"].get_by_artist(artist_id)
+    assert len(works) == 1
