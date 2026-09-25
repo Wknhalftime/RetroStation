@@ -13,8 +13,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
@@ -466,17 +466,42 @@ class FolderScanResult:
     # The folder exists but could not be listed (permissions, a share
     # dropping mid-scan). Nothing was diffed and nothing marked missing.
     folder_unreadable: bool = False
+    # Quarantine entries dropped because their file read cleanly or is gone.
+    quarantine_cleared: int = 0
+    # Every path that failed this visit; their quarantine entries stand.
+    failing_paths: set[str] = field(default_factory=set)
+
+    def record_failure(self, file_path: str) -> None:
+        self.quarantined += 1
+        self.failing_paths.add(file_path)
 
 
-def _quarantine_once(
+def quarantine_once(
     quarantine_repo: LibraryQuarantineRepository, file_path_str: str, error: str,
 ) -> None:
-    """Quarantine a file unless it already is; every visit to its folder retries it."""
+    """Quarantine a file unless it already is; every scan that reaches it retries it."""
     if quarantine_repo.get_by_path(file_path_str) is not None:
         return
     quarantine_repo.create_write_only(
         LibraryQuarantine(id=uuid4(), file_path=file_path_str, error_message=error)
     )
+
+
+def clear_resolved_quarantine(
+    paths: Iterable[str],
+    still_failing: set[str],
+    quarantine_repo: LibraryQuarantineRepository,
+) -> int:
+    """Drop the quarantine entries in *paths* whose file did not fail this visit.
+
+    Call only after a visit that reached every file those paths could name:
+    a file that did not fail either read cleanly or is no longer on disk,
+    and either way its entry is stale. Returns the number of paths cleared.
+    """
+    resolved = [p for p in paths if p not in still_failing]
+    for path in resolved:
+        quarantine_repo.delete_by_path(path)
+    return len(resolved)
 
 
 def _extract_tags_safe(
@@ -490,8 +515,8 @@ def _extract_tags_safe(
         return extract_tags(path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
-        _quarantine_once(quarantine_repo, file_path_str, str(exc))
-        result.quarantined += 1
+        quarantine_once(quarantine_repo, file_path_str, str(exc))
+        result.record_failure(file_path_str)
         return None
 
 
@@ -618,7 +643,7 @@ def _restore_reappeared_file(
         current_hash = _compute_file_hash(path)
     except OSError as exc:
         logger.warning("hash_failed", path=str(path), error=str(exc))
-        result.quarantined += 1
+        result.record_failure(str(path))
         return
 
     if current_hash == existing.file_hash:
@@ -662,7 +687,7 @@ def _reconcile_present_file(
         disk = _disk_stat(path)
     except OSError as exc:
         logger.warning("stat_failed", path=str(path), error=str(exc))
-        result.quarantined += 1
+        result.record_failure(str(path))
         return
 
     matches = _stat_matches(existing, disk)
@@ -679,7 +704,7 @@ def _reconcile_present_file(
             current_hash = _compute_file_hash(path)
         except OSError as exc:
             logger.warning("hash_failed", path=str(path), error=str(exc))
-            result.quarantined += 1
+            result.record_failure(str(path))
             return
         if current_hash != existing.file_hash:
             _reextract_and_upsert(path, file_repo, quarantine_repo, result)
@@ -726,7 +751,10 @@ def scan_folder_incrementally(
                                                       or renamed, adopt the old row
       4. Re-appeared file (MISSING in DB)          -> restore PRESENT, keep enrichment if hash same
       5. Missing file (in DB, not on disk)         -> mark MISSING
-      6. Parse failure (Mutagen error)             -> quarantine
+      6. Parse failure (Mutagen error)             -> quarantine (once per path)
+
+    Afterwards, quarantine entries for this folder's files that did not fail
+    this visit are dropped: the file now reads, or is gone.
     """
     result = FolderScanResult()
 
@@ -754,5 +782,15 @@ def scan_folder_incrementally(
             _reconcile_present_file(existing, path, file_repo, quarantine_repo, result)
 
     _mark_missing_files(existing_by_path, file_repo, result)
+
+    # Non-recursive, like the rest of the visit: a child folder's entries
+    # are judged when that folder is visited.
+    in_folder = {
+        p for p in quarantine_repo.get_paths_under(str(folder_path))
+        if Path(p).parent == folder_path
+    }
+    result.quarantine_cleared = clear_resolved_quarantine(
+        in_folder, result.failing_paths, quarantine_repo,
+    )
 
     return result

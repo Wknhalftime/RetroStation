@@ -152,6 +152,8 @@ class TestRunScanChunkedCommits:
 
         mock_conn = MagicMock()
         mock_repos = MagicMock()
+        # Neither file is quarantined yet, so each gets a new entry.
+        mock_repos.library_quarantine.get_by_path.return_value = None
 
         _run_scan(
             root_path="/tmp/music",

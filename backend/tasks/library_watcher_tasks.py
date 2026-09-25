@@ -234,6 +234,7 @@ def library_scan_files_task(
                 reappeared=result.files_reappeared,
                 relocated=result.files_relocated,
                 quarantined=result.quarantined,
+                quarantine_cleared=result.quarantine_cleared,
                 unreadable=result.folder_unreadable,
             )
 
