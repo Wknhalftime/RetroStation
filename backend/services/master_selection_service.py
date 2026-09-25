@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -131,4 +131,48 @@ def recalculate_song_masters(
         work_ids=len(work_ids),
         updated=updated,
         skipped_manual=skipped_manual,
+    )
+
+
+def reselect_master_from_files(
+    work_id: str,
+    song_master_repo: SongMasterRepository,
+    library_file_repo: LibraryFileRepository,
+    manual_file_id: UUID | None = None,
+) -> None:
+    """Pick a work's song master from the files attached to it directly.
+
+    Unlike :func:`recalculate_song_masters` this reads ``library_files.work_id``
+    rather than going through recordings, which most local works lack. An
+    existing manual master is left alone. ``manual_file_id`` carries a manual
+    choice over from a work merged into this one, if that file is attached.
+    """
+    existing = song_master_repo.get_by_work(work_id)
+    if existing is not None and existing.selection_method == SelectionMethod.MANUAL:
+        return
+    files = library_file_repo.get_by_work(work_id)
+    if not files:
+        return
+    master_id = existing.id if existing else uuid4()
+    carried = next((f for f in files if f.id == manual_file_id), None)
+    if carried is not None:
+        song_master_repo.upsert(
+            SongMaster(
+                id=master_id,
+                work_id=work_id,
+                preferred_file_id=carried.id,
+                selection_method=SelectionMethod.MANUAL,
+                score=_score_file(carried)[0],
+            )
+        )
+        return
+    best = max(files, key=_score_file)
+    song_master_repo.upsert(
+        SongMaster(
+            id=master_id,
+            work_id=work_id,
+            preferred_file_id=best.id,
+            selection_method=SelectionMethod.AUTO,
+            score=_score_file(best)[0],
+        )
     )

@@ -316,6 +316,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             (work_id, str(file_id)),
         )
 
+    def get_by_work(self, work_id: str) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE work_id = %s ORDER BY id ASC",
+            (work_id,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         self._conn.execute(
             "UPDATE library_files SET file_size = %s, file_mtime_ns = %s WHERE id = %s",

@@ -136,6 +136,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 self._data[file_id], work_id=work_id,
             )
 
+    def get_by_work(self, work_id: str) -> list[LibraryFile]:
+        return sorted(
+            (f for f in self._data.values() if f.work_id == work_id),
+            key=lambda f: str(f.id),
+        )
+
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.file_hash == file_hash]
 
