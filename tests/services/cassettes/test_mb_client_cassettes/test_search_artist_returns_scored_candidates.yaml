@@ -1,0 +1,113 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=Metallica&fmt=json&limit=10
+  response:
+    body:
+      string: "{\"created\":\"2026-09-25T22:56:04.787Z\",\"count\":147,\"offset\":0,\"artists\":[{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":100,\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"1f40c6e1-47ba-4e35-996f-fe6ee5840e62\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Los
+        Angeles\",\"sort-name\":\"Los Angeles\",\"life-span\":{\"ended\":null}},\"isnis\":[\"0000000122939631\"],\"life-span\":{\"begin\":\"1981-10-28\",\"ended\":null},\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":-1,\"name\":\"political\"},{\"count\":0,\"name\":\"rock\"},{\"count\":-2,\"name\":\"alternative
+        rock\"},{\"count\":-4,\"name\":\"80s\"},{\"count\":41,\"name\":\"heavy metal\"},{\"count\":-4,\"name\":\"90s\"},{\"count\":-1,\"name\":\"progressive
+        metal\"},{\"count\":66,\"name\":\"thrash metal\"},{\"count\":33,\"name\":\"metal\"},{\"count\":7,\"name\":\"american\"},{\"count\":-4,\"name\":\"grunge\"},{\"count\":-6,\"name\":\"seen
+        live\"},{\"count\":-4,\"name\":\"band\"},{\"count\":20,\"name\":\"hard rock\"},{\"count\":-1,\"name\":\"usa\"},{\"count\":-4,\"name\":\"nu
+        metal\"},{\"count\":-6,\"name\":\"trash\"},{\"count\":-4,\"name\":\"blues
+        rock\"},{\"count\":-1,\"name\":\"am\xE9ricain\"},{\"count\":-3,\"name\":\"thrash\"},{\"count\":-3,\"name\":\"megadeth\"},{\"count\":-4,\"name\":\"symphonic
+        metal\"},{\"count\":-3,\"name\":\"alternative metal\"},{\"count\":-1,\"name\":\"speed
+        metal\"},{\"count\":-3,\"name\":\"groove metal\"},{\"count\":-1,\"name\":\"california\"},{\"count\":-4,\"name\":\"los
+        angeles\"},{\"count\":0,\"name\":\"virtuoso\"},{\"count\":-6,\"name\":\"crap\"},{\"count\":0,\"name\":\"bay
+        area\"},{\"count\":-5,\"name\":\"trash metal\"},{\"count\":-2,\"name\":\"80s
+        thrash metal\"},{\"count\":-7,\"name\":\"douchebag metal\"},{\"count\":-2,\"name\":\"american
+        thrash metal\"},{\"count\":-6,\"name\":\"rock and indie\"},{\"count\":-1,\"name\":\"united
+        states\"},{\"count\":0,\"name\":\"angry\"},{\"count\":0,\"name\":\"energetic\"},{\"count\":-2,\"name\":\"pop
+        metal\"},{\"count\":-6,\"name\":\"metallica\"},{\"count\":-4,\"name\":\"classic
+        metal\"},{\"count\":-2,\"name\":\"80s metal\"},{\"count\":-4,\"name\":\"classic
+        thrash metal\"},{\"count\":-1,\"name\":\"90s metal\"},{\"count\":-3,\"name\":\"southern
+        metal\"},{\"count\":-1,\"name\":\"80's\"},{\"count\":-1,\"name\":\"90's\"},{\"count\":-1,\"name\":\"progressive
+        thrash metal\"},{\"count\":-4,\"name\":\"destroyer\"},{\"count\":-4,\"name\":\"hard'n'heavy\"},{\"count\":-6,\"name\":\"lame\"},{\"count\":-4,\"name\":\"a
+        filk artist\"},{\"count\":-5,\"name\":\"the unforgiving\"},{\"count\":-6,\"name\":\"stopped
+        being good after '97\"},{\"count\":-6,\"name\":\"stopped being good after
+        '88\"},{\"count\":-3,\"name\":\"traditional heavy metal\"},{\"count\":-6,\"name\":\"pompous
+        asses\"},{\"count\":-1,\"name\":\"old school thrash\"},{\"count\":-1,\"name\":\"pessimistic\"},{\"count\":-4,\"name\":\"teen
+        metal\"},{\"count\":-4,\"name\":\"a bit overrated\"},{\"count\":-1,\"name\":\"amerikansk\"},{\"count\":-1,\"name\":\"estados
+        unidos\"},{\"count\":-1,\"name\":\"michael moers\"},{\"count\":1,\"name\":\"rockgruppe\"}]},{\"id\":\"3cc58f89-767e-4926-9ac4-160b8e280cd4\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":61,\"name\":\"Metallica
+        2\",\"sort-name\":\"Metallica 2\",\"country\":\"CL\",\"area\":{\"id\":\"82d5f4d6-aed4-3ff5-81d1-5363ac6e97a7\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Chile\",\"sort-name\":\"Chile\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Chilean
+        tribal ambient/metal\",\"isnis\":[\"0000000511498243\"],\"life-span\":{\"ended\":null},\"tags\":[{\"count\":1,\"name\":\"electronic\"},{\"count\":1,\"name\":\"chile\"},{\"count\":1,\"name\":\"tribal
+        ambient\"}]},{\"id\":\"4b34e494-bbdf-49db-b035-ea2729c1ea2f\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":60,\"name\":\"Metallica
+        Jam\",\"sort-name\":\"Metallica Jam\",\"country\":\"DK\",\"area\":{\"id\":\"4757b525-2a60-324a-b060-578765d2c993\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Denmark\",\"sort-name\":\"Denmark\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Metallica
+        tribute band\",\"life-span\":{\"begin\":\"1993\",\"ended\":null}},{\"id\":\"f55b4371-a3ef-4d95-8b5f-0f1bc02a3d10\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":60,\"name\":\"Black
+        Metallica\",\"sort-name\":\"Black Metallica Tribute Band\",\"area\":{\"id\":\"3ab1537f-e425-435b-a500-78128ba50de5\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Novi
+        Sad\",\"sort-name\":\"Novi Sad\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Metallica
+        tribute band from Novi Sad, Serbia\",\"life-span\":{\"begin\":\"2016\",\"ended\":null},\"tags\":[{\"count\":1,\"name\":\"metal\"}]},{\"id\":\"9e8e7fd5-9d42-4474-bc39-bb4a3811e278\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":60,\"name\":\"Metallica
+        Reloaded\",\"sort-name\":\"Metallica Reloaded\",\"area\":{\"id\":\"40d758a4-b7c2-40f3-b439-5efbd2a3b038\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Bristol\",\"sort-name\":\"Bristol\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"40d758a4-b7c2-40f3-b439-5efbd2a3b038\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Bristol\",\"sort-name\":\"Bristol\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Metallica
+        tribute band\",\"life-span\":{\"begin\":\"2010-03-30\",\"ended\":null}},{\"id\":\"27822378-da1e-4525-89c2-9624a91a9c7d\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Metallica
+        Revival Beroun\",\"sort-name\":\"Metallica Revival Beroun\",\"country\":\"CZ\",\"area\":{\"id\":\"51d34c28-61bf-3d21-849f-7492672a9d44\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Czechia\",\"sort-name\":\"Czechia\",\"life-span\":{\"begin\":\"1993-01-01\",\"ended\":null}},\"disambiguation\":\"Czech
+        Metallica tribute band\",\"life-span\":{\"ended\":null}},{\"id\":\"f835c7a5-b15e-4eb9-bb4e-bb6aacc72f68\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Metallica
+        Symphonic Tribute\",\"sort-name\":\"Metallica, Symphonic Tribute\",\"country\":\"BR\",\"area\":{\"id\":\"f45b47f8-5796-386e-b172-6c31b009a5d8\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Brazil\",\"sort-name\":\"Brazil\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"2019\",\"ended\":null}},{\"id\":\"2e30b0c3-907e-427b-b433-b906ca78c8f0\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":54,\"name\":\"Metallica
+        Real Tribute\",\"sort-name\":\"Metallica Real Tribute\",\"country\":\"RS\",\"area\":{\"id\":\"424c1b50-57f8-34af-ab97-313e2ad40058\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Serbia\",\"sort-name\":\"Serbia\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"424c1b50-57f8-34af-ab97-313e2ad40058\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Serbia\",\"sort-name\":\"Serbia\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Serbian
+        Metallica tribute\",\"life-span\":{\"ended\":null}},{\"id\":\"a0b13500-2634-4572-9e66-1afc71319be4\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":52,\"name\":\"Some
+        Kind of Metallica\",\"sort-name\":\"Some Kind of Metallica\",\"area\":{\"id\":\"24404231-7564-4b11-9168-95dd148049a7\",\"type\":\"Subdivision\",\"type-id\":\"fd3d44c5-80a1-3842-9745-2c4972d35afa\",\"name\":\"Kent\",\"sort-name\":\"Kent\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"24404231-7564-4b11-9168-95dd148049a7\",\"type\":\"Subdivision\",\"type-id\":\"fd3d44c5-80a1-3842-9745-2c4972d35afa\",\"name\":\"Kent\",\"sort-name\":\"Kent\",\"life-span\":{\"ended\":null}},\"life-span\":{\"begin\":\"2018-10-07\",\"ended\":null},\"aliases\":[{\"sort-name\":\"Some
+        Kind of Metallica - UK Metallica Tribute Band\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Some
+        Kind of Metallica - UK Metallica Tribute Band\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":1,\"name\":\"metal\"},{\"count\":1,\"name\":\"heavy
+        metal\"},{\"count\":1,\"name\":\"tribute band\"},{\"count\":1,\"name\":\"hard
+        rock\"},{\"count\":1,\"name\":\"tributeband\"}]},{\"id\":\"d79d0275-89c2-4223-b52b-3d47379ab9ca\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":50,\"name\":\"The
+        Best of Metallica\",\"sort-name\":\"Best of Metallica, The\",\"country\":\"LU\",\"area\":{\"id\":\"563d21b7-4a8e-35e2-83a7-7804baefbfa7\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Luxembourg\",\"sort-name\":\"Luxembourg\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"tribute
+        to Metallica from France/Luxembourg\",\"life-span\":{\"ended\":null}}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '8924'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Fri, 25 Sep 2026 22:58:29 GMT
+      etag:
+      - '"YWEyMTJjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Fri, 25 Sep 2026 22:54:42 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - STALE
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '137'
+      x-ratelimit-reset:
+      - '1790377109'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

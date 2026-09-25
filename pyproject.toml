@@ -37,6 +37,7 @@ dev = [
     "pytest-timeout>=2.3",
     "mypy>=1.11",
     "ruff>=0.6",
+    "pytest-recording>=0.13",
 ]
 
 [tool.pytest.ini_options]

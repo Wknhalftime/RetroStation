@@ -1,0 +1,51 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/not-a-uuid?fmt=json&inc=artist-credits%2Bwork-rels
+  response:
+    body:
+      string: '{"help":"For usage, please see: https://musicbrainz.org/development/mmd","error":"Invalid
+        mbid."}'
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '97'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Fri, 25 Sep 2026 22:58:43 GMT
+      etag:
+      - '"326ef3f5b9aabae00194a1623cdb3810"'
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '1105'
+      x-ratelimit-reset:
+      - '1790377124'
+      x-runtime:
+      - '0.004869'
+    status:
+      code: 400
+      message: Bad Request
+version: 1
