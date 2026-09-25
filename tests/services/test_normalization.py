@@ -6,6 +6,7 @@ from backend.services.normalization import (
     compute_normalized_signature,
     detect_embedded_remix,
     extract_dash_version,
+    extract_version_info,
     extract_version_tags,
     normalize_artist,
     normalize_title,
@@ -1174,3 +1175,110 @@ def test_detect_embedded_remix_dub() -> None:
     assert desc is not None
     assert "Dub" in desc
     assert "Song" in base
+
+
+# ---------------------------------------------------------------------------
+# Broad catch-all version rules (Tier A / B / C) + _ALTLEN suffix pre-pass.
+# Protects against the Alice In Chains duplicate-works pattern where
+# "(Album Version)" was not recognized as a version tag and leaked into
+# the base title, producing a duplicate work row during local grouping.
+# ---------------------------------------------------------------------------
+
+
+def test_classify_tier_a_version_catchall() -> None:
+    """Bare `\\bversion\\b` falls through to REMIX when no specific rule claims it."""
+    assert classify_version_descriptor("Album Version") == VersionType.REMIX
+    assert classify_version_descriptor("album version") == VersionType.REMIX
+    assert classify_version_descriptor("European Version") == VersionType.REMIX
+    assert classify_version_descriptor("UK Version") == VersionType.REMIX
+
+
+def test_classify_original_version_still_wins_over_catchall() -> None:
+    """Specific ORIGINAL rule fires before the Tier A `\\bversion\\b` catch-all."""
+    assert classify_version_descriptor("Original Version") == VersionType.ORIGINAL
+    assert classify_version_descriptor("Original Recording") == VersionType.ORIGINAL
+
+
+def test_classify_tier_b_remix_tokens() -> None:
+    """Tier B structural tags classify as REMIX when nothing specific claims them."""
+    assert classify_version_descriptor("Amended") == VersionType.REMIX
+    assert classify_version_descriptor("Bootleg") == VersionType.REMIX
+    assert classify_version_descriptor("Video") == VersionType.REMIX
+    assert classify_version_descriptor("Studio") == VersionType.REMIX
+    assert classify_version_descriptor("Intro") == VersionType.REMIX
+    assert classify_version_descriptor("Radio Cut") == VersionType.REMIX
+    assert classify_version_descriptor("Short Fade") == VersionType.REMIX
+
+
+def test_classify_tier_c_spanish_catchalls() -> None:
+    """Spanish variants classify as REMIX via last-resort rules."""
+    assert classify_version_descriptor("Versión Radio") == VersionType.REMIX
+    assert classify_version_descriptor("En Vivo") == VersionType.REMIX
+    assert classify_version_descriptor("En Directo") == VersionType.REMIX
+    assert classify_version_descriptor("Acústica") == VersionType.REMIX
+    assert classify_version_descriptor("Acustico") == VersionType.REMIX
+
+
+def test_classify_ordering_specific_rules_win() -> None:
+    """Existing specific rules still win when they match (regression guard)."""
+    assert classify_version_descriptor("Live") == VersionType.LIVE
+    assert classify_version_descriptor("Unplugged") == VersionType.ACOUSTIC
+    assert classify_version_descriptor("Acoustic") == VersionType.ACOUSTIC
+    assert classify_version_descriptor("Radio Edit") == VersionType.RADIO_EDIT
+    assert classify_version_descriptor("Remix") == VersionType.REMIX
+    assert classify_version_descriptor("Club Mix") == VersionType.REMIX
+    assert classify_version_descriptor("Mono") == VersionType.FORMAT
+
+
+def test_extract_album_version_strips_to_base() -> None:
+    """`(Album Version)` is now stripped off the base title — the Alice In Chains fix."""
+    base, vtype = extract_version_info("Down In A Hole (Album Version)")
+    assert base == "Down In A Hole"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_album_version_lowercase() -> None:
+    base, vtype = extract_version_info("Get Born Again (album version)")
+    assert base == "Get Born Again"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_generic_version_qualifier() -> None:
+    """Unrecognized `(X Version)` forms fall through to Tier A REMIX."""
+    base, vtype = extract_version_info("Song Title (European Version)")
+    assert base == "Song Title"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_original_version_still_original() -> None:
+    """`(Original Version)` is still classified ORIGINAL, not REMIX."""
+    base, vtype = extract_version_info("Song Title (Original Version)")
+    assert base == "Song Title"
+    assert vtype == VersionType.ORIGINAL
+
+
+def test_extract_spanish_version_falls_through_to_tier_c() -> None:
+    """`Versión Radio` is stripped; falls through to Tier C REMIX."""
+    base, vtype = extract_version_info("Canción (Versión Radio)")
+    assert base == "Canción"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_altlen_suffix_stripped_as_remix() -> None:
+    """Bare `_ALTLEN-n` suffix is stripped and classified REMIX."""
+    base, vtype = extract_version_info("Something_ALTLEN-2")
+    assert base == "Something"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_altlen_without_hyphen() -> None:
+    base, vtype = extract_version_info("Something_ALTLEN10")
+    assert base == "Something"
+    assert vtype == VersionType.REMIX
+
+
+def test_extract_altlen_with_other_tag_other_tag_wins() -> None:
+    """`[Radio Edit]_ALTLEN-2` — the radio-edit rule wins, ALTLEN stripped from title."""
+    base, vtype = extract_version_info("Song Title [Radio Edit]_ALTLEN-2")
+    assert base == "Song Title"
+    assert vtype == VersionType.RADIO_EDIT
