@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -459,6 +460,23 @@ class FolderScanResult:
     # Legacy rows (no stored stat) confirmed unchanged and stamped with
     # their stat so the next scan can skip them on stat() alone.
     files_stat_backfilled: int = 0
+    # New paths whose content matched a row whose file had moved away; the
+    # row was repointed, keeping its links, instead of a bare row inserted.
+    files_relocated: int = 0
+    # The folder exists but could not be listed (permissions, a share
+    # dropping mid-scan). Nothing was diffed and nothing marked missing.
+    folder_unreadable: bool = False
+
+
+def _quarantine_once(
+    quarantine_repo: LibraryQuarantineRepository, file_path_str: str, error: str,
+) -> None:
+    """Quarantine a file unless it already is; every visit to its folder retries it."""
+    if quarantine_repo.get_by_path(file_path_str) is not None:
+        return
+    quarantine_repo.create_write_only(
+        LibraryQuarantine(id=uuid4(), file_path=file_path_str, error_message=error)
+    )
 
 
 def _extract_tags_safe(
@@ -472,13 +490,7 @@ def _extract_tags_safe(
         return extract_tags(path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
-        quarantine_repo.create_write_only(
-            LibraryQuarantine(
-                id=uuid4(),
-                file_path=file_path_str,
-                error_message=str(exc),
-            )
-        )
+        _quarantine_once(quarantine_repo, file_path_str, str(exc))
         result.quarantined += 1
         return None
 
@@ -505,6 +517,59 @@ def _reextract_and_upsert(
     if lf is not None:
         file_repo.upsert(lf)
         result.files_written += 1
+
+
+def _is_gone_or_same_file(old: Path, new: Path) -> bool:
+    """True when *old* no longer exists, or names *new* under another spelling.
+
+    The second case is a case-only rename on a case-insensitive filesystem,
+    where the old spelling still resolves to the renamed file.
+    """
+    if not os.path.exists(old):
+        return True
+    try:
+        return os.path.samefile(old, new)
+    except OSError:
+        return False
+
+
+def _moved_from(
+    lf: LibraryFile, path: Path, file_repo: LibraryFileRepository,
+) -> LibraryFile | None:
+    """The row this newly seen file was moved or renamed from, if any.
+
+    A row with identical content whose own file is still on disk is a
+    duplicate copy, not the origin of a move, and is left alone.
+    """
+    for candidate in file_repo.get_by_hash(lf.file_hash):
+        if candidate.file_path != lf.file_path and _is_gone_or_same_file(
+            Path(candidate.file_path), path,
+        ):
+            return candidate
+    return None
+
+
+def _index_new_file(
+    path: Path,
+    file_repo: LibraryFileRepository,
+    quarantine_repo: LibraryQuarantineRepository,
+    result: FolderScanResult,
+) -> str | None:
+    """Scenario 3: index a path the DB has no row for.
+
+    A moved or renamed file adopts its old row so grouping and enrichment
+    links survive. Returns the old path it was moved from, else None.
+    """
+    lf = _extract_tags_safe(path, str(path), quarantine_repo, result)
+    if lf is None:
+        return None
+    origin = _moved_from(lf, path, file_repo)
+    if origin is not None:
+        file_repo.relocate(origin.id, lf.file_path)
+        result.files_relocated += 1
+    file_repo.upsert(lf)
+    result.files_written += 1
+    return origin.file_path if origin is not None else None
 
 
 def _restore_reappeared_file(
@@ -592,6 +657,25 @@ def _reconcile_present_file(
     result.files_stat_backfilled += 1
 
 
+def _list_audio_files(folder_path: Path) -> dict[str, Path] | None:
+    """Audio files directly in *folder_path*; empty if it is gone, None if unlistable.
+
+    Gone and unreadable must stay distinct: gone marks every file missing,
+    while a folder we merely failed to list still holds its files.
+    """
+    if not folder_path.is_dir():
+        return {}
+    try:
+        return {
+            str(entry): entry
+            for entry in folder_path.iterdir()
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS
+        }
+    except OSError as exc:
+        logger.warning("scan_folder_unreadable", path=str(folder_path), error=str(exc))
+        return None
+
+
 def scan_folder_incrementally(
     *,
     folder_path: Path,
@@ -605,7 +689,8 @@ def scan_folder_incrementally(
     Scenarios:
       1. Unchanged file (stat, else hash, matches) -> skip, no DB write
       2. Modified file (stat or hash differs)      -> re-extract tags, upsert (resets enrichment)
-      3. New file (not in DB)                      -> extract tags, insert
+      3. New file (not in DB)                      -> extract tags, insert; if moved
+                                                      or renamed, adopt the old row
       4. Re-appeared file (MISSING in DB)          -> restore PRESENT, keep enrichment if hash same
       5. Missing file (in DB, not on disk)         -> mark MISSING
       6. Parse failure (Mutagen error)             -> quarantine
@@ -617,17 +702,19 @@ def scan_folder_incrementally(
         for f in file_repo.get_by_folder_path(str(folder_path))
     }
 
-    disk_files: dict[str, Path] = {}
-    if folder_path.is_dir():
-        for entry in folder_path.iterdir():
-            if entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
-                disk_files[str(entry)] = entry
+    disk_files = _list_audio_files(folder_path)
+    if disk_files is None:
+        result.folder_unreadable = True
+        return result
 
     for file_path_str, path in disk_files.items():
         existing = existing_by_path.pop(file_path_str, None)
         if existing is None:
-            # Scenario 3: New file — extract tags and insert
-            _reextract_and_upsert(path, file_repo, quarantine_repo, result)
+            moved_from = _index_new_file(path, file_repo, quarantine_repo, result)
+            if moved_from is not None:
+                # A rename within this folder: the old spelling is no longer
+                # a row to mark missing.
+                existing_by_path.pop(moved_from, None)
         elif existing.file_status == FileStatus.MISSING:
             _restore_reappeared_file(existing, path, file_repo, quarantine_repo, result)
         else:

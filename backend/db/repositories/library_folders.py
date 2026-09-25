@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -102,6 +103,14 @@ class PgLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStagin
             "SELECT DISTINCT folder_id FROM library_folder_staged_hashes"
         ).fetchall()
         return {row["folder_id"] for row in rows}
+
+    def clear_stale_staged_hashes(self, staged_before: datetime) -> int:
+        """Drop hashes staged by scans that died before committing or clearing them."""
+        result = self._conn.execute(
+            "DELETE FROM library_folder_staged_hashes WHERE staged_at < %s",
+            (staged_before,),
+        )
+        return result.rowcount
 
     def has_any(self) -> bool:
         row = self._conn.execute(

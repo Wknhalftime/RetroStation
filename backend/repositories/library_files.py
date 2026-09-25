@@ -71,6 +71,15 @@ class LibraryFileRepository(ABC):
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None: ...
 
     @abstractmethod
+    def relocate(self, file_id: UUID, new_path: str) -> None:
+        """Point an existing row at the path its file was moved or renamed to.
+
+        The row keeps its id and every link; only ``file_path`` changes and
+        the file is PRESENT again.
+        """
+        ...
+
+    @abstractmethod
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         """Return all files with the given content hash."""
         ...

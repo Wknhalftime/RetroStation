@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 
@@ -14,3 +15,6 @@ class LibraryFolderHashStaging(ABC):
 
     @abstractmethod
     def get_folders_with_staged_hashes(self) -> set[UUID]: ...
+
+    @abstractmethod
+    def clear_stale_staged_hashes(self, staged_before: datetime) -> int: ...

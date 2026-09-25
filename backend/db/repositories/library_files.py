@@ -289,8 +289,10 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         so an unescaped Windows prefix ending in ``\\`` turned the trailing
         ``\\%`` into a literal percent sign and matched nothing at all.
         """
+        # Separator from the path as given: a drive root ``X:\\`` strips to
+        # ``X:``, which alone would pick ``/`` and match nothing.
+        sep = "\\" if "\\" in folder_path else "/"
         stripped = folder_path.rstrip("/").rstrip("\\")
-        sep = "\\" if "\\" in stripped else "/"
         prefix = _like_literal(stripped + sep)
         sep_literal = _like_literal(sep)
         rows = self._conn.execute(
@@ -305,6 +307,12 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         self._conn.execute(
             "UPDATE library_files SET file_status = %s WHERE file_path = %s",
             (FileStatus.MISSING, file_path),
+        )
+
+    def relocate(self, file_id: UUID, new_path: str) -> None:
+        self._conn.execute(
+            "UPDATE library_files SET file_path = %s, file_status = %s WHERE id = %s",
+            (new_path, FileStatus.PRESENT, str(file_id)),
         )
 
     def update_work_id(

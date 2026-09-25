@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from backend.domain.library import LibraryFolder
@@ -11,6 +12,7 @@ class FakeLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStag
     def __init__(self) -> None:
         self._data: dict[UUID, LibraryFolder] = {}
         self._staged: dict[str, list[tuple[UUID, str]]] = {}
+        self._staged_at: dict[str, datetime] = {}
 
     def upsert(self, folder: LibraryFolder) -> None:
         existing = self.get_by_path(folder.full_path)
@@ -34,6 +36,7 @@ class FakeLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStag
 
     def stage_hashes(self, hashes: list[tuple[UUID, str]], task_id: str) -> None:
         self._staged[task_id] = hashes
+        self._staged_at[task_id] = datetime.now(UTC)
 
     def commit_staged_hashes(self, task_id: str) -> int:
         staged = self._staged.pop(task_id, [])
@@ -51,6 +54,14 @@ class FakeLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStag
             for folder_id, _ in staged_list:
                 result.add(folder_id)
         return result
+
+    def clear_stale_staged_hashes(self, staged_before: datetime) -> int:
+        stale = [t for t, at in self._staged_at.items() if at < staged_before]
+        cleared = 0
+        for task_id in stale:
+            cleared += len(self._staged.pop(task_id, []))
+            del self._staged_at[task_id]
+        return cleared
 
     def has_any(self) -> bool:
         return len(self._data) > 0

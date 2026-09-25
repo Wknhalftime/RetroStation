@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from backend.services.folder_hash_service import (
     canonicalize_path,
@@ -186,3 +192,55 @@ class TestDiffTree:
         # jazz folder should NOT appear in changed or pending
         assert jazz_folder.id not in {fid for fid, _ in pending}
         assert not any("jazz" in p for p in changes)
+
+
+class TestDiffTreeVanishedFolders:
+    """A folder deleted from disk is diffed as empty: reported once so its
+    files are marked missing, and never confused with one merely unreadable
+    or outside the current root."""
+
+    def _seed(self, tmp_path: Path) -> tuple[Path, FakeLibraryFolderRepository]:
+        album = tmp_path / "album"
+        album.mkdir()
+        (album / "track.flac").write_bytes(b"\x00" * 100)
+        repo = FakeLibraryFolderRepository()
+        diff_tree(str(tmp_path), repo)
+        return album, repo
+
+    def test_vanished_folder_reported_once(self, tmp_path: Path) -> None:
+        album, repo = self._seed(tmp_path)
+        shutil.rmtree(album)
+
+        changes, pending = diff_tree(str(tmp_path), repo)
+        assert changes == [canonicalize_path(str(album))]
+        for folder_id, new_hash in pending:
+            repo.update_hash(folder_id, new_hash)
+
+        assert diff_tree(str(tmp_path), repo)[0] == []
+
+    def test_folder_outside_root_not_reported(self, tmp_path: Path) -> None:
+        album, repo = self._seed(tmp_path)
+        other_root = tmp_path / "other"
+        other_root.mkdir()
+
+        changes, _ = diff_tree(str(other_root), repo)
+        assert canonicalize_path(str(album)) not in changes
+
+    def test_folder_under_unlistable_dir_not_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        album, repo = self._seed(tmp_path)
+        real_walk = os.walk
+
+        def _walk_denied(top: str, **kwargs: Any) -> Iterator[Any]:
+            onerror = kwargs["onerror"]
+            onerror(PermissionError(13, "Access is denied", str(album)))
+            for entry in real_walk(top, **kwargs):
+                if entry[0] != str(album):
+                    yield entry
+
+        monkeypatch.setattr(
+            "backend.services.folder_hash_service.os.walk", _walk_denied,
+        )
+        changes, _ = diff_tree(str(tmp_path), repo)
+        assert canonicalize_path(str(album)) not in changes

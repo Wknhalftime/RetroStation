@@ -116,6 +116,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 f.file_status = FileStatus.MISSING
                 break
 
+    def relocate(self, file_id: UUID, new_path: str) -> None:
+        if file_id in self._data:
+            self._data[file_id] = dataclasses.replace(
+                self._data[file_id], file_path=new_path, file_status=FileStatus.PRESENT,
+            )
+
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(
