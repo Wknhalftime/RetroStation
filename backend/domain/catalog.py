@@ -33,6 +33,25 @@ class Work:
     origin: CatalogSource = CatalogSource.LOCAL
 
 
+@dataclass(frozen=True)
+class WorkFootprint:
+    """A work plus how much references it — the input to duplicate planning."""
+
+    id: str
+    title: str
+    artist_id: str
+    file_count: int = 0
+    match_count: int = 0
+
+
+@dataclass(frozen=True)
+class WorkMergePlan:
+    """Fold ``source_ids`` into ``target_id``; all share an artist and title."""
+
+    target_id: str
+    source_ids: tuple[str, ...]
+
+
 @dataclass
 class Recording:
     id: str  # MusicBrainz recording MBID used directly as PK (no separate mbid field)

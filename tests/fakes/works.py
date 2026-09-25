@@ -1,8 +1,9 @@
 from uuid import uuid4
 
-from backend.domain.catalog import Work
+from backend.domain.catalog import Work, WorkFootprint
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
+from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.works import WorkRepository
 
 
@@ -12,6 +13,7 @@ class FakeWorkRepository(WorkRepository):
         # Candidate lookup resolves a normalized artist name to an artist id,
         # which is the artist repo's job; tests wire one in via set_artist_repo.
         self._artist_repo: ArtistCatalogRepository | None = None
+        self._library_file_repo: LibraryFileRepository | None = None
 
     def upsert(self, work: Work) -> Work:
         self._data[work.id] = work
@@ -91,3 +93,38 @@ class FakeWorkRepository(WorkRepository):
     def set_artist_repo(self, repo: ArtistCatalogRepository) -> None:
         """Inject the artist repo the candidate lookup resolves names through."""
         self._artist_repo = repo
+
+    def list_local_footprints(self) -> list[WorkFootprint]:
+        # Match counts are not modelled by the fakes; file counts come from
+        # the injected library file repo when one is wired in.
+        return [
+            WorkFootprint(
+                id=w.id,
+                title=w.title,
+                artist_id=w.artist_id,
+                file_count=(
+                    len(self._library_file_repo.get_by_work(w.id))
+                    if self._library_file_repo is not None
+                    else 0
+                ),
+            )
+            for w in sorted(self._data.values(), key=lambda w: w.id)
+            if w.origin == CatalogSource.LOCAL
+        ]
+
+    def merge_into(self, target_id: str, source_ids: tuple[str, ...]) -> None:
+        # Mirrors PgWorkRepository for the links the fakes model: files move
+        # to the target, then the sources are deleted.
+        if target_id not in self._data:
+            return
+        for source_id in source_ids:
+            if source_id == target_id or source_id not in self._data:
+                continue
+            if self._library_file_repo is not None:
+                for f in self._library_file_repo.get_by_work(source_id):
+                    self._library_file_repo.update_work_id(f.id, target_id)
+            del self._data[source_id]
+
+    def set_library_file_repo(self, repo: LibraryFileRepository) -> None:
+        """Inject the library file repo that footprints and merges read."""
+        self._library_file_repo = repo

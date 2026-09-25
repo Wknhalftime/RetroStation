@@ -76,6 +76,9 @@ class LibraryFileRepository(ABC):
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None: ...
 
     @abstractmethod
+    def get_by_work(self, work_id: str) -> list[LibraryFile]: ...
+
+    @abstractmethod
     def relocate(self, file_id: UUID, new_path: str) -> None:
         """Point an existing row at the path its file was moved or renamed to.
 

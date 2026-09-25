@@ -7,8 +7,8 @@ import psycopg
 import structlog
 
 from backend.db.repositories._pg_utils import format_embedding, parse_embedding
-from backend.domain.catalog import Work
-from backend.domain.enums import CatalogSource
+from backend.domain.catalog import Work, WorkFootprint
+from backend.domain.enums import CatalogSource, TargetType
 from backend.repositories.works import WorkRepository
 
 logger = structlog.get_logger()
@@ -160,3 +160,130 @@ class PgWorkRepository(WorkRepository):
                 normalized_artist_name, limit,
             )
         return [(r["id"], r["title"]) for r in rows]
+
+    def list_local_footprints(self) -> list[WorkFootprint]:
+        rows = self._conn.execute(
+            """SELECT w.id, w.title, w.artist_id,
+                      COALESCE(f.cnt, 0) AS file_count,
+                      COALESCE(m.cnt, 0) AS match_count
+               FROM works w
+               LEFT JOIN (SELECT work_id, count(*) AS cnt FROM library_files
+                          GROUP BY work_id) f ON f.work_id = w.id
+               LEFT JOIN (SELECT work_id, count(*) AS cnt FROM matches
+                          GROUP BY work_id) m ON m.work_id = w.id
+               WHERE w.origin = 'local'
+               ORDER BY w.id"""
+        ).fetchall()
+        return [
+            WorkFootprint(
+                id=r["id"],
+                title=r["title"],
+                artist_id=r["artist_id"],
+                file_count=r["file_count"],
+                match_count=r["match_count"],
+            )
+            for r in rows
+        ]
+
+    def merge_into(self, target_id: str, source_ids: tuple[str, ...]) -> None:
+        # Lock every row in the group so a concurrent grouping pass cannot
+        # attach a file to a source between the re-point and the delete.
+        locked = self._conn.execute(
+            "SELECT id FROM works WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+            ([target_id, *source_ids],),
+        ).fetchall()
+        sources = [r["id"] for r in locked if r["id"] != target_id]
+        if not sources:
+            return
+        self._merge_recordings(target_id, sources)
+        self._conn.execute(
+            "UPDATE library_files SET work_id = %s WHERE work_id = ANY(%s)",
+            (target_id, sources),
+        )
+        self._conn.execute(
+            "UPDATE matches SET work_id = %s WHERE work_id = ANY(%s)",
+            (target_id, sources),
+        )
+        self._conn.execute(
+            """UPDATE matches SET target_id = %s
+               WHERE target_type = %s AND target_id = ANY(%s)""",
+            (target_id, TargetType.WORK.value, sources),
+        )
+        self._merge_format_overrides(target_id, sources)
+        self._conn.execute(
+            "DELETE FROM song_masters WHERE work_id = ANY(%s)", (sources,),
+        )
+        self._conn.execute("DELETE FROM works WHERE id = ANY(%s)", (sources,))
+
+    def _merge_recordings(self, target_id: str, sources: list[str]) -> None:
+        """Move source recordings to the target.
+
+        ``uq_recordings_work_version`` allows one recording per version type,
+        so a source recording whose version the target already has hands its
+        files to the target's recording and is deleted instead.
+        """
+        clashes = self._conn.execute(
+            """SELECT s.id AS source_rec, t.id AS target_rec
+               FROM recordings s
+               JOIN recordings t
+                 ON t.work_id = %s AND t.version_type = s.version_type
+               WHERE s.work_id = ANY(%s)""",
+            (target_id, sources),
+        ).fetchall()
+        for clash in clashes:
+            self._conn.execute(
+                "UPDATE library_files SET recording_id = %s WHERE recording_id = %s",
+                (clash["target_rec"], clash["source_rec"]),
+            )
+            self._conn.execute(
+                "DELETE FROM recordings WHERE id = %s", (clash["source_rec"],),
+            )
+        # Two sources can share a version the target lacks; the oldest-id one
+        # moves and the rest collapse onto it.
+        keepers = self._conn.execute(
+            """SELECT DISTINCT ON (version_type) id, version_type
+               FROM recordings WHERE work_id = ANY(%s)
+               ORDER BY version_type, id""",
+            (sources,),
+        ).fetchall()
+        for keeper in keepers:
+            dupes = self._conn.execute(
+                """SELECT id FROM recordings
+                   WHERE work_id = ANY(%s) AND version_type = %s AND id <> %s""",
+                (sources, keeper["version_type"], keeper["id"]),
+            ).fetchall()
+            for dupe in dupes:
+                self._conn.execute(
+                    "UPDATE library_files SET recording_id = %s WHERE recording_id = %s",
+                    (keeper["id"], dupe["id"]),
+                )
+                self._conn.execute("DELETE FROM recordings WHERE id = %s", (dupe["id"],))
+            self._conn.execute(
+                "UPDATE recordings SET work_id = %s WHERE id = %s",
+                (target_id, keeper["id"]),
+            )
+
+    def _merge_format_overrides(self, target_id: str, sources: list[str]) -> None:
+        """Move source format overrides, honoring UNIQUE (work_id, format_name).
+
+        The target's own override wins a clash; between sources the oldest
+        wins (id tie-break). Losers are deleted.
+        """
+        self._conn.execute(
+            """DELETE FROM format_overrides
+               WHERE work_id = ANY(%(src)s)
+                 AND (
+                   format_name IN (SELECT format_name FROM format_overrides
+                                   WHERE work_id = %(tgt)s)
+                   OR id NOT IN (
+                     SELECT DISTINCT ON (format_name) id FROM format_overrides
+                     WHERE work_id = ANY(%(src)s)
+                     ORDER BY format_name, created_at ASC, id ASC
+                   )
+                 )""",
+            {"src": sources, "tgt": target_id},
+        )
+        self._conn.execute(
+            "UPDATE format_overrides SET work_id = %s WHERE work_id = ANY(%s)",
+            (target_id, sources),
+        )

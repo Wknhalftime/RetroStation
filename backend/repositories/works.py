@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from backend.domain.catalog import Work
+from backend.domain.catalog import Work, WorkFootprint
 
 
 class WorkRepository(ABC):
@@ -45,5 +45,21 @@ class WorkRepository(ABC):
 
         Deduplicates by work_id so each work appears at most once.
         Ordered by work title for stable results.
+        """
+        ...
+
+    @abstractmethod
+    def list_local_footprints(self) -> list[WorkFootprint]:
+        """Return every local-origin work with its file and match counts."""
+        ...
+
+    @abstractmethod
+    def merge_into(self, target_id: str, source_ids: tuple[str, ...]) -> None:
+        """Re-point everything that references ``source_ids`` at ``target_id``.
+
+        Covers library_files, recordings (collapsing same-version clashes),
+        matches and format_overrides, then deletes the source works and their
+        song masters. The caller re-selects the target's song master. Sources
+        that no longer exist are ignored.
         """
         ...
