@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from backend.domain.curation import SongMaster
-from backend.domain.enums import SelectionMethod
+from backend.domain.enums import FileStatus, SelectionMethod
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
@@ -65,6 +65,11 @@ def _score_file(lib_file: LibraryFile) -> tuple[int, int, int]:
     return score, bitrate, duration
 
 
+def _present(files: list[LibraryFile]) -> list[LibraryFile]:
+    """Files on disk: a missing file is never a song master."""
+    return [f for f in files if f.file_status == FileStatus.PRESENT]
+
+
 def recalculate_song_masters(
     work_ids: list[str],
     song_master_repo: SongMasterRepository,
@@ -106,7 +111,7 @@ def recalculate_song_masters(
         recordings = recording_repo.get_by_work(work_id)
         all_files: list[LibraryFile] = []
         for recording in recordings:
-            all_files.extend(library_file_repo.get_by_recording(recording.id))
+            all_files.extend(_present(library_file_repo.get_by_recording(recording.id)))
 
         if not all_files:
             logger.debug("master_selection_no_files", work_id=work_id)
@@ -143,14 +148,20 @@ def reselect_master_from_files(
     """Pick a work's song master from the files attached to it directly.
 
     Unlike :func:`recalculate_song_masters` this reads ``library_files.work_id``
-    rather than going through recordings, which most local works lack. An
-    existing manual master is left alone. ``manual_file_id`` carries a manual
-    choice over from a work merged into this one, if that file is attached.
+    rather than going through recordings, which most local works lack. A manual
+    master is kept while its file is still a present file of the work; one
+    whose file went missing or moved away is replaced. ``manual_file_id``
+    carries a manual choice over from a work merged into this one, if that
+    file is attached.
     """
     existing = song_master_repo.get_by_work(work_id)
-    if existing is not None and existing.selection_method == SelectionMethod.MANUAL:
+    files = _present(library_file_repo.get_by_work(work_id))
+    if (
+        existing is not None
+        and existing.selection_method == SelectionMethod.MANUAL
+        and any(f.id == existing.preferred_file_id for f in files)
+    ):
         return
-    files = library_file_repo.get_by_work(work_id)
     if not files:
         return
     master_id = existing.id if existing else uuid4()
