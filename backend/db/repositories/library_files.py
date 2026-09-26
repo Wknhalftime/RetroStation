@@ -360,21 +360,26 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return [self._row_to_model(r) for r in rows]
 
     def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        # 'present' is inlined (not bound as a parameter) so psycopg's
+        # auto-prepared generic plan can still prove this matches the
+        # partial index idx_library_files_unhashed, whose predicate is
+        # WHERE file_hash IS NULL AND file_status = 'present' (migration
+        # 0026) — a bound parameter defeats that proof.
         if after_path is None:
             rows = self._conn.execute(
                 """SELECT * FROM library_files
-                   WHERE file_hash IS NULL AND file_status = %s
+                   WHERE file_hash IS NULL AND file_status = 'present'
                    ORDER BY file_path
                    LIMIT %s""",
-                (FileStatus.PRESENT, limit),
+                (limit,),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 """SELECT * FROM library_files
-                   WHERE file_hash IS NULL AND file_status = %s AND file_path > %s
+                   WHERE file_hash IS NULL AND file_status = 'present' AND file_path > %s
                    ORDER BY file_path
                    LIMIT %s""",
-                (FileStatus.PRESENT, after_path, limit),
+                (after_path, limit),
             ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
@@ -390,10 +395,11 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return result.rowcount == 1
 
     def count_unhashed(self) -> int:
+        # 'present' inlined for the same reason as get_unhashed_after above:
+        # a bound parameter here defeats the planner's partial-index proof.
         row = self._conn.execute(
             """SELECT COUNT(*) AS n FROM library_files
-               WHERE file_hash IS NULL AND file_status = %s""",
-            (FileStatus.PRESENT,),
+               WHERE file_hash IS NULL AND file_status = 'present'"""
         ).fetchone()
         return int(row["n"]) if row else 0
 

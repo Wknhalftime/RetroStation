@@ -62,7 +62,12 @@ def _backfill_one(
         if disk_stat(path) != before:
             return BackfillOutcome.CHANGED
     except OSError as exc:
-        logger.warning("hash_backfill_unreadable", path=row.file_path, error=str(exc))
+        # DEBUG, not WARNING: a row this run can never hash keeps this firing
+        # every batch of every run, including the periodic resume every 5
+        # minutes — the run's `unreadable` total already carries this count
+        # for anyone watching progress, so a per-file event above DEBUG would
+        # spam system_logs indefinitely for a single stuck file.
+        logger.debug("hash_backfill_unreadable", path=row.file_path, error=str(exc))
         return BackfillOutcome.UNREADABLE
     if not file_repo.set_file_hash(row.id, digest, before.size, before.mtime_ns):
         return BackfillOutcome.CHANGED

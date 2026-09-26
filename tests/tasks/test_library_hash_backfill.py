@@ -1,14 +1,25 @@
 """Unit tests for run_hash_backfill: batching, progress and liveness."""
 from __future__ import annotations
 
+import logging
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+import structlog
+from structlog.testing import capture_logs
+
+import backend.tasks.library_hash_backfill_tasks as library_hash_backfill_tasks_module
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.library import LibraryFile
 from backend.domain.system import TaskProgress
-from backend.tasks.library_hash_backfill_tasks import BackfillRunConfig, run_hash_backfill
+from backend.tasks.library_hash_backfill_tasks import (
+    BackfillRunConfig,
+    library_hash_backfill_resume,
+    run_hash_backfill,
+)
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.task_progress import FakeTaskProgressRepository
 
@@ -127,3 +138,75 @@ def test_run_that_hashes_nothing_posts_no_progress(tmp_path: Path) -> None:
     assert result is not None
     assert (result.hashed, result.changed, result.unreadable) == (0, 1, 1)
     assert progress.received_upserts == []
+
+
+@pytest.fixture
+def _debug_bound_logger() -> Generator[None]:
+    """Make DEBUG-level events visible to `capture_logs` for this test.
+
+    `capture_logs` swaps the processor chain but not `wrapper_class` (see
+    `tests/services/test_mb_client_observability.py`). Importing this task
+    module pulls in `backend.tasks.huey_app`, which calls `configure_logging`
+    at import time with the app's default level (INFO) — so without this
+    override, a `logger.debug(...)` call never reaches the processor chain
+    and `capture_logs` would silently see nothing, whether or not the
+    production code actually logs at DEBUG.
+    """
+    original_config = structlog.get_config()
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG))
+    try:
+        yield
+    finally:
+        structlog.configure(**original_config)
+
+
+def test_run_that_hashes_nothing_logs_nothing_above_debug(
+    tmp_path: Path, _debug_bound_logger: None,
+) -> None:
+    files, paths = _library(tmp_path, 2)
+    paths[0].unlink()
+    paths[1].write_bytes(b"edited-to-a-different-size")
+
+    with capture_logs() as captured:
+        result = run_hash_backfill(
+            files, FakeTaskProgressRepository(), lambda: None,
+            BackfillRunConfig(run_id="run-1", clock=lambda: T0),
+        )
+
+    assert result is not None
+    assert result.hashed == 0
+    assert not any(e["log_level"] in {"info", "warning", "error"} for e in captured)
+
+
+def test_run_that_hashes_files_logs_completion_at_info(
+    tmp_path: Path, _debug_bound_logger: None,
+) -> None:
+    files, _ = _library(tmp_path, 2)
+
+    with capture_logs() as captured:
+        result = run_hash_backfill(
+            files, FakeTaskProgressRepository(), lambda: None,
+            BackfillRunConfig(run_id="run-1", clock=lambda: T0),
+        )
+
+    assert result is not None
+    assert result.hashed == 2
+    complete_events = [e for e in captured if e["event"] == "hash_backfill_complete"]
+    assert len(complete_events) == 1
+    assert complete_events[0]["log_level"] == "info"
+
+
+def test_resume_calls_the_backfill_task_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[None] = []
+
+    class _StubTask:
+        def call_local(self) -> None:
+            calls.append(None)
+
+    monkeypatch.setattr(
+        library_hash_backfill_tasks_module, "library_hash_backfill_task", _StubTask()
+    )
+
+    library_hash_backfill_resume.call_local()
+
+    assert len(calls) == 1

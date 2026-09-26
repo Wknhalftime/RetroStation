@@ -30,7 +30,8 @@ logger = structlog.get_logger()
 
 BATCH_SIZE = 200
 # A RUNNING backfill row not updated for this long belongs to a dead run.
-# Matches PgTaskProgressRepository.mark_stale_as_failed's default.
+# Matches backend.websocket's STALE_THRESHOLD_MINUTES, the stale reaper
+# actually in use.
 LIVENESS_WINDOW = timedelta(minutes=10)
 
 
@@ -138,11 +139,16 @@ def run_hash_backfill(
 
     if progress.hashed > 0:
         progress_repo.upsert(progress.as_task_progress(config.clock(), done=True))
+        # Only log completion when the run actually did something. A row this
+        # run can never hash keeps count_unhashed() above zero forever, so
+        # the periodic resume starts a new run every 5 minutes; logging an
+        # unconditional info here would spam system_logs with a no-op event
+        # every 5 minutes for as long as that row stays unhashable.
+        logger.info(
+            "hash_backfill_complete",
+            hashed=progress.hashed, changed=progress.changed, unreadable=progress.unreadable,
+        )
     commit()
-    logger.info(
-        "hash_backfill_complete",
-        hashed=progress.hashed, changed=progress.changed, unreadable=progress.unreadable,
-    )
     return progress
 
 
