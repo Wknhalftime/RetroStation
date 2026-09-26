@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -72,6 +73,10 @@ class FakeMbClient:
     ) -> list[dict[str, Any]]:
         self.calls.append(f"search_recording:{artist_mbid}:{title}")
         return self._recording_searches.get((artist_mbid, title), [])
+
+    def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        self.calls.append("search_recordings_by_mbids:" + ",".join(mbids))
+        return {m: self._recordings[m] for m in mbids if m in self._recordings}
 
     def lookup_artist(self, mbid: str) -> dict[str, Any] | None:
         self.calls.append(f"lookup_artist:{mbid}")
