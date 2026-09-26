@@ -25,6 +25,7 @@ import argparse
 import cProfile
 import functools
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -136,9 +137,23 @@ def instrument(timers: Timers) -> list[str]:
 
     missing: list[str] = []
 
-    def patch(owner: Any, attr: str, name: str, within: str | None = None) -> None:
-        if not _patch(timers, owner, attr, name, within):
+    def patch(owner: Any, attr: str, name: str, within: str | None = None) -> bool:
+        found = _patch(timers, owner, attr, name, within)
+        if not found:
             missing.append(f"{owner.__name__}.{attr}")
+        return found
+
+    def patch_any(
+        owner: Any, attrs: tuple[str, ...], name: str, within: str | None = None,
+    ) -> None:
+        """Time whichever of *attrs* exists on *owner*.
+
+        A rename (``_compute_file_hash`` -> ``compute_file_hash``) must not
+        make the timer vanish, since old and new scanner versions share this
+        harness; only report missing when neither name is found.
+        """
+        if not any(_patch(timers, owner, attr, name, within) for attr in attrs):
+            missing.append(f"{owner.__name__}.{'/'.join(attrs)}")
 
     # Top-level phases, as seen from the task module. Disjoint with each other.
     for attr in (
@@ -149,10 +164,18 @@ def instrument(timers: Timers) -> list[str]:
 
     # Per-file extraction work (summed over worker threads if parallel).
     patch(lss, "extract_tags", "file.extract_tags", "phase.scan_directory")
-    patch(lss, "_compute_file_hash", "file.sha256", "file.extract_tags")
-    patch(lss, "_disk_stat", "file.stat", "file.extract_tags")
+    # A tags-only first scan calls read_tags directly, never extract_tags, so
+    # this is what makes its per-file cost visible. Missing on scanner
+    # versions before the two-phase split — that is fine and gets reported.
+    has_read_tags = patch(lss, "read_tags", "file.read_tags", "phase.scan_directory")
+    # disk_stat (and, before extract_tags/read_tags split, mutagen.File) runs
+    # inside read_tags on versions that have it, inside extract_tags on those
+    # that don't; sha256 always runs in extract_tags, after read_tags returns.
+    inner_within = "file.read_tags" if has_read_tags else "file.extract_tags"
+    patch_any(lss, ("compute_file_hash", "_compute_file_hash"), "file.sha256", "file.extract_tags")
+    patch_any(lss, ("disk_stat", "_disk_stat"), "file.stat", inner_within)
     # The service calls mutagen.File through the module, so patch it there.
-    patch(mutagen, "File", "file.mutagen_parse", "file.extract_tags")
+    patch(mutagen, "File", "file.mutagen_parse", inner_within)
 
     # Folder tree.
     patch(fhs, "compute_folder_hash", "tree.compute_folder_hash", "phase.diff_tree")
@@ -407,6 +430,29 @@ def _quiet_logging() -> None:
     )
 
 
+def _drain_backfill(conn: psycopg.Connection[Any]) -> float | None:
+    """Run the deferred-hash backfill to completion; seconds taken.
+
+    None on scanner versions without one, so old and new versions share
+    this harness and their fingerprints stay comparable.
+    """
+    if importlib.util.find_spec("backend.tasks.library_hash_backfill_tasks") is None:
+        return None
+    from backend.services.repository_factory import RepositoryFactory
+    from backend.tasks.library_hash_backfill_tasks import (
+        BackfillRunConfig,
+        run_hash_backfill,
+    )
+
+    start = time.perf_counter()
+    repos = RepositoryFactory(conn)
+    run_hash_backfill(
+        repos.library_files, repos.task_progress, conn.commit,
+        BackfillRunConfig(run_id="bench"),
+    )
+    return time.perf_counter() - start
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     from backend.db.repositories.task_progress import PgTaskProgressRepository
     from backend.db.sync_conn import connect_sync
@@ -451,6 +497,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                 progress_repo=PgTaskProgressRepository(progress_conn),
                 task_id=f"bench-{args.label}",
             )
+            library_conn.commit()
+            phase1 = time.perf_counter() - start
+            backfill = None if args.no_drain else _drain_backfill(library_conn)
         elapsed = time.perf_counter() - start
     finally:
         library_conn.close()
@@ -463,6 +512,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         "root": str(root),
         "corpus": corpus,
         "elapsed_s": round(elapsed, 3),
+        "phase1_s": round(phase1, 3),
+        "backfill_s": round(backfill, 3) if backfill is not None else None,
         "files_written": written,
         "quarantined": quarantined,
         "files_per_s": round(written / elapsed, 1) if elapsed else None,
@@ -506,6 +557,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 print(f"   - {row[:300]}")
             for row in sorted(rb - ra)[: args.show]:
                 print(f"   + {row[:300]}")
+    print(f"time to usable (phase 1): {a['label']}: {a.get('phase1_s')}s   "
+          f"{b['label']}: {b.get('phase1_s')}s")
     print(f"\n{a['label']}: {a['elapsed_s']}s   {b['label']}: {b['elapsed_s']}s   "
           f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}")
     if not identical:
@@ -582,6 +635,8 @@ def main() -> None:
     p_run.add_argument("--profile", help="write cProfile stats to this path")
     p_run.add_argument("--no-instrument", action="store_true")
     p_run.add_argument("--no-fingerprint", action="store_true")
+    p_run.add_argument("--no-drain", action="store_true",
+                       help="skip the deferred-hash backfill (time phase 1 alone)")
     cache = p_run.add_mutually_exclusive_group()
     cache.add_argument("--evict", action="store_true",
                        help="drop the corpus from the OS file cache first (cold run)")
