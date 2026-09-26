@@ -174,6 +174,17 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 self._data[file_id], file_size=file_size, file_mtime_ns=file_mtime_ns,
             )
 
+    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        return sorted(
+            (
+                f for f in self._data.values()
+                if f.file_hash is None
+                and f.file_size == file_size
+                and f.file_mtime_ns == file_mtime_ns
+            ),
+            key=lambda f: f.file_path,
+        )
+
     def reset_failed_enrichments(self) -> int:
         count = 0
         for f in self._data.values():

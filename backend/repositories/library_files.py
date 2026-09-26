@@ -101,3 +101,12 @@ class LibraryFileRepository(ABC):
         """
         ...
 
+    @abstractmethod
+    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        """Rows with no content hash yet whose recorded size and mtime equal these.
+
+        Move detection's fallback while a first scan's hashes are being
+        filled in: a move or rename on one volume keeps size and mtime.
+        """
+        ...
+

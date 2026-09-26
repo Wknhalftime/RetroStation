@@ -350,6 +350,15 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE file_hash IS NULL AND file_size = %s AND file_mtime_ns = %s
+               ORDER BY file_path""",
+            (file_size, file_mtime_ns),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.
 

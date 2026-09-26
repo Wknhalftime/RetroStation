@@ -62,3 +62,22 @@ def test_upsert_over_unhashed_row_keeps_enrichment_only_if_stat_unchanged(
 
     assert got.enrichment_status == expected
     assert got.file_hash == "h" * 64
+
+
+def test_get_unhashed_by_stat_matches_only_unhashed_rows_with_equal_stat(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        repo.upsert(_unhashed("/m/a.flac", size=10, mtime_ns=5))
+        repo.upsert(_unhashed("/m/b.flac", size=10, mtime_ns=6))
+        missing = _unhashed("/m/c.flac", size=10, mtime_ns=5)
+        repo.upsert(missing)
+        repo.mark_missing(missing.file_path)
+        hashed = _unhashed("/m/d.flac", size=10, mtime_ns=5)
+        hashed.file_hash = "h" * 64
+        repo.upsert(hashed)
+
+        got = [f.file_path for f in repo.get_unhashed_by_stat(10, 5)]
+
+    assert got == ["/m/a.flac", "/m/c.flac"]

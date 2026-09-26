@@ -558,15 +558,26 @@ def _is_gone_or_same_file(old: Path, new: Path) -> bool:
         return False
 
 
+def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
+    """Rows *lf* may have been moved from.
+
+    Rows with the same content hash, plus rows a first scan has not hashed
+    yet that have the same size and mtime (a move or rename on one volume
+    keeps both).
+    """
+    candidates = file_repo.get_by_hash(lf.file_hash) if lf.file_hash is not None else []
+    if lf.file_size is not None and lf.file_mtime_ns is not None:
+        candidates += file_repo.get_unhashed_by_stat(lf.file_size, lf.file_mtime_ns)
+    return candidates
+
+
 def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
     """The row this newly seen file was moved or renamed from, if any.
 
     A row with identical content whose own file is still on disk is a
     duplicate copy, not the origin of a move, and is left alone.
     """
-    if lf.file_hash is None:
-        return None
-    for candidate in file_repo.get_by_hash(lf.file_hash):
+    for candidate in _move_candidates(lf, file_repo):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
             Path(candidate.file_path), Path(lf.file_path),
         ):
@@ -632,6 +643,17 @@ def _index_new_file(
     return moved_from
 
 
+def _content_unchanged(existing: LibraryFile, path: Path) -> bool:
+    """Whether *path* still holds the content *existing* was indexed from.
+
+    Compares hashes. A row a first scan has not hashed yet is judged by its
+    recorded size and mtime instead. Raises OSError if the file can't be read.
+    """
+    if existing.file_hash is None:
+        return _stat_matches(existing, _disk_stat(path)) is True
+    return _compute_file_hash(path) == existing.file_hash
+
+
 def _restore_reappeared_file(
     existing: LibraryFile,
     path: Path,
@@ -642,13 +664,13 @@ def _restore_reappeared_file(
     """Scenario 4: a MISSING row is back on disk. Same content → restore
     PRESENT and keep enrichment; otherwise re-extract."""
     try:
-        current_hash = _compute_file_hash(path)
+        unchanged = _content_unchanged(existing, path)
     except OSError as exc:
         logger.warning("hash_failed", path=str(path), error=str(exc))
         result.record_failure(str(path))
         return
 
-    if current_hash == existing.file_hash:
+    if unchanged:
         existing.file_status = FileStatus.PRESENT
         file_repo.upsert(existing)
     else:
@@ -684,6 +706,7 @@ def _reconcile_present_file(
     - no stored stat (legacy row):
         - file older than its index row  → unchanged, backfill stat, skip unread
         - file newer                     → hash; equal → backfill, else re-extract
+        - and no hash either              → re-extract
     """
     try:
         disk = _disk_stat(path)
@@ -697,6 +720,11 @@ def _reconcile_present_file(
         result.files_skipped += 1
         return
     if matches is False:
+        _reextract_and_upsert(path, file_repo, quarantine_repo, result)
+        return
+
+    if existing.file_hash is None:
+        # Neither a stored stat nor a hash to compare against: read it.
         _reextract_and_upsert(path, file_repo, quarantine_repo, result)
         return
 
