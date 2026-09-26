@@ -147,3 +147,30 @@ def test_malformed_mbids_never_reach_the_query(make_client: Any) -> None:
     assert set(found) == {good}
     query = parse_qs(server.requests[0].url.query.decode())["query"][0]
     assert query == f"rid:({good})"
+
+
+def test_mbids_the_search_never_returns_are_not_asked_again(make_client: Any) -> None:
+    # Merged MBIDs are absent from every search; without a negative entry a
+    # warm run would re-issue one request per batch that contains one.
+    known, merged = _mbid(1), _mbid(2)
+    server = _SearchServer([known])
+    client = make_client(server)
+    client.search_recordings_by_mbids([known, merged])
+
+    again = client.search_recordings_by_mbids([known, merged])
+
+    assert len(server.requests) == 1
+    assert set(again) == {known}
+
+
+def test_cached_recordings_are_read_in_one_call_per_batch(
+    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+) -> None:
+    mbids = [_mbid(n) for n in range(5)]
+    client = make_client(_SearchServer(mbids))
+    client.search_recordings_by_mbids(mbids)
+    cache.reads = 0
+
+    client.search_recordings_by_mbids(mbids)
+
+    assert cache.reads == 1
