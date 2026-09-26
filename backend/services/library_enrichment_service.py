@@ -10,6 +10,7 @@ from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
@@ -113,18 +114,21 @@ def _move_file_to_work(
     files: LibraryFileRepository,
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
+    match_repo: MatchRepository,
 ) -> None:
     """Attach a file to the work MusicBrainz says its recording performs.
 
     Grouping gave the file a local work at scan time. The file moves to the
-    MusicBrainz work, which then gets (or re-picks) an auto song master from
-    the files on it; the work the file left is deleted once nothing
-    references it, taking its now-stale song master with it.
+    MusicBrainz work and its matches follow it; the MusicBrainz work then
+    gets (or re-picks) an auto song master from the files on it, and the
+    work the file left is deleted once nothing references it, taking its
+    now-stale song master with it.
     """
     previous_work_id = library_file.work_id
     if previous_work_id == work_id:
         return
     files.update_work_id(library_file.id, work_id)
+    match_repo.move_to_work(library_file.id, work_id)
     reselect_master_from_files(work_id, song_master_repo, files)
     if previous_work_id is not None and work_repo.delete_if_empty(previous_work_id):
         logger.info(
@@ -142,6 +146,7 @@ def enrich_by_release(
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
+    match_repo: MatchRepository,
     artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
@@ -216,7 +221,9 @@ def enrich_by_release(
         )
         _link_file_to_recording(library_file, rec_mbid, files)
         if work_id is not None:
-            _move_file_to_work(library_file, work_id, files, work_repo, song_master_repo)
+            _move_file_to_work(
+                library_file, work_id, files, work_repo, song_master_repo, match_repo,
+            )
         enriched_count += 1
 
     logger.info(
@@ -235,6 +242,7 @@ def enrich_by_recording(
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
+    match_repo: MatchRepository,
     artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
@@ -280,7 +288,9 @@ def enrich_by_recording(
     for library_file in pending_files:
         _link_file_to_recording(library_file, recording_mbid, files)
         if work_id is not None:
-            _move_file_to_work(library_file, work_id, files, work_repo, song_master_repo)
+            _move_file_to_work(
+                library_file, work_id, files, work_repo, song_master_repo, match_repo,
+            )
         enriched_count += 1
 
     logger.info(

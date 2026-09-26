@@ -66,6 +66,12 @@ class PgMatchRepository(MatchRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
+    def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
+        self._conn.execute(
+            "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
+            (work_id, str(file_id)),
+        )
+
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute(
             "DELETE FROM matches WHERE identity_id = %s", (identity_id,)

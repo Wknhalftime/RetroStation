@@ -3,14 +3,16 @@ from __future__ import annotations
 from uuid import uuid4
 
 from backend.domain.curation import SongMaster
-from backend.domain.enums import EnrichmentStatus, SelectionMethod
+from backend.domain.enums import EnrichmentStatus, MatchTier, SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.matching import Match
 from backend.services.library_enrichment_service import (
     enrich_by_recording,
     enrich_by_release,
 )
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recordings import FakeRecordingRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
@@ -93,6 +95,7 @@ def test_enrich_by_release_links_recording() -> None:
         recording_repo,
         work_repo,
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         artist_repo,
         mb_client,
     )
@@ -144,6 +147,7 @@ def test_enrich_missing_release_marks_failed() -> None:
         recording_repo,
         work_repo,
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         artist_repo,
         mb_client,
     )
@@ -202,6 +206,7 @@ def test_enrich_by_recording_links_file() -> None:
         recording_repo,
         work_repo,
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         artist_repo,
         mb_client,
     )
@@ -242,6 +247,7 @@ def test_enrich_missing_recording_marks_failed() -> None:
         recording_repo,
         work_repo,
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         artist_repo,
         mb_client,
     )
@@ -284,7 +290,7 @@ def test_enrich_by_release_moves_file_to_mb_work_and_reselects_master() -> None:
 
     count = enrich_by_release(
         _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, artist_repo, mb_client,
+        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
     )
 
     assert count == 1
@@ -321,7 +327,7 @@ def test_enrich_by_release_keeps_local_work_that_still_has_files() -> None:
 
     enrich_by_release(
         _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, artist_repo, mb_client,
+        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
     )
 
     assert work_repo.get_by_id(local_work) is not None
@@ -357,7 +363,7 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
 
     enrich_by_recording(
         _RECORDING_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, artist_repo, mb_client,
+        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
     )
 
     moved = library_file_repo.get_by_id(lf.id)
@@ -366,4 +372,36 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
     master = song_master_repo.get_by_work(_WORK_MBID)
     assert master is not None
     assert master.preferred_file_id == lf.id
+    assert work_repo.get_by_id(local_work) is None
+
+
+def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
+    """A match on the moved file mirrors the file's new work, so the old work can go."""
+    library_file_repo = FakeLibraryFileRepository()
+    recording_repo = FakeRecordingRepository()
+    work_repo = FakeWorkRepository()
+    work_repo.set_library_file_repo(library_file_repo)
+    artist_repo = FakeArtistRepository()
+    song_master_repo = FakeSongMasterRepository()
+    match_repo = FakeMatchRepository()
+    mb_client = FakeMbClient(releases={_RELEASE_MBID: _FAKE_RELEASE})
+
+    local_work = work_repo.create_local("Test Track", "local-artist")
+    lf = _grouped_file(local_work)
+    library_file_repo.upsert(lf)
+    identity_id = uuid4()
+    match_repo.create(Match(
+        id=uuid4(), confidence_score=0.9, match_tier=MatchTier.LOCAL_FILE_FUZZY,
+        identity_id=identity_id, library_file_id=lf.id, work_id=local_work,
+    ))
+
+    enrich_by_release(
+        _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
+        work_repo, song_master_repo, match_repo, artist_repo, mb_client,
+    )
+
+    match = match_repo.get_by_identity(identity_id)
+    assert match is not None
+    assert match.work_id == _WORK_MBID
+    assert match.library_file_id == lf.id
     assert work_repo.get_by_id(local_work) is None

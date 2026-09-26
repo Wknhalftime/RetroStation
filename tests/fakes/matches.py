@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.matching import Match
@@ -17,6 +18,11 @@ class FakeMatchRepository(MatchRepository):
 
     def get_by_artist(self, artist_id: UUID) -> Match | None:
         return next((m for m in self._data.values() if m.artist_id == artist_id), None)
+
+    def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
+        for match_id, match in list(self._data.items()):
+            if match.library_file_id == file_id:
+                self._data[match_id] = replace(match, work_id=work_id)
 
     def delete_for_identity(self, identity_id: UUID) -> None:
         to_delete = [id for id, m in self._data.items() if m.identity_id == identity_id]

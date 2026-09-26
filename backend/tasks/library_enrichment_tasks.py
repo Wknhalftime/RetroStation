@@ -187,6 +187,7 @@ def library_enrichment_task() -> dict[str, int]:
                             repos.recordings,
                             repos.works,
                             repos.song_masters,
+                            repos.matches,
                             repos.artists,
                             mb_client,
                         )
@@ -217,6 +218,7 @@ def library_enrichment_task() -> dict[str, int]:
                             repos.recordings,
                             repos.works,
                             repos.song_masters,
+                            repos.matches,
                             repos.artists,
                             mb_client,
                         )

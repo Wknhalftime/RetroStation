@@ -20,6 +20,7 @@ from backend.services.library_enrichment_service import (
 )
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recordings import FakeRecordingRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
@@ -50,6 +51,7 @@ def _run_release(files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid
         FakeRecordingRepository(),
         FakeWorkRepository(),
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         FakeArtistRepository(),
         mb_client,
     )
@@ -65,6 +67,7 @@ def _run_recording(
         FakeRecordingRepository(),
         FakeWorkRepository(),
         FakeSongMasterRepository(),
+        FakeMatchRepository(),
         FakeArtistRepository(),
         mb_client,
     )
