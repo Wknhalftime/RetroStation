@@ -29,12 +29,13 @@ from backend.services.matching_reasons import (
     format_low_confidence,
 )
 from backend.services.matching_utils import (
+    broadcast_title_core_variants,
     broadcast_title_variants,
+    library_title_variants,
     normalize_title_for_scoring,
     rule_matches,
 )
 from backend.services.mb_client import MusicBrainzClientProtocol
-from backend.services.normalization import normalize_title
 
 logger = structlog.get_logger()
 
@@ -87,35 +88,60 @@ def _filter_to_artist(
     ]
 
 
-def _candidate_canonical_title(f: LibraryFile) -> str:
-    """Return the library file's canonical-normalized title for scoring.
+def _candidate_titles(f: LibraryFile) -> tuple[str, ...]:
+    """The library file's normalized title forms for scoring; see
+    library_title_variants for why the stored normalized_title comes first."""
+    return library_title_variants(f.audio.track_title, f.audio.normalized_title)
 
-    Prefers the precomputed audio.normalized_title (set by library_scan_service
-    via normalize_title()). Falls back to canonicalizing the raw track_title
-    on the fly for legacy rows that pre-date title backfill. Ensures both
-    sides of the fuzzy comparison live in the same canonical space — without
-    this, token_sort_ratio runs case-sensitively (no processor is supplied)
-    and scores plain "Halo" vs "halo" at 75 instead of 100.
+
+def _candidate_scores(
+    full_bcs: list[str],
+    core_bcs: list[str],
+    f: LibraryFile,
+    strong_match_threshold: int,
+) -> tuple[float, float]:
+    """(score that ranks the candidate, score of the two full forms).
+
+    The full broadcast forms (guest credits stripped) are scored against the
+    file's full title. That is the score unless a comparison with bracketed
+    groups stripped from either side is itself a strong match, in which case
+    that higher score is used: the bracket on one side was noise ("Train In
+    Vain (Stand By Me)" against a tag of "Train in Vain"). Below the
+    threshold a stripped comparison is ignored, because shortening both
+    titles inflates the score of the wrong file as well, and the mid-band
+    gap rule would then auto-match it ("Cry Baby Cry" against "Baby It's You
+    [Mono]" climbs from 48 to 58).
+
+    The full-form score breaks ties, so a file whose tag carries the same
+    bracketed text as the log line beats one that only matches once the
+    brackets are stripped ("Hello (Live)" picks the live file over "Hello"
+    when both reach 100).
     """
-    return f.audio.normalized_title or normalize_title(f.audio.track_title or "")
+    libs = [normalize_title_for_scoring(t) for t in _candidate_titles(f)]
+    exact = float(token_sort_ratio(full_bcs[0], libs[0]))
+    full = max(float(token_sort_ratio(bc, libs[0])) for bc in full_bcs)
+    stripped = max(
+        float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs
+    )
+    return (stripped if stripped >= strong_match_threshold else full), exact
 
 
 def _score_candidates(
-    broadcast_titles: tuple[str, ...],
+    original_title: str,
     candidates: list[LibraryFile],
     tier: MatchTier,
     strong_match_threshold: int,
 ) -> IdentityMatchResult:
     """Score candidates against the broadcast title; return best-match result.
 
-    broadcast_titles are the identity's broadcast_title_variants (the title
-    with guest credits stripped); each candidate keeps its best score
-    across them. Both sides arrive canonical-normalized (the candidate side
-    comes from _candidate_canonical_title). The scoring helper only layers
-    normalize_title_for_scoring on top — that strip is intentionally NOT part
-    of normalize_title() (see its docstring), because version-bearing
-    parentheticals like "(Live)" are signal in some contexts and noise in
-    fuzzy matching. Single-candidate case: gap = 100 (no competition).
+    original_title is the identity's raw broadcast title; it is scored as
+    its broadcast_title_variants (guest credits stripped) and, when that is
+    a strong match, also as its broadcast_title_core_variants (bracketed
+    groups stripped), against the candidate's library_title_variants (the
+    stored normalized title, and without its bracketed groups). See
+    _candidate_scores for the rule and the tie-break. Both sides are
+    canonical-normalized; normalize_title_for_scoring is layered on top for
+    bare "feat." clauses. Single-candidate case: gap = 100 (no competition).
     library_file_id is ALWAYS populated with best_file.id — never None.
     work_id is the file's own work_id (real works(id) reference) and is "" when
     the linked work is unknown — it is NOT recording_id as a stand-in (that
@@ -132,26 +158,24 @@ def _score_candidates(
         # `assert` is stripped under `python -O`; use a real guard so an
         # upstream bug surfaces as a ValueError, not a later IndexError.
         raise ValueError("_score_candidates requires at least one candidate")
-    norm_bcs = [normalize_title_for_scoring(t) for t in broadcast_titles]
-    # Sort by score DESC, then by library_file id ASC so duplicate-score ties
-    # are resolved deterministically. Without the tie-breaker, input order
-    # (often non-deterministic from SQL) would decide the match.
-    scored: list[tuple[float, LibraryFile]] = sorted(
+    full_bcs = [
+        normalize_title_for_scoring(t) for t in broadcast_title_variants(original_title)
+    ]
+    core_bcs = [
+        normalize_title_for_scoring(t) for t in broadcast_title_core_variants(original_title)
+    ]
+    # Sort by best score DESC, then full-form score DESC, then library_file
+    # id ASC so ties are resolved deterministically. Without the id
+    # tie-breaker, input order (often non-deterministic from SQL) would
+    # decide the match.
+    ranked = sorted(
         (
-            (
-                max(
-                    float(token_sort_ratio(
-                        norm_bc,
-                        normalize_title_for_scoring(_candidate_canonical_title(f)),
-                    ))
-                    for norm_bc in norm_bcs
-                ),
-                f,
-            )
+            (*_candidate_scores(full_bcs, core_bcs, f, strong_match_threshold), f)
             for f in candidates
         ),
-        key=lambda x: (-x[0], str(x[1].id)),
+        key=lambda x: (-x[0], -x[1], str(x[2].id)),
     )
+    scored: list[tuple[float, LibraryFile]] = [(best, f) for best, _exact, f in ranked]
     top_score, best = scored[0]
     has_competitor = len(scored) > 1
     gap: float = (top_score - scored[1][0]) if has_competitor else 100.0
@@ -352,7 +376,7 @@ class ResolvedArtistMbidStrategy:
             )
             if candidate_files:
                 local_result = _score_candidates(
-                    broadcast_title_variants(identity.original_title),
+                    identity.original_title,
                     candidate_files,
                     tier=MatchTier.MUSICBRAINZ_ID_EXACT,
                     strong_match_threshold=self._strong_match_threshold,
@@ -395,7 +419,7 @@ class ResolvedArtistMbidStrategy:
         )
         if name_candidates:
             return _score_candidates(
-                broadcast_title_variants(identity.original_title),
+                identity.original_title,
                 name_candidates,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 strong_match_threshold=self._strong_match_threshold,
@@ -449,7 +473,7 @@ class ResolvedArtistMbidStrategy:
         if not filtered:
             return None
         return _score_candidates(
-            titles,
+            identity.original_title,
             filtered,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             strong_match_threshold=self._strong_match_threshold,
@@ -505,7 +529,7 @@ class BroadcastToLocalStrategy:
                 ),
             )
         return _score_candidates(
-            broadcast_title_variants(identity.original_title),
+            identity.original_title,
             candidate_files,
             tier=MatchTier.LOCAL_FILE_FUZZY,
             strong_match_threshold=self._strong_match_threshold,

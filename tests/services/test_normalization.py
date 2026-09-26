@@ -11,6 +11,7 @@ from backend.services.normalization import (
     normalize_artist,
     normalize_title,
     split_artist_string,
+    strip_bracketed_groups,
 )
 
 # ---------------------------------------------------------------------------
@@ -1337,3 +1338,36 @@ def test_extract_version_info_lyrics_marker_is_stripped() -> None:
     assert extract_version_info("Falling In Love [Top 40 Mix](Lyrics!)") == (
         "Falling In Love", VersionType.REMIX,
     )
+
+
+# ---------------------------------------------------------------------------
+# strip_bracketed_groups — every (...) / [...] group except part numbers
+# ---------------------------------------------------------------------------
+
+
+def test_strip_bracketed_groups_removes_alt_title_subtitle() -> None:
+    assert strip_bracketed_groups("Train In Vain (Stand By Me)") == "Train In Vain"
+
+
+def test_strip_bracketed_groups_removes_leading_group() -> None:
+    assert strip_bracketed_groups("(Keep Feeling) Fascination") == "Fascination"
+
+
+def test_strip_bracketed_groups_removes_every_group_and_nested_ones() -> None:
+    assert strip_bracketed_groups("Song [Live] (Edit)") == "Song"
+    assert strip_bracketed_groups("Song (Live Version (Edit))") == "Song"
+
+
+def test_strip_bracketed_groups_keeps_part_numbers() -> None:
+    """Part I and Part II are different songs, not decorations."""
+    assert strip_bracketed_groups("Disco Duck (Part I)") == "Disco Duck (Part I)"
+    assert strip_bracketed_groups("Song (Pt. 2)") == "Song (Pt. 2)"
+
+
+def test_strip_bracketed_groups_leaves_unbalanced_and_plain_titles_alone() -> None:
+    assert strip_bracketed_groups("Boom Boom Boom (Let's Go ...") == "Boom Boom Boom (Let's Go ..."
+    assert strip_bracketed_groups("Enter Sandman") == "Enter Sandman"
+
+
+def test_strip_bracketed_groups_keeps_a_title_that_is_only_a_group() -> None:
+    assert strip_bracketed_groups("(Untitled)") == "(Untitled)"

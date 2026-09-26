@@ -963,3 +963,98 @@ def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
     assert result is not None
     assert result.library_file_id == hit.id
 
+
+
+# ---------------------------------------------------------------------------
+# Bracketed alternate titles: "Train In Vain (Stand By Me)" vs "Train in Vain"
+# ---------------------------------------------------------------------------
+
+
+def test_alt_title_in_parentheses_does_not_sink_an_exact_title() -> None:
+    """KSTZ logged "Train In Vain (Stand By Me)"; the library tag is
+    "Train in Vain". The five extra tokens scored the right file at 68%."""
+    lib_repo = FakeLibraryFileRepository()
+    hit = _lib_file("/c/train.flac", track_title="Train in Vain", artist_name="clash")
+    lib_repo.upsert(hit)
+    strategy = BroadcastToLocalStrategy(lib_repo)
+    artist = _artist("clash", status=MatchStatus.PENDING)
+
+    result = strategy.apply(_logged_identity(artist.id, "Train In Vain (Stand By Me)"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.confidence_score == 100.0
+    assert result.library_file_id == hit.id
+
+
+def test_alt_title_in_parentheses_on_the_library_side_is_stripped_too() -> None:
+    """The station may log the short form while the tag carries the subtitle."""
+    lib_repo = FakeLibraryFileRepository()
+    hit = _lib_file(
+        "/p/brass.flac", track_title="Brass in Pocket (I'm Special)", artist_name="pretenders",
+    )
+    lib_repo.upsert(hit)
+    strategy = BroadcastToLocalStrategy(lib_repo)
+    artist = _artist("pretenders", status=MatchStatus.PENDING)
+
+    result = strategy.apply(_logged_identity(artist.id, "Brass In Pocket"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.confidence_score == 100.0
+
+
+def test_exact_bracketed_form_wins_the_tie_over_the_stripped_one() -> None:
+    """With "Hello" and "Hello (Live)" both scoring 100 once brackets are
+    noise, the file whose full title matches the log line is preferred,
+    whatever the ids sort to."""
+    for live_first in (True, False):
+        lib_repo = FakeLibraryFileRepository()
+        live = _lib_file("/h/live.flac", track_title="Hello (Live)", artist_name="adele")
+        studio = _lib_file("/h/studio.flac", track_title="Hello", artist_name="adele")
+        for f in ((live, studio) if live_first else (studio, live)):
+            lib_repo.upsert(f)
+        strategy = BroadcastToLocalStrategy(lib_repo)
+        artist = _artist("adele", status=MatchStatus.PENDING)
+
+        result = strategy.apply(_logged_identity(artist.id, "Hello (Live)"), artist)
+
+        assert result is not None
+        assert result.status == MatchStatus.AUTO_MATCHED
+        assert result.library_file_id == live.id
+
+
+def test_part_numbers_still_tell_songs_apart() -> None:
+    lib_repo = FakeLibraryFileRepository()
+    part1 = _lib_file("/d/duck1.flac", track_title="Disco Duck (Part I)", artist_name="rick dees")
+    part2 = _lib_file("/d/duck2.flac", track_title="Disco Duck (Part II)", artist_name="rick dees")
+    lib_repo.upsert(part1)
+    lib_repo.upsert(part2)
+    strategy = BroadcastToLocalStrategy(lib_repo)
+    artist = _artist("rick dees", status=MatchStatus.PENDING)
+
+    result = strategy.apply(_logged_identity(artist.id, "Disco Duck (Part II)"), artist)
+
+    assert result is not None
+    assert result.library_file_id == part2.id
+    assert result.confidence_score == 100.0
+
+
+def test_stripping_brackets_never_lifts_a_wrong_file_into_the_mid_band() -> None:
+    """"Cry Baby Cry" against "Baby It's You [Mono]" scores 48 in full and 58
+    once "[Mono]" is stripped: inside the 55-64 band, where a 5-point gap
+    over the next file auto-matches. A stripped comparison only counts when
+    it is a strong match on its own, so the score stays at 48."""
+    lib_repo = FakeLibraryFileRepository()
+    wrong = _lib_file("/b/baby.flac", track_title="Baby It's You [Mono]", artist_name="beatles")
+    other = _lib_file("/b/yesterday.flac", track_title="Yesterday", artist_name="beatles")
+    lib_repo.upsert(wrong)
+    lib_repo.upsert(other)
+    strategy = BroadcastToLocalStrategy(lib_repo)
+    artist = _artist("beatles", status=MatchStatus.PENDING)
+
+    result = strategy.apply(_logged_identity(artist.id, "Cry Baby Cry"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.confidence_score < 55

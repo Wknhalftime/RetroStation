@@ -4,8 +4,10 @@ from backend.domain.enums import ReasonCode
 from backend.services.matching_reasons import format_deferred_retry
 from backend.services.matching_utils import (
     TRUNCATION_TOLERANCE_CHARS,
+    broadcast_title_core_variants,
     broadcast_title_variants,
     is_likely_truncated,
+    library_title_variants,
     normalize_title_for_scoring,
     rule_matches,
 )
@@ -146,3 +148,42 @@ class TestBroadcastTitleVariants:
     def test_title_that_is_only_a_credit_is_kept(self) -> None:
         assert broadcast_title_variants("f/Nobody") == ("f nobody",)
 
+
+    def test_bracketed_group_does_not_change_the_full_forms(self) -> None:
+        assert broadcast_title_variants("Train In Vain (Stand By Me)") == (
+            "train in vain stand by me",
+        )
+
+
+class TestBroadcastTitleCoreVariants:
+    """The full forms again without their bracketed groups, when that differs."""
+
+    def test_alt_title_in_brackets_is_stripped(self) -> None:
+        assert broadcast_title_core_variants("Train In Vain (Stand By Me)") == (
+            "train in vain",
+        )
+        assert broadcast_title_core_variants("(Keep Feeling) Fascination") == ("fascination",)
+
+    def test_plain_title_and_part_numbers_give_nothing(self) -> None:
+        assert broadcast_title_core_variants("Enter Sandman") == ()
+        assert broadcast_title_core_variants("Disco Duck (Part I)") == ()
+
+    def test_credit_and_bracketed_group_combine(self) -> None:
+        assert broadcast_title_core_variants("Smooth (Radio Edit) f/Rob Thomas") == ("smooth",)
+
+
+class TestLibraryTitleVariants:
+    def test_plain_title_is_its_stored_normalized_form(self) -> None:
+        assert library_title_variants("Enter Sandman", "enter sandman") == ("enter sandman",)
+
+    def test_bracketed_group_adds_a_stripped_form(self) -> None:
+        assert library_title_variants(
+            "Brass in Pocket (I'm Special)", "brass in pocket im special",
+        ) == ("brass in pocket im special", "brass in pocket")
+
+    def test_missing_stored_form_is_derived_from_the_tag(self) -> None:
+        assert library_title_variants("Halo (Live)", None) == ("halo live", "halo")
+
+    def test_missing_tag_falls_back_to_the_stored_form(self) -> None:
+        assert library_title_variants(None, "halo") == ("halo",)
+        assert library_title_variants(None, None) == ("",)

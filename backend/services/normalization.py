@@ -481,6 +481,36 @@ def extract_version_info(raw_title: str) -> tuple[str, VersionType]:
 # ---------------------------------------------------------------------------
 
 
+# Strict paired-bracket pattern: \( matched only with \), \[ only with \].
+# An independent closing charset [\)\]] would let mismatched pairs like
+# "(Live]" match. One level of nesting is allowed inside a group, so
+# "(Live Version (Edit))" is one group; stopping at the first ")" left titles
+# like "Last Child)". Group 1 is a (...) body, group 2 a [...] body.
+_BRACKET_GROUP_RE = re.compile(
+    r"\s*(?:\(((?:[^()]|\([^()]*\))+)\)|\[((?:[^\[\]]|\[[^\[\]]*\])+)\])"
+)
+
+
+def strip_bracketed_groups(raw_title: str) -> str:
+    """Remove every ``(...)`` / ``[...]`` group except part numbers.
+
+    For fuzzy scoring, where a bracketed alternate title, subtitle or version
+    tag present on one side only ("Train In Vain (Stand By Me)" against a tag
+    of "Train in Vain") is noise. Part numbers stay because "Part I" and
+    "Part II" are different songs. A title that is nothing but a group, or
+    whose brackets are unbalanced, comes back unchanged.
+    """
+    base = raw_title
+    for match in reversed(list(_BRACKET_GROUP_RE.finditer(raw_title))):
+        content = (match.group(1) or match.group(2) or "").strip()
+        if _PART_NUMBER_RE.match(content):
+            continue
+        start, end = match.span()
+        base = base[:start] + " " + base[end:]
+    base = re.sub(r"\s+", " ", base).strip()
+    return base or raw_title
+
+
 def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
     """Extract version descriptors from parenthetical / bracketed groups (FR21, FR23).
 
@@ -498,15 +528,7 @@ def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
         Tuple of (cleaned_base_title, list_of_extracted_descriptor_strings).
         Tags are in left-to-right order.  Base title has extracted groups removed.
     """
-    # Strict paired-bracket pattern: \( matched only with \), \[ only with \].
-    # The previous r"(\s*[\(\[])([^\)\]]+)([\)\]])" had an independent closing
-    # charset [\)\]] that allowed mismatched pairs like "(Live]" to match.
-    # One level of nesting is allowed inside a group, so "(Live Version (Edit))"
-    # is one group; stopping at the first ")" left titles like "Last Child)".
-    group_re = re.compile(
-        r"\s*(?:\(((?:[^()]|\([^()]*\))+)\)|\[((?:[^\[\]]|\[[^\[\]]*\])+)\])"
-    )
-    matches = list(group_re.finditer(raw_title))
+    matches = list(_BRACKET_GROUP_RE.finditer(raw_title))
 
     base = raw_title
     tags: list[str] = []
