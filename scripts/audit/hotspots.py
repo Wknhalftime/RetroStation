@@ -5,6 +5,7 @@ Evidence base: churn predicts defects better than static metrics alone
 
 Complexity comes from ruff's C901 rule with the threshold forced to 0, so no
 extra dependency is needed. Output is JSON so the next audit can diff it.
+Commits listed in .git-blame-ignore-revs (formatting sweeps) are not counted.
 
 Usage:
     uv run python scripts/audit/hotspots.py --since 2026-01-01 --out audit/hotspots.json
@@ -30,7 +31,39 @@ def run(cmd: list[str]) -> str:
     return result.stdout
 
 
-def churn_and_commits(since: str, path: str) -> tuple[Counter[str], list[list[str]]]:
+def ignored_revs(path: Path) -> set[str]:
+    """Commits git blame skips (formatting sweeps); churn skips them too."""
+    if not path.exists():
+        return set()
+    lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return {line.split()[0] for line in lines if line and not line.startswith("#")}
+
+
+def parse_log(out: str, skip: set[str]) -> tuple[list[list[str]], int]:
+    """Split `git log --name-only --format=@@commit %H` output into per-commit .py files.
+
+    Returns the kept commits and how many were dropped for being in `skip`
+    (full or abbreviated hashes).
+    """
+    commits: list[list[str]] = []
+    skipped = 0
+    for block in out.split("@@commit"):
+        tokens = block.split()
+        if not tokens:
+            continue
+        sha, names = tokens[0], tokens[1:]
+        if any(sha.startswith(rev) for rev in skip):
+            skipped += 1
+            continue
+        files = [f for f in names if f.endswith(".py")]
+        if files:
+            commits.append(files)
+    return commits, skipped
+
+
+def churn_and_commits(
+    since: str, path: str, skip: set[str]
+) -> tuple[Counter[str], list[list[str]], int]:
     out = run(
         [
             "git",
@@ -38,18 +71,14 @@ def churn_and_commits(since: str, path: str) -> tuple[Counter[str], list[list[st
             f"--since={since}",
             "--no-merges",
             "--name-only",
-            "--format=format:@@commit",
+            "--format=format:@@commit %H",
             "--",
             path,
         ]
     )
-    commits: list[list[str]] = []
-    for block in out.split("@@commit"):
-        files = [f for f in block.split() if f.endswith(".py")]
-        if files:
-            commits.append(files)
+    commits, skipped = parse_log(out, skip)
     churn = Counter(f for files in commits for f in set(files))
-    return churn, commits
+    return churn, commits, skipped
 
 
 def complexity(path: str) -> dict[str, dict[str, object]]:
@@ -108,9 +137,12 @@ def main() -> None:
     ap.add_argument("--top", type=int, default=15)
     ap.add_argument("--min-shared", type=int, default=4)
     ap.add_argument("--out", type=Path, default=Path("audit/hotspots.json"))
+    ap.add_argument("--ignore-revs-file", type=Path, default=Path(".git-blame-ignore-revs"))
     args = ap.parse_args()
 
-    churn, commits = churn_and_commits(args.since, args.path)
+    churn, commits, skipped = churn_and_commits(
+        args.since, args.path, ignored_revs(args.ignore_revs_file)
+    )
     cx = complexity(args.path)
     hotspots = []
     for f, n in churn.items():
@@ -123,6 +155,7 @@ def main() -> None:
     report = {
         "since": args.since,
         "commits": len(commits),
+        "skipped_format_commits": skipped,
         "hotspots": hotspots[: args.top],
         "coupling": coupling(commits, churn, args.min_shared)[: args.top],
     }
