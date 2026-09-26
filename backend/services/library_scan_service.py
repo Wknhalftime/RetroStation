@@ -3,6 +3,7 @@ Library scan service — tag extraction and directory walking.
 
 Public API:
   extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
+  read_tags(path)          -> LibraryFile  (tags and stat only, no content read)
   scan_directory(root, on_progress=None)  -> (list[LibraryFile], list[LibraryQuarantine])
 
 Supported formats: .flac, .mp3, .m4a, .ogg, .wav
@@ -189,7 +190,7 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=compute_file_hash(path),
+        file_hash=None,
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -243,7 +244,7 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=compute_file_hash(path),
+        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -282,7 +283,7 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=compute_file_hash(path),
+        file_hash=None,
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -331,8 +332,9 @@ def disk_stat(path: Path) -> DiskStat:
 def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
     """Stamp the on-disk stat onto a freshly extracted file.
 
-    Taken after the read, so if the file changes between now and the next
-    scan the mtime moves and the file is re-read rather than trusted.
+    Taken before the content is hashed, so a file that changes while it is
+    read keeps a stored stat that no longer matches, and the next scan
+    re-reads it rather than trusting it.
     """
     stat = disk_stat(path)
     lf.file_size = stat.size
@@ -362,7 +364,7 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=compute_file_hash(path),
+        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -372,11 +374,12 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     )
 
 
-def extract_tags(path: Path) -> LibraryFile:
+def read_tags(path: Path) -> LibraryFile:
     """
-    Extract audio tags from *path* and return a :class:`LibraryFile`.
+    Tags, format and on-disk stat for *path*, reading only its tag blocks.
 
-    Raises :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
+    ``file_hash`` is left None: the content is not read. Raises
+    :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
     """
     audio: MutagenFileType | None = mutagen.File(str(path), easy=False)  # type: ignore[attr-defined]
     if audio is None:
@@ -384,11 +387,23 @@ def extract_tags(path: Path) -> LibraryFile:
     return _with_disk_stat(_extract_by_format(audio, path), path)
 
 
+def extract_tags(path: Path) -> LibraryFile:
+    """
+    :func:`read_tags` plus the SHA-256 of the file's whole content.
+
+    Raises :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
+    """
+    lf = read_tags(path)
+    lf.file_hash = compute_file_hash(path)
+    return lf
+
+
 def scan_directory(
     root: Path,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_file: Callable[[LibraryFile], None] | None = None,
     on_quarantine: Callable[[LibraryQuarantine], None] | None = None,
+    hash_content: bool = True,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
@@ -401,6 +416,8 @@ def scan_directory(
       *on_quarantine* — called with each :class:`LibraryQuarantine` entry.
       *on_progress* — called with ``(processed, total, current_path)`` every
         50 files and on the final file.
+      *hash_content* — False reads tags and stat only and leaves file_hash
+        None (a first scan; library_hash_backfill_task hashes later).
     """
     candidates = sorted(
         p for p in root.rglob("*")
@@ -416,7 +433,7 @@ def scan_directory(
 
     for processed_idx, path in enumerate(candidates, start=1):
         try:
-            lf = extract_tags(path)
+            lf = extract_tags(path) if hash_content else read_tags(path)
             files.append(lf)
             if on_file is not None:
                 on_file(lf)

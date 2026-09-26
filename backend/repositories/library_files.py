@@ -132,3 +132,8 @@ class LibraryFileRepository(ABC):
         """PRESENT rows still waiting for a content hash."""
         ...
 
+    @abstractmethod
+    def has_any(self) -> bool:
+        """Whether the table has any row at all, of any status."""
+        ...
+

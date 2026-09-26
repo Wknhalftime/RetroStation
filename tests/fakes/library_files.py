@@ -216,6 +216,9 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             if f.file_hash is None and f.file_status == FileStatus.PRESENT
         )
 
+    def has_any(self) -> bool:
+        return bool(self._data)
+
     def reset_failed_enrichments(self) -> int:
         count = 0
         for f in self._data.values():

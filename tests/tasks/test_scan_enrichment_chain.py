@@ -18,13 +18,21 @@ class TestScanEnrichmentChain:
 
         with patch("backend.tasks.library_scan_tasks._run_scan") as mock_run:
             mock_run.return_value = (5, 0, {"processed": 5, "total": 5, "current_path": ""})
-            with patch(
-                "backend.tasks.library_enrichment_tasks.library_enrichment_task"
-            ) as mock_enrich:
+            with (
+                patch(
+                    "backend.tasks.library_enrichment_tasks.library_enrichment_task"
+                ) as mock_enrich,
+                patch(
+                    "backend.tasks.library_hash_backfill_tasks.library_hash_backfill_task"
+                ) as mock_backfill,
+            ):
+                order = MagicMock()
+                order.attach_mock(mock_backfill, "backfill")
+                order.attach_mock(mock_enrich, "enrich")
                 from backend.tasks.library_scan_tasks import library_scan_task
 
                 library_scan_task.call_local("/music")
-                mock_enrich.assert_called_once()
+                assert [c[0] for c in order.mock_calls] == ["backfill", "enrich"]
 
     @patch("backend.tasks.library_scan_tasks.connect_sync")
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
@@ -39,10 +47,16 @@ class TestScanEnrichmentChain:
 
         with patch("backend.tasks.library_scan_tasks._run_scan") as mock_run:
             mock_run.return_value = (0, 0, {"processed": 0, "total": 0, "current_path": ""})
-            with patch(
-                "backend.tasks.library_enrichment_tasks.library_enrichment_task"
-            ) as mock_enrich:
+            with (
+                patch(
+                    "backend.tasks.library_enrichment_tasks.library_enrichment_task"
+                ) as mock_enrich,
+                patch(
+                    "backend.tasks.library_hash_backfill_tasks.library_hash_backfill_task"
+                ) as mock_backfill,
+            ):
                 from backend.tasks.library_scan_tasks import library_scan_task
 
                 library_scan_task.call_local("/empty")
                 mock_enrich.assert_not_called()
+                mock_backfill.assert_not_called()

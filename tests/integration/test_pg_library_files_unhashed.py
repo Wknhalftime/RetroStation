@@ -118,3 +118,12 @@ def test_set_file_hash_writes_only_over_an_unchanged_unhashed_row(migrated_db: s
     assert (stale_stat, written, again) == (False, True, False)
     assert got is not None
     assert got.file_hash == "h" * 64
+
+
+def test_has_any_reports_whether_the_table_has_rows(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        before = repo.has_any()
+        repo.upsert(_unhashed("/m/a.flac"))
+        after = repo.has_any()
+    assert (before, after) == (False, True)

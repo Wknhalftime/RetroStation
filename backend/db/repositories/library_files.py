@@ -397,6 +397,12 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchone()
         return int(row["n"]) if row else 0
 
+    def has_any(self) -> bool:
+        row = self._conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM library_files) AS has_rows"
+        ).fetchone()
+        return bool(row and row["has_rows"])
+
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.
 
