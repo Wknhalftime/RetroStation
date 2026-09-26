@@ -8,7 +8,6 @@ files cost the library's SATA SSD ~70% of its throughput (PR #70).
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,7 +17,7 @@ import structlog
 
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
-from backend.services.library_scan_service import compute_file_hash
+from backend.services.library_scan_service import compute_file_hash, disk_stat
 
 logger = structlog.get_logger()
 
@@ -47,11 +46,6 @@ class HashBackfillBatch:
         return self.last_path is None
 
 
-def _stat_pair(path: Path) -> tuple[int, int]:
-    st = os.stat(path)
-    return st.st_size, st.st_mtime_ns
-
-
 def _backfill_one(
     row: LibraryFile,
     file_repo: LibraryFileRepository,
@@ -60,17 +54,17 @@ def _backfill_one(
     """Hash one row's file if it is still exactly what was indexed."""
     path = Path(row.file_path)
     try:
-        before = _stat_pair(path)
-        if before != (row.file_size, row.file_mtime_ns):
+        before = disk_stat(path)
+        if (before.size, before.mtime_ns) != (row.file_size, row.file_mtime_ns):
             return BackfillOutcome.CHANGED
         digest = hash_file(path)
         # A write during the read must not pin a hash of new bytes to old tags.
-        if _stat_pair(path) != before:
+        if disk_stat(path) != before:
             return BackfillOutcome.CHANGED
     except OSError as exc:
         logger.warning("hash_backfill_unreadable", path=row.file_path, error=str(exc))
         return BackfillOutcome.UNREADABLE
-    if not file_repo.set_file_hash(row.id, digest, before[0], before[1]):
+    if not file_repo.set_file_hash(row.id, digest, before.size, before.mtime_ns):
         return BackfillOutcome.CHANGED
     return BackfillOutcome.HASHED
 

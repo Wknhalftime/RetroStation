@@ -316,16 +316,16 @@ _FORMAT_EXTRACTORS: dict[str, Callable[[MutagenFileType, Path, str], LibraryFile
 
 
 @dataclass(frozen=True)
-class _DiskStat:
+class DiskStat:
     """The two stat() fields an incremental scan compares before hashing."""
 
     size: int
     mtime_ns: int
 
 
-def _disk_stat(path: Path) -> _DiskStat:
+def disk_stat(path: Path) -> DiskStat:
     st = path.stat()
-    return _DiskStat(size=st.st_size, mtime_ns=st.st_mtime_ns)
+    return DiskStat(size=st.st_size, mtime_ns=st.st_mtime_ns)
 
 
 def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
@@ -334,7 +334,7 @@ def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
     Taken after the read, so if the file changes between now and the next
     scan the mtime moves and the file is re-read rather than trusted.
     """
-    stat = _disk_stat(path)
+    stat = disk_stat(path)
     lf.file_size = stat.size
     lf.file_mtime_ns = stat.mtime_ns
     return lf
@@ -651,7 +651,7 @@ def _content_unchanged(existing: LibraryFile, path: Path) -> bool:
     recorded size and mtime instead. Raises OSError if the file can't be read.
     """
     if existing.file_hash is None:
-        return _stat_matches(existing, _disk_stat(path)) is True
+        return _stat_matches(existing, disk_stat(path)) is True
     return compute_file_hash(path) == existing.file_hash
 
 
@@ -679,14 +679,14 @@ def _restore_reappeared_file(
     result.files_reappeared += 1
 
 
-def _stat_matches(existing: LibraryFile, disk: _DiskStat) -> bool | None:
+def _stat_matches(existing: LibraryFile, disk: DiskStat) -> bool | None:
     """Compare stored size+mtime with disk. None when the row predates stat tracking."""
     if existing.file_size is None or existing.file_mtime_ns is None:
         return None
     return existing.file_size == disk.size and existing.file_mtime_ns == disk.mtime_ns
 
 
-def _modified_since_indexed(existing: LibraryFile, disk: _DiskStat) -> bool:
+def _modified_since_indexed(existing: LibraryFile, disk: DiskStat) -> bool:
     indexed_ns = int(existing.indexed_at.timestamp() * 1_000_000_000)
     return disk.mtime_ns > indexed_ns
 
@@ -710,7 +710,7 @@ def _reconcile_present_file(
         - and no hash either              → re-extract
     """
     try:
-        disk = _disk_stat(path)
+        disk = disk_stat(path)
     except OSError as exc:
         logger.warning("stat_failed", path=str(path), error=str(exc))
         result.record_failure(str(path))
