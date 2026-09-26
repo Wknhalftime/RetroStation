@@ -72,3 +72,16 @@ class LibraryFolder:
     folder_hash: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class CaseDuplicateRepair:
+    """Rows naming one file in different case, left by case-only renames.
+
+    The keeper is the row spelled as the file is on disk; each stale row's
+    references move to it and the stale row is deleted.
+    """
+
+    keeper_id: UUID
+    keeper_path: str
+    stale_ids: tuple[UUID, ...]

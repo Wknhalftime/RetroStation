@@ -357,6 +357,43 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE lower(file_path) IN (
+                   SELECT lower(file_path) FROM library_files
+                   GROUP BY 1 HAVING count(*) > 1)
+               ORDER BY lower(file_path), file_path"""
+        ).fetchall()
+        groups: dict[str, list[LibraryFile]] = {}
+        for row in rows:
+            groups.setdefault(row["file_path"].lower(), []).append(self._row_to_model(row))
+        return list(groups.values())
+
+    def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+        source, target = str(source_id), str(target_id)
+        # matches has UNIQUE (identity_id, library_file_id).
+        self._conn.execute(
+            """DELETE FROM matches s
+               WHERE s.library_file_id = %s AND s.identity_id IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM matches t
+                             WHERE t.library_file_id = %s AND t.identity_id = s.identity_id)""",
+            (source, target),
+        )
+        self._conn.execute(
+            "UPDATE matches SET library_file_id = %s WHERE library_file_id = %s",
+            (target, source),
+        )
+        self._conn.execute(
+            "UPDATE song_masters SET preferred_file_id = %s WHERE preferred_file_id = %s",
+            (target, source),
+        )
+        self._conn.execute(
+            "UPDATE format_overrides SET preferred_file_id = %s WHERE preferred_file_id = %s",
+            (target, source),
+        )
+        self._conn.execute("DELETE FROM library_files WHERE id = %s", (source,))
+
     def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
