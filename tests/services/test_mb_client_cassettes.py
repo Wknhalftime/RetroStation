@@ -115,7 +115,9 @@ def test_search_recording_scopes_results_to_artist(client: MusicBrainzApiClient)
     assert len(results) == 5
     for recording in results:
         assert recording["title"] == "Enter Sandman"
-        assert isinstance(recording["length"], int)
+        # A recording with no known duration omits "length" entirely (seen
+        # 2026-09-26 on a live Seoul 1998 recording); readers use .get().
+        assert isinstance(recording.get("length", 0), int)
         credit = _extract_artist_from_credits(recording["artist-credit"])
         assert credit is not None
         assert credit[0] == METALLICA_MBID
@@ -161,6 +163,27 @@ def test_lookup_release_nests_recordings_under_media_tracks(
         assert recording["id"]
         assert recording["title"]
         assert isinstance(recording["length"], int)
+
+
+def test_lookup_release_track_performance_relation_yields_work(
+    client: MusicBrainzApiClient,
+) -> None:
+    """A release lookup carries each recording's work relation.
+
+    ``enrich_by_release`` reads ``relations`` off every track's recording; the
+    request must ask for ``recording-level-rels+work-rels`` or MusicBrainz
+    returns the recordings with no relations at all and no work is ever
+    linked from the release path.
+    """
+    release = client.lookup_release(MASTER_OF_PUPPETS_RELEASE_MBID)
+
+    assert release is not None
+    tracks = [track for medium in release["media"] for track in medium["tracks"]]
+    works = [_extract_work_from_relations(track["recording"]["relations"]) for track in tracks]
+    assert all(work is not None for work in works)
+    assert [work[1] for work in works if work is not None][:2] == [
+        "Battery", "Master of Puppets",
+    ]
 
 
 # --- lookup_artist -----------------------------------------------------------

@@ -28,7 +28,7 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Fri, 25 Sep 2026 22:58:40 GMT
+      - Sat, 26 Sep 2026 16:27:24 GMT
       etag:
       - '"8b5a62e76b15ec04b7cbc0eb576f7f62"'
       keep-alive:
@@ -40,11 +40,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '569'
+      - '353'
       x-ratelimit-reset:
-      - '1790377120'
+      - '1790440045'
       x-runtime:
-      - '0.016002'
+      - '0.019231'
     status:
       code: 404
       message: Not Found

@@ -18,6 +18,7 @@ from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.library_enrichment_service import (
+    EnrichmentRepos,
     enrich_by_recording,
     enrich_by_recording_batch,
     enrich_by_release,
@@ -144,17 +145,22 @@ def library_enrichment_task() -> dict[str, int]:
                 },
             ))
 
+            enrichment_repos = EnrichmentRepos(
+                files=repos.library_files,
+                enrichment_queries=repos.library_files,
+                recordings=repos.recordings,
+                works=repos.works,
+                song_masters=repos.song_masters,
+                matches=repos.matches,
+                artists=repos.artists,
+            )
             with MusicBrainzApiClient(
                 cache_repo, ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client:
                 for index, chunk in enumerate(chunks, start=1):
                     try:
                         outcome = enrich_by_recording_batch(
-                            chunk,
-                            repos.library_files,
-                            repos.recordings,
-                            repos.artists,
-                            mb_client,
+                            chunk, enrichment_repos, mb_client,
                         )
                         total_enriched += outcome.enriched
                         conn.commit()
@@ -181,15 +187,7 @@ def library_enrichment_task() -> dict[str, int]:
 
                 for release_mbid in release_mbids:
                     try:
-                        count = enrich_by_release(
-                            release_mbid,
-                            repos.library_files,
-                            repos.library_files,
-                            repos.recordings,
-                            repos.works,
-                            repos.artists,
-                            mb_client,
-                        )
+                        count = enrich_by_release(release_mbid, enrichment_repos, mb_client)
                         total_enriched += count
                         conn.commit()
                     except _PER_ITEM_RETRIABLE_ERRORS as exc:
@@ -211,13 +209,7 @@ def library_enrichment_task() -> dict[str, int]:
                 for recording_mbid in recording_mbids:
                     try:
                         count = enrich_by_recording(
-                            recording_mbid,
-                            repos.library_files,
-                            repos.library_files,
-                            repos.recordings,
-                            repos.works,
-                            repos.artists,
-                            mb_client,
+                            recording_mbid, enrichment_repos, mb_client,
                         )
                         total_enriched += count
                         conn.commit()

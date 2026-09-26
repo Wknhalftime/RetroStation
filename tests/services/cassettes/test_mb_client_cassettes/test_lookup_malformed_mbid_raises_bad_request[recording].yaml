@@ -16,8 +16,7 @@ interactions:
     uri: https://musicbrainz.org/ws/2/recording/not-a-uuid?fmt=json&inc=artist-credits%2Bwork-rels
   response:
     body:
-      string: '{"help":"For usage, please see: https://musicbrainz.org/development/mmd","error":"Invalid
-        mbid."}'
+      string: '{"error":"Invalid mbid.","help":"For usage, please see: https://musicbrainz.org/development/mmd"}'
     headers:
       access-control-allow-origin:
       - '*'
@@ -28,9 +27,9 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Fri, 25 Sep 2026 22:58:43 GMT
+      - Sat, 26 Sep 2026 16:27:30 GMT
       etag:
-      - '"326ef3f5b9aabae00194a1623cdb3810"'
+      - '"3dfd9a96b34e7d04b918ad79bf429369"'
       keep-alive:
       - timeout=15
       server:
@@ -40,11 +39,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '1105'
+      - '633'
       x-ratelimit-reset:
-      - '1790377124'
+      - '1790440051'
       x-runtime:
-      - '0.004869'
+      - '0.003980'
     status:
       code: 400
       message: Bad Request

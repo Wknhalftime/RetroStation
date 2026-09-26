@@ -1,0 +1,78 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/release/31de97e3-6c53-4ca6-a00d-152642eb7e4a?fmt=json&inc=recordings%2Bartist-credits%2Brelease-groups%2Brecording-level-rels%2Bwork-rels
+  response:
+    body:
+      string: '{"artist-credit":[{"artist":{"name":"Metallica","type":"Group","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","country":"US","disambiguation":"","sort-name":"Metallica"},"name":"Metallica","joinphrase":""}],"date":"1986-06","text-representation":{"language":"eng","script":"Latn"},"release-group":{"secondary-types":[],"title":"Master
+        of Puppets","primary-type":"Album","artist-credit":[{"name":"Metallica","joinphrase":"","artist":{"sort-name":"Metallica","disambiguation":"","country":"US","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica"}}],"disambiguation":"","id":"3d00fb45-f8ab-3436-a8e1-b4bfc4d66913","primary-type-id":"f529b476-6e62-324f-b0aa-1f3e33d313fc","secondary-type-ids":[],"first-release-date":"1986-03-03"},"asin":null,"packaging":"Jewel
+        Case","packaging-id":"ec27701a-4a22-37f4-bfac-6616e0f9750a","status":"Official","country":"US","cover-art-archive":{"count":0,"darkened":false,"artwork":false,"back":false,"front":false},"status-id":"4e304316-386d-3409-af2e-78857eec5cfe","disambiguation":"","title":"Master
+        of Puppets","media":[{"track-offset":0,"track-count":8,"position":1,"title":"","format":"CD","tracks":[{"position":1,"title":"Battery","recording":{"relations":[{"attributes":[],"work":{"language":"eng","id":"a13a4029-ecd5-3930-b673-96ae651ea519","attributes":[],"iswcs":["T-070.017.067-7"],"title":"Battery","disambiguation":"","type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","languages":["eng"],"type":"Song"},"attribute-ids":{},"source-credit":"","ended":true,"end":"1985-12-27","target-credit":"","target-type":"work","direction":"forward","attribute-values":{},"begin":"1985-09-01","type":"performance","type-id":"a3005666-a872-32c3-ad06-98af558e99b0"}],"video":false,"title":"Battery","disambiguation":"","artist-credit":[{"joinphrase":"","name":"Metallica","artist":{"type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica","sort-name":"Metallica","disambiguation":"","country":"US"}}],"length":312360,"id":"3bfda26a-49fa-4bc4-a4d6-8bbfa0767ab7","first-release-date":"1986-03-03"},"artist-credit":[{"artist":{"type":"Group","name":"Metallica","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","country":"US","disambiguation":"","sort-name":"Metallica"},"joinphrase":"","name":"Metallica"}],"number":"1","length":310000,"id":"ad2a91d1-dd3c-462b-90db-113ff7459259"},{"artist-credit":[{"joinphrase":"","name":"Metallica","artist":{"type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica","sort-name":"Metallica","country":"US","disambiguation":""}}],"title":"Master
+        of Puppets","recording":{"artist-credit":[{"name":"Metallica","joinphrase":"","artist":{"type":"Group","name":"Metallica","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","disambiguation":"","country":"US","sort-name":"Metallica"}}],"disambiguation":"","title":"Master
+        of Puppets","video":false,"relations":[{"target-credit":"","end":"1985-12-27","ended":true,"source-credit":"","attribute-ids":{},"work":{"id":"19ec21de-2d93-390c-98b0-b68d98c4baf5","attributes":[],"iswcs":["T-070.115.558-9"],"language":"eng","languages":["eng"],"type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","type":"Song","title":"Master
+        of Puppets","disambiguation":""},"attributes":[],"type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","begin":"1985-09-01","attribute-values":{},"direction":"forward","target-type":"work"}],"first-release-date":"1986-03-03","id":"0151d8a4-50c8-4036-b824-4a4f4b140e8e","length":515240},"position":2,"id":"0dbf1f5d-1245-4736-a190-83ab3174bcb2","length":518000,"number":"2"},{"recording":{"first-release-date":"1986-03-03","id":"f5267fe1-5cb6-47f7-8df2-e6e8f09fa7ad","length":396173,"title":"The
+        Thing That Should Not Be","disambiguation":"","artist-credit":[{"artist":{"sort-name":"Metallica","country":"US","disambiguation":"","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","name":"Metallica","type":"Group"},"joinphrase":"","name":"Metallica"}],"video":false,"relations":[{"type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","begin":"1985-09-01","attribute-values":{},"direction":"forward","target-type":"work","target-credit":"","end":"1985-12-27","ended":true,"source-credit":"","attribute-ids":{},"work":{"id":"845c7fe0-e11d-3e7b-ad42-814e5c285e13","attributes":[],"iswcs":["T-070.186.595-3"],"language":"eng","type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","languages":["eng"],"type":"Song","title":"The
+        Thing That Should Not Be","disambiguation":""},"attributes":[]}]},"title":"The
+        Thing That Should Not Be","position":3,"artist-credit":[{"artist":{"type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica","sort-name":"Metallica","country":"US","disambiguation":""},"name":"Metallica","joinphrase":""}],"id":"4edbe3e8-4672-4ab9-9664-b0fcf43a786b","length":392000,"number":"3"},{"recording":{"first-release-date":"1986-03-03","length":387026,"id":"a20860e9-7636-422b-a9cd-2da671b242a8","disambiguation":"","artist-credit":[{"name":"Metallica","joinphrase":"","artist":{"country":"US","disambiguation":"","sort-name":"Metallica","type":"Group","name":"Metallica","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"}}],"title":"Welcome
+        Home (Sanitarium)","relations":[{"begin":"1985-09-01","attribute-values":{},"direction":"forward","target-type":"work","type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","work":{"iswcs":["T-070.204.989-5"],"attributes":[],"id":"6193e612-7482-3698-a84d-f3684d183264","language":"eng","type":"Song","type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","languages":["eng"],"disambiguation":"","title":"Welcome
+        Home (Sanitarium)"},"attributes":[],"target-credit":"","ended":true,"end":"1985-12-27","attribute-ids":{},"source-credit":""}],"video":false},"title":"Welcome
+        Home (Sanitarium)","position":4,"artist-credit":[{"artist":{"disambiguation":"","country":"US","sort-name":"Metallica","type":"Group","name":"Metallica","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"},"joinphrase":"","name":"Metallica"}],"id":"d848ecf3-8c22-4fde-bdc1-bbc072e8cb01","length":388000,"number":"4"},{"artist-credit":[{"name":"Metallica","joinphrase":"","artist":{"disambiguation":"","country":"US","sort-name":"Metallica","name":"Metallica","type":"Group","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b"}}],"recording":{"title":"Disposable
+        Heroes","disambiguation":"","artist-credit":[{"joinphrase":"","name":"Metallica","artist":{"name":"Metallica","type":"Group","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","disambiguation":"","country":"US","sort-name":"Metallica"}}],"relations":[{"begin":"1985-09-01","attribute-values":{},"direction":"forward","target-type":"work","type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","work":{"type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","languages":["eng"],"type":"Song","title":"Disposable
+        Heroes","disambiguation":"","id":"3c08e882-e98c-3889-a3c5-6854d35e3e2f","iswcs":["T-070.043.581-9"],"attributes":[],"language":"eng"},"attributes":[],"target-credit":"","ended":true,"end":"1985-12-27","attribute-ids":{},"source-credit":""}],"video":false,"first-release-date":"1986-03-03","length":496626,"id":"93ae3251-d9b5-46ee-9849-7b16d5e57d8b"},"title":"Disposable
+        Heroes","position":5,"number":"5","id":"765bec33-fd00-45e7-99e7-e28c0e16e8a0","length":494000},{"id":"a7e11895-93ea-4617-81ad-d296d8240ad4","length":338000,"number":"6","recording":{"id":"2d9a5b40-f5e6-4499-ab7a-567fe3b42ab9","length":339906,"first-release-date":"1986-03-03","video":false,"relations":[{"type":"performance","type-id":"a3005666-a872-32c3-ad06-98af558e99b0","attribute-values":{},"begin":"1985-09-01","target-type":"work","direction":"forward","target-credit":"","attribute-ids":{},"source-credit":"","ended":true,"end":"1985-12-27","work":{"id":"830e90d3-eb79-3f0a-a395-59b61ec29973","iswcs":["T-070.102.257-2"],"attributes":[],"language":"eng","languages":["eng"],"type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","type":"Song","title":"Leper
+        Messiah","disambiguation":""},"attributes":[]}],"artist-credit":[{"artist":{"id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","name":"Metallica","type":"Group","sort-name":"Metallica","country":"US","disambiguation":""},"name":"Metallica","joinphrase":""}],"disambiguation":"","title":"Leper
+        Messiah"},"title":"Leper Messiah","position":6,"artist-credit":[{"artist":{"disambiguation":"","country":"US","sort-name":"Metallica","type":"Group","name":"Metallica","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"},"name":"Metallica","joinphrase":""}]},{"id":"3ff0310b-491b-4ec1-89b4-94d627207aa4","length":492000,"number":"7","artist-credit":[{"artist":{"country":"US","disambiguation":"","sort-name":"Metallica","name":"Metallica","type":"Group","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b"},"joinphrase":"","name":"Metallica"}],"recording":{"length":507293,"id":"b6cbe414-8b21-4600-8588-f6a80fd7043a","first-release-date":"1986-03-03","relations":[{"ended":true,"end":"1985-12-27","attribute-ids":{},"source-credit":"","target-credit":"","attributes":[],"work":{"attributes":[],"iswcs":["T-070.162.223-2"],"id":"4bd346e7-814a-3af7-a538-faf17da70981","language":"zxx","type":null,"type-id":null,"languages":["zxx"],"disambiguation":"","title":"Orion"},"type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","direction":"forward","target-type":"work","begin":"1985-09-01","attribute-values":{}}],"video":false,"title":"Orion","artist-credit":[{"joinphrase":"","name":"Metallica","artist":{"type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica","sort-name":"Metallica","country":"US","disambiguation":""}}],"disambiguation":""},"title":"Orion","position":7},{"position":8,"title":"Damage,
+        Inc.","recording":{"first-release-date":"1986-03-03","id":"01ea1189-e0d2-48a0-9dc2-c615785a5ae0","length":331573,"disambiguation":"","artist-credit":[{"artist":{"sort-name":"Metallica","disambiguation":"","country":"US","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica"},"name":"Metallica","joinphrase":""}],"title":"Damage,
+        Inc.","video":false,"relations":[{"target-credit":"","end":"1985-12-27","ended":true,"source-credit":"","attribute-ids":{},"work":{"type":"Song","type-id":"f061270a-2fd6-32f1-a641-f0f8676d14e6","languages":["eng"],"disambiguation":"","title":"Damage,
+        Inc.","attributes":[],"iswcs":["T-070.043.583-1"],"id":"4ec34a05-99aa-3299-a0c4-922c1e255810","language":"eng"},"attributes":[],"type-id":"a3005666-a872-32c3-ad06-98af558e99b0","type":"performance","begin":"1985-09-01","attribute-values":{},"direction":"forward","target-type":"work"}]},"artist-credit":[{"artist":{"sort-name":"Metallica","disambiguation":"","country":"US","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","type":"Group","name":"Metallica"},"joinphrase":"","name":"Metallica"}],"number":"8","length":308000,"id":"fe9c3ff1-3f20-41f9-8f8a-10045f34e954"}],"format-id":"9712d52a-4509-3d4b-a1a2-67c88c643e31","id":"a16000ea-587a-3e4b-933d-8628772f2e82"}],"relations":[],"barcode":"075596043922","quality":"normal","id":"31de97e3-6c53-4ca6-a00d-152642eb7e4a","release-events":[{"date":"1986-06","area":{"sort-name":"United
+        States","disambiguation":"","iso-3166-1-codes":["US"],"type-id":null,"id":"489ce91b-6658-3307-9877-795b68554c98","type":null,"name":"United
+        States"}}]}'
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '12096'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Sat, 26 Sep 2026 16:27:21 GMT
+      etag:
+      - W/"a4314fe0f7790eaf44e11a943468cf17"
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      transfer-encoding:
+      - chunked
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '1543'
+      x-ratelimit-reset:
+      - '1790440043'
+      x-runtime:
+      - '0.087454'
+    status:
+      code: 200
+      message: OK
+version: 1
