@@ -1,0 +1,4512 @@
+[
+  {
+    "cell": null,
+    "code": "S105",
+    "end_location": {
+      "column": 37,
+      "row": 8
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\config.py",
+    "fix": null,
+    "location": {
+      "column": 26,
+      "row": 8
+    },
+    "message": "Possible hardcoded password assigned to: \"airwave_token\"",
+    "noqa_row": 8,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-password-string"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 10,
+      "row": 44
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\migrations.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 40
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 40,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY400",
+    "end_location": {
+      "column": 70,
+      "row": 83
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\migrations.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "exception",
+          "end_location": {
+            "column": 29,
+            "row": 83
+          },
+          "location": {
+            "column": 24,
+            "row": 83
+          }
+        }
+      ],
+      "message": "Replace with `exception`"
+    },
+    "location": {
+      "column": 17,
+      "row": 83
+    },
+    "message": "Use `logging.exception` instead of `logging.error`",
+    "noqa_row": 83,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/error-instead-of-exception"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 73,
+      "row": 84
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\migrations.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 84
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 84,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 87,
+      "row": 20
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\pool.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 20
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 20,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 47
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\artists.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 47
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 47,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 89,
+      "row": 95
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\artists.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 95
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 95,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 83,
+      "row": 142
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\artists.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 142
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 142,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 46
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_artists.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 46
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 46,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 38
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_days.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 38
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 38,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 92,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_play_events.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 55
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 33
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_playlists.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 33
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 33,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 34
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_stations.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 34
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 34,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 60
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_stations.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 60
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 60,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 56
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\broadcast_track_identities.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 56
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 56,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\format_overrides.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 55
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 174
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\library_files.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 174
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 174,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 36
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\library_quarantine.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 36
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 36,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 47
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\mapping_rules.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 47
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 47,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 59
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\matches.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 59
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 59,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\recordings.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 55
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 83,
+      "row": 119
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\recordings.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 119
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 119,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 50
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\song_masters.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 50
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 50,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 93,
+      "row": 79
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\system_logs.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 79
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 79,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 61,
+      "row": 93
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\system_logs.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 93
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 93,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\task_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 55
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S101",
+    "end_location": {
+      "column": 15,
+      "row": 66
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\user_settings.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 66
+    },
+    "message": "Use of `assert` detected",
+    "noqa_row": 66,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 44
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\repositories\\works.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 44
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 44,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 54,
+      "row": 36
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\retry.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 36
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 36,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 79,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\db\\retry.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 55
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 14,
+      "row": 31
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\domain\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 28
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 28,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "ARG002",
+    "end_location": {
+      "column": 15,
+      "row": 87
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\logging_config.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 87
+    },
+    "message": "Unused method argument: `logger`",
+    "noqa_row": 87,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-method-argument"
+  },
+  {
+    "cell": null,
+    "code": "ARG002",
+    "end_location": {
+      "column": 15,
+      "row": 88
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\logging_config.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 88
+    },
+    "message": "Unused method argument: `method`",
+    "noqa_row": 88,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-method-argument"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 18,
+      "row": 114
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\logging_config.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "pass",
+          "end_location": {
+            "column": 94,
+            "row": 114
+          },
+          "location": {
+            "column": 13,
+            "row": 114
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 13,
+      "row": 114
+    },
+    "message": "`print` found",
+    "noqa_row": 114,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "ARG001",
+    "end_location": {
+      "column": 23,
+      "row": 24
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\main.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 24
+    },
+    "message": "Unused function argument: `app`",
+    "noqa_row": 24,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-function-argument"
+  },
+  {
+    "cell": null,
+    "code": "S105",
+    "end_location": {
+      "column": 45,
+      "row": 28
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\main.py",
+    "fix": null,
+    "location": {
+      "column": 34,
+      "row": 28
+    },
+    "message": "Possible hardcoded password assigned to: \"airwave_token\"",
+    "noqa_row": 28,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-password-string"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 8,
+      "row": 101
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\artists.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 97
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 101,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 8,
+      "row": 125
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\artists.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 107
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 125,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 8,
+      "row": 107
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\files.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 103
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 107,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 8,
+      "row": 118
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\files.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 112
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 118,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 79,
+      "row": 226
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 226
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 226,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 26,
+      "row": 294
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 294
+    },
+    "message": "Too many statements (43 > 40)",
+    "noqa_row": 294,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "S101",
+    "end_location": {
+      "column": 15,
+      "row": 452
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 452
+    },
+    "message": "Use of `assert` detected",
+    "noqa_row": 452,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 561
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 561
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 561,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 636
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 636
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 636,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 22,
+      "row": 673
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 673
+    },
+    "message": "`merge_works` is too complex (11 > 10)",
+    "noqa_row": 673,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 22,
+      "row": 673
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 673
+    },
+    "message": "Too many statements (46 > 40)",
+    "noqa_row": 673,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 72,
+      "row": 696
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 696
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 696,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 87,
+      "row": 711
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 711
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 711,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 12,
+      "row": 738
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 721
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 738,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 78,
+      "row": 748
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 748
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 748,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 90,
+      "row": 753
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 753
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 753,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 12,
+      "row": 764
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 760
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 764,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 81,
+      "row": 768
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 768
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 768,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 74,
+      "row": 773
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 773
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 773,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 75,
+      "row": 777
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 777
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 777,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 29,
+      "row": 914
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\library\\works.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 914
+    },
+    "message": "Too many statements (45 > 40)",
+    "noqa_row": 914,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 4,
+      "row": 159
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 90
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 159,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 29,
+      "row": 343
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 343
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 343,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "FBT001",
+    "end_location": {
+      "column": 21,
+      "row": 351
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 351
+    },
+    "message": "Boolean-typed positional argument in function definition",
+    "noqa_row": 351,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 12,
+      "row": 396
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 380
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 396,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 16,
+      "row": 431
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 425
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 431,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 36,
+      "row": 565
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 566
+          },
+          "location": {
+            "column": 1,
+            "row": 565
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 565
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 565,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 41,
+      "row": 763
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 764
+          },
+          "location": {
+            "column": 1,
+            "row": 763
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 763
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 763,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 36,
+      "row": 898
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 899
+          },
+          "location": {
+            "column": 1,
+            "row": 898
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 898
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 898,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 41,
+      "row": 990
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\matching.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 991
+          },
+          "location": {
+            "column": 1,
+            "row": 990
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 990
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 990,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 195
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\stations.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 195
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 195,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 243
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\stations.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 243
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 243,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 27,
+      "row": 65
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\system_logs.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 65
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 65,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 57,
+      "row": 91
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\system_logs.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 91
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 91,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 89,
+      "row": 99
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\routers\\system_logs.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 99
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 99,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 24,
+      "row": 92
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 92
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 92,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "FBT001",
+    "end_location": {
+      "column": 19,
+      "row": 97
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 97
+    },
+    "message": "Boolean-typed positional argument in function definition",
+    "noqa_row": 97,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "S101",
+    "end_location": {
+      "column": 15,
+      "row": 261
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 261
+    },
+    "message": "Use of `assert` detected",
+    "noqa_row": 261,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert"
+  },
+  {
+    "cell": null,
+    "code": "ARG002",
+    "end_location": {
+      "column": 37,
+      "row": 382
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 382
+    },
+    "message": "Unused method argument: `broadcast_artist`",
+    "noqa_row": 382,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-method-argument"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 21,
+      "row": 454
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 454
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 454,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 30,
+      "row": 525
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 525
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 525,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 14,
+      "row": 565
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 561
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 561,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 31,
+      "row": 609
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 609
+    },
+    "message": "Too many arguments in function definition (12 > 5)",
+    "noqa_row": 609,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PTH113",
+    "end_location": {
+      "column": 26,
+      "row": 26
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\case_duplicate_service.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 26
+    },
+    "message": "`os.path.isfile()` should be replaced by `Path.is_file()`",
+    "noqa_row": 26,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-isfile"
+  },
+  {
+    "cell": null,
+    "code": "PTH122",
+    "end_location": {
+      "column": 35,
+      "row": 50
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\folder_hash_service.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 50
+    },
+    "message": "`os.path.splitext()` should be replaced by `Path.suffix`, `Path.stem`, and `Path.parent`",
+    "noqa_row": 50,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-splitext"
+  },
+  {
+    "cell": null,
+    "code": "FBT001",
+    "end_location": {
+      "column": 17,
+      "row": 125
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\folder_hash_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 125
+    },
+    "message": "Boolean-typed positional argument in function definition",
+    "noqa_row": 125,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 23,
+      "row": 121
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\grouping_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 121
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 121,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 16,
+      "row": 155
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\grouping_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 155
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 155,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 78,
+      "row": 156
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\identity_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 156
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 156,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "ARG002",
+    "end_location": {
+      "column": 15,
+      "row": 245
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\identity_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 245
+    },
+    "message": "Unused method argument: `artist`",
+    "noqa_row": 245,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-method-argument"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 34,
+      "row": 539
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\identity_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 539
+    },
+    "message": "Too many arguments in function definition (9 > 5)",
+    "noqa_row": 539,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 92,
+      "row": 82
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\identity_resolution_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 82
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 82,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 10,
+      "row": 130
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 128
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 128,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 10,
+      "row": 138
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 134
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 134,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 6,
+      "row": 174
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 171
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 171,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 15,
+      "row": 205
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 205
+    },
+    "message": "`ingest_csv` is too complex (13 > 10)",
+    "noqa_row": 205,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 15,
+      "row": 205
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 205
+    },
+    "message": "Too many arguments in function definition (9 > 5)",
+    "noqa_row": 205,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 15,
+      "row": 205
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 205
+    },
+    "message": "Too many statements (59 > 40)",
+    "noqa_row": 205,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 88,
+      "row": 250
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\ingestion_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 250
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 250,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 22,
+      "row": 183
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_enrichment_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 183
+    },
+    "message": "`enrich_by_release` is too complex (12 > 10)",
+    "noqa_row": 183,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "S101",
+    "end_location": {
+      "column": 15,
+      "row": 371
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_enrichment_service.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 371
+    },
+    "message": "Use of `assert` detected",
+    "noqa_row": 371,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 71,
+      "row": 378
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_scan_service.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 378
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 378,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "FBT001",
+    "end_location": {
+      "column": 17,
+      "row": 398
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_scan_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 398
+    },
+    "message": "Boolean-typed positional argument in function definition",
+    "noqa_row": 398,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "FBT002",
+    "end_location": {
+      "column": 17,
+      "row": 398
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_scan_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 398
+    },
+    "message": "Boolean default positional argument in function definition",
+    "noqa_row": 398,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-default-value-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "PTH121",
+    "end_location": {
+      "column": 32,
+      "row": 558
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_scan_service.py",
+    "fix": null,
+    "location": {
+      "column": 16,
+      "row": 558
+    },
+    "message": "`os.path.samefile()` should be replaced by `Path.samefile()`",
+    "noqa_row": 558,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-samefile"
+  },
+  {
+    "cell": null,
+    "code": "PTH110",
+    "end_location": {
+      "column": 30,
+      "row": 569
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\library_scan_service.py",
+    "fix": null,
+    "location": {
+      "column": 16,
+      "row": 569
+    },
+    "message": "`os.path.exists()` should be replaced by `Path.exists()`",
+    "noqa_row": 569,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-exists"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 17,
+      "row": 31
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\m3u_generator_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 31
+    },
+    "message": "`generate_m3u` is too complex (11 > 10)",
+    "noqa_row": 31,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 17,
+      "row": 31
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\m3u_generator_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 31
+    },
+    "message": "Too many arguments in function definition (9 > 5)",
+    "noqa_row": 31,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "S324",
+    "end_location": {
+      "column": 23,
+      "row": 270
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\services\\normalization.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 270
+    },
+    "message": "Probable use of insecure hash functions in `hashlib`: `md5`",
+    "noqa_row": 270,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hashlib-insecure-hash-function"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 20,
+      "row": 97
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\_error_boundary.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 97
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 97,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 74,
+      "row": 97
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\ingestion_tasks.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 98
+          },
+          "location": {
+            "column": 1,
+            "row": 97
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 97
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 97,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "TRY300",
+    "end_location": {
+      "column": 20,
+      "row": 127
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\ingestion_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 127
+    },
+    "message": "Consider moving this statement to an `else` block",
+    "noqa_row": 127,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-consider-else"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 19,
+      "row": 177
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\ingestion_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 177
+    },
+    "message": "`ingestion_task` is too complex (11 > 10)",
+    "noqa_row": 177,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 19,
+      "row": 177
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\ingestion_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 177
+    },
+    "message": "Too many statements (49 > 40)",
+    "noqa_row": 177,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "TRY300",
+    "end_location": {
+      "column": 23,
+      "row": 304
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\ingestion_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 304
+    },
+    "message": "Consider moving this statement to an `else` block",
+    "noqa_row": 304,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-consider-else"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 20,
+      "row": 66
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 66
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 66,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 28,
+      "row": 88
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 88
+    },
+    "message": "`library_enrichment_task` is too complex (11 > 10)",
+    "noqa_row": 88,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 28,
+      "row": 88
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 88
+    },
+    "message": "Too many statements (76 > 40)",
+    "noqa_row": 88,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 14,
+      "row": 41
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 41
+    },
+    "message": "`_run_scan` is too complex (20 > 10)",
+    "noqa_row": 41,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 14,
+      "row": 41
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 41
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 41,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 14,
+      "row": 41
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 41
+    },
+    "message": "Too many statements (81 > 40)",
+    "noqa_row": 41,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 22,
+      "row": 243
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 243
+    },
+    "message": "Too many statements (47 > 40)",
+    "noqa_row": 243,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 28,
+      "row": 103
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_watcher_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 103
+    },
+    "message": "`library_scan_files_task` is too complex (14 > 10)",
+    "noqa_row": 103,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0912",
+    "end_location": {
+      "column": 28,
+      "row": 103
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_watcher_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 103
+    },
+    "message": "Too many branches (14 > 12)",
+    "noqa_row": 103,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-branches"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 28,
+      "row": 103
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_watcher_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 103
+    },
+    "message": "Too many statements (62 > 40)",
+    "noqa_row": 103,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "TRY400",
+    "end_location": {
+      "column": 60,
+      "row": 307
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\library_watcher_tasks.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "exception",
+          "end_location": {
+            "column": 21,
+            "row": 307
+          },
+          "location": {
+            "column": 16,
+            "row": 307
+          }
+        }
+      ],
+      "message": "Replace with `exception`"
+    },
+    "location": {
+      "column": 9,
+      "row": 307
+    },
+    "message": "Use `logging.exception` instead of `logging.error`",
+    "noqa_row": 307,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/error-instead-of-exception"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 10,
+      "row": 88
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\mb_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 86
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 86,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 20,
+      "row": 100
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\mb_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 100
+    },
+    "message": "`_enhance_artist` is too complex (11 > 10)",
+    "noqa_row": 100,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 20,
+      "row": 100
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\mb_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 100
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 100,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 33,
+      "row": 200
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\mb_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 200
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 200,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 23,
+      "row": 783
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\backend\\tasks\\mb_enrichment_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 783
+    },
+    "message": "Too many statements (49 > 40)",
+    "noqa_row": 783,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 28,
+      "row": 27
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\audit\\hotspots.py",
+    "fix": null,
+    "location": {
+      "column": 14,
+      "row": 27
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 27,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 93,
+      "row": 29
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\audit\\hotspots.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 29
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 29,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 77,
+      "row": 72
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 72
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 72,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "FBT001",
+    "end_location": {
+      "column": 23,
+      "row": 206
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 206
+    },
+    "message": "Boolean-typed positional argument in function definition",
+    "noqa_row": 206,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/boolean-type-hint-positional-argument"
+  },
+  {
+    "cell": null,
+    "code": "PTH207",
+    "end_location": {
+      "column": 39,
+      "row": 249
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 30,
+      "row": 249
+    },
+    "message": "Replace `glob` with `Path.glob` or `Path.rglob`",
+    "noqa_row": 249,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/glob"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 61,
+      "row": 253
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 253
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 253,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 28,
+      "row": 265
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 265
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 265,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 29,
+      "row": 275
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 275
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 275,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 62,
+      "row": 283
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 283
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 283,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 68,
+      "row": 285
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 285
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 285,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 8,
+      "row": 307
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 297
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 307,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 12,
+      "row": 324
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 22,
+      "row": 320
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 324,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "S101",
+    "end_location": {
+      "column": 11,
+      "row": 337
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 337
+    },
+    "message": "Use of `assert` detected",
+    "noqa_row": 337,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 76,
+      "row": 359
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 359
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 359,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 67,
+      "row": 432
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_enrich.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 432
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 432,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 15,
+      "row": 129
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 129
+    },
+    "message": "`instrument` is too complex (12 > 10)",
+    "noqa_row": 129,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 15,
+      "row": 129
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 129
+    },
+    "message": "Too many statements (42 > 40)",
+    "noqa_row": 129,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 77,
+      "row": 263
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 263
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 263,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PTH118",
+    "end_location": {
+      "column": 21,
+      "row": 368
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 368
+    },
+    "message": "`os.path.join()` should be replaced by `Path` with `/` operator",
+    "noqa_row": 368,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-join"
+  },
+  {
+    "cell": null,
+    "code": "PTH122",
+    "end_location": {
+      "column": 28,
+      "row": 371
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 371
+    },
+    "message": "`os.path.splitext()` should be replaced by `Path.suffix`, `Path.stem`, and `Path.parent`",
+    "noqa_row": 371,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-splitext"
+  },
+  {
+    "cell": null,
+    "code": "PTH116",
+    "end_location": {
+      "column": 54,
+      "row": 376
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 47,
+      "row": 376
+    },
+    "message": "`os.stat()` should be replaced by `Path.stat()`, `Path.owner()`, or `Path.group()`",
+    "noqa_row": 376,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-stat"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 83,
+      "row": 381
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 381
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 381,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PTH100",
+    "end_location": {
+      "column": 27,
+      "row": 386
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 386
+    },
+    "message": "`os.path.abspath()` should be replaced by `Path.resolve()`",
+    "noqa_row": 386,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/os-path-abspath"
+  },
+  {
+    "cell": null,
+    "code": "PTH123",
+    "end_location": {
+      "column": 18,
+      "row": 443
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 14,
+      "row": 443
+    },
+    "message": "`open()` should be replaced by `Path.open()`",
+    "noqa_row": 443,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/builtin-open"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 28,
+      "row": 449
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 14,
+      "row": 449
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 449,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 65,
+      "row": 450
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 450
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 450,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 27,
+      "row": 455
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 455
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 455,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 75,
+      "row": 456
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 456
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 456,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 12,
+      "row": 504
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 504
+    },
+    "message": "Too many statements (49 > 40)",
+    "noqa_row": 504,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 99,
+      "row": 521
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 521
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 521,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S311",
+    "end_location": {
+      "column": 29,
+      "row": 632
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 632
+    },
+    "message": "Standard pseudo-random generators are not suitable for cryptographic purposes",
+    "noqa_row": 632,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/suspicious-non-cryptographic-random-usage"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 31,
+      "row": 651
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 651
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 651,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 74,
+      "row": 652
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\bench_scan.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 652
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 652,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 19,
+      "row": 28
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_mcp_server.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 28
+    },
+    "message": "`handle_request` is too complex (11 > 10)",
+    "noqa_row": 28,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "TRY300",
+    "end_location": {
+      "column": 18,
+      "row": 122
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_mcp_server.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 118
+    },
+    "message": "Consider moving this statement to an `else` block",
+    "noqa_row": 118,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-consider-else"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 31,
+      "row": 32
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 32
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 32,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 61,
+      "row": 33
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 33
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 33,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 83,
+      "row": 107
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 107
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 107,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "TRY300",
+    "end_location": {
+      "column": 23,
+      "row": 128
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 128
+    },
+    "message": "Consider moving this statement to an `else` block",
+    "noqa_row": 128,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-consider-else"
+  },
+  {
+    "cell": null,
+    "code": "TRY300",
+    "end_location": {
+      "column": 51,
+      "row": 150
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 150
+    },
+    "message": "Consider moving this statement to an `else` block",
+    "noqa_row": 150,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-consider-else"
+  },
+  {
+    "cell": null,
+    "code": "C901",
+    "end_location": {
+      "column": 26,
+      "row": 166
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 166
+    },
+    "message": "`do_incremental_update` is too complex (11 > 10)",
+    "noqa_row": 166,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/complex-structure"
+  },
+  {
+    "cell": null,
+    "code": "S112",
+    "end_location": {
+      "column": 21,
+      "row": 257
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\leann_reindex.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 256
+    },
+    "message": "`try`-`except`-`continue` detected, consider logging the exception",
+    "noqa_row": 256,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/try-except-continue"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 16,
+      "row": 84
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\scripts\\retitle_works.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 75
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 84,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 93,
+      "row": 79
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\conftest.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 79
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 79,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 17,
+      "row": 22
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fakes\\mb_client.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 22
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 22,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 10,
+      "row": 53
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fakes\\mb_client.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 51
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 51,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 68,
+      "row": 68
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fakes\\mb_client.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 68
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 68,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 68,
+      "row": 85
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fakes\\mb_client.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 85
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 85,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 121
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 122
+          },
+          "location": {
+            "column": 1,
+            "row": 121
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 121
+    },
+    "message": "`print` found",
+    "noqa_row": 121,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 139
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 140
+          },
+          "location": {
+            "column": 1,
+            "row": 139
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 139
+    },
+    "message": "`print` found",
+    "noqa_row": 139,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "S603",
+    "end_location": {
+      "column": 32,
+      "row": 152
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": null,
+    "location": {
+      "column": 18,
+      "row": 152
+    },
+    "message": "`subprocess` call: check for execution of untrusted input",
+    "noqa_row": 152,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true"
+  },
+  {
+    "cell": null,
+    "code": "S607",
+    "end_location": {
+      "column": 14,
+      "row": 165
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 153
+    },
+    "message": "Starting a process with a partial executable path",
+    "noqa_row": 153,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/start-process-with-partial-path"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 14,
+      "row": 171
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 172
+          },
+          "location": {
+            "column": 1,
+            "row": 171
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 9,
+      "row": 171
+    },
+    "message": "`print` found",
+    "noqa_row": 171,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 196
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 197
+          },
+          "location": {
+            "column": 1,
+            "row": 196
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 196
+    },
+    "message": "`print` found",
+    "noqa_row": 196,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 206
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 207
+          },
+          "location": {
+            "column": 1,
+            "row": 206
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 206
+    },
+    "message": "`print` found",
+    "noqa_row": 206,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 215
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 216
+          },
+          "location": {
+            "column": 1,
+            "row": 215
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 215
+    },
+    "message": "`print` found",
+    "noqa_row": 215,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 14,
+      "row": 221
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "pass",
+          "end_location": {
+            "column": 91,
+            "row": 221
+          },
+          "location": {
+            "column": 9,
+            "row": 221
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 9,
+      "row": 221
+    },
+    "message": "`print` found",
+    "noqa_row": 221,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "T201",
+    "end_location": {
+      "column": 10,
+      "row": 224
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\fixtures\\create_audio_fixtures.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 225
+          },
+          "location": {
+            "column": 1,
+            "row": 224
+          }
+        }
+      ],
+      "message": "Remove `print`"
+    },
+    "location": {
+      "column": 5,
+      "row": 224
+    },
+    "message": "`print` found",
+    "noqa_row": 224,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/print"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 70,
+      "row": 17
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\helpers.py",
+    "fix": null,
+    "location": {
+      "column": 28,
+      "row": 17
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 17,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 11,
+      "row": 64
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\integration\\test_library_enrichment.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 64
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 64,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 37,
+      "row": 45
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\integration\\test_library_pipeline_e2e.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 45
+    },
+    "message": "Too many statements (42 > 40)",
+    "noqa_row": 45,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 15,
+      "row": 14
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\integration\\test_pg_library_repos.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 14
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 14,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 14,
+      "row": 15
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\integration\\test_pg_system_logs_repo.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 15
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 15,
+      "row": 46
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_library.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 46
+    },
+    "message": "Too many arguments in function definition (8 > 5)",
+    "noqa_row": 46,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 26,
+      "row": 75
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_library.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 75
+    },
+    "message": "Too many arguments in function definition (8 > 5)",
+    "noqa_row": 75,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 25,
+      "row": 130
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_matching.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 130
+    },
+    "message": "Too many arguments in function definition (8 > 5)",
+    "noqa_row": 130,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 50,
+      "row": 1093
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_matching.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 1093
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 1093,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 92,
+      "row": 2343
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_matching.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 2343
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 2343,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 33,
+      "row": 198
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_stations.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 198
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 198,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "S608",
+    "end_location": {
+      "column": 67,
+      "row": 371
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_stations.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 371
+    },
+    "message": "Possible SQL injection vector through string-based query construction",
+    "noqa_row": 371,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-sql-expression"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 14,
+      "row": 19
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_system_logs_router.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 19
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 19,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 46,
+      "row": 119
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_system_logs_router.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 120
+          },
+          "location": {
+            "column": 1,
+            "row": 119
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 119
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 119,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 15,
+      "row": 18
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 18
+    },
+    "message": "Too many arguments in function definition (6 > 5)",
+    "noqa_row": 18,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 15,
+      "row": 38
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\routers\\test_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 38
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 38,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 68,
+      "row": 416
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_artist_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 416
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 416,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 37,
+      "row": 626
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_artist_matching_service.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 627
+          },
+          "location": {
+            "column": 1,
+            "row": 626
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 5,
+      "row": 626
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 626,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 14,
+      "row": 55
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_identity_matching_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 55
+    },
+    "message": "Too many arguments in function definition (8 > 5)",
+    "noqa_row": 55,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 14,
+      "row": 71
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_identity_matching_strategies.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 71
+    },
+    "message": "Too many arguments in function definition (9 > 5)",
+    "noqa_row": 71,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 19,
+      "row": 112
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_m3u_generator.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 112
+    },
+    "message": "Too many arguments in function definition (10 > 5)",
+    "noqa_row": 112,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 28,
+      "row": 208
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_normalization.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 209
+          },
+          "location": {
+            "column": 1,
+            "row": 208
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 208
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 208,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 36,
+      "row": 314
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_normalization.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 315
+          },
+          "location": {
+            "column": 1,
+            "row": 314
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 314
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 314,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 29,
+      "row": 481
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_normalization.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 482
+          },
+          "location": {
+            "column": 1,
+            "row": 481
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 481
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 481,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "ERA001",
+    "end_location": {
+      "column": 30,
+      "row": 521
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_normalization.py",
+    "fix": {
+      "applicability": "displayonly",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 522
+          },
+          "location": {
+            "column": 1,
+            "row": 521
+          }
+        }
+      ],
+      "message": "Remove commented-out code"
+    },
+    "location": {
+      "column": 1,
+      "row": 521
+    },
+    "message": "Found commented-out code",
+    "noqa_row": 521,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/commented-out-code"
+  },
+  {
+    "cell": null,
+    "code": "PLR0913",
+    "end_location": {
+      "column": 19,
+      "row": 22
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\services\\test_smart_scan.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 22
+    },
+    "message": "Too many arguments in function definition (7 > 5)",
+    "noqa_row": 22,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-arguments"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 70,
+      "row": 352
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_ingestion_task_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 352
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 352,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 75,
+      "row": 379
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_ingestion_task_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 379
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 379,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 75,
+      "row": 394
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_ingestion_task_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 394
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 394,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 76,
+      "row": 540
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_ingestion_task_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 540
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 540,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 42,
+      "row": 192
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_enrichment_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 192
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 192,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 31,
+      "row": 16
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 16
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/test_\"",
+    "noqa_row": 16,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 30,
+      "row": 26
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 21,
+      "row": 26
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/bad_\"",
+    "noqa_row": 26,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 57
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 57
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 57,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 94
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 94
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 94,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 127
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 127
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 127,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 160
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 160
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 160,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 195
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 195
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 195,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 225
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 225
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 225,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 302
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 302
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 302,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "S108",
+    "end_location": {
+      "column": 35,
+      "row": 324
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_library_scan_tasks.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 324
+    },
+    "message": "Probable insecure usage of temporary file or directory: \"/tmp/music\"",
+    "noqa_row": 324,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/hardcoded-temp-file"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 256
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_mb_enrichment_heartbeat.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 256
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 256,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 68,
+      "row": 380
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_mb_enrichment_heartbeat.py",
+    "fix": null,
+    "location": {
+      "column": 23,
+      "row": 380
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 380,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 45,
+      "row": 213
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_mb_enrichment_progress.py",
+    "fix": null,
+    "location": {
+      "column": 19,
+      "row": 213
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 213,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "TRY003",
+    "end_location": {
+      "column": 56,
+      "row": 77
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\tasks\\test_normalize_backfill_task.py",
+    "fix": null,
+    "location": {
+      "column": 15,
+      "row": 77
+    },
+    "message": "Avoid specifying long messages outside the exception class",
+    "noqa_row": 77,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-vanilla-args"
+  },
+  {
+    "cell": null,
+    "code": "PLR0915",
+    "end_location": {
+      "column": 51,
+      "row": 276
+    },
+    "filename": "D:\\PythonStuff\\RetroStation-audit1\\tests\\test_websocket.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 276
+    },
+    "message": "Too many statements (47 > 40)",
+    "noqa_row": 276,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/too-many-statements"
+  }
+]
