@@ -111,3 +111,19 @@ def test_ends_even_when_rows_cannot_be_hashed(tmp_path: Path) -> None:
     assert result is not None
     assert (result.hashed, result.changed, result.unreadable) == (1, 1, 1)
     assert files.count_unhashed() == 2
+
+
+def test_run_that_hashes_nothing_posts_no_progress(tmp_path: Path) -> None:
+    files, paths = _library(tmp_path, 2)
+    paths[0].unlink()
+    paths[1].write_bytes(b"edited-to-a-different-size")
+    progress = FakeTaskProgressRepository()
+
+    result = run_hash_backfill(
+        files, progress, lambda: None,
+        BackfillRunConfig(run_id="run-1", clock=lambda: T0),
+    )
+
+    assert result is not None
+    assert (result.hashed, result.changed, result.unreadable) == (0, 1, 1)
+    assert progress.received_upserts == []

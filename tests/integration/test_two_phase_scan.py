@@ -142,10 +142,12 @@ def test_backfill_after_first_scan_matches_a_one_phase_scan(
         one_phase = _snapshot(conn, library)
 
     assert all(row[1] is not None for row in two_phase["files"])
+    assert len(two_phase["files"]) == 5
+    assert len(two_phase["quarantine"]) == 1
     assert two_phase == one_phase
 
 
-def test_rescan_during_backfill_keeps_enrichment_and_fills_hashes(
+def test_rescan_after_first_scan_keeps_enrichment_and_fills_hashes(
     migrated_db: str, library: Path,
 ) -> None:
     kiss = library / "a" / "kiss.mp3"

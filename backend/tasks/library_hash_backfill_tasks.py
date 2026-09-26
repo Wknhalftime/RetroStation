@@ -126,10 +126,18 @@ def run_hash_backfill(
             break
         cursor = batch.last_path
         progress = progress.after(batch)
-        progress_repo.upsert(progress.as_task_progress(config.clock(), done=False))
+        # A row this run can never hash (unreadable past its tags, or its
+        # stat keeps moving with no watcher running) leaves count_unhashed()
+        # above zero forever, so the periodic resume starts a run every 5
+        # minutes. Post progress only once the run has actually hashed
+        # something, so a run that hashes nothing leaves no trace for the
+        # UI to show as a perpetually running backfill.
+        if progress.hashed > 0:
+            progress_repo.upsert(progress.as_task_progress(config.clock(), done=False))
         commit()
 
-    progress_repo.upsert(progress.as_task_progress(config.clock(), done=True))
+    if progress.hashed > 0:
+        progress_repo.upsert(progress.as_task_progress(config.clock(), done=True))
     commit()
     logger.info(
         "hash_backfill_complete",

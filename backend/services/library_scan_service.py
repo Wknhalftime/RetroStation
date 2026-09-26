@@ -4,7 +4,8 @@ Library scan service — tag extraction and directory walking.
 Public API:
   extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
   read_tags(path)          -> LibraryFile  (tags and stat only, no content read)
-  scan_directory(root, on_progress=None)  -> (list[LibraryFile], list[LibraryQuarantine])
+  scan_directory(root, on_progress=None, on_file=None, on_quarantine=None,
+                 hash_content=True)        -> (list[LibraryFile], list[LibraryQuarantine])
 
 Supported formats: .flac, .mp3, .m4a, .ogg, .wav
 """
