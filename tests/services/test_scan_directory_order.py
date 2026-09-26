@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from backend.domain.library import LibraryFile, LibraryQuarantine
+from backend.services import library_scan_service
 from backend.services.library_scan_service import scan_directory
 
 AUDIO_DIR = Path(__file__).parent.parent / "fixtures" / "audio"
@@ -86,3 +87,46 @@ class TestScanDirectoryOrder:
             e for e in events if e[0] == "quarantine"
         ]
         assert len(quarantine) == 13
+
+
+class TestScanDirectoryWorkers:
+    """Parallel extraction must be indistinguishable from serial extraction."""
+
+    @pytest.mark.parametrize("workers", [2, 4, 16])
+    def test_same_events_as_serial(self, library: Path, workers: int) -> None:
+        serial, _, _ = _record(library, workers=1)
+        parallel, _, _ = _record(library, workers=workers)
+        assert parallel == serial
+
+    def test_error_in_worker_is_quarantined_in_order(
+        self, library: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        real = library_scan_service.extract_tags
+
+        def flaky(path: Path) -> LibraryFile:
+            if path.name.startswith("05"):
+                raise PermissionError("Access denied")
+            return real(path)
+
+        monkeypatch.setattr(library_scan_service, "extract_tags", flaky)
+        serial, _, _ = _record(library, workers=1)
+        parallel, _, _ = _record(library, workers=4)
+        assert parallel == serial
+        denied = [e for e in parallel if e[0] == "quarantine" and "PermissionError" in str(e[2])]
+        assert len(denied) == 10
+
+    def test_callback_exception_propagates_and_stops_the_scan(self, library: Path) -> None:
+        seen: list[str] = []
+
+        def boom(lf: LibraryFile) -> None:
+            seen.append(lf.file_path)
+            if len(seen) == 5:
+                raise RuntimeError("db down")
+
+        with pytest.raises(RuntimeError, match="db down"):
+            scan_directory(library, on_file=boom, workers=4)
+        assert len(seen) == 5
+
+    def test_rejects_non_positive_workers(self, library: Path) -> None:
+        with pytest.raises(ValueError):
+            scan_directory(library, workers=0)

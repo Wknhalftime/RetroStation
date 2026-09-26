@@ -13,8 +13,11 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-from collections.abc import Callable, Iterable
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
 from uuid import uuid4
 
@@ -55,6 +58,12 @@ _TXXX_ALBUM_ARTIST_MBID = "MusicBrainz Album Artist Id"
 _TXXX_RELEASE_MBID = "MusicBrainz Album Id"
 _TXXX_RELEASE_TYPE = "MusicBrainz Release Type"
 _TXXX_RELEASE_STATUS = "MusicBrainz Release Status"
+
+# Files a full scan reads at once. Threads overlap one file's disk reads
+# with another's hashing and tag parsing; see scripts/bench_scan.py.
+DEFAULT_SCAN_WORKERS = 4
+# Extractions queued ahead of the consumer, per worker.
+_LOOKAHEAD_PER_WORKER = 2
 
 # Vorbis comment tag names (FLAC / OGG) — lowercase.
 _VORBIS_RECORDING_MBID = "musicbrainz_trackid"
@@ -383,11 +392,63 @@ def extract_tags(path: Path) -> LibraryFile:
     return _with_disk_stat(_extract_by_format(audio, path), path)
 
 
+@dataclass(frozen=True)
+class _Extraction:
+    """One file's extraction outcome: a LibraryFile, or the error that stopped it."""
+
+    path: Path
+    file: LibraryFile | None = None
+    error: str | None = None
+    # A non-Mutagen failure (permissions, I/O, a bug) rather than a bad file.
+    unexpected: bool = False
+
+
+def _extract_or_error(path: Path) -> _Extraction:
+    """Run extract_tags, capturing any failure so it can cross a thread boundary."""
+    try:
+        return _Extraction(path, file=extract_tags(path))
+    except MutagenError as exc:
+        return _Extraction(path, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — any per-file failure quarantines only that file
+        return _Extraction(path, error=f"{type(exc).__name__}: {exc}", unexpected=True)
+
+
+def _extract_in_order(paths: list[Path], workers: int) -> Iterator[_Extraction]:
+    """Yield an extraction per path, in *paths* order, running up to *workers* at once.
+
+    Reading and hashing release the GIL, so threads overlap one file's disk
+    reads with another's hashing. A bounded look-ahead window keeps memory
+    flat; results come back strictly in order, so a caller cannot tell this
+    apart from a serial loop.
+    """
+    if workers == 1:
+        yield from map(_extract_or_error, paths)
+        return
+
+    pending = iter(paths)
+    window: deque[Future[_Extraction]] = deque()
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scan") as pool:
+        try:
+            for path in islice(pending, workers * _LOOKAHEAD_PER_WORKER):
+                window.append(pool.submit(_extract_or_error, path))
+            while window:
+                done = window.popleft().result()
+                for path in islice(pending, 1):
+                    window.append(pool.submit(_extract_or_error, path))
+                yield done
+        finally:
+            # The consumer stopped early (a callback raised): don't go on
+            # reading files nobody will look at.
+            for future in window:
+                future.cancel()
+
+
 def scan_directory(
     root: Path,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_file: Callable[[LibraryFile], None] | None = None,
     on_quarantine: Callable[[LibraryQuarantine], None] | None = None,
+    workers: int | None = None,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
@@ -395,12 +456,22 @@ def scan_directory(
     Returns ``(files, quarantine)`` where *quarantine* contains an entry for
     every file that raised a :exc:`mutagen.MutagenError`.
 
+    Up to *workers* (default ``DEFAULT_SCAN_WORKERS``) files are extracted
+    at once, but the returned lists and
+    every callback follow sorted path order, and callbacks run on the
+    calling thread.
+
     Optional callbacks:
       *on_file* — called with each successfully extracted :class:`LibraryFile`.
       *on_quarantine* — called with each :class:`LibraryQuarantine` entry.
       *on_progress* — called with ``(processed, total, current_path)`` every
         50 files and on the final file.
     """
+    if workers is None:
+        workers = DEFAULT_SCAN_WORKERS
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, got {workers}")
+
     candidates = sorted(
         p for p in root.rglob("*")
         if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
@@ -413,28 +484,20 @@ def scan_directory(
     files: list[LibraryFile] = []
     quarantine: list[LibraryQuarantine] = []
 
-    for processed_idx, path in enumerate(candidates, start=1):
-        try:
-            lf = extract_tags(path)
-            files.append(lf)
+    for processed_idx, result in enumerate(_extract_in_order(candidates, workers), start=1):
+        if result.file is not None:
+            files.append(result.file)
             if on_file is not None:
-                on_file(lf)
-        except MutagenError as exc:
-            logger.warning("Quarantining %s: %s", path, exc)
+                on_file(result.file)
+        else:
+            if result.unexpected:
+                logger.warning("Unexpected error scanning %s: %s", result.path, result.error)
+            else:
+                logger.warning("Quarantining %s: %s", result.path, result.error)
             entry = LibraryQuarantine(
                 id=uuid4(),
-                file_path=str(path),
-                error_message=str(exc),
-            )
-            quarantine.append(entry)
-            if on_quarantine is not None:
-                on_quarantine(entry)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Unexpected error scanning %s: %s", path, exc)
-            entry = LibraryQuarantine(
-                id=uuid4(),
-                file_path=str(path),
-                error_message=f"{type(exc).__name__}: {exc}",
+                file_path=str(result.path),
+                error_message=result.error or "",
             )
             quarantine.append(entry)
             if on_quarantine is not None:
@@ -443,7 +506,7 @@ def scan_directory(
         if on_progress is not None and (
             processed_idx % 50 == 0 or processed_idx == total
         ):
-            on_progress(processed_idx, total, str(path))
+            on_progress(processed_idx, total, str(result.path))
 
     return files, quarantine
 

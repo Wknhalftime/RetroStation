@@ -383,6 +383,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         preload_into_cache(audio)
     dsn = reset_bench_db(args.admin_dsn, args.db)
 
+    if args.workers is not None:
+        from backend.services import library_scan_service
+
+        if not hasattr(library_scan_service, "DEFAULT_SCAN_WORKERS"):
+            raise SystemExit("this scanner version has no worker setting")
+        library_scan_service.DEFAULT_SCAN_WORKERS = args.workers
+
     timers = Timers()
     if not args.no_instrument:
         instrument(timers)
@@ -409,6 +416,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         "label": args.label,
         "git": _git_describe(),
         "cache": "evicted" if args.evict else "preloaded" if args.preload else "as-is",
+        "workers": args.workers,
         "root": str(root),
         "corpus": corpus,
         "elapsed_s": round(elapsed, 3),
@@ -540,6 +548,8 @@ def main() -> None:
                        help="drop the corpus from the OS file cache first (cold run)")
     cache.add_argument("--preload", action="store_true",
                        help="read the corpus into the OS file cache first (warm run)")
+    p_run.add_argument("--workers", type=int,
+                       help="override DEFAULT_SCAN_WORKERS (scanner versions that have it)")
     p_run.set_defaults(func=cmd_run)
 
     p_cmp = sub.add_parser("compare")
