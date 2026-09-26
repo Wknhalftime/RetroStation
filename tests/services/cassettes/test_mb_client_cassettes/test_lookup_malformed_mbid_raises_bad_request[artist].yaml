@@ -16,6 +16,55 @@ interactions:
     uri: https://musicbrainz.org/ws/2/artist/not-a-uuid?fmt=json&inc=aliases%2Btags
   response:
     body:
+      string: '{"error": "Your requests are exceeding the allowable rate limit. Please
+        see http://wiki.musicbrainz.org/XMLWebService for more information."}
+
+        '
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-type:
+      - application/json
+      date:
+      - Sat, 26 Sep 2026 16:27:26 GMT
+      keep-alive:
+      - timeout=15
+      retry-after:
+      - '1'
+      server:
+      - openresty
+      transfer-encoding:
+      - chunked
+      x-mb-gateway:
+      - rudi
+      x-mb-rate-limiter:
+      - lua
+      x-ratelimit-who:
+      - per-ip
+      x-ratelimit-zone:
+      - per-ip
+    status:
+      code: 503
+      message: Service Temporarily Unavailable
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/not-a-uuid?fmt=json&inc=aliases%2Btags
+  response:
+    body:
       string: '{"help":"For usage, please see: https://musicbrainz.org/development/mmd","error":"Invalid
         mbid."}'
     headers:
@@ -28,7 +77,7 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Fri, 25 Sep 2026 22:58:42 GMT
+      - Sat, 26 Sep 2026 16:27:29 GMT
       etag:
       - '"326ef3f5b9aabae00194a1623cdb3810"'
       keep-alive:
@@ -40,11 +89,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '325'
+      - '1884'
       x-ratelimit-reset:
-      - '1790377122'
+      - '1790440051'
       x-runtime:
-      - '0.003310'
+      - '0.029079'
     status:
       code: 400
       message: Bad Request

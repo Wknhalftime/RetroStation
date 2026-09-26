@@ -13,11 +13,10 @@ interactions:
       user-agent:
       - RetroStation/0.1.0 (https://github.com/retrostation)
     method: GET
-    uri: https://musicbrainz.org/ws/2/release/not-a-uuid?fmt=json&inc=recordings%2Bartist-credits%2Brelease-groups
+    uri: https://musicbrainz.org/ws/2/release/not-a-uuid?fmt=json&inc=recordings%2Bartist-credits%2Brelease-groups%2Brecording-level-rels%2Bwork-rels
   response:
     body:
-      string: '{"help":"For usage, please see: https://musicbrainz.org/development/mmd","error":"Invalid
-        mbid."}'
+      string: '{"error":"Invalid mbid.","help":"For usage, please see: https://musicbrainz.org/development/mmd"}'
     headers:
       access-control-allow-origin:
       - '*'
@@ -28,9 +27,9 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Fri, 25 Sep 2026 22:58:44 GMT
+      - Sat, 26 Sep 2026 16:27:31 GMT
       etag:
-      - '"326ef3f5b9aabae00194a1623cdb3810"'
+      - '"3dfd9a96b34e7d04b918ad79bf429369"'
       keep-alive:
       - timeout=15
       server:
@@ -40,11 +39,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '1807'
+      - '1451'
       x-ratelimit-reset:
-      - '1790377126'
+      - '1790440053'
       x-runtime:
-      - '0.006919'
+      - '0.003199'
     status:
       code: 400
       message: Bad Request
