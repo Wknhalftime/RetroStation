@@ -564,6 +564,8 @@ def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFil
     A row with identical content whose own file is still on disk is a
     duplicate copy, not the origin of a move, and is left alone.
     """
+    if lf.file_hash is None:
+        return None
     for candidate in file_repo.get_by_hash(lf.file_hash):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
             Path(candidate.file_path), Path(lf.file_path),

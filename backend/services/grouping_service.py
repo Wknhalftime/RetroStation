@@ -48,7 +48,13 @@ def _try_hash_shortcut(
     file: LibraryFile,
     library_file_repo: LibraryFileRepository,
 ) -> GroupingResult | None:
-    """Return existing GroupingResult if a file with the same hash already has a work_id."""
+    """Return existing GroupingResult if a file with the same hash already has a work_id.
+
+    A file not fingerprinted yet has no content identity to share; identical
+    bytes mean identical tags, so title matching reaches the same work.
+    """
+    if file.file_hash is None:
+        return None
     for existing in library_file_repo.get_by_hash(file.file_hash):
         if existing.work_id is not None and existing.id != file.id:
             return GroupingResult(
