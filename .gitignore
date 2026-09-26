@@ -32,3 +32,6 @@ coverage.xml
 .tox/
 *.log
 huey_gw*.db
+
+# Benchmark harness output (scripts/bench_*.py --out)
+results/
