@@ -77,6 +77,9 @@ export type QueueArtist = z.infer<typeof QueueArtistSchema>;
 export const MatchingQueueSchema = z.object({
   items: z.array(QueueArtistSchema),
   total: z.number(),
+  // Artists (under the same search) whose review items have no likely match,
+  // counted whether or not the request let them into `items`.
+  unlikely_total: z.number().optional(),
 });
 
 export type MatchingQueue = z.infer<typeof MatchingQueueSchema>;

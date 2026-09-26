@@ -80,11 +80,13 @@ _MATCHING_RUN_LOCK_OBJ_ID: int = 1
 _MAX_FAILED_PLAYLIST_IDS_IN_RESPONSE: int = 50
 
 
+_USER_UNMATCHED: str = ReasonCode.USER_UNMATCHED.value
+
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
 # bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
 # count all reference the same filtered set. Thresholds come from
 # matching_constants (single source of truth); the f-string interpolates trusted
-# module-level ints, never user input.
+# module-level ints and enum values, never user input.
 _QUEUE_BUCKET_CTE = f"""
 artist_base AS (
     -- Surface artists in two cases:
@@ -121,6 +123,7 @@ identity_best AS (
     SELECT DISTINCT ON (ti.id)
            ti.id AS identity_id,
            ti.broadcast_artist_id,
+           ti.reason_code,
            m.confidence_score
     FROM track_identities ti
     LEFT JOIN matches m ON m.identity_id = ti.id
@@ -140,7 +143,15 @@ artist_bucket AS (
                             AND ib.confidence_score < {QUICK_REVIEW_MIN_SCORE})
                    THEN 'needs_attention'
                ELSE 'blocked'
-           END AS bucket
+           END AS bucket,
+           -- Likely = worth a curator's time by default: a review item with a
+           -- guess at the presentation floor, or something the curator
+           -- unmatched (unmatch deletes the match rows, so it has no score,
+           -- and the artist must not vanish from under them).
+           COALESCE(bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
+                            OR ib.reason_code = '{_USER_UNMATCHED}'), FALSE)
+               OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
+               AS likely
     FROM artist_base a
     LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
     GROUP BY a.id
@@ -264,7 +275,10 @@ class QueueIdentity(BaseModel):
             "a candidate yet; (2) no library_file is currently linked to the "
             "persisted match row (orphan FK); (3) Resolution Center safety net "
             "— the persisted match would point at a different artist than the "
-            "locked one and is being suppressed. (3) is additive, not breaking; "
+            "locked one and is being suppressed; (4) the best guess scores "
+            "below MIN_PRESENTATION_SCORE (triage_bucket 'blocked'), where it "
+            "is the artist's nearest title, not a proposal — confidence_score "
+            "still carries the score. (3) and (4) are additive, not breaking; "
             "membership and `total` are unchanged. Note: proposed_match may "
             "remain null when a lower-ranked artist-valid match row exists; "
             "the queue picks the highest-scored row per identity and treats a "
@@ -292,6 +306,15 @@ class MatchingQueue(BaseModel):
 
     items: list[QueueArtist]
     total: int
+    unlikely_total: int = Field(
+        default=0,
+        description=(
+            "Artists matching the search and bucket filters whose review "
+            "items have no guess at MIN_PRESENTATION_SCORE or above. Counted "
+            "whether or not include_unlikely lets them into `items`, so the "
+            "UI can say how many it is hiding."
+        ),
+    )
 
 
 class ArtistResolution(BaseModel):
@@ -329,6 +352,7 @@ async def get_matching_queue(
     bucket: TriageBucket | None = Query(default=None),  # noqa: B008
     search: str | None = Query(default=None, max_length=200),  # noqa: B008
     sort: QueueSort = Query(default="created_at"),  # noqa: B008
+    include_unlikely: bool = Query(default=True),  # noqa: B008
 ) -> MatchingQueue:
     """Return paginated artists that need curator review.
 
@@ -345,6 +369,9 @@ async def get_matching_queue(
     set. `sort=name` orders alphabetically by original_name; default is the
     historical created_at, id order.
 
+    `include_unlikely=false` leaves out artists with no likely match (see
+    `likely` in _QUEUE_BUCKET_CTE); `unlikely_total` counts them either way.
+
     Locked-artist invariant: a persisted match row whose library_file's
     normalized_artist_name disagrees with the locked broadcast_artist's
     normalized_name is suppressed by the LEFT JOIN predicate. The identity
@@ -359,13 +386,15 @@ async def get_matching_queue(
         filtered AS (
             SELECT a.id, a.original_name, a.normalized_name, a.match_status,
                    a.artist_candidates, a.reason_code, a.reason_detail,
-                   a.created_at, ab.bucket
+                   a.created_at, ab.bucket, ab.likely
             FROM artist_base a
             JOIN artist_bucket ab ON ab.id = a.id
             WHERE %s::text IS NULL OR ab.bucket = %s::text
         )
-        SELECT *, COUNT(*) OVER () AS _total
+        SELECT *, COUNT(*) OVER () AS _total,
+               (SELECT COUNT(*) FROM filtered WHERE NOT likely) AS _unlikely_total
         FROM filtered
+        WHERE %s OR likely
         {order_by}
         LIMIT %s OFFSET %s
         """,
@@ -377,6 +406,7 @@ async def get_matching_queue(
         #   identity_best WHERE     — _QUEUE_STATUSES (identity status, again)
         #   filtered WHERE NULL     — bucket
         #   filtered WHERE eq       — bucket
+        #   page WHERE              — include_unlikely
         #   LIMIT / OFFSET          — limit / offset
         (
             _QUEUE_STATUSES,
@@ -386,6 +416,7 @@ async def get_matching_queue(
             _QUEUE_STATUSES,
             bucket,
             bucket,
+            include_unlikely,
             limit,
             offset,
         ),
@@ -397,26 +428,34 @@ async def get_matching_queue(
         count_cur = await conn.execute(
             f"""
             WITH {_QUEUE_BUCKET_CTE}
-            SELECT COUNT(*) AS total FROM artist_bucket
+            SELECT COUNT(*) FILTER (WHERE %s OR likely) AS total,
+                   COUNT(*) FILTER (WHERE NOT likely)   AS unlikely_total
+            FROM artist_bucket
             WHERE %s::text IS NULL OR bucket = %s::text
             """,
             # Same artist_base/identity_best bind order as the page query,
-            # then the two `bucket` bindings for the count's WHERE.
+            # then include_unlikely for the total's FILTER and the two
+            # `bucket` bindings for the count's WHERE.
             (
                 _QUEUE_STATUSES,
                 _QUEUE_STATUSES,
                 search_term,
                 search_term,
                 _QUEUE_STATUSES,
+                include_unlikely,
                 bucket,
                 bucket,
             ),
         )
         count_row = await count_cur.fetchone()
-        total = count_row["total"] if count_row else 0
-        return MatchingQueue(items=[], total=total)
+        return MatchingQueue(
+            items=[],
+            total=count_row["total"] if count_row else 0,
+            unlikely_total=count_row["unlikely_total"] if count_row else 0,
+        )
 
     total = artist_rows[0]["_total"]
+    unlikely_total = artist_rows[0]["_unlikely_total"]
     artist_ids = [row["id"] for row in artist_rows]
 
     # Locked-artist invariant for the Resolution Center: a persisted match
@@ -461,10 +500,12 @@ async def get_matching_queue(
     for irow in identity_rows:
         aid = irow["broadcast_artist_id"]
         cs: float | None = irow.get("confidence_score")
+        triage_bucket = _compute_triage_bucket(cs)
         # Build proposed_match only when the LEFT JOIN to library_files actually
         # matched a row. Checking library_files_joined_id (rather than
         # m.library_file_id) correctly leaves proposed_match=None for orphan
-        # FKs — preserves identity visibility in the queue.
+        # FKs — preserves identity visibility in the queue. A blocked guess is
+        # the artist's nearest title, not a proposal.
         lf_joined_id = irow.get("library_files_joined_id")
         proposed: ProposedMatch | None = (
             ProposedMatch(
@@ -475,7 +516,7 @@ async def get_matching_queue(
                 recording_mbid=irow.get("recording_mbid"),
                 candidate_match_tier=irow["candidate_match_tier"],
             )
-            if lf_joined_id is not None
+            if lf_joined_id is not None and triage_bucket != "blocked"
             else None
         )
         identities_by_artist.setdefault(aid, []).append(
@@ -486,7 +527,7 @@ async def get_matching_queue(
                 match_status=irow["match_status"],
                 match_tier=irow.get("match_tier"),
                 confidence_score=cs,
-                triage_bucket=_compute_triage_bucket(cs),
+                triage_bucket=triage_bucket,
                 reason_code=irow.get("reason_code"),
                 reason_detail=irow.get("reason_detail"),
                 proposed_match=proposed,
@@ -521,7 +562,7 @@ async def get_matching_queue(
             )
         )
 
-    return MatchingQueue(items=items, total=total)
+    return MatchingQueue(items=items, total=total, unlikely_total=unlikely_total)
 
 
 # ---------------------------------------------------------------------------
