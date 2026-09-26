@@ -23,6 +23,7 @@ from backend.domain.library import (
     MissingFilePlan,
     MissingFileReconciliation,
 )
+from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -168,19 +169,25 @@ class ReconciliationRepos:
     matches: MatchRepository
     works: WorkRepository
     song_masters: SongMasterRepository
+    format_overrides: FormatOverrideRepository
 
 
 def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> None:
     """Move every reference to the missing row onto its successor, then delete it.
 
-    When the successor sits in another work, the moved matches take that
-    work, and the work the missing row left re-picks its master from its
-    own present files and is deleted once nothing references it.
+    When the successor sits in another work, the moved matches and format
+    overrides take that work, and the work the missing row left re-picks its
+    master from its own present files and is deleted once nothing references
+    it.
     """
     repos.files.merge_into(move.missing_id, move.successor_id)
     if not move.crosses_work:
         return
     repos.matches.move_to_work(move.successor_id, move.successor_work_id)
+    if move.missing_work_id is not None and move.successor_work_id is not None:
+        repos.format_overrides.move_to_work(
+            move.successor_id, move.missing_work_id, move.successor_work_id
+        )
     if move.missing_work_id is None:
         return
     reselect_master_from_files(move.missing_work_id, repos.song_masters, repos.files)

@@ -13,6 +13,7 @@ from backend.services.missing_file_reconciliation_service import (
     apply_missing_file_move,
     reconcile_missing_files,
 )
+from tests.fakes.format_overrides import FakeFormatOverrideRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
@@ -27,6 +28,7 @@ def _repos() -> ReconciliationRepos:
         matches=FakeMatchRepository(),
         works=works,
         song_masters=FakeSongMasterRepository(),
+        format_overrides=FakeFormatOverrideRepository(),
     )
 
 

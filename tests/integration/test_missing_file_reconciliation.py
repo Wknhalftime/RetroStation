@@ -10,7 +10,7 @@ import pytest
 from psycopg.rows import DictRow, dict_row
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.curation import SongMaster
+from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.missing_file_reconciliation_service import (
@@ -28,6 +28,7 @@ def _repos(repos: RepositoryFactory) -> ReconciliationRepos:
         matches=repos.matches,
         works=repos.works,
         song_masters=repos.song_masters,
+        format_overrides=repos.format_overrides,
     )
 
 
@@ -157,3 +158,69 @@ def test_cross_work_fold_moves_matches_to_the_new_work_and_deletes_the_old_one(
                    WHERE lf.id IS NULL) AS n"""
         ).fetchone()
         assert dangling is not None and dangling["n"] == 0
+
+
+def test_cross_work_fold_moves_the_format_override_to_the_new_work(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
+        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
+        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
+        new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
+        repos.format_overrides.create(
+            FormatOverride(
+                id=uuid4(),
+                work_id=old_work,
+                format_name="hot_ac",
+                preferred_file_id=old.id,
+            )
+        )
+
+        reconcile_missing_files(_repos(repos))
+
+        assert repos.works.get_by_id(old_work) is None
+        moved = repos.format_overrides.get(new_work, "hot_ac")
+        assert moved is not None
+        assert moved.preferred_file_id == new.id
+
+
+def test_cross_work_fold_keeps_the_new_works_own_override_for_the_same_format(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
+        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
+        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
+        new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
+        kept_id = uuid4()
+        repos.format_overrides.create(
+            FormatOverride(
+                id=uuid4(),
+                work_id=old_work,
+                format_name="hot_ac",
+                preferred_file_id=old.id,
+            )
+        )
+        repos.format_overrides.create(
+            FormatOverride(
+                id=kept_id,
+                work_id=new_work,
+                format_name="hot_ac",
+                preferred_file_id=new.id,
+            )
+        )
+
+        reconcile_missing_files(_repos(repos))
+
+        assert repos.works.get_by_id(old_work) is None
+        assert repos.format_overrides.get(old_work, "hot_ac") is None
+        kept = repos.format_overrides.get(new_work, "hot_ac")
+        assert kept is not None
+        assert (kept.id, kept.preferred_file_id) == (kept_id, new.id)
