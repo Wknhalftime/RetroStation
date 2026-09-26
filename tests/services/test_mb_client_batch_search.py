@@ -208,3 +208,18 @@ def test_cache_keeps_only_the_fields_enrichment_reads(
     assert entry is not None
     assert entry.response_data == slim
     assert found[mbid] == slim
+
+
+def test_a_batch_is_written_to_the_cache_in_one_call(
+    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+) -> None:
+    # 21,000 single-row writes cost 39 s of a cold run; write per batch.
+    known = [_mbid(n) for n in range(3)]
+    client = make_client(_SearchServer(known))
+
+    client.search_recordings_by_mbids([*known, _mbid(9)])
+
+    assert cache.writes == 1
+    assert cache.get(f"recording-by-mbid:{known[2]}") is not None
+    negative = cache.get(f"recording-by-mbid:{_mbid(9)}")
+    assert negative is not None and negative.response_data == {"not_in_index": True}

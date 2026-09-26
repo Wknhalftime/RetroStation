@@ -119,6 +119,8 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     patch(pg_cache.PgMusicBrainzCacheRepository, "get_many", "db.mb_cache.get_many",
           "mb.search_recordings_by_mbids")
     patch(pg_cache.PgMusicBrainzCacheRepository, "set", "db.mb_cache.set", "mb.lookup_*")
+    patch(pg_cache.PgMusicBrainzCacheRepository, "set_many", "db.mb_cache.set_many",
+          "mb.search_recordings_by_mbids")
 
     # Database round trips inside the per-release / per-recording work.
     for cls, prefix, attrs in (

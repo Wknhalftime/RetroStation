@@ -90,3 +90,30 @@ def test_cache_get_many_returns_only_unexpired_hits(migrated_db: str) -> None:
         assert hits["live"].response_data == {"id": "live"}
         assert repo.get_many([]) == {}
         conn.commit()
+
+
+def test_cache_set_many_inserts_and_overwrites(migrated_db: str) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from backend.domain.system import MusicBrainzCache
+
+    now = datetime.now(tz=UTC)
+
+    def entry(key: str, data: dict[str, object]) -> MusicBrainzCache:
+        return MusicBrainzCache(
+            id=uuid4(), cache_key=key, entity_type="recording-search", entity_mbid=key,
+            response_data=data, cached_at=now, expires_at=now + timedelta(days=1),
+        )
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgMusicBrainzCacheRepository(conn)
+        repo.set(entry("a", {"v": 1}))
+
+        repo.set_many([entry("a", {"v": 2}), entry("b", {"v": 3})])
+
+        hits = repo.get_many(["a", "b"])
+        assert hits["a"].response_data == {"v": 2}
+        assert hits["b"].response_data == {"v": 3}
+        repo.set_many([])
+        conn.commit()

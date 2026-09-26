@@ -17,6 +17,11 @@ class MusicBrainzCacheRepository(ABC):
     def set(self, cache: MusicBrainzCache) -> None: ...
 
     @abstractmethod
+    def set_many(self, caches: Sequence[MusicBrainzCache]) -> None:
+        """Insert or overwrite every entry, one round trip."""
+        ...
+
+    @abstractmethod
     def delete_expired(self) -> int:
         """Delete all rows where expires_at < now(). Returns count deleted."""
         ...
