@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -914,7 +915,7 @@ def mb_enrichment_task() -> dict[str, int]:
                     level=LogLevel.ERROR,
                     message="mb_enrichment_failed",
                     trace_id=task_id,
-                    details={"error": str(exc)},
+                    details={"error": str(exc), "traceback": traceback.format_exc()},
                 ))
         raise
 
