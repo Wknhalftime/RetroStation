@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 
@@ -966,6 +966,40 @@ def _seed_match_for_work(conn: psycopg.Connection, work_id: str) -> str:
     return str(match_id)
 
 
+def _seed_match_for_file(
+    conn: psycopg.Connection, file_id: UUID, work_id: str,
+) -> str:
+    """Insert a matches row resolved to ``file_id`` with ``work_id`` set.
+
+    This is the shape automatic and manual resolution write since migration
+    0024: ``matches.work_id`` is a real FK to works, so any endpoint that
+    deletes a work must first move these rows off it.
+    """
+    suffix = uuid4().hex[:8]
+    ba_id = uuid4()
+    conn.execute(
+        "INSERT INTO broadcast_artists (id, original_name, normalized_name)"
+        " VALUES (%s, %s, %s)",
+        (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
+    )
+    match_id = uuid4()
+    conn.execute(
+        "INSERT INTO matches (id, artist_id, library_file_id, work_id)"
+        " VALUES (%s, %s, %s, %s)",
+        (match_id, ba_id, file_id, work_id),
+    )
+    conn.commit()
+    return str(match_id)
+
+
+def _match_work_id(conn: psycopg.Connection, match_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT work_id FROM matches WHERE id = %s", (match_id,),
+    ).fetchone()
+    assert row is not None
+    return row["work_id"]
+
+
 class TestMergeWorks:
     def test_merge_basic_happy_path(self, client, db_conn) -> None:
         """Files move from source to target and source work is deleted."""
@@ -1663,6 +1697,127 @@ class TestReassignFileWork:
             "SELECT id FROM works WHERE id = %s", (w1.id,)
         ).fetchone()
         assert survived is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests — matches.work_id follows its file through merge / split / reassign
+# ---------------------------------------------------------------------------
+
+
+class TestMatchWorkIdFollowsFile:
+    """``matches.work_id`` (0024) is an FK to works with no ON DELETE.
+
+    Before the fix none of the three endpoints moved it, so deleting the
+    emptied work failed with a ForeignKeyViolation (a 500), and a match
+    whose file moved kept pointing at the old work.
+    """
+
+    def test_merge_moves_matches_to_the_target(self, client, db_conn) -> None:
+        _seed_canonical_chain(
+            db_conn, artist_mbid="a-mm", work_mbid="w-mm-target",
+            recording_mbid="r-mm-target", file_path="/m/mm_t.flac",
+        )
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn, artist_mbid="a-mm", work_mbid="w-mm-source",
+            recording_mbid="r-mm-source", file_path="/m/mm_s.flac",
+        )
+        match_id = _seed_match_for_file(db_conn, lf.id, "w-mm-source")
+
+        resp = client.post(
+            "/api/v1/library/works/w-mm-target/merge",
+            json={"source_work_ids": ["w-mm-source"]},
+        )
+
+        assert resp.status_code == 200
+        assert _match_work_id(db_conn, match_id) == "w-mm-target"
+
+    def test_split_moves_the_files_match_to_the_new_work(
+        self, client, db_conn,
+    ) -> None:
+        _, _, _, lf_a = _seed_canonical_chain(
+            db_conn, artist_mbid="a-ms", work_mbid="w-ms",
+            recording_mbid="r-ms", file_path="/m/ms_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/ms_b.flac", format="flac", recording_id="r-ms", work_id="w-ms",
+            )
+        )
+        db_conn.commit()
+        moved = _seed_match_for_file(db_conn, lf_a.id, "w-ms")
+        stays = _seed_match_for_file(db_conn, lf_b.id, "w-ms")
+
+        resp = client.post(
+            "/api/v1/library/works/w-ms/split", json={"file_id": str(lf_a.id)},
+        )
+
+        assert resp.status_code == 201
+        assert _match_work_id(db_conn, moved) == resp.json()["new_work_id"]
+        assert _match_work_id(db_conn, stays) == "w-ms"
+
+    def test_split_last_file_with_a_match_deletes_the_old_work(
+        self, client, db_conn,
+    ) -> None:
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn, artist_mbid="a-msl", work_mbid="w-msl",
+            recording_mbid="r-msl", file_path="/m/msl.flac",
+        )
+        match_id = _seed_match_for_file(db_conn, lf.id, "w-msl")
+
+        resp = client.post(
+            "/api/v1/library/works/w-msl/split", json={"file_id": str(lf.id)},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["old_work_deleted"] is True
+        assert _match_work_id(db_conn, match_id) == resp.json()["new_work_id"]
+
+    def test_reassign_last_file_with_a_match_deletes_the_old_work(
+        self, client, db_conn,
+    ) -> None:
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn, artist_mbid="a-mr", work_mbid="w1-mr",
+            recording_mbid="r1-mr", file_path="/m/mr.flac",
+        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-mr", "Other", artist_id="a-mr"))
+        db_conn.commit()
+        match_id = _seed_match_for_file(db_conn, lf.id, "w1-mr")
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work", json={"work_id": "w2-mr"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["old_work_deleted"] is True
+        assert _match_work_id(db_conn, match_id) == "w2-mr"
+
+    def test_emptied_work_releases_a_stale_match_to_its_files_work(
+        self, client, db_conn,
+    ) -> None:
+        """A match can name a work its file no longer belongs to.
+
+        When that work is emptied and deleted, the match is realigned to the
+        work its file is actually on rather than blocking the delete.
+        """
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn, artist_mbid="a-mst", work_mbid="w1-mst",
+            recording_mbid="r1-mst", file_path="/m/mst_a.flac",
+        )
+        _, _, _, elsewhere = _seed_canonical_chain(
+            db_conn, artist_mbid="a-mst", work_mbid="w3-mst",
+            recording_mbid="r3-mst", file_path="/m/mst_c.flac",
+        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-mst", "Other", artist_id="a-mst"))
+        db_conn.commit()
+        stale = _seed_match_for_file(db_conn, elsewhere.id, "w1-mst")
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work", json={"work_id": "w2-mst"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["old_work_deleted"] is True
+        assert _match_work_id(db_conn, stale) == "w3-mst"
 
 
 # ---------------------------------------------------------------------------

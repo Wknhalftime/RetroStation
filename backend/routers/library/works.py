@@ -251,6 +251,38 @@ async def _consolidate_recordings(
             )
 
 
+async def _move_file_matches(
+    conn: AsyncConnection[Any], file_id: UUID, work_id: str,
+) -> None:
+    """Point the file's matches at the work the file now belongs to.
+
+    ``matches.work_id`` (0024) mirrors ``library_files.work_id`` for the
+    matched file, so it must follow the file when split or reassign moves it.
+    """
+    await conn.execute(
+        "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
+        (work_id, str(file_id)),
+    )
+
+
+async def _release_work_matches(conn: AsyncConnection[Any], work_id: str) -> None:
+    """Move any match still naming an emptied work to its file's current work.
+
+    ``matches.work_id`` is an FK without ON DELETE, so this must run before
+    the work is deleted. A match without a file is left with a NULL work_id.
+    """
+    await conn.execute(
+        """
+        UPDATE matches m
+        SET work_id = (
+            SELECT lf.work_id FROM library_files lf WHERE lf.id = m.library_file_id
+        )
+        WHERE m.work_id = %s
+        """,
+        (work_id,),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes — work detail
 # ---------------------------------------------------------------------------
@@ -731,6 +763,10 @@ async def merge_works(
         """,
         [target_id, TargetType.WORK.value, *existing_source_ids],
     )
+    await conn.execute(
+        f"UPDATE matches SET work_id = %s WHERE work_id IN ({src_placeholders})",
+        [target_id, *existing_source_ids],
+    )
 
     await conn.execute(
         f"DELETE FROM song_masters WHERE work_id IN ({src_placeholders})",
@@ -842,6 +878,7 @@ async def split_work(
         "UPDATE library_files SET work_id = %s WHERE id = %s",
         (new_work_id, body.file_id),
     )
+    await _move_file_matches(conn, body.file_id, new_work_id)
 
     new_master_id = uuid4()
     await conn.execute(
@@ -860,6 +897,7 @@ async def split_work(
     count_row = await count_cur.fetchone()
     old_work_deleted = False
     if count_row and count_row["cnt"] == 0:
+        await _release_work_matches(conn, work_id)
         await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
         await conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (work_id,))
         await conn.execute("DELETE FROM recordings WHERE work_id = %s", (work_id,))
@@ -962,6 +1000,7 @@ async def reassign_file_work(
         "UPDATE library_files SET work_id = %s WHERE id = %s",
         (body.work_id, file_id),
     )
+    await _move_file_matches(conn, file_id, body.work_id)
 
     await _recalculate_song_master(conn, body.work_id)
 
@@ -973,6 +1012,7 @@ async def reassign_file_work(
         )
         count_row = await count_cur.fetchone()
         if count_row and count_row["cnt"] == 0:
+            await _release_work_matches(conn, current_work_id)
             await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (current_work_id,))
             await conn.execute(
                 "DELETE FROM format_overrides WHERE work_id = %s", (current_work_id,)
