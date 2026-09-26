@@ -168,6 +168,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.file_hash == file_hash]
 
+    def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
+        return sorted(
+            (f for f in self._data.values() if f.file_path.lower() == file_path.lower()),
+            key=lambda f: f.file_path,
+        )
+
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(

@@ -93,6 +93,15 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
+    def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
+        """Rows whose path equals *file_path* when case is ignored, itself included.
+
+        Case-only rename detection: on a case-insensitive disk every such
+        row names the same file.
+        """
+        ...
+
+    @abstractmethod
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         """Record the on-disk size and mtime without touching any other column.
 

@@ -350,6 +350,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE lower(file_path) = lower(%s) ORDER BY file_path",
+            (file_path,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
