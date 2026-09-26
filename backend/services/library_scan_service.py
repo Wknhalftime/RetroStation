@@ -3,7 +3,9 @@ Library scan service — tag extraction and directory walking.
 
 Public API:
   extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
-  scan_directory(root, on_progress=None)  -> (list[LibraryFile], list[LibraryQuarantine])
+  read_tags(path)          -> LibraryFile  (tags and stat only, no content read)
+  scan_directory(root, on_progress=None, on_file=None, on_quarantine=None,
+                 hash_content=True)        -> (list[LibraryFile], list[LibraryQuarantine])
 
 Supported formats: .flac, .mp3, .m4a, .ogg, .wav
 """
@@ -68,7 +70,8 @@ _VORBIS_RELEASE_MBID = "musicbrainz_albumid"
 # ---------------------------------------------------------------------------
 
 
-def _compute_file_hash(path: Path) -> str:
+def compute_file_hash(path: Path) -> str:
+    """SHA-256 of *path*'s whole content, as lowercase hex."""
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(65536), b""):
@@ -188,7 +191,7 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=None,
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -242,7 +245,7 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -281,7 +284,7 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=None,
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -315,25 +318,26 @@ _FORMAT_EXTRACTORS: dict[str, Callable[[MutagenFileType, Path, str], LibraryFile
 
 
 @dataclass(frozen=True)
-class _DiskStat:
+class DiskStat:
     """The two stat() fields an incremental scan compares before hashing."""
 
     size: int
     mtime_ns: int
 
 
-def _disk_stat(path: Path) -> _DiskStat:
+def disk_stat(path: Path) -> DiskStat:
     st = path.stat()
-    return _DiskStat(size=st.st_size, mtime_ns=st.st_mtime_ns)
+    return DiskStat(size=st.st_size, mtime_ns=st.st_mtime_ns)
 
 
 def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
     """Stamp the on-disk stat onto a freshly extracted file.
 
-    Taken after the read, so if the file changes between now and the next
-    scan the mtime moves and the file is re-read rather than trusted.
+    Taken before the content is hashed, so a file that changes while it is
+    read keeps a stored stat that no longer matches, and the next scan
+    re-reads it rather than trusting it.
     """
-    stat = _disk_stat(path)
+    stat = disk_stat(path)
     lf.file_size = stat.size
     lf.file_mtime_ns = stat.mtime_ns
     return lf
@@ -361,7 +365,7 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -371,11 +375,12 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     )
 
 
-def extract_tags(path: Path) -> LibraryFile:
+def read_tags(path: Path) -> LibraryFile:
     """
-    Extract audio tags from *path* and return a :class:`LibraryFile`.
+    Tags, format and on-disk stat for *path*, reading only its tag blocks.
 
-    Raises :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
+    ``file_hash`` is left None: the content is not read. Raises
+    :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
     """
     audio: MutagenFileType | None = mutagen.File(str(path), easy=False)  # type: ignore[attr-defined]
     if audio is None:
@@ -383,11 +388,23 @@ def extract_tags(path: Path) -> LibraryFile:
     return _with_disk_stat(_extract_by_format(audio, path), path)
 
 
+def extract_tags(path: Path) -> LibraryFile:
+    """
+    :func:`read_tags` plus the SHA-256 of the file's whole content.
+
+    Raises :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
+    """
+    lf = read_tags(path)
+    lf.file_hash = compute_file_hash(path)
+    return lf
+
+
 def scan_directory(
     root: Path,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_file: Callable[[LibraryFile], None] | None = None,
     on_quarantine: Callable[[LibraryQuarantine], None] | None = None,
+    hash_content: bool = True,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
@@ -400,6 +417,8 @@ def scan_directory(
       *on_quarantine* — called with each :class:`LibraryQuarantine` entry.
       *on_progress* — called with ``(processed, total, current_path)`` every
         50 files and on the final file.
+      *hash_content* — False reads tags and stat only and leaves file_hash
+        None (a first scan; library_hash_backfill_task hashes later).
     """
     candidates = sorted(
         p for p in root.rglob("*")
@@ -415,7 +434,7 @@ def scan_directory(
 
     for processed_idx, path in enumerate(candidates, start=1):
         try:
-            lf = extract_tags(path)
+            lf = extract_tags(path) if hash_content else read_tags(path)
             files.append(lf)
             if on_file is not None:
                 on_file(lf)
@@ -558,13 +577,26 @@ def _is_gone_or_same_file(old: Path, new: Path) -> bool:
         return False
 
 
+def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
+    """Rows *lf* may have been moved from.
+
+    Rows with the same content hash, plus rows a first scan has not hashed
+    yet that have the same size and mtime (a move or rename on one volume
+    keeps both).
+    """
+    candidates = file_repo.get_by_hash(lf.file_hash) if lf.file_hash is not None else []
+    if lf.file_size is not None and lf.file_mtime_ns is not None:
+        candidates += file_repo.get_unhashed_by_stat(lf.file_size, lf.file_mtime_ns)
+    return candidates
+
+
 def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
     """The row this newly seen file was moved or renamed from, if any.
 
     A row with identical content whose own file is still on disk is a
     duplicate copy, not the origin of a move, and is left alone.
     """
-    for candidate in file_repo.get_by_hash(lf.file_hash):
+    for candidate in _move_candidates(lf, file_repo):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
             Path(candidate.file_path), Path(lf.file_path),
         ):
@@ -630,6 +662,17 @@ def _index_new_file(
     return moved_from
 
 
+def _content_unchanged(existing: LibraryFile, path: Path) -> bool:
+    """Whether *path* still holds the content *existing* was indexed from.
+
+    Compares hashes. A row a first scan has not hashed yet is judged by its
+    recorded size and mtime instead. Raises OSError if the file can't be read.
+    """
+    if existing.file_hash is None:
+        return _stat_matches(existing, disk_stat(path)) is True
+    return compute_file_hash(path) == existing.file_hash
+
+
 def _restore_reappeared_file(
     existing: LibraryFile,
     path: Path,
@@ -640,13 +683,13 @@ def _restore_reappeared_file(
     """Scenario 4: a MISSING row is back on disk. Same content → restore
     PRESENT and keep enrichment; otherwise re-extract."""
     try:
-        current_hash = _compute_file_hash(path)
+        unchanged = _content_unchanged(existing, path)
     except OSError as exc:
         logger.warning("hash_failed", path=str(path), error=str(exc))
         result.record_failure(str(path))
         return
 
-    if current_hash == existing.file_hash:
+    if unchanged:
         existing.file_status = FileStatus.PRESENT
         file_repo.upsert(existing)
     else:
@@ -654,14 +697,14 @@ def _restore_reappeared_file(
     result.files_reappeared += 1
 
 
-def _stat_matches(existing: LibraryFile, disk: _DiskStat) -> bool | None:
+def _stat_matches(existing: LibraryFile, disk: DiskStat) -> bool | None:
     """Compare stored size+mtime with disk. None when the row predates stat tracking."""
     if existing.file_size is None or existing.file_mtime_ns is None:
         return None
     return existing.file_size == disk.size and existing.file_mtime_ns == disk.mtime_ns
 
 
-def _modified_since_indexed(existing: LibraryFile, disk: _DiskStat) -> bool:
+def _modified_since_indexed(existing: LibraryFile, disk: DiskStat) -> bool:
     indexed_ns = int(existing.indexed_at.timestamp() * 1_000_000_000)
     return disk.mtime_ns > indexed_ns
 
@@ -682,9 +725,10 @@ def _reconcile_present_file(
     - no stored stat (legacy row):
         - file older than its index row  → unchanged, backfill stat, skip unread
         - file newer                     → hash; equal → backfill, else re-extract
+        - and no hash either              → re-extract
     """
     try:
-        disk = _disk_stat(path)
+        disk = disk_stat(path)
     except OSError as exc:
         logger.warning("stat_failed", path=str(path), error=str(exc))
         result.record_failure(str(path))
@@ -698,10 +742,15 @@ def _reconcile_present_file(
         _reextract_and_upsert(path, file_repo, quarantine_repo, result)
         return
 
+    if existing.file_hash is None:
+        # Neither a stored stat nor a hash to compare against: read it.
+        _reextract_and_upsert(path, file_repo, quarantine_repo, result)
+        return
+
     # Legacy row. Only a file touched after we last read it can differ.
     if _modified_since_indexed(existing, disk):
         try:
-            current_hash = _compute_file_hash(path)
+            current_hash = compute_file_hash(path)
         except OSError as exc:
             logger.warning("hash_failed", path=str(path), error=str(exc))
             result.record_failure(str(path))

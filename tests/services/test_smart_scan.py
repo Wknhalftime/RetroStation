@@ -67,7 +67,7 @@ class TestScanFolderSmartUnchanged:
     -> skip, no rewrite, but the stat is recorded so the next scan never
     reads the file again."""
 
-    @patch("backend.services.library_scan_service._compute_file_hash", return_value="existing_hash")
+    @patch("backend.services.library_scan_service.compute_file_hash", return_value="existing_hash")
     def test_unchanged_file_not_written(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()
@@ -96,7 +96,7 @@ class TestScanFolderSmartUnchanged:
 class TestScanFolderSmartModified:
     """Scenario 2: File on disk, hash differs -> update, reset enrichment."""
 
-    @patch("backend.services.library_scan_service._compute_file_hash", return_value="new_hash")
+    @patch("backend.services.library_scan_service.compute_file_hash", return_value="new_hash")
     def test_modified_file_written(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()
@@ -133,7 +133,7 @@ class TestScanFolderStatShortcut:
     """
 
     @patch(
-        "backend.services.library_scan_service._compute_file_hash",
+        "backend.services.library_scan_service.compute_file_hash",
         side_effect=AssertionError("must not hash a file whose stat is unchanged"),
     )
     def test_matching_stat_skips_without_hashing(self, _mock: object, tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ class TestScanFolderStatShortcut:
         assert result.files_written == 1
 
     @patch(
-        "backend.services.library_scan_service._compute_file_hash",
+        "backend.services.library_scan_service.compute_file_hash",
         side_effect=AssertionError("must not hash a file older than its index row"),
     )
     def test_legacy_row_older_file_is_backfilled_not_hashed(
@@ -251,7 +251,7 @@ class TestScanFolderStatShortcut:
 
         with (
             patch(
-                "backend.services.library_scan_service._compute_file_hash",
+                "backend.services.library_scan_service.compute_file_hash",
                 return_value="new_hash",
             ),
             patch("backend.services.library_scan_service.extract_tags") as mock_extract,
@@ -296,7 +296,7 @@ class TestScanFolderSmartNew:
 class TestScanFolderSmartReappeared:
     """Scenario 4: File on disk, MISSING in DB -> restore to PRESENT."""
 
-    @patch("backend.services.library_scan_service._compute_file_hash", return_value="existing_hash")
+    @patch("backend.services.library_scan_service.compute_file_hash", return_value="existing_hash")
     def test_reappeared_same_hash_preserves_enrichment(self, _mock: object, tmp_path: Path) -> None:
         folder = tmp_path / "jazz"
         folder.mkdir()

@@ -19,6 +19,7 @@ from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.library_scan_service import (
     _sanitise_tag_value,
     extract_tags,
+    read_tags,
     scan_directory,
 )
 
@@ -364,7 +365,7 @@ class TestExtractTagsGenericFallback:
     """Test the generic fallback when tag type is not ID3/Vorbis/WAV."""
 
     @patch("backend.services.library_scan_service.mutagen.File")
-    @patch("backend.services.library_scan_service._compute_file_hash", return_value="a" * 64)
+    @patch("backend.services.library_scan_service.compute_file_hash", return_value="a" * 64)
     def test_generic_fallback_returns_library_file(
         self, _mock_sha: MagicMock, mock_file: MagicMock, tmp_path: Path
     ) -> None:
@@ -439,3 +440,29 @@ class TestScanDirectoryNonMutagenError:
         callback.assert_called_once()
         entry = callback.call_args[0][0]
         assert "OSError" in entry.error_message
+
+
+class TestReadTags:
+    def test_reads_the_same_tags_as_extract_tags_without_hashing(self) -> None:
+        path = _require(WELL_TAGGED)
+        full = extract_tags(path)
+        with patch(
+            "backend.services.library_scan_service.compute_file_hash",
+            side_effect=AssertionError("content read"),
+        ):
+            tags_only = read_tags(path)
+
+        assert tags_only.file_hash is None
+        assert tags_only.audio == full.audio
+        assert (tags_only.format, tags_only.file_size, tags_only.file_mtime_ns) == (
+            full.format, full.file_size, full.file_mtime_ns,
+        )
+
+    def test_scan_directory_without_hashing_still_quarantines_bad_files(self) -> None:
+        if not AUDIO_DIR.exists():
+            pytest.skip("Audio fixtures directory not found")
+        files, quarantine = scan_directory(AUDIO_DIR, hash_content=False)
+        assert len(files) == 4
+        assert len(quarantine) == 1
+        assert all(lf.file_hash is None for lf in files)
+        assert all(lf.file_size is not None for lf in files)

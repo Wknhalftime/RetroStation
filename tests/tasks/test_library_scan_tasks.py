@@ -273,3 +273,46 @@ class TestRunScanChunkedCommits:
         # last_progress return value should match
         assert last_progress["processed"] == 100
         assert last_progress["total"] == 100
+
+    @patch("backend.tasks.library_scan_tasks.adopt_moved_row")
+    @patch("backend.tasks.library_scan_tasks.diff_tree", return_value=([], []))
+    @patch("backend.tasks.library_scan_tasks.scan_directory")
+    def test_first_scan_defers_hashes_and_skips_move_detection(
+        self, mock_scan: MagicMock, _mock_diff: MagicMock, mock_adopt: MagicMock,
+    ) -> None:
+        from backend.tasks.library_scan_tasks import _run_scan
+
+        files = [_make_lf(i) for i in range(3)]
+
+        def fake_scan(root: Path, **kwargs):
+            for lf in files:
+                kwargs["on_file"](lf)
+            return files, []
+
+        mock_scan.side_effect = fake_scan
+        repos = MagicMock()
+        repos.library_files.has_any.return_value = False
+        repos.library_files.get_path_statuses_under.return_value = {}
+
+        _run_scan(
+            root_path="/tmp/music", library_conn=MagicMock(), repos=repos,
+            progress_repo=MagicMock(), task_id="t",
+        )
+
+        assert mock_scan.call_args.kwargs["hash_content"] is False
+        mock_adopt.assert_not_called()
+
+    @patch("backend.tasks.library_scan_tasks.diff_tree", return_value=([], []))
+    @patch("backend.tasks.library_scan_tasks.scan_directory", return_value=([], []))
+    def test_scan_of_a_non_empty_library_hashes_inline(
+        self, mock_scan: MagicMock, _mock_diff: MagicMock,
+    ) -> None:
+        from backend.tasks.library_scan_tasks import _run_scan
+
+        repos = MagicMock()
+        repos.library_files.has_any.return_value = True
+        _run_scan(
+            root_path="/tmp/music", library_conn=MagicMock(), repos=repos,
+            progress_repo=MagicMock(), task_id="t",
+        )
+        assert mock_scan.call_args.kwargs["hash_content"] is True

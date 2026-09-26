@@ -19,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
 const TASK_TYPE_TO_NAV: Record<string, string> = {
   scan: "/library",
   library_enrichment: "/library",
+  hash_backfill: "/library",
   mb_enrichment: "/library",
   ingestion: "/stations",
   matching: "/matcher",

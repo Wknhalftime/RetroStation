@@ -71,6 +71,10 @@ def _run_scan(
     # Stored paths use the OS separator; a root typed as ``D:/Music``
     # would otherwise match none of them.
     root = Path(root_path)
+    # An empty library has nothing a new file could have moved from and no
+    # hash to compare against, so a first scan reads tags and stats only
+    # and library_hash_backfill_task fills in the hashes afterwards.
+    library_was_empty = not repos.library_files.has_any()
     # Paths already indexed, so a path seen for the first time can be
     # checked for being a moved or renamed file before it is inserted.
     known_paths = repos.library_files.get_path_statuses_under(str(root))
@@ -86,9 +90,11 @@ def _run_scan(
     def on_file(lf: LibraryFile) -> None:
         nonlocal pending_writes, files_written, files_relocated
         try:
-            if lf.file_path not in known_paths and adopt_moved_row(
-                lf, repos.library_files,
-            ) is not None:
+            if (
+                not library_was_empty
+                and lf.file_path not in known_paths
+                and adopt_moved_row(lf, repos.library_files) is not None
+            ):
                 files_relocated += 1
             repos.library_files.upsert_write_only(lf)
         except psycopg.Error:
@@ -147,6 +153,7 @@ def _run_scan(
         on_progress=on_progress,
         on_file=on_file,
         on_quarantine=on_quarantine,
+        hash_content=not library_was_empty,
     )
 
     # Flush any remaining scan writes before folder-tree pass
@@ -326,7 +333,12 @@ def library_scan_task(root_path: str) -> str:
         # Fire-and-forget: chain into enrichment if any files were written
         if files_written > 0:
             from backend.tasks.library_enrichment_tasks import library_enrichment_task
+            from backend.tasks.library_hash_backfill_tasks import library_hash_backfill_task
 
+            # Hashing first: it is disk-bound and short next to enrichment's
+            # MusicBrainz lookups, and until it finishes, move detection
+            # falls back to size + mtime. A no-op unless hashes were deferred.
+            library_hash_backfill_task()
             library_enrichment_task()
 
     except Exception as exc:

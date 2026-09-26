@@ -39,6 +39,9 @@ _UPSERT_SQL = """
         format                 = EXCLUDED.format,
         enrichment_status      = CASE
             WHEN library_files.file_hash = EXCLUDED.file_hash
+              OR (library_files.file_hash IS NULL
+                  AND library_files.file_size = EXCLUDED.file_size
+                  AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns)
             THEN library_files.enrichment_status
             ELSE EXCLUDED.enrichment_status
         END,
@@ -346,6 +349,65 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             (file_hash,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE file_hash IS NULL AND file_size = %s AND file_mtime_ns = %s
+               ORDER BY file_path""",
+            (file_size, file_mtime_ns),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        # 'present' is inlined (not bound as a parameter) so psycopg's
+        # auto-prepared generic plan can still prove this matches the
+        # partial index idx_library_files_unhashed, whose predicate is
+        # WHERE file_hash IS NULL AND file_status = 'present' (migration
+        # 0026) — a bound parameter defeats that proof.
+        if after_path is None:
+            rows = self._conn.execute(
+                """SELECT * FROM library_files
+                   WHERE file_hash IS NULL AND file_status = 'present'
+                   ORDER BY file_path
+                   LIMIT %s""",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT * FROM library_files
+                   WHERE file_hash IS NULL AND file_status = 'present' AND file_path > %s
+                   ORDER BY file_path
+                   LIMIT %s""",
+                (after_path, limit),
+            ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def set_file_hash(
+        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+    ) -> bool:
+        result = self._conn.execute(
+            """UPDATE library_files SET file_hash = %s
+               WHERE id = %s AND file_hash IS NULL
+                 AND file_size = %s AND file_mtime_ns = %s""",
+            (file_hash, str(file_id), file_size, file_mtime_ns),
+        )
+        return result.rowcount == 1
+
+    def count_unhashed(self) -> int:
+        # 'present' inlined for the same reason as get_unhashed_after above:
+        # a bound parameter here defeats the planner's partial-index proof.
+        row = self._conn.execute(
+            """SELECT COUNT(*) AS n FROM library_files
+               WHERE file_hash IS NULL AND file_status = 'present'"""
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def has_any(self) -> bool:
+        row = self._conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM library_files) AS has_rows"
+        ).fetchone()
+        return bool(row and row["has_rows"])
 
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.

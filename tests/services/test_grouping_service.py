@@ -397,3 +397,17 @@ def test_album_version_collapses_to_base_work() -> None:
     )
     assert result is not None
     assert result.work_id == plain_work
+
+
+def test_unhashed_file_does_not_share_work_with_other_unhashed_files() -> None:
+    repos = _make_repos()
+    other, other_work = _seed_file_in_work(
+        repos, artist_name="Someone Else", track_title="Different Song",
+    )
+    repos["library_file_repo"].upsert(dataclasses.replace(other, file_hash=None))
+    incoming = dataclasses.replace(_make_file(), file_hash=None)
+
+    result = assign_work(incoming, **repos)
+
+    assert result is not None
+    assert result.work_id != other_work
