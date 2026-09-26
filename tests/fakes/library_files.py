@@ -63,11 +63,20 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     ) -> list[LibraryFile]:
         if not normalized_name:
             return []
-        hits = [f for f in self._data.values() if f.audio.normalized_artist_name == normalized_name]
+        hits = [
+            f
+            for f in self._data.values()
+            if f.audio.normalized_artist_name == normalized_name
+            and f.file_status == FileStatus.PRESENT
+        ]
         return sorted(hits, key=lambda f: str(f.id))[:limit]
 
     def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
-        return [f for f in self._data.values() if f.audio.recording_mbid == recording_mbid]
+        return [
+            f
+            for f in self._data.values()
+            if f.audio.recording_mbid == recording_mbid and f.file_status == FileStatus.PRESENT
+        ]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         return [
@@ -165,6 +174,36 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         return sorted(
             (f for f in self._data.values() if f.work_id == work_id),
             key=lambda f: str(f.id),
+        )
+
+    def get_missing(self) -> list[LibraryFile]:
+        return sorted(
+            (f for f in self._data.values() if f.file_status == FileStatus.MISSING),
+            key=lambda f: f.file_path,
+        )
+
+    def get_present_by_track(
+        self,
+        normalized_artist_name: str,
+        release_title: str,
+        track_number: int,
+        normalized_title: str,
+    ) -> list[LibraryFile]:
+        key = (normalized_artist_name, release_title, track_number, normalized_title)
+        return sorted(
+            (
+                f
+                for f in self._data.values()
+                if f.file_status == FileStatus.PRESENT
+                and (
+                    f.audio.normalized_artist_name,
+                    f.audio.release_title,
+                    f.audio.track_number,
+                    f.audio.normalized_title,
+                )
+                == key
+            ),
+            key=lambda f: f.file_path,
         )
 
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:

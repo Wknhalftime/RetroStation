@@ -6,9 +6,9 @@ def test_all_migrations_applied(migrated_db: str) -> None:
     with psycopg.connect(migrated_db) as conn:
         rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 27
+    assert len(versions) == 28
     assert versions[0].startswith("0001")
-    assert versions[-1].startswith("0027")
+    assert versions[-1].startswith("0028")
 
 
 def test_path_lower_index_exists(migrated_db: str) -> None:
