@@ -1,0 +1,303 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/release/b07b4d2f-bd70-46c7-b208-2d9438fc1511?fmt=json&inc=recordings%2Bartist-credits%2Brelease-groups%2Brecording-level-rels%2Bwork-rels
+  response:
+    body:
+      string: "{\"id\":\"e572bae7-fb00-4863-87fc-78dfd0ab091c\",\"status\":\"Official\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"relations\":[],\"release-group\":{\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"}}],\"disambiguation\":\"\",\"id\":\"b89956ff-8ad4-3a21-b8b8-c3c064530855\",\"secondary-types\":[],\"primary-type\":\"Album\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Poodle
+        Hat\",\"secondary-type-ids\":[],\"first-release-date\":\"2003-05-20\"},\"barcode\":\"614223219424\",\"release-events\":[{\"area\":{\"name\":\"[Worldwide]\",\"type\":null,\"disambiguation\":\"\",\"id\":\"525d4e18-3d00-31b9-a58b-a146a916de8f\",\"iso-3166-1-codes\":[\"XW\"],\"type-id\":null,\"sort-name\":\"[Worldwide]\"},\"date\":\"2003-05-30\"}],\"date\":\"2003-05-30\",\"cover-art-archive\":{\"back\":false,\"count\":1,\"front\":true,\"artwork\":true,\"darkened\":false},\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"name\":\"\u201CWeird Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"packaging-id\":\"119eba76-b343-3e02-a292-f0f00644bb9b\",\"disambiguation\":\"\",\"asin\":null,\"country\":\"XW\",\"title\":\"Poodle
+        Hat\",\"text-representation\":{\"language\":\"eng\",\"script\":\"Latn\"},\"packaging\":\"None\",\"media\":[{\"title\":\"\",\"format-id\":\"907a28d9-b3b2-3ef6-89a8-7b18d91d4794\",\"position\":1,\"id\":\"d1782ce5-2147-3ca4-ad08-f06c1008d60a\",\"format\":\"Digital
+        Media\",\"track-count\":12,\"tracks\":[{\"position\":1,\"id\":\"f82994f3-9b22-42f0-ae21-64a4070fb885\",\"number\":\"1\",\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"recording\":{\"first-release-date\":\"2003-05-20\",\"video\":false,\"id\":\"e3f94f56-4621-40ef-8bcb-f68baf004455\",\"disambiguation\":\"\",\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\"}}],\"length\":258106,\"relations\":[{\"type\":\"performance\",\"work\":{\"disambiguation\":\"\",\"id\":\"49c586ea-b43c-3159-a2d8-635c22f7fd79\",\"attributes\":[],\"languages\":[\"eng\"],\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"language\":\"eng\",\"title\":\"Couch
+        Potato\",\"type\":\"Song\",\"iswcs\":[\"T-906.719.925-1\"]},\"attribute-values\":{},\"ended\":false,\"source-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"target-credit\":\"\",\"direction\":\"forward\",\"target-type\":\"work\",\"end\":null,\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\"}],\"title\":\"Couch
+        Potato\"},\"length\":261000,\"title\":\"Couch Potato\"},{\"title\":\"Hardware
+        Store\",\"recording\":{\"length\":224253,\"relations\":[{\"work\":{\"iswcs\":[],\"type\":\"Song\",\"id\":\"e08d6052-10be-434e-b7ed-8b01364103ac\",\"attributes\":[],\"disambiguation\":\"\",\"title\":\"Hardware
+        Store\",\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"]},\"type\":\"performance\",\"attribute-values\":{},\"ended\":false,\"source-credit\":\"\",\"attributes\":[],\"attribute-ids\":{},\"target-credit\":\"\",\"direction\":\"forward\",\"end\":null,\"begin\":null,\"target-type\":\"work\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\"}],\"title\":\"Hardware
+        Store\",\"disambiguation\":\"\",\"id\":\"1f3a62b2-1cb1-4274-967b-6341645915a1\",\"artist-credit\":[{\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird Al\u201D Yankovic\"}],\"first-release-date\":\"2003-05-20\",\"video\":false},\"length\":224253,\"id\":\"fe44c379-f81a-4f75-869b-f0e592707666\",\"position\":2,\"number\":\"2\",\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"}}]},{\"artist-credit\":[{\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"number\":\"3\",\"position\":3,\"id\":\"a27e97b1-40a3-4d66-887a-620b7884d45f\",\"length\":192000,\"recording\":{\"length\":191466,\"title\":\"Trash
+        Day\",\"relations\":[{\"target-credit\":\"\",\"source-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"ended\":false,\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"language\":\"eng\",\"languages\":[\"eng\"],\"title\":\"Trash
+        Day\",\"id\":\"7ffe1583-4780-40f1-89fc-e9127ad5e6e6\",\"disambiguation\":\"\",\"attributes\":[],\"type\":\"Song\",\"iswcs\":[\"T-915.666.940-8\"]},\"type\":\"performance\",\"attribute-values\":{},\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"target-type\":\"work\",\"end\":null,\"begin\":null,\"direction\":\"forward\"}],\"id\":\"fe00a33c-c3d2-45aa-9b75-b409bf461022\",\"disambiguation\":\"\",\"artist-credit\":[{\"artist\":{\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"name\":\"\u201CWeird Al\u201D Yankovic\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"first-release-date\":\"2003-05-20\",\"video\":false},\"title\":\"Trash
+        Day\"},{\"title\":\"Party at the Leper Colony\",\"recording\":{\"relations\":[{\"ended\":false,\"work\":{\"type\":\"Song\",\"iswcs\":[\"T-918.913.930-8\"],\"disambiguation\":\"\",\"id\":\"b9c7f60d-6867-483f-8a41-966c6484f15b\",\"attributes\":[],\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"],\"language\":\"eng\",\"title\":\"Party
+        at the Leper Colony\"},\"type\":\"performance\",\"attribute-values\":{},\"target-credit\":\"\",\"source-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"direction\":\"forward\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"end\":null,\"target-type\":\"work\"}],\"title\":\"Party
+        at the Leper Colony\",\"length\":218600,\"disambiguation\":\"\",\"id\":\"b2f22492-578b-42b0-ab83-548ef08312ed\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"}}],\"video\":false,\"first-release-date\":\"2003-05-20\"},\"length\":218600,\"id\":\"f5618915-c0b8-47b1-b514-10164d63e3df\",\"position\":4,\"artist-credit\":[{\"artist\":{\"type\":\"Person\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird Al\u201D Yankovic\"}],\"number\":\"4\"},{\"id\":\"9f998418-f0b3-48be-81ff-c23a18c5c758\",\"position\":5,\"number\":\"5\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"type\":\"Person\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"sort-name\":\"Yankovic, Weird Al\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"}}],\"recording\":{\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"disambiguation\":\"\",\"id\":\"408ffdc4-0170-492d-bd83-9fe40720e176\",\"relations\":[{\"ended\":false,\"work\":{\"type\":\"Song\",\"iswcs\":[],\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"],\"title\":\"Angry
+        White Boy Polka\",\"attributes\":[],\"id\":\"c5309047-4176-48f0-b0f6-689247884648\",\"disambiguation\":\"\"},\"type\":\"performance\",\"attribute-values\":{},\"target-credit\":\"\",\"source-credit\":\"\",\"attributes\":[],\"attribute-ids\":{},\"direction\":\"forward\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"target-type\":\"work\",\"begin\":null,\"end\":null}],\"title\":\"Angry
+        White Boy Polka\",\"length\":303546,\"video\":false,\"first-release-date\":\"2003-05-20\"},\"length\":303000,\"title\":\"Angry
+        White Boy Polka\"},{\"length\":374506,\"recording\":{\"first-release-date\":\"2003-05-20\",\"video\":false,\"length\":374506,\"title\":\"Wanna
+        B Ur Lovr\",\"relations\":[{\"ended\":false,\"attribute-values\":{},\"work\":{\"iswcs\":[],\"type\":\"Song\",\"attributes\":[],\"id\":\"31e8d696-98f7-4e2f-a66a-b7c01b35cee2\",\"disambiguation\":\"\",\"title\":\"Wanna
+        B Ur Lovr\",\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"]},\"type\":\"performance\",\"target-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"end\":null,\"begin\":null,\"target-type\":\"work\"}],\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\"}}],\"id\":\"2d9028cf-a20b-494a-b9ba-eacdb1cde920\",\"disambiguation\":\"\"},\"title\":\"Wanna
+        B Ur Lovr\",\"number\":\"6\",\"artist-credit\":[{\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"name\":\"\u201CWeird Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"id\":\"f2262e7d-a1a7-42d8-8959-25cf88270398\",\"position\":6},{\"length\":220000,\"recording\":{\"first-release-date\":\"2003-05-20\",\"video\":false,\"id\":\"c798f880-8359-4021-950d-0a3f435f15e6\",\"disambiguation\":\"\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"}}],\"length\":219306,\"relations\":[{\"direction\":\"forward\",\"end\":null,\"begin\":null,\"target-type\":\"work\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"attribute-values\":{},\"work\":{\"iswcs\":[\"T-071.853.526-2\"],\"type\":\"Song\",\"title\":\"A
+        Complicated Song\",\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"],\"id\":\"67af12f9-2121-41c9-809a-e8f2a060c318\",\"disambiguation\":\"\",\"attributes\":[]},\"type\":\"performance\",\"ended\":false,\"attributes\":[],\"attribute-ids\":{},\"source-credit\":\"\",\"target-credit\":\"\"}],\"title\":\"A
+        Complicated Song\"},\"title\":\"A Complicated Song\",\"number\":\"7\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"}}],\"position\":7,\"id\":\"6f1b3b90-0756-4e1e-8df7-ff31a41027fc\"},{\"title\":\"Why
+        Does This Always Happen to Me?\",\"recording\":{\"first-release-date\":\"2003-05-20\",\"video\":false,\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"disambiguation\":\"\",\"id\":\"adc7fdf8-ca29-4756-b8e8-404415e3bbac\",\"length\":292213,\"relations\":[{\"target-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"source-credit\":\"\",\"ended\":false,\"attribute-values\":{},\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"language\":\"eng\",\"languages\":[\"eng\"],\"title\":\"Why
+        Does This Always Happen to Me?\",\"id\":\"5e2aadfd-1362-408e-b149-d2be0fd75063\",\"disambiguation\":\"\",\"attributes\":[],\"type\":\"Song\",\"iswcs\":[]},\"type\":\"performance\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"target-type\":\"work\",\"end\":null,\"begin\":null,\"direction\":\"forward\"}],\"title\":\"Why
+        Does This Always Happen to Me?\"},\"length\":292213,\"id\":\"569ae5e0-be80-4343-ad46-21b21ab9643d\",\"position\":8,\"number\":\"8\",\"artist-credit\":[{\"artist\":{\"type\":\"Person\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}]},{\"title\":\"Ode to a Superhero\",\"recording\":{\"artist-credit\":[{\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird Al\u201D Yankovic\"}],\"disambiguation\":\"\",\"id\":\"ff84c2ec-ac03-464c-87c9-5317c10d3e52\",\"title\":\"Ode
+        to a Superhero\",\"relations\":[{\"direction\":\"forward\",\"target-type\":\"work\",\"end\":null,\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"type\":\"performance\",\"work\":{\"languages\":[\"eng\"],\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"language\":\"eng\",\"title\":\"Ode
+        to a Superhero\",\"attributes\":[],\"id\":\"f49304b1-05e8-488e-ad46-9c7666d16f5e\",\"disambiguation\":\"\",\"type\":\"Song\",\"iswcs\":[]},\"attribute-values\":{},\"ended\":false,\"source-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"target-credit\":\"\"}],\"length\":292826,\"video\":false,\"first-release-date\":\"2003-05-20\"},\"length\":292826,\"position\":9,\"id\":\"0e11112d-b74d-4f26-9f8e-f095cabb9e70\",\"artist-credit\":[{\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"number\":\"9\"},{\"id\":\"247fd419-2890-48d7-b602-af21a8a2b678\",\"position\":10,\"number\":\"10\",\"artist-credit\":[{\"artist\":{\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"title\":\"Bob\",\"recording\":{\"video\":false,\"first-release-date\":\"2003-05-20\",\"id\":\"3bf9029f-07a5-495b-95e8-4a6102f14db1\",\"disambiguation\":\"\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"type\":\"Person\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}}],\"title\":\"Bob\",\"relations\":[{\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"end\":null,\"target-type\":\"work\",\"direction\":\"forward\",\"target-credit\":\"\",\"attributes\":[],\"attribute-ids\":{},\"source-credit\":\"\",\"ended\":false,\"attribute-values\":{},\"type\":\"performance\",\"work\":{\"type\":\"Song\",\"iswcs\":[\"T-918.914.334-8\"],\"id\":\"39e3fbad-cf30-439c-a31c-da03baebd2fe\",\"disambiguation\":\"\",\"attributes\":[],\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"],\"title\":\"Bob\"}}],\"length\":149186},\"length\":149186},{\"id\":\"7145e187-e241-4fa7-910a-feab687bdd7a\",\"position\":11,\"number\":\"11\",\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"type\":\"Person\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\"}}],\"title\":\"eBay\",\"recording\":{\"title\":\"eBay\",\"relations\":[{\"ended\":false,\"attribute-values\":{},\"type\":\"performance\",\"work\":{\"title\":\"eBay\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"],\"language\":\"eng\",\"id\":\"9fa04589-5d48-4871-bd20-9e336ae7cecb\",\"attributes\":[],\"disambiguation\":\"\",\"iswcs\":[\"T-001.534.171-5\"],\"type\":\"Song\"},\"target-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"target-type\":\"work\",\"begin\":null,\"end\":null}],\"length\":216333,\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"type\":\"Person\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}}],\"id\":\"944144b4-170f-4a6c-af85-bbb5964ca6e5\",\"disambiguation\":\"\",\"video\":false,\"first-release-date\":\"2003-05-20\"},\"length\":217000},{\"length\":537000,\"recording\":{\"id\":\"c0b53183-40cf-4353-b529-c0cb4eb92176\",\"disambiguation\":\"\",\"artist-credit\":[{\"artist\":{\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"title\":\"Genius in France\",\"relations\":[{\"direction\":\"forward\",\"target-type\":\"work\",\"begin\":null,\"end\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"work\":{\"iswcs\":[\"T-918.913.929-5\"],\"type\":\"Song\",\"id\":\"ea6ca3ec-3cf2-4a1e-8a90-e39279a65320\",\"disambiguation\":\"\",\"attributes\":[],\"title\":\"Genius
+        in France\",\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"languages\":[\"eng\"]},\"type\":\"performance\",\"attribute-values\":{},\"ended\":false,\"source-credit\":\"\",\"attribute-ids\":{},\"attributes\":[],\"target-credit\":\"\"}],\"length\":537000,\"video\":false,\"first-release-date\":\"2003-05-20\"},\"title\":\"Genius
+        in France\",\"artist-credit\":[{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"name\":\"\u201CWeird Al\u201D Yankovic\"}}],\"number\":\"12\",\"id\":\"923535ee-4960-4287-8348-5c321cad610c\",\"position\":12}],\"track-offset\":0}],\"quality\":\"normal\"}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '18092'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Sat, 26 Sep 2026 19:20:03 GMT
+      etag:
+      - '"ab88867494015918da249023f61b7086"'
+      keep-alive:
+      - timeout=15
+      location:
+      - https://musicbrainz.org/ws/2/release/e572bae7-fb00-4863-87fc-78dfd0ab091c?inc=recordings%2Bartist-credits%2Brelease-groups%2Brecording-level-rels%2Bwork-rels&fmt=json
+      server:
+      - Plack::Handler::Starlet
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '87'
+      x-ratelimit-reset:
+      - '1790450403'
+      x-runtime:
+      - '0.096748'
+    status:
+      code: 301
+      message: Moved Permanently
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/release/e572bae7-fb00-4863-87fc-78dfd0ab091c?inc=recordings%2Bartist-credits%2Brelease-groups%2Brecording-level-rels%2Bwork-rels&fmt=json
+  response:
+    body:
+      string: "{\"country\":\"XW\",\"release-group\":{\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"secondary-type-ids\":[],\"primary-type\":\"Album\",\"id\":\"b89956ff-8ad4-3a21-b8b8-c3c064530855\",\"secondary-types\":[],\"disambiguation\":\"\",\"first-release-date\":\"2003-05-20\",\"title\":\"Poodle
+        Hat\",\"artist-credit\":[{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\"}}]},\"disambiguation\":\"\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"text-representation\":{\"language\":\"eng\",\"script\":\"Latn\"},\"packaging-id\":\"119eba76-b343-3e02-a292-f0f00644bb9b\",\"status\":\"Official\",\"media\":[{\"track-offset\":0,\"track-count\":12,\"id\":\"d1782ce5-2147-3ca4-ad08-f06c1008d60a\",\"format-id\":\"907a28d9-b3b2-3ef6-89a8-7b18d91d4794\",\"title\":\"\",\"tracks\":[{\"id\":\"f82994f3-9b22-42f0-ae21-64a4070fb885\",\"recording\":{\"artist-credit\":[{\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"name\":\"\u201CWeird Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"country\":\"US\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"length\":258106,\"title\":\"Couch Potato\",\"first-release-date\":\"2003-05-20\",\"disambiguation\":\"\",\"video\":false,\"id\":\"e3f94f56-4621-40ef-8bcb-f68baf004455\",\"relations\":[{\"type\":\"performance\",\"direction\":\"forward\",\"source-credit\":\"\",\"attributes\":[],\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"end\":null,\"target-credit\":\"\",\"target-type\":\"work\",\"ended\":false,\"attribute-ids\":{},\"work\":{\"id\":\"49c586ea-b43c-3159-a2d8-635c22f7fd79\",\"attributes\":[],\"languages\":[\"eng\"],\"disambiguation\":\"\",\"language\":\"eng\",\"iswcs\":[\"T-906.719.925-1\"],\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"type\":\"Song\",\"title\":\"Couch
+        Potato\"},\"attribute-values\":{}}]},\"length\":261000,\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"sort-name\":\"Yankovic, Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"}}],\"position\":1,\"number\":\"1\",\"title\":\"Couch
+        Potato\"},{\"recording\":{\"first-release-date\":\"2003-05-20\",\"title\":\"Hardware
+        Store\",\"length\":224253,\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\"}}],\"relations\":[{\"target-credit\":\"\",\"end\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"attribute-values\":{},\"work\":{\"id\":\"e08d6052-10be-434e-b7ed-8b01364103ac\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"language\":\"eng\",\"iswcs\":[],\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"Hardware
+        Store\",\"type\":\"Song\"},\"ended\":false,\"attribute-ids\":{},\"target-type\":\"work\",\"direction\":\"forward\",\"type\":\"performance\",\"attributes\":[],\"source-credit\":\"\"}],\"id\":\"1f3a62b2-1cb1-4274-967b-6341645915a1\",\"disambiguation\":\"\",\"video\":false},\"id\":\"fe44c379-f81a-4f75-869b-f0e592707666\",\"title\":\"Hardware
+        Store\",\"number\":\"2\",\"position\":2,\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"disambiguation\":\"\",\"country\":\"US\"}}],\"length\":224253},{\"number\":\"3\",\"title\":\"Trash
+        Day\",\"length\":192000,\"position\":3,\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"recording\":{\"first-release-date\":\"2003-05-20\",\"title\":\"Trash
+        Day\",\"length\":191466,\"artist-credit\":[{\"name\":\"\u201CWeird Al\u201D
+        Yankovic\",\"joinphrase\":\"\",\"artist\":{\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}}],\"id\":\"fe00a33c-c3d2-45aa-9b75-b409bf461022\",\"relations\":[{\"attribute-values\":{},\"work\":{\"type\":\"Song\",\"title\":\"Trash
+        Day\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"iswcs\":[\"T-915.666.940-8\"],\"language\":\"eng\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"id\":\"7ffe1583-4780-40f1-89fc-e9127ad5e6e6\"},\"attribute-ids\":{},\"ended\":false,\"target-type\":\"work\",\"target-credit\":\"\",\"end\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type\":\"performance\"}],\"video\":false,\"disambiguation\":\"\"},\"id\":\"a27e97b1-40a3-4d66-887a-620b7884d45f\"},{\"title\":\"Party
+        at the Leper Colony\",\"number\":\"4\",\"position\":4,\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"length\":218600,\"recording\":{\"video\":false,\"disambiguation\":\"\",\"id\":\"b2f22492-578b-42b0-ab83-548ef08312ed\",\"relations\":[{\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"target-credit\":\"\",\"end\":null,\"attribute-values\":{},\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"type\":\"Song\",\"title\":\"Party
+        at the Leper Colony\",\"disambiguation\":\"\",\"attributes\":[],\"languages\":[\"eng\"],\"id\":\"b9c7f60d-6867-483f-8a41-966c6484f15b\",\"iswcs\":[\"T-918.913.930-8\"],\"language\":\"eng\"},\"target-type\":\"work\",\"attribute-ids\":{},\"ended\":false,\"direction\":\"forward\",\"type\":\"performance\",\"attributes\":[],\"source-credit\":\"\"}],\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\"}}],\"length\":218600,\"title\":\"Party
+        at the Leper Colony\",\"first-release-date\":\"2003-05-20\"},\"id\":\"f5618915-c0b8-47b1-b514-10164d63e3df\"},{\"artist-credit\":[{\"artist\":{\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"disambiguation\":\"\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"position\":5,\"length\":303000,\"title\":\"Angry White
+        Boy Polka\",\"number\":\"5\",\"id\":\"9f998418-f0b3-48be-81ff-c23a18c5c758\",\"recording\":{\"length\":303546,\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\"}}],\"first-release-date\":\"2003-05-20\",\"title\":\"Angry
+        White Boy Polka\",\"relations\":[{\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type\":\"performance\",\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"Angry
+        White Boy Polka\",\"type\":\"Song\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"id\":\"c5309047-4176-48f0-b0f6-689247884648\",\"iswcs\":[],\"language\":\"eng\"},\"attribute-values\":{},\"attribute-ids\":{},\"ended\":false,\"target-type\":\"work\",\"target-credit\":\"\",\"end\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null}],\"id\":\"408ffdc4-0170-492d-bd83-9fe40720e176\",\"disambiguation\":\"\",\"video\":false}},{\"length\":374506,\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"country\":\"US\"}}],\"position\":6,\"number\":\"6\",\"title\":\"Wanna
+        B Ur Lovr\",\"id\":\"f2262e7d-a1a7-42d8-8959-25cf88270398\",\"recording\":{\"video\":false,\"disambiguation\":\"\",\"id\":\"2d9028cf-a20b-494a-b9ba-eacdb1cde920\",\"relations\":[{\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type\":\"performance\",\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"Wanna
+        B Ur Lovr\",\"type\":\"Song\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"id\":\"31e8d696-98f7-4e2f-a66a-b7c01b35cee2\",\"iswcs\":[],\"language\":\"eng\"},\"attribute-values\":{},\"target-type\":\"work\",\"attribute-ids\":{},\"ended\":false,\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"end\":null,\"target-credit\":\"\"}],\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\"}}],\"length\":374506,\"title\":\"Wanna B Ur Lovr\",\"first-release-date\":\"2003-05-20\"}},{\"id\":\"6f1b3b90-0756-4e1e-8df7-ff31a41027fc\",\"recording\":{\"relations\":[{\"direction\":\"forward\",\"type\":\"performance\",\"attributes\":[],\"source-credit\":\"\",\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"end\":null,\"target-credit\":\"\",\"attribute-values\":{},\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"type\":\"Song\",\"title\":\"A
+        Complicated Song\",\"id\":\"67af12f9-2121-41c9-809a-e8f2a060c318\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"language\":\"eng\",\"iswcs\":[\"T-071.853.526-2\"]},\"target-type\":\"work\",\"ended\":false,\"attribute-ids\":{}}],\"id\":\"c798f880-8359-4021-950d-0a3f435f15e6\",\"video\":false,\"disambiguation\":\"\",\"length\":219306,\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"disambiguation\":\"\",\"country\":\"US\"}}],\"first-release-date\":\"2003-05-20\",\"title\":\"A
+        Complicated Song\"},\"length\":220000,\"position\":7,\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"}}],\"number\":\"7\",\"title\":\"A
+        Complicated Song\"},{\"recording\":{\"first-release-date\":\"2003-05-20\",\"title\":\"Why
+        Does This Always Happen to Me?\",\"length\":292213,\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"relations\":[{\"ended\":false,\"attribute-ids\":{},\"target-type\":\"work\",\"attribute-values\":{},\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"Why
+        Does This Always Happen to Me?\",\"type\":\"Song\",\"disambiguation\":\"\",\"attributes\":[],\"languages\":[\"eng\"],\"id\":\"5e2aadfd-1362-408e-b149-d2be0fd75063\",\"language\":\"eng\",\"iswcs\":[]},\"target-credit\":\"\",\"end\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"source-credit\":\"\",\"attributes\":[],\"type\":\"performance\",\"direction\":\"forward\"}],\"id\":\"adc7fdf8-ca29-4756-b8e8-404415e3bbac\",\"disambiguation\":\"\",\"video\":false},\"id\":\"569ae5e0-be80-4343-ad46-21b21ab9643d\",\"number\":\"8\",\"title\":\"Why
+        Does This Always Happen to Me?\",\"length\":292213,\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\"}}],\"position\":8},{\"length\":292826,\"artist-credit\":[{\"artist\":{\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"position\":9,\"number\":\"9\",\"title\":\"Ode
+        to a Superhero\",\"id\":\"0e11112d-b74d-4f26-9f8e-f095cabb9e70\",\"recording\":{\"id\":\"ff84c2ec-ac03-464c-87c9-5317c10d3e52\",\"relations\":[{\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"Ode
+        to a Superhero\",\"type\":\"Song\",\"id\":\"f49304b1-05e8-488e-ad46-9c7666d16f5e\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"language\":\"eng\",\"iswcs\":[]},\"attribute-values\":{},\"target-type\":\"work\",\"attribute-ids\":{},\"ended\":false,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"target-credit\":\"\",\"end\":null,\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type\":\"performance\"}],\"video\":false,\"disambiguation\":\"\",\"length\":292826,\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"type\":\"Person\",\"sort-name\":\"Yankovic, Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"first-release-date\":\"2003-05-20\",\"title\":\"Ode
+        to a Superhero\"}},{\"recording\":{\"first-release-date\":\"2003-05-20\",\"title\":\"Bob\",\"length\":149186,\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"disambiguation\":\"\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"relations\":[{\"work\":{\"language\":\"eng\",\"iswcs\":[\"T-918.914.334-8\"],\"disambiguation\":\"\",\"languages\":[\"eng\"],\"attributes\":[],\"id\":\"39e3fbad-cf30-439c-a31c-da03baebd2fe\",\"title\":\"Bob\",\"type\":\"Song\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\"},\"attribute-values\":{},\"attribute-ids\":{},\"ended\":false,\"target-type\":\"work\",\"end\":null,\"target-credit\":\"\",\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"attributes\":[],\"source-credit\":\"\",\"direction\":\"forward\",\"type\":\"performance\"}],\"id\":\"3bf9029f-07a5-495b-95e8-4a6102f14db1\",\"video\":false,\"disambiguation\":\"\"},\"id\":\"247fd419-2890-48d7-b602-af21a8a2b678\",\"title\":\"Bob\",\"number\":\"10\",\"artist-credit\":[{\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"type\":\"Person\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"disambiguation\":\"\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"country\":\"US\"}}],\"position\":10,\"length\":149186},{\"id\":\"7145e187-e241-4fa7-910a-feab687bdd7a\",\"recording\":{\"length\":216333,\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\"}],\"first-release-date\":\"2003-05-20\",\"title\":\"eBay\",\"id\":\"944144b4-170f-4a6c-af85-bbb5964ca6e5\",\"relations\":[{\"type\":\"performance\",\"direction\":\"forward\",\"source-credit\":\"\",\"attributes\":[],\"begin\":null,\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"end\":null,\"target-credit\":\"\",\"target-type\":\"work\",\"attribute-ids\":{},\"ended\":false,\"attribute-values\":{},\"work\":{\"id\":\"9fa04589-5d48-4871-bd20-9e336ae7cecb\",\"languages\":[\"eng\"],\"attributes\":[],\"disambiguation\":\"\",\"iswcs\":[\"T-001.534.171-5\"],\"language\":\"eng\",\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"title\":\"eBay\",\"type\":\"Song\"}}],\"video\":false,\"disambiguation\":\"\"},\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"position\":11,\"length\":217000,\"title\":\"eBay\",\"number\":\"11\"},{\"recording\":{\"disambiguation\":\"\",\"video\":false,\"id\":\"c0b53183-40cf-4353-b529-c0cb4eb92176\",\"relations\":[{\"target-type\":\"work\",\"attribute-ids\":{},\"ended\":false,\"work\":{\"type-id\":\"f061270a-2fd6-32f1-a641-f0f8676d14e6\",\"type\":\"Song\",\"title\":\"Genius
+        in France\",\"disambiguation\":\"\",\"languages\":[\"eng\"],\"attributes\":[],\"id\":\"ea6ca3ec-3cf2-4a1e-8a90-e39279a65320\",\"language\":\"eng\",\"iswcs\":[\"T-918.913.929-5\"]},\"attribute-values\":{},\"type-id\":\"a3005666-a872-32c3-ad06-98af558e99b0\",\"begin\":null,\"target-credit\":\"\",\"end\":null,\"source-credit\":\"\",\"attributes\":[],\"type\":\"performance\",\"direction\":\"forward\"}],\"artist-credit\":[{\"joinphrase\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"artist\":{\"name\":\"\u201CWeird Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"disambiguation\":\"\",\"country\":\"US\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\"}}],\"length\":537000,\"title\":\"Genius in
+        France\",\"first-release-date\":\"2003-05-20\"},\"id\":\"923535ee-4960-4287-8348-5c321cad610c\",\"number\":\"12\",\"title\":\"Genius
+        in France\",\"length\":537000,\"artist-credit\":[{\"name\":\"\u201CWeird Al\u201D
+        Yankovic\",\"joinphrase\":\"\",\"artist\":{\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"country\":\"US\"}}],\"position\":12}],\"position\":1,\"format\":\"Digital
+        Media\"}],\"release-events\":[{\"area\":{\"type-id\":null,\"iso-3166-1-codes\":[\"XW\"],\"type\":null,\"sort-name\":\"[Worldwide]\",\"disambiguation\":\"\",\"id\":\"525d4e18-3d00-31b9-a58b-a146a916de8f\",\"name\":\"[Worldwide]\"},\"date\":\"2003-05-30\"}],\"date\":\"2003-05-30\",\"relations\":[],\"id\":\"e572bae7-fb00-4863-87fc-78dfd0ab091c\",\"cover-art-archive\":{\"count\":1,\"back\":false,\"front\":true,\"artwork\":true,\"darkened\":false},\"title\":\"Poodle
+        Hat\",\"asin\":null,\"barcode\":\"614223219424\",\"packaging\":\"None\",\"artist-credit\":[{\"artist\":{\"country\":\"US\",\"disambiguation\":\"\",\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"id\":\"7746d775-9550-4360-b8d5-c37bd448ce01\",\"sort-name\":\"Yankovic,
+        Weird Al\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\"},\"name\":\"\u201CWeird
+        Al\u201D Yankovic\",\"joinphrase\":\"\"}],\"quality\":\"normal\"}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '18092'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Sat, 26 Sep 2026 19:20:04 GMT
+      etag:
+      - W/"a7d5ac6d684ade3e57279797a7916385"
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      transfer-encoding:
+      - chunked
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '1578'
+      x-ratelimit-reset:
+      - '1790450405'
+      x-runtime:
+      - '0.078104'
+    status:
+      code: 200
+      message: OK
+version: 1

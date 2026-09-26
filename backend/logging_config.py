@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TextIO, cast
 from uuid import uuid4
 
 import structlog
@@ -22,6 +22,33 @@ _LEVEL_MAP: dict[str, str] = {
 }
 
 _RESERVED_KEYS = {"event", "level", "timestamp", "category", "_record", "_from_structlog"}
+
+
+class _LossyStdout:
+    """``sys.stdout`` as seen by the log renderer: a failed write is dropped.
+
+    A worker whose parent has died (honcho gone, console closed) keeps a
+    stdout nobody reads; on Windows every write to it then raises
+    ``OSError: [Errno 22] Invalid argument``. Logging is observability, not
+    work, so the line is dropped and counted instead of becoming the task's
+    failure. ``sys.stdout`` is looked up per write so test capture still
+    sees the output.
+    """
+
+    def __init__(self) -> None:
+        self.dropped = 0
+
+    def write(self, text: str) -> None:
+        try:
+            sys.stdout.write(text)
+        except OSError:
+            self.dropped += 1
+
+    def flush(self) -> None:
+        try:
+            sys.stdout.flush()
+        except OSError:
+            self.dropped += 1
 
 
 class DbLogProcessor:
@@ -130,5 +157,6 @@ def configure_logging(log_level: str = "INFO", database_url: str | None = None) 
             getattr(logging, log_level.upper(), logging.INFO)
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        # cast: the factory only calls write() and flush(); see _LossyStdout.
+        logger_factory=structlog.PrintLoggerFactory(file=cast(TextIO, _LossyStdout())),
     )

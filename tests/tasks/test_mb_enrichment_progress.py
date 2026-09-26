@@ -247,6 +247,11 @@ class TestMbEnrichmentProgress:
             if c.status == TaskStatus.FAILED
         )
         assert any(entry.trace_id == failed.task_id for entry in log_entries)
+        # The traceback goes with the message: a bare str(exc) such as
+        # "[Errno 22] Invalid argument" says nothing about where it came from.
+        failed_log = next(e for e in log_entries if e.message == "mb_enrichment_failed")
+        assert "phase boom" in failed_log.details["traceback"]
+        assert "mb_enrichment_tasks.py" in failed_log.details["traceback"]
 
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")

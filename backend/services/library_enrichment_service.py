@@ -152,6 +152,34 @@ def _move_file_to_work(
         )
 
 
+def _resolve_track_recording(
+    rec_mbid: str,
+    recording_map: dict[str, MbRecording],
+    mb_client: MusicBrainzClientProtocol,
+) -> str | None:
+    """The MBID under which *rec_mbid* appears on the release, or None.
+
+    A tag can name a recording MusicBrainz has since merged into another;
+    the release then lists only the survivor. One direct lookup (the client
+    follows the redirect) tells which recording that is. A recording that
+    is genuinely not on the release stays unresolved.
+    """
+    if rec_mbid in recording_map:
+        return rec_mbid
+    if MusicBrainzId.parse(rec_mbid) is None:
+        return None
+    survivor = mb_client.lookup_recording(rec_mbid)
+    if survivor is None:
+        return None
+    survivor_id = survivor.get("id")
+    if survivor_id and survivor_id != rec_mbid and survivor_id in recording_map:
+        logger.info(
+            "recording_mbid_merged", recording_mbid=rec_mbid, survivor_mbid=survivor_id,
+        )
+        return survivor_id
+    return None
+
+
 def enrich_by_release(
     release_mbid: str,
     repos: EnrichmentRepos,
@@ -211,11 +239,11 @@ def enrich_by_release(
             )
             continue
 
-        rec_data = recording_map.get(rec_mbid)
-        if rec_data is None:
+        rec_mbid = _resolve_track_recording(rec_mbid, recording_map, mb_client)
+        if rec_mbid is None:
             logger.warning(
                 "recording_not_found_in_release",
-                recording_mbid=rec_mbid,
+                recording_mbid=library_file.audio.recording_mbid,
                 release_mbid=release_mbid,
             )
             repos.files.update_recording_link(
@@ -224,7 +252,7 @@ def enrich_by_release(
             continue
 
         work_id = _upsert_recording_with_work(
-            rec_mbid, rec_data, artist_id, repos
+            rec_mbid, recording_map[rec_mbid], artist_id, repos
         )
         _link_file_to_recording(library_file, rec_mbid, repos.files)
         if work_id is not None:

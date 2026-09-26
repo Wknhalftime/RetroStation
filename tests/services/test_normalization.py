@@ -1282,3 +1282,58 @@ def test_extract_altlen_with_other_tag_other_tag_wins() -> None:
     base, vtype = extract_version_info("Song Title [Radio Edit]_ALTLEN-2")
     assert base == "Song Title"
     assert vtype == VersionType.RADIO_EDIT
+
+
+# --- nested parentheses (stray-bracket work titles, 2026-09-26) ---------------
+
+
+def test_extract_version_tags_nested_parens_removed_whole() -> None:
+    """"(Live Version (Edit))" must go as one group, not leave the outer ")".
+
+    Six works in the library were titled "Back In The Saddle)" and the like
+    because the group regex stopped at the first ")".
+    """
+    base, tags = extract_version_tags("Back In The Saddle (Live Version (Edit))")
+    assert base == "Back In The Saddle"
+    assert tags == ["Live Version (Edit)"]
+    assert extract_version_info("Back In The Saddle (Live Version (Edit))") == (
+        "Back In The Saddle", VersionType.LIVE,
+    )
+
+
+def test_extract_version_tags_nested_keeps_subtitle_group() -> None:
+    base, _ = extract_version_tags("Dude (Looks Like A Lady) (Live Version (Edit))")
+    assert base == "Dude (Looks Like A Lady)"
+
+
+def test_extract_version_tags_removed_group_leaves_one_space() -> None:
+    # The subtitle group stays; the removed mix tag must not glue it to the title.
+    base, tags = extract_version_tags("Falling In Love [Top 40 Mix](Is Hard On The Knees)")
+    assert base == "Falling In Love (Is Hard On The Knees)"
+    assert tags == ["Top 40 Mix"]
+
+
+def test_extract_version_info_language_marker_is_explicit() -> None:
+    # Radio-pool tag for a version with explicit language.
+    assert extract_version_info("F.I.N.E. [Language]") == ("F.I.N.E.", VersionType.EXPLICIT)
+
+
+def test_extract_version_info_year_and_venue_is_live() -> None:
+    # Bootleg-style tags: "(1998/West In West Palm Beach, FL)", "(2003-06-21, Wembley)".
+    assert extract_version_info("Same Old Song And Dance (1998/West In West Palm Beach, FL)") == (
+        "Same Old Song And Dance", VersionType.LIVE,
+    )
+    assert extract_version_info("Dream On (2003-06-21, Wembley)") == ("Dream On", VersionType.LIVE)
+
+
+def test_extract_version_info_year_alone_is_not_live() -> None:
+    # "(1998)" is a release year, already dropped elsewhere; not a live marker.
+    _base, vtype = extract_version_info("Song (1998)")
+    assert vtype != VersionType.LIVE
+
+
+def test_extract_version_info_lyrics_marker_is_stripped() -> None:
+    # "(Lyrics!)" is the pool's explicit-lyrics flag, like "[Language]".
+    assert extract_version_info("Falling In Love [Top 40 Mix](Lyrics!)") == (
+        "Falling In Love", VersionType.REMIX,
+    )
