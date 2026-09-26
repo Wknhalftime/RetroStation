@@ -27,20 +27,15 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
         self._conn.execute(
             """INSERT INTO stations (id, call_letters, name, city, format_name)
                VALUES (%s, %s, %s, %s, %s)""",
-            (station.id, station.call_letters, station.name, station.city,
-             station.format_name),
+            (station.id, station.call_letters, station.name, station.city, station.format_name),
         )
-        row = self._conn.execute(
-            "SELECT * FROM stations WHERE id = %s", (station.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM stations WHERE id = %s", (station.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, station_id: UUID) -> BroadcastStation | None:
-        row = self._conn.execute(
-            "SELECT * FROM stations WHERE id = %s", (station_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def get_by_call_letters(self, call_letters: str) -> BroadcastStation | None:
@@ -50,9 +45,7 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
         return self._row_to_model(row) if row else None
 
     def list_all(self) -> list[BroadcastStation]:
-        rows = self._conn.execute(
-            "SELECT * FROM stations ORDER BY call_letters"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM stations ORDER BY call_letters").fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def update(self, station: BroadcastStation) -> BroadcastStation:
@@ -60,16 +53,12 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
             """UPDATE stations
                SET call_letters = %s, name = %s, city = %s, format_name = %s
                WHERE id = %s""",
-            (station.call_letters, station.name, station.city,
-             station.format_name, station.id),
+            (station.call_letters, station.name, station.city, station.format_name, station.id),
         )
-        row = self._conn.execute(
-            "SELECT * FROM stations WHERE id = %s", (station.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM stations WHERE id = %s", (station.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def delete(self, station_id: UUID) -> None:
         self._conn.execute("DELETE FROM stations WHERE id = %s", (station_id,))
-

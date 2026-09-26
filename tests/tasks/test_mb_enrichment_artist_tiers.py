@@ -35,12 +35,14 @@ def test_tier1_high_confidence_writes_mbid_and_marks_enhanced():
     artist = _bare_artist()
     fake_client = FakeMbClient(
         responses={
-            "Unknown Band": [{
-                "id": "mb-uuid-123",
-                "score": 99,
-                "sort-name": "Band, Unknown",
-                "disambiguation": "British rock band",
-            }]
+            "Unknown Band": [
+                {
+                    "id": "mb-uuid-123",
+                    "score": 99,
+                    "sort-name": "Band, Unknown",
+                    "disambiguation": "British rock band",
+                }
+            ]
         }
     )
     conn = MagicMock()
@@ -61,11 +63,7 @@ def test_tier1_high_confidence_writes_mbid_and_marks_enhanced():
 
 def test_tier1_low_confidence_marks_enhanced_without_mbid():
     artist = _bare_artist()
-    fake_client = FakeMbClient(
-        responses={
-            "Unknown Band": [{"id": "mb-uuid-X", "score": 40}]
-        }
-    )
+    fake_client = FakeMbClient(responses={"Unknown Band": [{"id": "mb-uuid-X", "score": 40}]})
     conn = MagicMock()
     repos = MagicMock()
 
@@ -91,7 +89,7 @@ def _mbid_artist(**overrides) -> Artist:
     base = dict(
         id="local-uuid-2",
         name="Known Band",
-        sort_name="Known Band",           # == name → still a "default"
+        sort_name="Known Band",  # == name → still a "default"
         disambiguation=None,
         needs_enhancement=True,
         enhanced_at=None,
@@ -107,12 +105,14 @@ def _mbid_artist(**overrides) -> Artist:
 def test_tier2_fills_disambiguation_and_sort_name():
     artist = _mbid_artist()
     fake_client = FakeMbClient(
-        artists={"mb-uuid-known": {
-            "id": "mb-uuid-known",
-            "name": "Known Band",
-            "sort-name": "Band, Known",
-            "disambiguation": "US indie rock band",
-        }}
+        artists={
+            "mb-uuid-known": {
+                "id": "mb-uuid-known",
+                "name": "Known Band",
+                "sort-name": "Band, Known",
+                "disambiguation": "US indie rock band",
+            }
+        }
     )
     conn = MagicMock()
     repos = MagicMock()
@@ -130,12 +130,14 @@ def test_tier2_fills_disambiguation_and_sort_name():
 def test_tier3_all_fields_present_no_update():
     artist = _mbid_artist(disambiguation="Already set", sort_name="Band, Known")
     fake_client = FakeMbClient(
-        artists={"mb-uuid-known": {
-            "id": "mb-uuid-known",
-            "name": "Known Band",
-            "sort-name": "Band, Known",
-            "disambiguation": "Already set",
-        }}
+        artists={
+            "mb-uuid-known": {
+                "id": "mb-uuid-known",
+                "name": "Known Band",
+                "sort-name": "Band, Known",
+                "disambiguation": "Already set",
+            }
+        }
     )
     conn = MagicMock()
     repos = MagicMock()
@@ -188,7 +190,11 @@ def test_mbid_map_with_none_value_treated_as_404():
     mbid_map: dict[str, object] = {"mb-uuid-known": None}
 
     outcome = _enhance_artist(
-        artist, fake_client, conn, repos, mbid_map=mbid_map,  # type: ignore[arg-type]
+        artist,
+        fake_client,
+        conn,
+        repos,
+        mbid_map=mbid_map,  # type: ignore[arg-type]
     )
 
     assert outcome is ArtistEnhanceOutcome.FAILED
@@ -246,10 +252,13 @@ def test_coalesce_artist_lookups_swallows_transient_error_per_mbid():
         # Protocol fills — unused by this test
         def search_artist(self, name: str):
             return []
+
         def lookup_release(self, mbid: str):
             return None
+
         def lookup_recording(self, mbid: str):
             return None
+
         def search_recording(self, artist_mbid: str, title: str, limit: int = 10):
             return []
 

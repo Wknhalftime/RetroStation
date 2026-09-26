@@ -184,11 +184,7 @@ def _normalize_search(raw: str | None) -> str | None:
     trimmed = raw.strip()
     if not trimmed:
         return None
-    return (
-        trimmed.replace("!", "!!")
-        .replace("%", "!%")
-        .replace("_", "!_")
-    )
+    return trimmed.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def _compute_triage_bucket(score: float | None) -> TriageBucket:
@@ -608,8 +604,7 @@ async def resolve_artist(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                "match_status must be MANUAL_MATCHED or"
-                f" MANUAL_REJECTED, got {body.match_status!r}"
+                f"match_status must be MANUAL_MATCHED or MANUAL_REJECTED, got {body.match_status!r}"
             ),
         )
 
@@ -806,8 +801,7 @@ async def resolve_identity(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                "match_status must be MANUAL_MATCHED or"
-                f" MANUAL_REJECTED, got {body.match_status!r}"
+                f"match_status must be MANUAL_MATCHED or MANUAL_REJECTED, got {body.match_status!r}"
             ),
         )
 
@@ -853,9 +847,7 @@ async def resolve_identity(
         # deterministic instead of waiting for an FK violation to bubble
         # up as 500.
         try:
-            work_id = await persist_manual_match(
-                conn, identity_id, body.library_file_id
-            )
+            work_id = await persist_manual_match(conn, identity_id, body.library_file_id)
         except LibraryFileNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

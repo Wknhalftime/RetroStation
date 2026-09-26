@@ -36,8 +36,7 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
                (id, original_name, normalized_name, match_status)
                VALUES (%s, %s, %s, %s)
                ON CONFLICT (normalized_name) DO NOTHING""",
-            (artist.id, artist.original_name, artist.normalized_name,
-             artist.match_status.value),
+            (artist.id, artist.original_name, artist.normalized_name, artist.match_status.value),
         )
         row = self._conn.execute(
             "SELECT * FROM broadcast_artists WHERE normalized_name = %s",
@@ -89,9 +88,7 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def get_unembedded_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastArtist]:
+    def get_unembedded_for_playlist(self, playlist_id: UUID) -> list[BroadcastArtist]:
         rows = self._conn.execute(
             """SELECT DISTINCT la.* FROM broadcast_artists la
                JOIN track_identities li ON li.broadcast_artist_id = la.id

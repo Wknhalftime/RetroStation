@@ -1,4 +1,5 @@
 """Planning repairs for rows that name one file in different case."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +26,8 @@ def test_keeper_is_the_row_spelled_as_on_disk() -> None:
     older = _row(r"D:\Seal\SEAL - KISS FROM A ROSE.flac")
 
     repairs, unresolved = plan_case_duplicate_repairs(
-        [[stale, keeper, older]], spelling=lambda _p: keeper.file_path,
+        [[stale, keeper, older]],
+        spelling=lambda _p: keeper.file_path,
     )
 
     assert unresolved == []
@@ -34,11 +36,16 @@ def test_keeper_is_the_row_spelled_as_on_disk() -> None:
     assert set(repairs[0].stale_ids) == {stale.id, older.id}
 
 
-@pytest.mark.parametrize("disk", [None, r"D:\Seal\seal - kiss from a rose.flac"],
-                         ids=["gone-or-unreadable", "spelled-a-third-way"])
+@pytest.mark.parametrize(
+    "disk",
+    [None, r"D:\Seal\seal - kiss from a rose.flac"],
+    ids=["gone-or-unreadable", "spelled-a-third-way"],
+)
 def test_group_with_no_row_spelled_as_on_disk_is_left_alone(disk: str | None) -> None:
-    group = [_row(r"D:\Seal\Seal - Kiss from a Rose.flac"),
-             _row(r"D:\Seal\Seal - Kiss From a Rose.flac")]
+    group = [
+        _row(r"D:\Seal\Seal - Kiss from a Rose.flac"),
+        _row(r"D:\Seal\Seal - Kiss From a Rose.flac"),
+    ]
 
     repairs, unresolved = plan_case_duplicate_repairs([group], spelling=lambda _p: disk)
 
@@ -51,7 +58,8 @@ def test_apply_deletes_stale_rows_and_keeps_the_keeper() -> None:
     stale = repo.upsert(_row(r"D:\Bon Jovi\Keep The Faith\a.flac"))
     keeper = repo.upsert(_row(r"D:\Bon Jovi\Keep the Faith\a.flac"))
     repairs, _ = plan_case_duplicate_repairs(
-        repo.get_case_duplicate_groups(), spelling=lambda _p: keeper.file_path,
+        repo.get_case_duplicate_groups(),
+        spelling=lambda _p: keeper.file_path,
     )
 
     apply_case_duplicate_repair(repairs[0], repo)

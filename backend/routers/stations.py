@@ -173,9 +173,7 @@ async def list_stations(conn: DbConn, _token: Token) -> list[StationSummary]:
 
 
 @router.post("", response_model=StationResponse, status_code=status.HTTP_201_CREATED)
-async def create_station(
-    body: StationCreate, conn: DbConn, _token: Token
-) -> StationResponse:
+async def create_station(body: StationCreate, conn: DbConn, _token: Token) -> StationResponse:
     """Create a new station."""
     station_id = uuid4()
     try:
@@ -191,9 +189,7 @@ async def create_station(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Station with call_letters '{body.call_letters}' already exists",
         ) from exc
-    cur = await conn.execute(
-        "SELECT * FROM stations WHERE id = %s", (station_id,)
-    )
+    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
     row = await cur.fetchone()
     if row is None:
         raise RuntimeError("Expected row after INSERT")
@@ -203,9 +199,7 @@ async def create_station(
 @router.get("/{station_id}", response_model=StationResponse)
 async def get_station(station_id: UUID, conn: DbConn, _token: Token) -> StationResponse:
     """Retrieve a single station by ID."""
-    cur = await conn.execute(
-        "SELECT * FROM stations WHERE id = %s", (station_id,)
-    )
+    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
     row = await cur.fetchone()
     if row is None:
         raise HTTPException(
@@ -220,9 +214,7 @@ async def update_station(
     station_id: UUID, body: StationUpdate, conn: DbConn, _token: Token
 ) -> StationResponse:
     """Partially update a station (only provided fields are changed)."""
-    cur = await conn.execute(
-        "SELECT * FROM stations WHERE id = %s", (station_id,)
-    )
+    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
     existing = await cur.fetchone()
     if existing is None:
         raise HTTPException(
@@ -245,9 +237,7 @@ async def update_station(
         """,
         (new_call_letters, new_name, new_city, new_format_name, station_id),
     )
-    cur = await conn.execute(
-        "SELECT * FROM stations WHERE id = %s", (station_id,)
-    )
+    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
     row = await cur.fetchone()
     if row is None:
         raise RuntimeError("Expected row after INSERT")
@@ -255,9 +245,7 @@ async def update_station(
 
 
 @router.delete("/{station_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_station(
-    station_id: UUID, conn: DbConn, _token: Token
-) -> None:
+async def delete_station(station_id: UUID, conn: DbConn, _token: Token) -> None:
     """Permanently delete a station and all data it owns.
 
     Cascade order (FK constraints added in migration 0018):
@@ -280,7 +268,9 @@ async def delete_station(
 
 @router.get("/{station_id}/broadcast-days", response_model=list[str])
 async def get_station_broadcast_days(
-    station_id: UUID, conn: DbConn, _token: Token,
+    station_id: UUID,
+    conn: DbConn,
+    _token: Token,
 ) -> list[str]:
     """Return ISO date strings for all broadcast days for this station."""
     await _require_station(conn, station_id)
@@ -489,6 +479,7 @@ def _generate_station_m3u_sync(
 ) -> str:
     """Run M3U generation for a station+date on a sync connection."""
     from datetime import date as date_type
+
     sid = UUID(station_id_str)
     d = date_type.fromisoformat(date_str)
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:

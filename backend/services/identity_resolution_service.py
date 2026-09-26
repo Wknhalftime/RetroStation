@@ -79,9 +79,7 @@ async def persist_manual_match(
     lf_row = await cur.fetchone()
 
     if lf_row is None:
-        raise LibraryFileNotFoundError(
-            f"library_file_id {library_file_id} does not exist"
-        )
+        raise LibraryFileNotFoundError(f"library_file_id {library_file_id} does not exist")
 
     # Only the file's real work_id — never recording_id as a stand-in.
     # matches.work_id is FK to works(id); a recording_id would fail the

@@ -84,9 +84,7 @@ class TestScanDirectoryProgress:
             shutil.copy(wav, tmp_path / f"track_{i}.wav")
 
         files_no_cb, q_no_cb = scan_directory(tmp_path)
-        files_cb, q_cb = scan_directory(
-            tmp_path, on_progress=lambda p, t, c: None
-        )
+        files_cb, q_cb = scan_directory(tmp_path, on_progress=lambda p, t, c: None)
 
         assert len(files_cb) == len(files_no_cb)
         assert len(q_cb) == len(q_no_cb)
@@ -117,7 +115,8 @@ class TestLibraryScanTaskProgress:
         status_at_scan_time: list[TaskStatus] = []
 
         def capture_status_then_return_empty(
-            *args: object, **kwargs: object,
+            *args: object,
+            **kwargs: object,
         ) -> tuple[list[object], list[object]]:
             # When scan_directory is called, capture current progress status
             records = list(fake_progress._data.values())

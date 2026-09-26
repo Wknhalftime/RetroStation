@@ -261,8 +261,13 @@ def _grouped_file(work_id: str, **kwargs: str | None) -> LibraryFile:
     """A pending file that grouping already attached to a local work."""
     lf = _pending_file(**kwargs)
     return LibraryFile(
-        id=lf.id, file_path=lf.file_path, file_hash=lf.file_hash, format=lf.format,
-        enrichment_status=lf.enrichment_status, audio=lf.audio, work_id=work_id,
+        id=lf.id,
+        file_path=lf.file_path,
+        file_hash=lf.file_hash,
+        format=lf.format,
+        enrichment_status=lf.enrichment_status,
+        audio=lf.audio,
+        work_id=work_id,
     )
 
 
@@ -279,10 +284,14 @@ def test_enrich_by_release_moves_file_to_mb_work_and_reselects_master() -> None:
     local_work = work_repo.create_local("Test Track", "local-artist")
     lf = _grouped_file(local_work)
     library_file_repo.upsert(lf)
-    song_master_repo.upsert(SongMaster(
-        id=uuid4(), work_id=local_work, preferred_file_id=lf.id,
-        selection_method=SelectionMethod.AUTO,
-    ))
+    song_master_repo.upsert(
+        SongMaster(
+            id=uuid4(),
+            work_id=local_work,
+            preferred_file_id=lf.id,
+            selection_method=SelectionMethod.AUTO,
+        )
+    )
 
     count = enrich_by_release(
         _RELEASE_MBID,
@@ -317,7 +326,9 @@ def test_enrich_by_release_keeps_local_work_that_still_has_files() -> None:
     library_file_repo.upsert(moving)
     library_file_repo.upsert(sibling)
     local_master = SongMaster(
-        id=uuid4(), work_id=local_work, preferred_file_id=sibling.id,
+        id=uuid4(),
+        work_id=local_work,
+        preferred_file_id=sibling.id,
         selection_method=SelectionMethod.MANUAL,
     )
     song_master_repo.upsert(local_master)
@@ -343,17 +354,27 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
     work_repo.set_library_file_repo(library_file_repo)
     artist_repo = FakeArtistRepository()
     song_master_repo = FakeSongMasterRepository()
-    mb_client = FakeMbClient(recordings={_RECORDING_MBID: {
-        "id": _RECORDING_MBID,
-        "title": "Test Track",
-        "length": 240000,
-        "artist-credit": [{"artist": {
-            "id": _ARTIST_MBID, "name": "Test Artist", "sort-name": "Artist, Test",
-        }}],
-        "relations": [
-            {"type": "performance", "work": {"id": _WORK_MBID, "title": "Test Work"}},
-        ],
-    }})
+    mb_client = FakeMbClient(
+        recordings={
+            _RECORDING_MBID: {
+                "id": _RECORDING_MBID,
+                "title": "Test Track",
+                "length": 240000,
+                "artist-credit": [
+                    {
+                        "artist": {
+                            "id": _ARTIST_MBID,
+                            "name": "Test Artist",
+                            "sort-name": "Artist, Test",
+                        }
+                    }
+                ],
+                "relations": [
+                    {"type": "performance", "work": {"id": _WORK_MBID, "title": "Test Work"}},
+                ],
+            }
+        }
+    )
 
     local_work = work_repo.create_local("Test Track", "local-artist")
     lf = _grouped_file(local_work, release_mbid=None)
@@ -389,16 +410,26 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
     lf = _grouped_file(local_work)
     library_file_repo.upsert(lf)
     identity_id = uuid4()
-    match_repo.create(Match(
-        id=uuid4(), confidence_score=0.9, match_tier=MatchTier.LOCAL_FILE_FUZZY,
-        identity_id=identity_id, library_file_id=lf.id, work_id=local_work,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            confidence_score=0.9,
+            match_tier=MatchTier.LOCAL_FILE_FUZZY,
+            identity_id=identity_id,
+            library_file_id=lf.id,
+            work_id=local_work,
+        )
+    )
 
     enrich_by_release(
         _RELEASE_MBID,
         _repos(
-            library_file_repo, recording_repo, work_repo, artist_repo,
-            song_master_repo, match_repo,
+            library_file_repo,
+            recording_repo,
+            work_repo,
+            artist_repo,
+            song_master_repo,
+            match_repo,
         ),
         mb_client,
     )
@@ -408,6 +439,7 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
     assert match.work_id == _WORK_MBID
     assert match.library_file_id == lf.id
     assert work_repo.get_by_id(local_work) is None
+
 
 def test_enrich_by_release_links_a_merged_recording_to_its_survivor() -> None:
     """The file's tag names a recording MusicBrainz merged into another one.
@@ -454,7 +486,9 @@ def test_enrich_by_release_still_fails_a_recording_from_another_release() -> Non
     count = enrich_by_release(
         _RELEASE_MBID,
         _repos(
-            library_file_repo, FakeRecordingRepository(), FakeWorkRepository(),
+            library_file_repo,
+            FakeRecordingRepository(),
+            FakeWorkRepository(),
             FakeArtistRepository(),
         ),
         mb_client,

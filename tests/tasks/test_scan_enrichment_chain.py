@@ -1,4 +1,5 @@
 """Test that library_scan_task chains into enrichment on completion."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

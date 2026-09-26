@@ -1,4 +1,5 @@
 """Unit tests for smart per-folder scan (all 6 scenarios + stat shortcut)."""
+
 from __future__ import annotations
 
 import os
@@ -76,12 +77,15 @@ class TestScanFolderSmartUnchanged:
         file_repo = FakeLibraryFileRepository()
         q_repo = FakeLibraryQuarantineRepository()
         existing = _make_existing(
-            file_path=str(folder / "track.flac"), indexed_at=_LONG_AGO,
+            file_path=str(folder / "track.flac"),
+            indexed_at=_LONG_AGO,
         )
         file_repo.upsert(existing)
 
         result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            folder_path=folder,
+            file_repo=file_repo,
+            quarantine_repo=q_repo,
         )
 
         assert result.files_written == 0
@@ -105,7 +109,9 @@ class TestScanFolderSmartModified:
         file_repo = FakeLibraryFileRepository()
         q_repo = FakeLibraryQuarantineRepository()
         existing = _make_existing(
-            file_path=str(folder / "track.flac"), file_hash="old_hash", indexed_at=_LONG_AGO,
+            file_path=str(folder / "track.flac"),
+            file_hash="old_hash",
+            indexed_at=_LONG_AGO,
         )
         file_repo.upsert(existing)
 
@@ -118,8 +124,10 @@ class TestScanFolderSmartModified:
                 enrichment_status=EnrichmentStatus.PENDING,
             )
             result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
-        )
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
+            )
 
         assert result.files_written == 1
 
@@ -150,7 +158,9 @@ class TestScanFolderStatShortcut:
         )
 
         result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            folder_path=folder,
+            file_repo=file_repo,
+            quarantine_repo=q_repo,
         )
 
         assert result.files_skipped == 1
@@ -173,7 +183,9 @@ class TestScanFolderStatShortcut:
         with patch("backend.services.library_scan_service.extract_tags") as mock_extract:
             mock_extract.return_value = _fresh_extract(track)
             result = scan_folder_incrementally(
-                folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
             )
 
         assert result.files_written == 1
@@ -190,14 +202,18 @@ class TestScanFolderStatShortcut:
         q_repo = FakeLibraryQuarantineRepository()
         file_repo.upsert(
             _make_existing(
-                file_path=str(track), file_size=size, file_mtime_ns=mtime_ns - 1_000_000_000,
+                file_path=str(track),
+                file_size=size,
+                file_mtime_ns=mtime_ns - 1_000_000_000,
             ),
         )
 
         with patch("backend.services.library_scan_service.extract_tags") as mock_extract:
             mock_extract.return_value = _fresh_extract(track)
             result = scan_folder_incrementally(
-                folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
             )
 
         assert result.files_written == 1
@@ -207,7 +223,9 @@ class TestScanFolderStatShortcut:
         side_effect=AssertionError("must not hash a file older than its index row"),
     )
     def test_legacy_row_older_file_is_backfilled_not_hashed(
-        self, _mock: object, tmp_path: Path,
+        self,
+        _mock: object,
+        tmp_path: Path,
     ) -> None:
         """Rows indexed before size/mtime were stored have neither.
 
@@ -226,7 +244,9 @@ class TestScanFolderStatShortcut:
         file_repo.upsert(_make_existing(file_path=str(track)))  # indexed_at = now
 
         result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            folder_path=folder,
+            file_repo=file_repo,
+            quarantine_repo=q_repo,
         )
 
         assert result.files_skipped == 1
@@ -258,7 +278,9 @@ class TestScanFolderStatShortcut:
         ):
             mock_extract.return_value = _fresh_extract(track)
             result = scan_folder_incrementally(
-                folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
             )
 
         assert result.files_written == 1
@@ -284,8 +306,10 @@ class TestScanFolderSmartNew:
                 enrichment_status=EnrichmentStatus.PENDING,
             )
             result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
-        )
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
+            )
 
         assert result.files_written == 1
         f = file_repo.get_by_path(str(folder / "track.flac"))
@@ -312,7 +336,9 @@ class TestScanFolderSmartReappeared:
         file_repo.upsert(existing)
 
         result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            folder_path=folder,
+            file_repo=file_repo,
+            quarantine_repo=q_repo,
         )
 
         assert result.files_reappeared == 1
@@ -334,7 +360,9 @@ class TestScanFolderSmartMissing:
         file_repo.upsert(ghost)
 
         result = scan_folder_incrementally(
-            folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+            folder_path=folder,
+            file_repo=file_repo,
+            quarantine_repo=q_repo,
         )
 
         assert result.files_missing == 1
@@ -355,12 +383,15 @@ class TestScanFolderSmartParseFailure:
         q_repo = FakeLibraryQuarantineRepository()
 
         from mutagen._util import MutagenError
+
         with patch(
             "backend.services.library_scan_service.extract_tags",
             side_effect=MutagenError("bad file"),
         ):
             result = scan_folder_incrementally(
-                folder_path=folder, file_repo=file_repo, quarantine_repo=q_repo,
+                folder_path=folder,
+                file_repo=file_repo,
+                quarantine_repo=q_repo,
             )
 
         assert result.quarantined == 1

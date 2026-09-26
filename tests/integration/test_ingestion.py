@@ -21,9 +21,13 @@ FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 def test_ingest_kazr_csv(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         station_repo = PgBroadcastStationRepository(conn)
-        station = station_repo.create(BroadcastStation(
-            id=uuid4(), call_letters="KAZR-FM", name="KAZR",
-        ))
+        station = station_repo.create(
+            BroadcastStation(
+                id=uuid4(),
+                call_letters="KAZR-FM",
+                name="KAZR",
+            )
+        )
 
         file_bytes = FIXTURE_PATH.read_bytes()
         result = ingest_csv(
@@ -58,9 +62,13 @@ def test_ingest_duplicate_csv_raises(migrated_db: str) -> None:
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         station_repo = PgBroadcastStationRepository(conn)
-        station = station_repo.create(BroadcastStation(
-            id=uuid4(), call_letters="KAZR-FM-DUP", name="KAZR Dup Test",
-        ))
+        station = station_repo.create(
+            BroadcastStation(
+                id=uuid4(),
+                call_letters="KAZR-FM-DUP",
+                name="KAZR Dup Test",
+            )
+        )
 
         ingest_csv(
             file_bytes=unique_bytes,

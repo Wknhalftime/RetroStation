@@ -1,4 +1,5 @@
 """Integration tests for PgSystemLogRepository."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -45,9 +46,9 @@ class TestCreateAndList:
     def test_list_ordered_descending(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             repo = PgSystemLogRepository(conn)
-            repo.create(_make_log(message="first",  offset_seconds=0))
+            repo.create(_make_log(message="first", offset_seconds=0))
             repo.create(_make_log(message="second", offset_seconds=10))
-            repo.create(_make_log(message="third",  offset_seconds=20))
+            repo.create(_make_log(message="third", offset_seconds=20))
             conn.commit()
             results = repo.list()
         assert [r.message for r in results] == ["third", "second", "first"]
@@ -161,4 +162,3 @@ class TestCount:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             repo = PgSystemLogRepository(conn)
             assert repo.count() == 0
-

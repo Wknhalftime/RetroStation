@@ -49,9 +49,7 @@ def _insert_identity_match(
     return match_id
 
 
-def _set_artist_status(
-    conn: psycopg.Connection, artist_id: UUID, status: MatchStatus
-) -> None:
+def _set_artist_status(conn: psycopg.Connection, artist_id: UUID, status: MatchStatus) -> None:
     conn.execute(
         "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
         (status.value, artist_id),
@@ -59,9 +57,7 @@ def _set_artist_status(
     conn.commit()
 
 
-def _set_identity_status(
-    conn: psycopg.Connection, identity_id: UUID, status: MatchStatus
-) -> None:
+def _set_identity_status(conn: psycopg.Connection, identity_id: UUID, status: MatchStatus) -> None:
     conn.execute(
         "UPDATE track_identities SET match_status = %s WHERE id = %s",
         (status.value, identity_id),
@@ -154,8 +150,7 @@ class TestUnmatchArtist:
         assert data["match_status"] == "needs_review"
 
         artist_row = db_conn.execute(
-            "SELECT match_status, reason_code, reason_detail "
-            "FROM broadcast_artists WHERE id = %s",
+            "SELECT match_status, reason_code, reason_detail FROM broadcast_artists WHERE id = %s",
             (artist.id,),
         ).fetchone()
         assert artist_row is not None
@@ -164,8 +159,7 @@ class TestUnmatchArtist:
         assert artist_row["reason_detail"] is None
 
         identity_row = db_conn.execute(
-            "SELECT match_status, match_tier, reason_code "
-            "FROM track_identities WHERE id = %s",
+            "SELECT match_status, match_tier, reason_code FROM track_identities WHERE id = %s",
             (identity.id,),
         ).fetchone()
         assert identity_row is not None
@@ -178,9 +172,7 @@ class TestUnmatchArtist:
         ).fetchone()
         assert artist_match is None
 
-    def test_artist_unmatch_cascades_all_children_regardless_of_status(
-        self, client, db_conn
-    ):
+    def test_artist_unmatch_cascades_all_children_regardless_of_status(self, client, db_conn):
         """Distinct from resolve_artist's MANUAL_REJECTED cascade — unmatch wipes
         even MANUAL_MATCHED / MANUAL_REJECTED children.
         """
@@ -190,24 +182,32 @@ class TestUnmatchArtist:
 
         # Mix of statuses on children, including manual decisions
         manual_matched_child = _insert_identity(
-            db_conn, artist, original_title="Manual Matched Child",
+            db_conn,
+            artist,
+            original_title="Manual Matched Child",
             match_status=MatchStatus.MANUAL_MATCHED,
         )
         _insert_identity_match(db_conn, manual_matched_child.id)
 
         manual_rejected_child = _insert_identity(
-            db_conn, artist, original_title="Manual Rejected Child",
+            db_conn,
+            artist,
+            original_title="Manual Rejected Child",
             match_status=MatchStatus.MANUAL_REJECTED,
         )
 
         auto_matched_child = _insert_identity(
-            db_conn, artist, original_title="Auto Matched Child",
+            db_conn,
+            artist,
+            original_title="Auto Matched Child",
             match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_identity_match(db_conn, auto_matched_child.id)
 
         pending_child = _insert_identity(
-            db_conn, artist, original_title="Pending Child",
+            db_conn,
+            artist,
+            original_title="Pending Child",
             match_status=MatchStatus.PENDING,
         )
 
@@ -222,8 +222,7 @@ class TestUnmatchArtist:
             pending_child.id,
         ):
             row = db_conn.execute(
-                "SELECT match_status, match_tier, reason_code "
-                "FROM track_identities WHERE id = %s",
+                "SELECT match_status, match_tier, reason_code FROM track_identities WHERE id = %s",
                 (child_id,),
             ).fetchone()
             assert row is not None, f"identity {child_id} missing"
@@ -257,9 +256,7 @@ class TestUnmatchArtist:
         "blocked_status",
         [MatchStatus.PENDING, MatchStatus.NEEDS_REVIEW],
     )
-    def test_unmatch_non_finalized_artist_returns_409(
-        self, client, db_conn, blocked_status
-    ):
+    def test_unmatch_non_finalized_artist_returns_409(self, client, db_conn, blocked_status):
         artist = _insert_artist(db_conn, match_status=blocked_status)
 
         resp = client.post(f"/api/v1/matching/artists/{artist.id}/unmatch")

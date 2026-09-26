@@ -28,11 +28,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
             mbid=row.get("mbid"),
-            origin=(
-                CatalogSource(row["origin"])
-                if row.get("origin")
-                else CatalogSource.LOCAL
-            ),
+            origin=(CatalogSource(row["origin"]) if row.get("origin") else CatalogSource.LOCAL),
             normalized_name=row.get("normalized_name"),
         )
 
@@ -46,23 +42,17 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
                  disambiguation = EXCLUDED.disambiguation""",
             (artist.id, artist.name, artist.sort_name, artist.disambiguation),
         )
-        row = self._conn.execute(
-            "SELECT * FROM artists WHERE id = %s", (artist.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM artists WHERE id = %s", (artist.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, artist_id: str) -> Artist | None:
-        row = self._conn.execute(
-            "SELECT * FROM artists WHERE id = %s", (artist_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM artists WHERE id = %s", (artist_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def list_all(self) -> list[Artist]:
-        rows = self._conn.execute(
-            "SELECT * FROM artists ORDER BY name"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM artists ORDER BY name").fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def list_unenhanced(self) -> list[Artist]:
@@ -102,9 +92,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (normalized_name,),
         ).fetchone()
         if row is None:
-            raise RuntimeError(
-                f"Artist not found after ON CONFLICT: {normalized_name}"
-            )
+            raise RuntimeError(f"Artist not found after ON CONFLICT: {normalized_name}")
         return cast(str, row["id"])
 
     def upsert_musicbrainz_artist(
@@ -116,9 +104,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         disambiguation: str | None = None,
     ) -> str:
         # 1. Return early if this exact MBID is already known.
-        row = self._conn.execute(
-            "SELECT id FROM artists WHERE mbid = %s", (mbid,)
-        ).fetchone()
+        row = self._conn.execute("SELECT id FROM artists WHERE mbid = %s", (mbid,)).fetchone()
         if row is not None:
             return cast(str, row["id"])
 
@@ -127,11 +113,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             "SELECT id, mbid FROM artists WHERE normalized_name = %s",
             (normalized_name,),
         ).fetchone()
-        if (
-            existing is not None
-            and existing["mbid"] is not None
-            and existing["mbid"] != mbid
-        ):
+        if existing is not None and existing["mbid"] is not None and existing["mbid"] != mbid:
             logger.warning(
                 "mb_artist_mbid_conflict",
                 normalized_name=normalized_name,
@@ -162,7 +144,8 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         return cast(str, row["id"])
 
     def get_by_normalized_name(
-        self, normalized_name: str,
+        self,
+        normalized_name: str,
     ) -> Artist | None:
         row = self._conn.execute(
             "SELECT * FROM artists WHERE normalized_name = %s",
@@ -171,9 +154,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         return self._row_to_model(row) if row else None
 
 
-def _maybe_mark_complete_on_upsert(
-    conn: psycopg.Connection[Any], artist_id: str
-) -> None:
+def _maybe_mark_complete_on_upsert(conn: psycopg.Connection[Any], artist_id: str) -> None:
     """Flip needs_enhancement back to FALSE if all completeness fields are filled.
 
     The `sort_name != name` guard aligns with the Tier 2/3 "would we update

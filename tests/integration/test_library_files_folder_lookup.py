@@ -7,6 +7,7 @@ file in a changed folder then looked brand-new to the incremental scan:
 it was re-read and re-hashed on every visit, and files that had vanished
 from disk were never marked missing.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -44,7 +45,11 @@ def _file(path: str) -> LibraryFile:
     ids=["windows", "posix"],
 )
 def test_returns_only_direct_children(
-    migrated_db: str, folder: str, direct: str, nested: str, sibling: str,
+    migrated_db: str,
+    folder: str,
+    direct: str,
+    nested: str,
+    sibling: str,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFileRepository(conn)

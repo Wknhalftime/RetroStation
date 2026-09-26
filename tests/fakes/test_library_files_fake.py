@@ -18,11 +18,7 @@ def _file(
     normalized_artist_name: str | None = _UNSET,
     recording_mbid: str | None = None,
 ) -> LibraryFile:
-    norm = (
-        artist_name.lower()
-        if normalized_artist_name is _UNSET
-        else normalized_artist_name
-    )
+    norm = artist_name.lower() if normalized_artist_name is _UNSET else normalized_artist_name
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{artist_name.replace(' ', '_')}-{uuid4()}.mp3",
@@ -111,7 +107,10 @@ def test_upsert_keeps_links_when_incoming_row_has_none() -> None:
     repo.upsert(original)
 
     fresh = LibraryFile(
-        id=uuid4(), file_path=original.file_path, file_hash="retagged", format="mp3",
+        id=uuid4(),
+        file_path=original.file_path,
+        file_hash="retagged",
+        format="mp3",
     )
     repo.upsert(fresh)
 
@@ -128,8 +127,11 @@ def test_upsert_explicit_links_replace_existing() -> None:
     repo.upsert(original)
 
     relinked = LibraryFile(
-        id=uuid4(), file_path=original.file_path, file_hash=original.file_hash,
-        format="mp3", work_id="work-2",
+        id=uuid4(),
+        file_path=original.file_path,
+        file_hash=original.file_hash,
+        format="mp3",
+        work_id="work-2",
     )
     repo.upsert(relinked)
 
@@ -160,11 +162,13 @@ def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:
         **{**both.__dict__, "audio": AudioMetadata(release_mbid="rel-1", recording_mbid="rec-1")}
     )
     no_release = _file("B", recording_mbid="rec-2")
-    enriched = LibraryFile(**{
-        **_file("C").__dict__,
-        "audio": AudioMetadata(release_mbid="rel-1", recording_mbid="rec-3"),
-        "enrichment_status": EnrichmentStatus.ENRICHED,
-    })
+    enriched = LibraryFile(
+        **{
+            **_file("C").__dict__,
+            "audio": AudioMetadata(release_mbid="rel-1", recording_mbid="rec-3"),
+            "enrichment_status": EnrichmentStatus.ENRICHED,
+        }
+    )
     for f in (both, no_release, enriched):
         repo.upsert(f)
 
@@ -180,7 +184,9 @@ def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:
     ],
 )
 def test_upsert_over_unhashed_row_mirrors_pg(
-    new_size: int, new_mtime_ns: int, expected: EnrichmentStatus,
+    new_size: int,
+    new_mtime_ns: int,
+    expected: EnrichmentStatus,
 ) -> None:
     repo = FakeLibraryFileRepository()
     stored = LibraryFile(
@@ -207,8 +213,7 @@ def test_upsert_over_unhashed_row_mirrors_pg(
     assert got.enrichment_status == expected
 
 
-def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg(
-) -> None:
+def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() -> None:
     # PG: NULL = NULL is not true, so nothing shows the content is unchanged.
     repo = FakeLibraryFileRepository()
     repo.upsert(

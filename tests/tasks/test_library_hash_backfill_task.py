@@ -1,4 +1,5 @@
 """Integration: library_hash_backfill_task against a real database."""
+
 from __future__ import annotations
 
 import hashlib
@@ -39,17 +40,24 @@ def _seed(db_url: str, tmp_path: Path, n: int) -> list[Path]:
             path = tmp_path / f"{i:02d}.flac"
             path.write_bytes(bytes([i]) * 64)
             st = path.stat()
-            repo.upsert(LibraryFile(
-                id=uuid4(), file_path=str(path), file_hash=None, format="flac",
-                file_size=st.st_size, file_mtime_ns=st.st_mtime_ns,
-            ))
+            repo.upsert(
+                LibraryFile(
+                    id=uuid4(),
+                    file_path=str(path),
+                    file_hash=None,
+                    format="flac",
+                    file_size=st.st_size,
+                    file_mtime_ns=st.st_mtime_ns,
+                )
+            )
             paths.append(path)
         conn.commit()
     return paths
 
 
 def test_task_hashes_backlog_and_completes_progress(
-    settings_db_url: str, tmp_path: Path,
+    settings_db_url: str,
+    tmp_path: Path,
 ) -> None:
     paths = _seed(settings_db_url, tmp_path, 3)
 
@@ -71,7 +79,9 @@ def test_task_hashes_backlog_and_completes_progress(
 
 
 def test_task_failure_is_reported_and_reraised(
-    settings_db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    settings_db_url: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed(settings_db_url, tmp_path, 1)
 
@@ -82,14 +92,16 @@ def test_task_failure_is_reported_and_reraised(
         raise BoomError("deliberate")
 
     monkeypatch.setattr(
-        "backend.tasks.library_hash_backfill_tasks.backfill_hash_batch", _explode,
+        "backend.tasks.library_hash_backfill_tasks.backfill_hash_batch",
+        _explode,
     )
     with pytest.raises(BoomError):
         library_hash_backfill_task.call_local()
 
     with psycopg.connect(settings_db_url, row_factory=dict_row) as conn:
         statuses = [
-            r["status"] for r in conn.execute(
+            r["status"]
+            for r in conn.execute(
                 "SELECT status FROM progress_tracking WHERE task_type = %s",
                 ("hash_backfill",),
             ).fetchall()

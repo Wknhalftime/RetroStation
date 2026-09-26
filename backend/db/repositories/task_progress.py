@@ -38,9 +38,15 @@ class PgTaskProgressRepository(TaskProgressRepository):
                  progress_data = EXCLUDED.progress_data,
                  updated_at = EXCLUDED.updated_at,
                  completed_at = EXCLUDED.completed_at""",
-            (task.task_id, task.task_type.value, task.status.value,
-             json.dumps(task.progress_data), task.started_at, task.updated_at,
-             task.completed_at),
+            (
+                task.task_id,
+                task.task_type.value,
+                task.status.value,
+                json.dumps(task.progress_data),
+                task.started_at,
+                task.updated_at,
+                task.completed_at,
+            ),
         )
         row = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE task_id = %s", (task.task_id,)
@@ -99,4 +105,3 @@ class PgTaskProgressRepository(TaskProgressRepository):
             (json.dumps(progress_overlay), task_id),
         )
         return result.rowcount
-

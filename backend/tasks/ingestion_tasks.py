@@ -29,15 +29,11 @@ from backend.tasks.huey_app import huey
 logger = structlog.get_logger()
 
 
-def _build_running_progress(
-    processed: int, total: int, filename: str
-) -> dict[str, Any]:
+def _build_running_progress(processed: int, total: int, filename: str) -> dict[str, Any]:
     return {"processed": processed, "total": total, "filename": filename}
 
 
-def _build_completed_progress(
-    result: IngestionResult, total: int, filename: str
-) -> dict[str, Any]:
+def _build_completed_progress(result: IngestionResult, total: int, filename: str) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "processed": result.rows_processed,
         "skipped": result.rows_skipped,
@@ -281,9 +277,7 @@ def ingestion_task(
                 task_id=task_id,
                 task_type=TaskType.INGESTION,
                 status=TaskStatus.COMPLETED,
-                progress_data=_build_completed_progress(
-                    result, total_rows, file_name
-                ),
+                progress_data=_build_completed_progress(result, total_rows, file_name),
                 started_at=task_started_at,
                 updated_at=datetime.now(UTC),
                 completed_at=datetime.now(UTC),

@@ -82,7 +82,10 @@ class Timers:
             self.calls[name] += 1
 
     def wrap(
-        self, name: str, fn: Callable[..., Any], within: str | None = None,
+        self,
+        name: str,
+        fn: Callable[..., Any],
+        within: str | None = None,
     ) -> Callable[..., Any]:
         self.within[name] = within
 
@@ -104,7 +107,11 @@ class Timers:
 
 
 def _patch(
-    timers: Timers, owner: Any, attr: str, name: str, within: str | None = None,
+    timers: Timers,
+    owner: Any,
+    attr: str,
+    name: str,
+    within: str | None = None,
 ) -> bool:
     """Wrap ``owner.attr`` in a timer. Returns False if the name is missing.
 
@@ -144,7 +151,10 @@ def instrument(timers: Timers) -> list[str]:
         return found
 
     def patch_any(
-        owner: Any, attrs: tuple[str, ...], name: str, within: str | None = None,
+        owner: Any,
+        attrs: tuple[str, ...],
+        name: str,
+        within: str | None = None,
     ) -> None:
         """Time whichever of *attrs* exists on *owner*.
 
@@ -157,8 +167,11 @@ def instrument(timers: Timers) -> list[str]:
 
     # Top-level phases, as seen from the task module. Disjoint with each other.
     for attr in (
-        "scan_directory", "mark_unseen_missing", "clear_resolved_quarantine",
-        "diff_tree", "assign_work",
+        "scan_directory",
+        "mark_unseen_missing",
+        "clear_resolved_quarantine",
+        "diff_tree",
+        "assign_work",
     ):
         patch(lst, attr, f"phase.{attr}")
 
@@ -202,7 +215,9 @@ def instrument(timers: Timers) -> list[str]:
 
     # Grouping internals.
     for attr in (
-        "_try_hash_shortcut", "_try_mbid_shortcut", "_fuzzy_match_work",
+        "_try_hash_shortcut",
+        "_try_mbid_shortcut",
+        "_fuzzy_match_work",
         "_create_local_work",
     ):
         patch(gs, attr, f"group.{attr}", "phase.assign_work")
@@ -247,9 +262,7 @@ def reset_bench_db(admin_dsn: str, dbname: str) -> str:
     if "bench" not in dbname:
         raise SystemExit(f"refusing to reset non-bench database {dbname!r}")
     with psycopg.connect(admin_dsn, autocommit=True) as admin:
-        exists = admin.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
-        ).fetchone()
+        exists = admin.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)).fetchone()
         if not exists:
             admin.execute(pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname)))
     dsn = _with_dbname(admin_dsn, dbname)
@@ -395,16 +408,26 @@ def evict_from_cache(files: list[str]) -> list[str]:
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateFileW.restype = wintypes.HANDLE
     k32.CreateFileW.argtypes = [
-        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
-        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
     ]
     generic_read, share_rw, open_existing, no_buffering = 0x80000000, 3, 3, 0x20000000
     invalid = wintypes.HANDLE(-1).value
     still_cached: list[str] = []
     for path in files:
         handle = k32.CreateFileW(
-            _extended_path(path), generic_read, share_rw, None,
-            open_existing, no_buffering, None,
+            _extended_path(path),
+            generic_read,
+            share_rw,
+            None,
+            open_existing,
+            no_buffering,
+            None,
         )
         if handle == invalid:
             still_cached.append(path)
@@ -425,11 +448,15 @@ def preload_into_cache(files: list[str]) -> None:
 def _git_describe() -> str:
     result = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     dirty = subprocess.run(
         ["git", "-C", str(ROOT), "status", "--porcelain", "--", "backend"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return result.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
 
@@ -466,7 +493,9 @@ def _drain_backfill(conn: psycopg.Connection[Any]) -> float | None:
     start = time.perf_counter()
     repos = RepositoryFactory(conn)
     run_hash_backfill(
-        repos.library_files, repos.task_progress, conn.commit,
+        repos.library_files,
+        repos.task_progress,
+        conn.commit,
         BackfillRunConfig(run_id="bench"),
     )
     return time.perf_counter() - start
@@ -489,9 +518,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         if still_cached:
             # A partly warm "cold" run would silently flatter the candidate.
             listed = "\n  ".join(still_cached[:10])
-            raise SystemExit(
-                f"{len(still_cached)} files could not be evicted, e.g.:\n  {listed}"
-            )
+            raise SystemExit(f"{len(still_cached)} files could not be evicted, e.g.:\n  {listed}")
     elif args.preload:
         preload_into_cache(audio)
     dsn = reset_bench_db(args.admin_dsn or _default_admin_dsn(), args.db)
@@ -541,9 +568,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         "files_written": written,
         "quarantined": quarantined,
         "files_per_s": round(written / elapsed, 1) if elapsed else None,
-        "mb_per_s": (
-            round(corpus["bytes"] / elapsed / 1e6, 1) if corpus and elapsed else None
-        ),
+        "mb_per_s": (round(corpus["bytes"] / elapsed / 1e6, 1) if corpus and elapsed else None),
         "timers": timers.report(),
         "missing_patches": missing_patches,
     }
@@ -581,10 +606,14 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 print(f"   - {row[:300]}")
             for row in sorted(rb - ra)[: args.show]:
                 print(f"   + {row[:300]}")
-    print(f"time to usable (phase 1): {a['label']}: {a.get('phase1_s')}s   "
-          f"{b['label']}: {b.get('phase1_s')}s")
-    print(f"\n{a['label']}: {a['elapsed_s']}s   {b['label']}: {b['elapsed_s']}s   "
-          f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}")
+    print(
+        f"time to usable (phase 1): {a['label']}: {a.get('phase1_s')}s   "
+        f"{b['label']}: {b.get('phase1_s')}s"
+    )
+    print(
+        f"\n{a['label']}: {a['elapsed_s']}s   {b['label']}: {b['elapsed_s']}s   "
+        f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}"
+    )
     if not identical:
         raise SystemExit(1)
 
@@ -601,9 +630,7 @@ def cmd_corpus(args: argparse.Namespace) -> None:
     source = Path(args.source)
     artists = sorted(p for p in source.iterdir() if p.is_dir())
     random.Random(args.seed).shuffle(artists)
-    targets = [
-        (name, int(n)) for name, n in (s.split("=") for s in args.sets.split(","))
-    ]
+    targets = [(name, int(n)) for name, n in (s.split("=") for s in args.sets.split(","))]
     out = Path(args.out)
     manifest: dict[str, Any] = {}
     cursor = 0
@@ -623,7 +650,8 @@ def cmd_corpus(args: argparse.Namespace) -> None:
             if not link.exists():
                 subprocess.run(
                     ["cmd", "/c", "mklink", "/J", str(link), str(artist)],
-                    check=True, capture_output=True,
+                    check=True,
+                    capture_output=True,
                 )
             picked.append(artist.name)
             files += n
@@ -659,13 +687,22 @@ def main() -> None:
     p_run.add_argument("--profile", help="write cProfile stats to this path")
     p_run.add_argument("--no-instrument", action="store_true")
     p_run.add_argument("--no-fingerprint", action="store_true")
-    p_run.add_argument("--no-drain", action="store_true",
-                       help="skip the deferred-hash backfill (time phase 1 alone)")
+    p_run.add_argument(
+        "--no-drain",
+        action="store_true",
+        help="skip the deferred-hash backfill (time phase 1 alone)",
+    )
     cache = p_run.add_mutually_exclusive_group()
-    cache.add_argument("--evict", action="store_true",
-                       help="drop the corpus from the OS file cache first (cold run)")
-    cache.add_argument("--preload", action="store_true",
-                       help="read the corpus into the OS file cache first (warm run)")
+    cache.add_argument(
+        "--evict",
+        action="store_true",
+        help="drop the corpus from the OS file cache first (cold run)",
+    )
+    cache.add_argument(
+        "--preload",
+        action="store_true",
+        help="read the corpus into the OS file cache first (warm run)",
+    )
     p_run.set_defaults(func=cmd_run)
 
     p_cmp = sub.add_parser("compare")

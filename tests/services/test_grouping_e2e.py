@@ -1,4 +1,5 @@
 """E2E integration tests for local-first grouping with real PostgreSQL."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -43,7 +44,6 @@ def _make_file(
 
 @pytest.mark.integration
 class TestGroupingE2E:
-
     def test_grouping_assigns_work_ids(self, migrated_db: str) -> None:
         """Two similar titles get the same work; a different title gets another."""
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -54,14 +54,22 @@ class TestGroupingE2E:
             sm_repo = PgSongMasterRepository(conn)
 
             f1 = _make_file(
-                "/music/hey_jude.mp3", "hash1", "Beatles", "Hey Jude",
+                "/music/hey_jude.mp3",
+                "hash1",
+                "Beatles",
+                "Hey Jude",
             )
             f2 = _make_file(
-                "/music/hey_jude_remastered.mp3", "hash2",
-                "Beatles", "Hey Jude (Remastered)",
+                "/music/hey_jude_remastered.mp3",
+                "hash2",
+                "Beatles",
+                "Hey Jude (Remastered)",
             )
             f3 = _make_file(
-                "/music/let_it_be.mp3", "hash3", "Beatles", "Let It Be",
+                "/music/let_it_be.mp3",
+                "hash3",
+                "Beatles",
+                "Let It Be",
             )
 
             file_repo.upsert(f1)
@@ -106,12 +114,8 @@ class TestGroupingE2E:
             assert r1 is not None
             assert r2 is not None
             assert r3 is not None
-            assert r1.work_id == r2.work_id, (
-                "Same song (remastered) should share a work"
-            )
-            assert r1.work_id != r3.work_id, (
-                "Different songs should have different works"
-            )
+            assert r1.work_id == r2.work_id, "Same song (remastered) should share a work"
+            assert r1.work_id != r3.work_id, "Different songs should have different works"
 
             assert_grouping_invariants(conn)
 
@@ -125,8 +129,10 @@ class TestGroupingE2E:
             sm_repo = PgSongMasterRepository(conn)
 
             f1 = _make_file(
-                "/music/original.mp3", "same_hash",
-                "Beatles", "Come Together",
+                "/music/original.mp3",
+                "same_hash",
+                "Beatles",
+                "Come Together",
             )
             file_repo.upsert(f1)
             conn.commit()
@@ -144,8 +150,10 @@ class TestGroupingE2E:
 
             # Second file with identical hash but different path
             f2 = _make_file(
-                "/music/copy.mp3", "same_hash",
-                "Beatles", "Come Together",
+                "/music/copy.mp3",
+                "same_hash",
+                "Beatles",
+                "Come Together",
             )
             file_repo.upsert(f2)
             conn.commit()
@@ -161,9 +169,7 @@ class TestGroupingE2E:
 
             assert r1 is not None
             assert r2 is not None
-            assert r2.work_id == r1.work_id, (
-                "Hash shortcut should reuse the existing work_id"
-            )
+            assert r2.work_id == r1.work_id, "Hash shortcut should reuse the existing work_id"
 
     def test_rescan_preserves_work_ids(self, migrated_db: str) -> None:
         """Re-upserting the same file (same path, same hash) keeps work_id."""
@@ -175,8 +181,10 @@ class TestGroupingE2E:
             sm_repo = PgSongMasterRepository(conn)
 
             f1 = _make_file(
-                "/music/stable.mp3", "stable_hash",
-                "Beatles", "Yesterday",
+                "/music/stable.mp3",
+                "stable_hash",
+                "Beatles",
+                "Yesterday",
             )
             file_repo.upsert(f1)
             conn.commit()
@@ -194,17 +202,17 @@ class TestGroupingE2E:
 
             # Simulate rescan: upsert same path/hash again
             f1_rescan = _make_file(
-                "/music/stable.mp3", "stable_hash",
-                "Beatles", "Yesterday",
+                "/music/stable.mp3",
+                "stable_hash",
+                "Beatles",
+                "Yesterday",
             )
             f1_rescan.id = uuid4()  # scanner would generate new UUID
             result = file_repo.upsert(f1_rescan)
             conn.commit()
 
             # ON CONFLICT keeps work_id when hash matches
-            assert result.work_id == r1.work_id, (
-                "Rescan with same hash should preserve work_id"
-            )
+            assert result.work_id == r1.work_id, "Rescan with same hash should preserve work_id"
 
     def test_merge_works_via_repo(self, migrated_db: str) -> None:
         """Merge two local works: files move, source work deleted."""
@@ -217,12 +225,16 @@ class TestGroupingE2E:
 
             # Create two separate works via grouping
             f_a = _make_file(
-                "/music/song_a.mp3", "hash_a",
-                "Stones", "Paint It Black",
+                "/music/song_a.mp3",
+                "hash_a",
+                "Stones",
+                "Paint It Black",
             )
             f_b = _make_file(
-                "/music/song_b.mp3", "hash_b",
-                "Stones", "Paint It Blk",
+                "/music/song_b.mp3",
+                "hash_b",
+                "Stones",
+                "Paint It Blk",
             )
 
             file_repo.upsert(f_a)
@@ -258,15 +270,18 @@ class TestGroupingE2E:
             # score. If they already matched, create a forced second work.
             if w_a == w_b:
                 artist_id = artist_repo.upsert_local_artist(
-                    "Stones", normalize_artist("Stones"),
+                    "Stones",
+                    normalize_artist("Stones"),
                 )
                 w_b = work_repo.create_local("Paint It Blk", artist_id)
-                sm_repo.upsert(SongMaster(
-                    id=uuid4(),
-                    work_id=w_b,
-                    preferred_file_id=f_b.id,
-                    selection_method=SelectionMethod.AUTO,
-                ))
+                sm_repo.upsert(
+                    SongMaster(
+                        id=uuid4(),
+                        work_id=w_b,
+                        preferred_file_id=f_b.id,
+                        selection_method=SelectionMethod.AUTO,
+                    )
+                )
                 file_repo.update_work_id(f_b.id, w_b)
                 conn.commit()
 
@@ -276,8 +291,7 @@ class TestGroupingE2E:
 
             # Merge w_b -> w_a
             conn.execute(
-                "UPDATE library_files SET work_id = %s"
-                " WHERE work_id = %s",
+                "UPDATE library_files SET work_id = %s WHERE work_id = %s",
                 (w_a, w_b),
             )
             conn.execute(
@@ -289,12 +303,12 @@ class TestGroupingE2E:
                 (w_b,),
             )
             conn.execute(
-                "UPDATE recordings SET work_id = %s"
-                " WHERE work_id = %s",
+                "UPDATE recordings SET work_id = %s WHERE work_id = %s",
                 (w_a, w_b),
             )
             conn.execute(
-                "DELETE FROM works WHERE id = %s", (w_b,),
+                "DELETE FROM works WHERE id = %s",
+                (w_b,),
             )
             conn.commit()
 
@@ -319,12 +333,16 @@ class TestGroupingE2E:
 
             # Create two files that group into the same work
             f1 = _make_file(
-                "/music/eleanor_rigby.mp3", "hash_er1",
-                "Beatles", "Eleanor Rigby",
+                "/music/eleanor_rigby.mp3",
+                "hash_er1",
+                "Beatles",
+                "Eleanor Rigby",
             )
             f2 = _make_file(
-                "/music/eleanor_rigby_live.mp3", "hash_er2",
-                "Beatles", "Eleanor Rigby",
+                "/music/eleanor_rigby_live.mp3",
+                "hash_er2",
+                "Beatles",
+                "Eleanor Rigby",
             )
 
             file_repo.upsert(f1)
@@ -360,17 +378,21 @@ class TestGroupingE2E:
 
             # Split f2 into a new work
             artist_id = artist_repo.upsert_local_artist(
-                "Beatles", normalize_artist("Beatles"),
+                "Beatles",
+                normalize_artist("Beatles"),
             )
             new_work_id = work_repo.create_local(
-                "Eleanor Rigby (Live)", artist_id,
+                "Eleanor Rigby (Live)",
+                artist_id,
             )
-            sm_repo.upsert(SongMaster(
-                id=uuid4(),
-                work_id=new_work_id,
-                preferred_file_id=f2.id,
-                selection_method=SelectionMethod.AUTO,
-            ))
+            sm_repo.upsert(
+                SongMaster(
+                    id=uuid4(),
+                    work_id=new_work_id,
+                    preferred_file_id=f2.id,
+                    selection_method=SelectionMethod.AUTO,
+                )
+            )
             file_repo.update_work_id(f2.id, new_work_id)
             conn.commit()
 

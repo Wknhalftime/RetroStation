@@ -25,9 +25,7 @@ class PgMappingRuleRepository(MappingRuleRepository):
         )
 
     def list_ordered(self) -> list[MappingRule]:
-        rows = self._conn.execute(
-            "SELECT * FROM mapping_rules ORDER BY priority DESC"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM mapping_rules ORDER BY priority DESC").fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def create(self, rule: MappingRule) -> MappingRule:
@@ -35,17 +33,19 @@ class PgMappingRuleRepository(MappingRuleRepository):
             """INSERT INTO mapping_rules
                (id, source_pattern, target_type, target_id, priority, created_at)
                VALUES (%s, %s, %s, %s, %s, %s)""",
-            (rule.id, rule.source_pattern, rule.target_type.value,
-             rule.target_id, rule.priority, rule.created_at),
+            (
+                rule.id,
+                rule.source_pattern,
+                rule.target_type.value,
+                rule.target_id,
+                rule.priority,
+                rule.created_at,
+            ),
         )
-        row = self._conn.execute(
-            "SELECT * FROM mapping_rules WHERE id = %s", (rule.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM mapping_rules WHERE id = %s", (rule.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def delete(self, rule_id: UUID) -> None:
-        self._conn.execute(
-            "DELETE FROM mapping_rules WHERE id = %s", (rule_id,)
-        )
+        self._conn.execute("DELETE FROM mapping_rules WHERE id = %s", (rule_id,))

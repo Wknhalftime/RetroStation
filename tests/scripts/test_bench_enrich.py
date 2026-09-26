@@ -4,6 +4,7 @@ The harness patches named functions to time them and stubs the follow-on
 Huey task so an in-process run never enqueues work for the real worker.
 Both break silently when the code they name is renamed, so pin them here.
 """
+
 from __future__ import annotations
 
 import importlib

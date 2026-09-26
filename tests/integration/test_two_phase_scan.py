@@ -3,6 +3,7 @@
 The quality bar: phase 1 plus a complete backfill leaves exactly the library
 a one-phase scan of the same files builds.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,8 +51,11 @@ def library(tmp_path: Path) -> Path:
 
 def _scan(conn: Conn, root: Path) -> None:
     _run_scan(
-        root_path=str(root), library_conn=conn, repos=RepositoryFactory(conn),
-        progress_repo=PgTaskProgressRepository(conn), task_id=uuid4().hex,
+        root_path=str(root),
+        library_conn=conn,
+        repos=RepositoryFactory(conn),
+        progress_repo=PgTaskProgressRepository(conn),
+        task_id=uuid4().hex,
     )
     conn.commit()
 
@@ -59,7 +63,9 @@ def _scan(conn: Conn, root: Path) -> None:
 def _drain_backfill(conn: Conn) -> None:
     repos = RepositoryFactory(conn)
     run_hash_backfill(
-        repos.library_files, repos.task_progress, conn.commit,
+        repos.library_files,
+        repos.task_progress,
+        conn.commit,
         BackfillRunConfig(run_id=uuid4().hex),
     )
 
@@ -107,7 +113,8 @@ def _truncate_library(conn: Conn) -> None:
 
 
 def test_first_scan_defers_hashes_but_groups_every_tagged_file(
-    migrated_db: str, library: Path,
+    migrated_db: str,
+    library: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         _scan(conn, library)
@@ -123,7 +130,8 @@ def test_first_scan_defers_hashes_but_groups_every_tagged_file(
 
 
 def test_backfill_after_first_scan_matches_a_one_phase_scan(
-    migrated_db: str, library: Path,
+    migrated_db: str,
+    library: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         _scan(conn, library)
@@ -133,10 +141,14 @@ def test_backfill_after_first_scan_matches_a_one_phase_scan(
         # One-phase baseline over the same files: a row outside the library
         # makes the table non-empty, so the scan hashes inline.
         _truncate_library(conn)
-        RepositoryFactory(conn).library_files.upsert(LibraryFile(
-            id=uuid4(), file_path=str(library.parent / "elsewhere" / "x.flac"),
-            file_hash="0" * 64, format="flac",
-        ))
+        RepositoryFactory(conn).library_files.upsert(
+            LibraryFile(
+                id=uuid4(),
+                file_path=str(library.parent / "elsewhere" / "x.flac"),
+                file_hash="0" * 64,
+                format="flac",
+            )
+        )
         conn.commit()
         _scan(conn, library)
         one_phase = _snapshot(conn, library)
@@ -148,7 +160,8 @@ def test_backfill_after_first_scan_matches_a_one_phase_scan(
 
 
 def test_rescan_after_first_scan_keeps_enrichment_and_fills_hashes(
-    migrated_db: str, library: Path,
+    migrated_db: str,
+    library: Path,
 ) -> None:
     kiss = library / "a" / "kiss.mp3"
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -157,7 +170,9 @@ def test_rescan_after_first_scan_keeps_enrichment_and_fills_hashes(
         row = repos.library_files.get_by_path(str(kiss))
         assert row is not None
         repos.library_files.update_recording_link(
-            row.id, row.recording_id, EnrichmentStatus.ENRICHED,
+            row.id,
+            row.recording_id,
+            EnrichmentStatus.ENRICHED,
         )
         conn.commit()
 
@@ -173,17 +188,24 @@ def test_rescan_after_first_scan_keeps_enrichment_and_fills_hashes(
 
 
 def test_scan_after_interrupted_first_scan_hashes_leftovers(
-    migrated_db: str, library: Path,
+    migrated_db: str,
+    library: Path,
 ) -> None:
     partial = library / "a" / "partial.mp3"
     st = partial.stat()
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         # What a first scan killed after one file leaves behind.
-        repos.library_files.upsert(LibraryFile(
-            id=uuid4(), file_path=str(partial), file_hash=None, format="mp3",
-            file_size=st.st_size, file_mtime_ns=st.st_mtime_ns,
-        ))
+        repos.library_files.upsert(
+            LibraryFile(
+                id=uuid4(),
+                file_path=str(partial),
+                file_hash=None,
+                format="mp3",
+                file_size=st.st_size,
+                file_mtime_ns=st.st_mtime_ns,
+            )
+        )
         conn.commit()
 
         _scan(conn, library)

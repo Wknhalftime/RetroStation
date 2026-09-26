@@ -181,9 +181,7 @@ class TestGetPlaylist:
 
 
 class TestPlaylistEvents:
-    def _seed_playlist_with_events(
-        self, db_conn, count: int = 5
-    ) -> tuple:
+    def _seed_playlist_with_events(self, db_conn, count: int = 5) -> tuple:
         station = _insert_station(db_conn)
         playlist = _insert_playlist(db_conn, station=station)
         artist = _insert_artist(db_conn)

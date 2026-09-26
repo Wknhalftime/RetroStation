@@ -90,19 +90,19 @@ def _upsert_recording_with_work(
 
     rec_title = rec_data.get("title", "")
     _, version_type = extract_version_info(rec_title)
-    repos.recordings.upsert(Recording(
-        id=rec_mbid,
-        title=rec_title,
-        work_id=work_id,
-        duration_ms=rec_data.get("length"),
-        version_type=version_type,
-    ))
+    repos.recordings.upsert(
+        Recording(
+            id=rec_mbid,
+            title=rec_title,
+            work_id=work_id,
+            duration_ms=rec_data.get("length"),
+            version_type=version_type,
+        )
+    )
     return work_id
 
 
-def _mark_files_failed(
-    pending_files: list[LibraryFile], files: LibraryFileRepository
-) -> None:
+def _mark_files_failed(pending_files: list[LibraryFile], files: LibraryFileRepository) -> None:
     """Mark files FAILED so the next enrichment run's pending query skips them."""
     for library_file in pending_files:
         files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
@@ -114,9 +114,7 @@ def _link_file_to_recording(
     files: LibraryFileRepository,
 ) -> None:
     """Mark a library file as ENRICHED and link it to its recording."""
-    files.update_recording_link(
-        library_file.id, recording_mbid, EnrichmentStatus.ENRICHED
-    )
+    files.update_recording_link(library_file.id, recording_mbid, EnrichmentStatus.ENRICHED)
     logger.debug(
         "library_file_enriched",
         file_id=str(library_file.id),
@@ -174,7 +172,9 @@ def _resolve_track_recording(
     survivor_id = survivor.get("id")
     if survivor_id and survivor_id != rec_mbid and survivor_id in recording_map:
         logger.info(
-            "recording_mbid_merged", recording_mbid=rec_mbid, survivor_mbid=survivor_id,
+            "recording_mbid_merged",
+            recording_mbid=rec_mbid,
+            survivor_mbid=survivor_id,
         )
         return survivor_id
     return None
@@ -234,9 +234,7 @@ def enrich_by_release(
         rec_mbid = library_file.audio.recording_mbid
         if not rec_mbid:
             logger.debug("library_file_no_recording_mbid", file_id=str(library_file.id))
-            repos.files.update_recording_link(
-                library_file.id, None, EnrichmentStatus.FAILED
-            )
+            repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
             continue
 
         rec_mbid = _resolve_track_recording(rec_mbid, recording_map, mb_client)
@@ -246,14 +244,10 @@ def enrich_by_release(
                 recording_mbid=library_file.audio.recording_mbid,
                 release_mbid=release_mbid,
             )
-            repos.files.update_recording_link(
-                library_file.id, None, EnrichmentStatus.FAILED
-            )
+            repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
             continue
 
-        work_id = _upsert_recording_with_work(
-            rec_mbid, recording_map[rec_mbid], artist_id, repos
-        )
+        work_id = _upsert_recording_with_work(rec_mbid, recording_map[rec_mbid], artist_id, repos)
         _link_file_to_recording(library_file, rec_mbid, repos.files)
         if work_id is not None:
             _move_file_to_work(library_file, work_id, repos)
@@ -307,9 +301,7 @@ def enrich_by_recording(
             normalized_name=normalize_artist(artist_name),
         )
 
-    work_id = _upsert_recording_with_work(
-        recording_mbid, rec_data, artist_id, repos
-    )
+    work_id = _upsert_recording_with_work(recording_mbid, rec_data, artist_id, repos)
 
     enriched_count = 0
     for library_file in pending_files:
@@ -335,7 +327,8 @@ class BatchEnrichment:
 
 
 def _upsert_artist_from_credits(
-    credits: list[MbArtistCredit], artist_repo: ArtistCatalogRepository,
+    credits: list[MbArtistCredit],
+    artist_repo: ArtistCatalogRepository,
 ) -> str | None:
     artist_info = _extract_artist_from_credits(credits)
     if artist_info is None:
@@ -388,13 +381,15 @@ def enrich_by_recording_batch(
         _upsert_artist_from_credits(rec_data.get("artist-credit", []), repos.artists)
         rec_title = rec_data.get("title", "")
         _, version_type = extract_version_info(rec_title)
-        repos.recordings.upsert(Recording(
-            id=rec_mbid,
-            title=rec_title,
-            work_id=None,
-            duration_ms=rec_data.get("length"),
-            version_type=version_type,
-        ))
+        repos.recordings.upsert(
+            Recording(
+                id=rec_mbid,
+                title=rec_title,
+                work_id=None,
+                duration_ms=rec_data.get("length"),
+                version_type=version_type,
+            )
+        )
         _link_file_to_recording(library_file, rec_mbid, repos.files)
         enriched += 1
 

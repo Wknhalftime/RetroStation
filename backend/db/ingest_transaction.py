@@ -4,6 +4,7 @@ Encapsulates "open a sync connection, acquire the per-station advisory
 lock, yield repositories, commit" so the task layer doesn't mix settings
 lookup, raw SQL, and repo wiring in one place.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator

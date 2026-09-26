@@ -3,6 +3,7 @@
 - `mb_api_fetch_start` fires before any HTTP call so hangs/timeouts leave a trail.
 - `mb_cache_set` fires after every cache write so silent failures are visible.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,6 +63,7 @@ def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPat
     # Bypass the tenacity retry + rate limiter by patching the low-level http get
     # and the sleep. Patch _rate_limit to a no-op so the test stays fast.
     import backend.services.mb_client as mb_mod
+
     monkeypatch.setattr(mb_mod, "_rate_limit", lambda: None)
 
     class _FakeHttp:
@@ -124,5 +126,3 @@ def test_mb_cache_set_not_emitted_on_cache_hit(monkeypatch: pytest.MonkeyPatch) 
 
     set_events = _mb_events(captured, "mb_cache_set")
     assert len(set_events) == 1
-
-

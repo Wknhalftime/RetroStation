@@ -28,11 +28,7 @@ class PgWorkRepository(WorkRepository):
             enhancement_error=row.get("enhancement_error"),
             embedding=parse_embedding(row.get("embedding")),
             mbid=row.get("mbid"),
-            origin=(
-                CatalogSource(row["origin"])
-                if row.get("origin")
-                else CatalogSource.LOCAL
-            ),
+            origin=(CatalogSource(row["origin"]) if row.get("origin") else CatalogSource.LOCAL),
         )
 
     def upsert(self, work: Work) -> Work:
@@ -43,17 +39,13 @@ class PgWorkRepository(WorkRepository):
                  title = EXCLUDED.title""",
             (work.id, work.title, work.artist_id),
         )
-        row = self._conn.execute(
-            "SELECT * FROM works WHERE id = %s", (work.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM works WHERE id = %s", (work.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, mbid: str) -> Work | None:
-        row = self._conn.execute(
-            "SELECT * FROM works WHERE id = %s", (mbid,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM works WHERE id = %s", (mbid,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def get_by_artist(self, artist_id: str) -> list[Work]:
@@ -100,7 +92,10 @@ class PgWorkRepository(WorkRepository):
         return work_id
 
     def upsert_from_mb(
-        self, mbid: str, title: str, artist_id: str,
+        self,
+        mbid: str,
+        title: str,
+        artist_id: str,
     ) -> str:
         row = self._conn.execute(
             "SELECT id FROM works WHERE mbid = %s FOR UPDATE",
@@ -117,7 +112,6 @@ class PgWorkRepository(WorkRepository):
             (work_id, title, artist_id, mbid),
         )
         return work_id
-
 
     def delete_if_empty(self, work_id: str) -> bool:
         # Every table with a FK to works except song_masters, which goes
@@ -144,7 +138,9 @@ class PgWorkRepository(WorkRepository):
         return True
 
     def get_candidates_by_normalized_artist(
-        self, normalized_artist_name: str, limit: int = 100,
+        self,
+        normalized_artist_name: str,
+        limit: int = 100,
     ) -> list[tuple[str, str]]:
         # Join through `artists.normalized_name` so orphan works (no attached
         # library_files yet) still appear as fuzzy-match candidates — this is
@@ -163,7 +159,8 @@ class PgWorkRepository(WorkRepository):
         if len(rows) >= limit:
             logger.warning(
                 "Candidate cap hit for artist %s (limit=%d)",
-                normalized_artist_name, limit,
+                normalized_artist_name,
+                limit,
             )
         return [(r["id"], r["title"]) for r in rows]
 
@@ -217,7 +214,8 @@ class PgWorkRepository(WorkRepository):
         )
         self._merge_format_overrides(target_id, sources)
         self._conn.execute(
-            "DELETE FROM song_masters WHERE work_id = ANY(%s)", (sources,),
+            "DELETE FROM song_masters WHERE work_id = ANY(%s)",
+            (sources,),
         )
         self._conn.execute("DELETE FROM works WHERE id = ANY(%s)", (sources,))
 
@@ -242,7 +240,8 @@ class PgWorkRepository(WorkRepository):
                 (clash["target_rec"], clash["source_rec"]),
             )
             self._conn.execute(
-                "DELETE FROM recordings WHERE id = %s", (clash["source_rec"],),
+                "DELETE FROM recordings WHERE id = %s",
+                (clash["source_rec"],),
             )
         # Two sources can share a version the target lacks; the oldest-id one
         # moves and the rest collapse onto it.

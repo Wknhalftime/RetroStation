@@ -76,9 +76,7 @@ def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> N
     Rules out misconfiguration pointing tests at a prod URL.
     """
     if not dbname.startswith("retrostation_test"):
-        raise RuntimeError(
-            f"refusing to apply test tuning to non-test database {dbname!r}"
-        )
+        raise RuntimeError(f"refusing to apply test tuning to non-test database {dbname!r}")
     for setting, value in _TEST_DB_SETTINGS:
         admin_conn.execute(
             pg_sql.SQL("ALTER DATABASE {} SET {} = {}").format(
@@ -127,9 +125,7 @@ def clean_db(db_url: str, worker_id: str) -> None:
                 ).fetchone()
                 if not exists:
                     admin_conn.execute(
-                        pg_sql.SQL("CREATE DATABASE {}").format(
-                            pg_sql.Identifier(dbname)
-                        )
+                        pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
                     )
             # Apply unsafe-but-fast settings scoped to this test DB only.
             # Takes effect for connections opened AFTER this runs (which is fine:
@@ -144,6 +140,7 @@ def clean_db(db_url: str, worker_id: str) -> None:
 @pytest.fixture(scope="session")
 def _migrated_db_url(clean_db: None, db_url: str) -> str:
     from backend.db.migrations import run_migrations
+
     with psycopg.connect(db_url) as conn:
         run_migrations(conn)
         conn.commit()

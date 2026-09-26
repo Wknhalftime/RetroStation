@@ -22,9 +22,7 @@ from backend.domain.broadcast import (
 from backend.domain.enums import MatchStatus
 
 
-def _insert_station(
-    conn: psycopg.Connection, call_letters: str, **kwargs
-) -> BroadcastStation:
+def _insert_station(conn: psycopg.Connection, call_letters: str, **kwargs) -> BroadcastStation:
     station = BroadcastStation(id=uuid4(), call_letters=call_letters, **kwargs)
     result = PgBroadcastStationRepository(conn).create(station)
     conn.commit()
@@ -33,7 +31,10 @@ def _insert_station(
 
 def _insert_playlist(conn, station, name="show.csv"):
     playlist = BroadcastPlaylist(
-        id=uuid4(), name=name, content_hash=uuid4().hex, station_id=station.id,
+        id=uuid4(),
+        name=name,
+        content_hash=uuid4().hex,
+        station_id=station.id,
     )
     result = PgBroadcastPlaylistRepository(conn).create(playlist)
     conn.commit()
@@ -45,13 +46,17 @@ def _insert_event_full(
 ):
     """Insert artist + identity + event. Returns the event."""
     artist = BroadcastArtist(
-        id=uuid4(), original_name=artist_name,
-        normalized_name=artist_name.lower(), match_status=MatchStatus.PENDING,
+        id=uuid4(),
+        original_name=artist_name,
+        normalized_name=artist_name.lower(),
+        match_status=MatchStatus.PENDING,
     )
     PgBroadcastArtistRepository(conn).upsert(artist)
 
     identity = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist.id, original_title=title,
+        id=uuid4(),
+        broadcast_artist_id=artist.id,
+        original_title=title,
         normalized_title=title.lower(),
         normalized_signature=f"{artist_name.lower()}:{title.lower()}",
         match_status=MatchStatus.PENDING,
@@ -59,7 +64,9 @@ def _insert_event_full(
     PgBroadcastTrackIdentityRepository(conn).upsert(identity)
 
     event = BroadcastPlayEvent(
-        id=uuid4(), identity_id=identity.id, playlist_id=playlist.id,
+        id=uuid4(),
+        identity_id=identity.id,
+        playlist_id=playlist.id,
         played_at=played_at or datetime.now(tz=UTC),
     )
     PgBroadcastPlayEventRepository(conn).create(event)
@@ -92,12 +99,13 @@ def _bulk_insert_events(
         identity_id = uuid4()
         normalized_artist = artist_name.lower()
         normalized_title = title.lower()
-        artist_params.append(
-            (artist_id, artist_name, normalized_artist, MatchStatus.PENDING.value)
-        )
+        artist_params.append((artist_id, artist_name, normalized_artist, MatchStatus.PENDING.value))
         identity_params.append(
             (
-                identity_id, artist_id, title, normalized_title,
+                identity_id,
+                artist_id,
+                title,
+                normalized_title,
                 f"{normalized_artist}:{normalized_title}",
                 MatchStatus.PENDING.value,
             )
@@ -224,7 +232,10 @@ class TestListStations:
         station = _insert_station(db_conn, "KAZR-FM")
         PgBroadcastPlaylistRepository(db_conn).create(
             BroadcastPlaylist(
-                id=uuid4(), name="test.csv", content_hash="abc123", station_id=station.id,
+                id=uuid4(),
+                name="test.csv",
+                content_hash="abc123",
+                station_id=station.id,
             )
         )
         db_conn.commit()
@@ -235,10 +246,15 @@ class TestListStations:
 
 class TestCreateStation:
     def test_create(self, client):
-        resp = client.post("/api/v1/stations", json={
-            "call_letters": "KAZR-FM", "name": "Laser 103.3",
-            "city": "Waukee", "format_name": "CHR",
-        })
+        resp = client.post(
+            "/api/v1/stations",
+            json={
+                "call_letters": "KAZR-FM",
+                "name": "Laser 103.3",
+                "city": "Waukee",
+                "format_name": "CHR",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["call_letters"] == "KAZR-FM"
@@ -313,13 +329,17 @@ class TestDeleteStation:
         other_playlist = _insert_playlist(db_conn, other_station, name="other.csv")
 
         artist = BroadcastArtist(
-            id=uuid4(), original_name="The Clash",
-            normalized_name="the clash", match_status=MatchStatus.PENDING,
+            id=uuid4(),
+            original_name="The Clash",
+            normalized_name="the clash",
+            match_status=MatchStatus.PENDING,
         )
         PgBroadcastArtistRepository(db_conn).upsert(artist)
         identity = BroadcastTrackIdentity(
-            id=uuid4(), broadcast_artist_id=artist.id,
-            original_title="London Calling", normalized_title="london calling",
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="London Calling",
+            normalized_title="london calling",
             normalized_signature="the clash:london calling",
             match_status=MatchStatus.PENDING,
         )
@@ -348,7 +368,8 @@ class TestDeleteStation:
 
         def _count(table: str, where: str, param) -> int:
             row = db_conn.execute(
-                f"SELECT COUNT(*) AS n FROM {table} WHERE {where}", (param,)  # noqa: S608
+                f"SELECT COUNT(*) AS n FROM {table} WHERE {where}",
+                (param,),  # noqa: S608
             ).fetchone()
             return row["n"]
 
@@ -406,11 +427,17 @@ class TestStationEventsByDate:
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station, name="morning.csv")
         _insert_event_full(
-            db_conn, playlist, "The Clash", "London Calling",
+            db_conn,
+            playlist,
+            "The Clash",
+            "London Calling",
             played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
-            db_conn, playlist, "Nirvana", "Smells Like Teen Spirit",
+            db_conn,
+            playlist,
+            "Nirvana",
+            "Smells Like Teen Spirit",
             played_at=datetime(2001, 3, 15, 9, 0, 0, tzinfo=UTC),
         )
 
@@ -428,11 +455,17 @@ class TestStationEventsByDate:
         p1 = _insert_playlist(db_conn, station, name="morning.csv")
         p2 = _insert_playlist(db_conn, station, name="evening.csv")
         _insert_event_full(
-            db_conn, p1, "The Clash", "London Calling",
+            db_conn,
+            p1,
+            "The Clash",
+            "London Calling",
             played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
-            db_conn, p2, "Nirvana", "In Bloom",
+            db_conn,
+            p2,
+            "Nirvana",
+            "In Bloom",
             played_at=datetime(2001, 3, 15, 20, 0, 0, tzinfo=UTC),
         )
 
@@ -447,11 +480,17 @@ class TestStationEventsByDate:
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
         _insert_event_full(
-            db_conn, playlist, "The Clash", "London Calling",
+            db_conn,
+            playlist,
+            "The Clash",
+            "London Calling",
             played_at=datetime(2001, 3, 15, 8, 0, 0, tzinfo=UTC),
         )
         _insert_event_full(
-            db_conn, playlist, "Nirvana", "In Bloom",
+            db_conn,
+            playlist,
+            "Nirvana",
+            "In Bloom",
             played_at=datetime(2001, 3, 16, 8, 0, 0, tzinfo=UTC),
         )
 
@@ -466,8 +505,7 @@ class TestStationEventsByDate:
             db_conn,
             playlist,
             [
-                (f"Artist {i}", f"Song {i}",
-                 datetime(2001, 3, 15, 8, i, 0, tzinfo=UTC))
+                (f"Artist {i}", f"Song {i}", datetime(2001, 3, 15, 8, i, 0, tzinfo=UTC))
                 for i in range(5)
             ],
         )
@@ -543,13 +581,19 @@ class TestMissingMatchesReport:
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
         _insert_identity_with_events(
-            db_conn, playlist, "Artist A", "Song A",
+            db_conn,
+            playlist,
+            "Artist A",
+            "Song A",
             n_events=3,
             artist_status=MatchStatus.AUTO_MATCHED,
             identity_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_identity_with_events(
-            db_conn, playlist, "Artist B", "Song B",
+            db_conn,
+            playlist,
+            "Artist B",
+            "Song B",
             n_events=3,
             artist_status=MatchStatus.MANUAL_MATCHED,
             identity_status=MatchStatus.MANUAL_MATCHED,
@@ -562,15 +606,21 @@ class TestMissingMatchesReport:
         """PENDING, NEEDS_REVIEW, AUTO_REJECTED, MANUAL_REJECTED all appear."""
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
-        for i, status in enumerate([
-            MatchStatus.PENDING,
-            MatchStatus.NEEDS_REVIEW,
-            MatchStatus.AUTO_REJECTED,
-            MatchStatus.MANUAL_REJECTED,
-        ]):
+        for i, status in enumerate(
+            [
+                MatchStatus.PENDING,
+                MatchStatus.NEEDS_REVIEW,
+                MatchStatus.AUTO_REJECTED,
+                MatchStatus.MANUAL_REJECTED,
+            ]
+        ):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i}", "Song",
-                n_events=1, identity_status=status,
+                db_conn,
+                playlist,
+                f"Artist {i}",
+                "Song",
+                n_events=1,
+                identity_status=status,
             )
         resp = client.get(self._url(station.id))
         assert resp.status_code == 200
@@ -585,7 +635,10 @@ class TestMissingMatchesReport:
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
         _insert_identity_with_events(
-            db_conn, playlist, "Pending Artist", "Matched Song",
+            db_conn,
+            playlist,
+            "Pending Artist",
+            "Matched Song",
             n_events=5,
             artist_status=MatchStatus.PENDING,
             identity_status=MatchStatus.AUTO_MATCHED,
@@ -605,8 +658,12 @@ class TestMissingMatchesReport:
         assert resp.status_code == 200
         item = resp.json()["items"][0]
         assert set(item.keys()) == {
-            "identity_id", "artist_name", "track_title",
-            "track_status", "play_count", "impact_pct",
+            "identity_id",
+            "artist_name",
+            "track_title",
+            "track_status",
+            "play_count",
+            "impact_pct",
         }
 
     # ------------------------------------------------------------------
@@ -618,7 +675,11 @@ class TestMissingMatchesReport:
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
         _insert_identity_with_events(
-            db_conn, playlist, "The Clash", "London Calling", n_events=7,
+            db_conn,
+            playlist,
+            "The Clash",
+            "London Calling",
+            n_events=7,
         )
         resp = client.get(self._url(station.id))
         assert resp.status_code == 200
@@ -648,7 +709,11 @@ class TestMissingMatchesReport:
         playlist = _insert_playlist(db_conn, station)
         for i in range(5):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=i + 1,
+                db_conn,
+                playlist,
+                f"Artist {i:02d}",
+                "Song",
+                n_events=i + 1,
             )
         resp = client.get(self._url(station.id) + "?limit=500")
         assert resp.status_code == 200
@@ -665,7 +730,11 @@ class TestMissingMatchesReport:
         playlist = _insert_playlist(db_conn, station)
         for i in range(5):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+                db_conn,
+                playlist,
+                f"Artist {i:02d}",
+                "Song",
+                n_events=1,
             )
         r1 = client.get(self._url(station.id, "?limit=2&offset=0"))
         r2 = client.get(self._url(station.id, "?limit=2&offset=2"))
@@ -692,10 +761,7 @@ class TestMissingMatchesReport:
 
         resp = client.get(self._url(station.id))
         assert resp.status_code == 200
-        names = [
-            (item["artist_name"], item["track_title"])
-            for item in resp.json()["items"]
-        ]
+        names = [(item["artist_name"], item["track_title"]) for item in resp.json()["items"]]
         assert names == [
             ("Abba", "Dancing Queen"),
             ("Abba", "Waterloo"),
@@ -712,7 +778,11 @@ class TestMissingMatchesReport:
         playlist = _insert_playlist(db_conn, station)
         for i in range(5):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+                db_conn,
+                playlist,
+                f"Artist {i:02d}",
+                "Song",
+                n_events=1,
             )
         resp = client.get(self._url(station.id, "?limit=2&offset=0"))
         assert resp.status_code == 200
@@ -726,7 +796,11 @@ class TestMissingMatchesReport:
         playlist = _insert_playlist(db_conn, station)
         for i in range(5):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+                db_conn,
+                playlist,
+                f"Artist {i:02d}",
+                "Song",
+                n_events=1,
             )
         resp = client.get(self._url(station.id, "?limit=2&offset=4"))
         assert resp.status_code == 200
@@ -745,13 +819,17 @@ class TestMissingMatchesReport:
         playlist = _insert_playlist(db_conn, station)
         for i in range(3):
             _insert_identity_with_events(
-                db_conn, playlist, f"Artist {i:02d}", "Song", n_events=1,
+                db_conn,
+                playlist,
+                f"Artist {i:02d}",
+                "Song",
+                n_events=1,
             )
         resp = client.get(self._url(station.id, "?limit=10&offset=100"))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 3       # full count preserved
-        assert data["items"] == []      # page is empty
+        assert data["total"] == 3  # full count preserved
+        assert data["items"] == []  # page is empty
 
     # ------------------------------------------------------------------
     # Station isolation and cross-playlist aggregation
@@ -764,10 +842,18 @@ class TestMissingMatchesReport:
         playlist_a = _insert_playlist(db_conn, station_a)
         playlist_b = _insert_playlist(db_conn, station_b)
         _insert_identity_with_events(
-            db_conn, playlist_a, "Artist A", "Song A", n_events=10,
+            db_conn,
+            playlist_a,
+            "Artist A",
+            "Song A",
+            n_events=10,
         )
         _insert_identity_with_events(
-            db_conn, playlist_b, "Artist B", "Song B", n_events=5,
+            db_conn,
+            playlist_b,
+            "Artist B",
+            "Song B",
+            n_events=5,
         )
 
         resp = client.get(self._url(station_a.id))
@@ -788,7 +874,9 @@ class TestMissingMatchesReport:
         playlist_b = _insert_playlist(db_conn, station, name="evening.csv")
 
         _, identity = _insert_artist_and_identity(
-            db_conn, "The Clash", "London Calling",
+            db_conn,
+            "The Clash",
+            "London Calling",
         )
         _insert_play_events_for_identity(db_conn, identity, playlist_a, n=3)
         _insert_play_events_for_identity(db_conn, identity, playlist_b, n=2)

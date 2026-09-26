@@ -252,7 +252,9 @@ async def _consolidate_recordings(
 
 
 async def _move_file_matches(
-    conn: AsyncConnection[Any], file_id: UUID, work_id: str,
+    conn: AsyncConnection[Any],
+    file_id: UUID,
+    work_id: str,
 ) -> None:
     """Point the file's matches at the work the file now belongs to.
 
@@ -624,8 +626,7 @@ async def create_format_override(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Format override for work {work_id} and format "
-                f"'{body.format_name}' already exists"
+                f"Format override for work {work_id} and format '{body.format_name}' already exists"
             ),
         )
 

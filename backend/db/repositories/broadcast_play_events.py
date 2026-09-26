@@ -35,8 +35,13 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
                VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (identity_id, playlist_id, played_at) DO NOTHING
                RETURNING *""",
-            (event.id, event.identity_id, event.playlist_id,
-             event.played_at, event.broadcast_day_id),
+            (
+                event.id,
+                event.identity_id,
+                event.playlist_id,
+                event.played_at,
+                event.broadcast_day_id,
+            ),
         ).fetchone()
         if row is not None:
             return self._row_to_model(row)
@@ -75,4 +80,3 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
             (station_id, broadcast_date),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
-

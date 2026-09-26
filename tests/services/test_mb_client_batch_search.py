@@ -4,6 +4,7 @@ One search request carries up to 100 MBIDs as ``rid:(a OR b ...)``; each
 recording that comes back is cached on its own so a later batch that
 contains it makes no request for it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -37,7 +38,7 @@ class _SearchServer:
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         query = parse_qs(request.url.query.decode())["query"][0]
-        asked = query[len("rid:("):-1].split(" OR ")
+        asked = query[len("rid:(") : -1].split(" OR ")
         found = [_recording(m) for m in asked if m in self.known]
         return httpx.Response(200, json={"count": len(found), "recordings": found})
 
@@ -96,7 +97,8 @@ def test_unknown_mbids_are_absent_from_the_result(make_client: Any) -> None:
 
 
 def test_cached_recordings_are_not_requested_again(
-    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+    make_client: Any,
+    cache: FakeMusicBrainzCacheRepository,
 ) -> None:
     mbids = [_mbid(n) for n in range(3)]
     server = _SearchServer(mbids)
@@ -124,7 +126,8 @@ def test_empty_input_makes_no_request(make_client: Any) -> None:
 
 
 def test_cache_ttl_is_configurable(
-    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+    make_client: Any,
+    cache: FakeMusicBrainzCacheRepository,
 ) -> None:
     mbid = _mbid(1)
     client = make_client(_SearchServer([mbid]), ttl_days=3650)
@@ -164,7 +167,8 @@ def test_mbids_the_search_never_returns_are_not_asked_again(make_client: Any) ->
 
 
 def test_cached_recordings_are_read_in_one_call_per_batch(
-    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+    make_client: Any,
+    cache: FakeMusicBrainzCacheRepository,
 ) -> None:
     mbids = [_mbid(n) for n in range(5)]
     client = make_client(_SearchServer(mbids))
@@ -177,7 +181,8 @@ def test_cached_recordings_are_read_in_one_call_per_batch(
 
 
 def test_cache_keeps_only_the_fields_enrichment_reads(
-    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+    make_client: Any,
+    cache: FakeMusicBrainzCacheRepository,
 ) -> None:
     # A raw search hit is ~30 KB (every release the recording appears on,
     # aliases, tags); reading 100 of those per batch costs more than the
@@ -185,22 +190,52 @@ def test_cache_keeps_only_the_fields_enrichment_reads(
     mbid = _mbid(1)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"count": 1, "recordings": [{
-            "id": mbid, "title": "Song", "length": 1234, "score": 100, "video": None,
-            "tags": [{"name": "rock"}], "isrcs": ["USXXX"], "first-release-date": "1999",
-            "artist-credit": [{"name": "A", "artist": {
-                "id": "a1", "name": "A", "sort-name": "A", "aliases": [{"name": "AA"}],
-            }}],
-            "releases": [{"id": "r1", "title": "R", "media": [{"format": "CD"}],
-                          "release-events": [{"date": "1999"}]}],
-        }]})
+        return httpx.Response(
+            200,
+            json={
+                "count": 1,
+                "recordings": [
+                    {
+                        "id": mbid,
+                        "title": "Song",
+                        "length": 1234,
+                        "score": 100,
+                        "video": None,
+                        "tags": [{"name": "rock"}],
+                        "isrcs": ["USXXX"],
+                        "first-release-date": "1999",
+                        "artist-credit": [
+                            {
+                                "name": "A",
+                                "artist": {
+                                    "id": "a1",
+                                    "name": "A",
+                                    "sort-name": "A",
+                                    "aliases": [{"name": "AA"}],
+                                },
+                            }
+                        ],
+                        "releases": [
+                            {
+                                "id": "r1",
+                                "title": "R",
+                                "media": [{"format": "CD"}],
+                                "release-events": [{"date": "1999"}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
 
     client = MusicBrainzApiClient(cache)
     client._http = httpx.Client(transport=httpx.MockTransport(handler))
     found = client.search_recordings_by_mbids([mbid])
 
     slim = {
-        "id": mbid, "title": "Song", "length": 1234,
+        "id": mbid,
+        "title": "Song",
+        "length": 1234,
         "artist-credit": [{"name": "A", "artist": {"id": "a1", "name": "A", "sort-name": "A"}}],
         "releases": [{"id": "r1"}],
     }
@@ -211,7 +246,8 @@ def test_cache_keeps_only_the_fields_enrichment_reads(
 
 
 def test_a_batch_is_written_to_the_cache_in_one_call(
-    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+    make_client: Any,
+    cache: FakeMusicBrainzCacheRepository,
 ) -> None:
     # 21,000 single-row writes cost 39 s of a cold run; write per batch.
     known = [_mbid(n) for n in range(3)]

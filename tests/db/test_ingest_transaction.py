@@ -4,6 +4,7 @@
 given station regardless of how the UUID string is formatted, so two uploads
 against the same station cannot bypass the advisory lock.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -28,9 +29,7 @@ def test_uuid_with_and_without_hyphens_produces_same_key() -> None:
 
 
 def test_different_stations_produce_different_keys() -> None:
-    assert station_advisory_lock_key(str(uuid4())) != station_advisory_lock_key(
-        str(uuid4())
-    )
+    assert station_advisory_lock_key(str(uuid4())) != station_advisory_lock_key(str(uuid4()))
 
 
 def test_empty_station_id_uses_reserved_key() -> None:

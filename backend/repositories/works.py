@@ -39,7 +39,9 @@ class WorkRepository(ABC):
 
     @abstractmethod
     def get_candidates_by_normalized_artist(
-        self, normalized_artist_name: str, limit: int = 100,
+        self,
+        normalized_artist_name: str,
+        limit: int = 100,
     ) -> list[tuple[str, str]]:
         """Return (work_id, work_title) pairs for fuzzy matching.
 

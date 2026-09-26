@@ -4,6 +4,7 @@ Enrichment calls it on the local work a file just left for a MusicBrainz work.
 ``matches`` (work_id and target_id) and ``format_overrides`` also point at
 works, so a work they still reference must survive rather than trip the FK.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,19 +24,25 @@ pytestmark = pytest.mark.integration
 
 
 def _file(repos: RepositoryFactory, tmp_path: Path, work_id: str | None) -> LibraryFile:
-    return repos.library_files.upsert(LibraryFile(
-        id=uuid4(),
-        file_path=str(tmp_path / f"{uuid4()}.mp3"),
-        file_hash=str(uuid4()),
-        format="mp3",
-        work_id=work_id,
-        audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),
-    ))
+    return repos.library_files.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path=str(tmp_path / f"{uuid4()}.mp3"),
+            file_hash=str(uuid4()),
+            format="mp3",
+            work_id=work_id,
+            audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),
+        )
+    )
 
 
 def _match(
-    conn: psycopg.Connection[DictRow], repos: RepositoryFactory, file_id: UUID,
-    *, work_id: str | None = None, target_id: str | None = None,
+    conn: psycopg.Connection[DictRow],
+    repos: RepositoryFactory,
+    file_id: UUID,
+    *,
+    work_id: str | None = None,
+    target_id: str | None = None,
 ) -> None:
     artist = repos.broadcast_artists.upsert(
         BroadcastArtist(id=uuid4(), original_name="Metallica", normalized_name=str(uuid4())),
@@ -43,8 +50,7 @@ def _match(
     conn.execute(
         """INSERT INTO matches (artist_id, library_file_id, work_id, target_id, target_type)
            VALUES (%s, %s, %s, %s, %s)""",
-        (artist.id, file_id, work_id, target_id,
-         TargetType.WORK.value if target_id else None),
+        (artist.id, file_id, work_id, target_id, TargetType.WORK.value if target_id else None),
     )
 
 
@@ -55,16 +61,21 @@ def _setup(conn: psycopg.Connection[DictRow]) -> tuple[RepositoryFactory, str, s
 
 
 def test_deletes_unreferenced_work_and_its_song_master(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos, work, artist_id = _setup(conn)
         other = repos.works.create_local("Orion", artist_id)
         elsewhere = _file(repos, tmp_path, other)
-        repos.song_masters.upsert(SongMaster(
-            id=uuid4(), work_id=work, preferred_file_id=elsewhere.id,
-            selection_method=SelectionMethod.AUTO,
-        ))
+        repos.song_masters.upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=work,
+                preferred_file_id=elsewhere.id,
+                selection_method=SelectionMethod.AUTO,
+            )
+        )
 
         assert repos.works.delete_if_empty(work) is True
 

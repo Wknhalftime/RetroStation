@@ -7,6 +7,7 @@ recordings; the filter is defensive/forward-safe. These tests pin the
 fake behaviour so a future feature that adds quarantine writes doesn't
 silently re-queue failed rows.
 """
+
 from __future__ import annotations
 
 from backend.domain.catalog import CatalogSource, Recording, VersionType, Work
@@ -69,9 +70,7 @@ def test_work_needs_enhancement_false_also_excluded() -> None:
 def test_recording_with_enhancement_error_is_excluded_from_queue() -> None:
     repo = FakeRecordingRepository()
     repo._data["ok"] = _recording("ok")
-    repo._data["failed"] = _recording(
-        "failed", enhancement_error="previous error"
-    )
+    repo._data["failed"] = _recording("failed", enhancement_error="previous error")
 
     ids = [r.id for r in repo.list_needing_enhancement()]
 

@@ -45,9 +45,7 @@ class PgLibraryQuarantineRepository(LibraryQuarantineRepository):
         )
 
     def list_all(self) -> list[LibraryQuarantine]:
-        rows = self._conn.execute(
-            "SELECT * FROM library_quarantine ORDER BY created_at"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM library_quarantine ORDER BY created_at").fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def get_by_path(self, file_path: str) -> LibraryQuarantine | None:
@@ -67,5 +65,6 @@ class PgLibraryQuarantineRepository(LibraryQuarantineRepository):
 
     def delete_by_path(self, file_path: str) -> None:
         self._conn.execute(
-            "DELETE FROM library_quarantine WHERE file_path = %s", (file_path,),
+            "DELETE FROM library_quarantine WHERE file_path = %s",
+            (file_path,),
         )

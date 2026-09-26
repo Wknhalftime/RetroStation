@@ -87,4 +87,3 @@ class PgUserSettingRepository(UserSettingRepository):
             )
             for row in rows
         ]
-

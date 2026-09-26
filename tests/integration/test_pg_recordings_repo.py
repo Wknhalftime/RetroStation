@@ -1,4 +1,5 @@
 """Integration tests for PgRecordingRepository."""
+
 from __future__ import annotations
 
 import psycopg
@@ -53,4 +54,3 @@ def test_upsert_inserts_with_correct_version_type(migrated_db: str) -> None:
         result = repo.get_by_id(mbid)
         assert result is not None
         assert result.version_type == VersionType.REMIX
-

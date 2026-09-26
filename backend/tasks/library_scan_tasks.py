@@ -104,7 +104,8 @@ def _run_scan(
             library_conn.rollback()
             logger.warning(
                 "file_insert_failed_quarantined",
-                file_path=lf.file_path, exc_info=True,
+                file_path=lf.file_path,
+                exc_info=True,
             )
             quarantine_once(
                 repos.library_quarantine,
@@ -259,7 +260,8 @@ def library_scan_task(root_path: str) -> str:
     try:
         # Autocommit connection for progress tracking and system logs
         progress_conn = connect_sync(
-            settings.database_url, autocommit=True,
+            settings.database_url,
+            autocommit=True,
         )
         progress_repo = PgTaskProgressRepository(progress_conn)
         sys_log_repo = PgSystemLogRepository(progress_conn)
@@ -276,17 +278,20 @@ def library_scan_task(root_path: str) -> str:
             )
         )
 
-        sys_log_repo.create(SystemLog(
-            category=LogCategory.SCAN,
-            level=LogLevel.INFO,
-            message="scan_started",
-            trace_id=task_id,
-            details={"root": root_path},
-        ))
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="scan_started",
+                trace_id=task_id,
+                details={"root": root_path},
+            )
+        )
 
         # Open library connection BEFORE scan so callbacks can write immediately
         library_conn = connect_sync(
-            settings.database_url, autocommit=False,
+            settings.database_url,
+            autocommit=False,
         )
         repos = RepositoryFactory(library_conn)
 
@@ -315,13 +320,15 @@ def library_scan_task(root_path: str) -> str:
             )
         )
 
-        sys_log_repo.create(SystemLog(
-            category=LogCategory.SCAN,
-            level=LogLevel.INFO,
-            message="scan_completed",
-            trace_id=task_id,
-            details={"files_indexed": files_written, "quarantined": quarantine_written},
-        ))
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="scan_completed",
+                trace_id=task_id,
+                details={"files_indexed": files_written, "quarantined": quarantine_written},
+            )
+        )
 
         logger.info(
             "library_scan_task_complete",
@@ -361,13 +368,15 @@ def library_scan_task(root_path: str) -> str:
                 )
         if progress_conn is not None and sys_log_repo is not None:
             with contextlib.suppress(Exception):
-                sys_log_repo.create(SystemLog(
-                    category=LogCategory.SCAN,
-                    level=LogLevel.ERROR,
-                    message="scan_failed",
-                    trace_id=task_id,
-                    details={"error": str(exc)},
-                ))
+                sys_log_repo.create(
+                    SystemLog(
+                        category=LogCategory.SCAN,
+                        level=LogLevel.ERROR,
+                        message="scan_failed",
+                        trace_id=task_id,
+                        details={"error": str(exc)},
+                    )
+                )
         raise
 
     finally:

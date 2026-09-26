@@ -39,6 +39,7 @@ FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
 # MP3 helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_silent_mp3_frames(num_frames: int = 8) -> bytes:
     """
     Return raw MPEG1 Layer3 silence frames.
@@ -57,12 +58,7 @@ def _write_id3v2_plain(tags: dict[str, str]) -> bytes:
 
     def _text_frame(frame_id: str, text: str) -> bytes:
         content = b"\x00" + text.encode("latin-1", errors="replace")
-        return (
-            frame_id.encode("ascii")
-            + struct.pack(">I", len(content))
-            + b"\x00\x00"
-            + content
-        )
+        return frame_id.encode("ascii") + struct.pack(">I", len(content)) + b"\x00\x00" + content
 
     body = b"".join(_text_frame(fid, txt) for fid, txt in tags.items())
     size = len(body)
@@ -79,6 +75,7 @@ def _write_id3v2_plain(tags: dict[str, str]) -> bytes:
 # Fixture 1: well_tagged.mp3  (use mutagen API for correct TXXX encoding)
 # ---------------------------------------------------------------------------
 
+
 def create_well_tagged_mp3(path: Path) -> None:
     # Write bare MP3 frames first, then layer ID3 tags on top with mutagen
     mp3_frames = _make_silent_mp3_frames(8)
@@ -90,18 +87,36 @@ def create_well_tagged_mp3(path: Path) -> None:
     tags.add(TALB(encoding=Encoding.UTF8, text=["Test Album"]))
     tags.add(TRCK(encoding=Encoding.UTF8, text=["3/10"]))
     tags.add(TPOS(encoding=Encoding.UTF8, text=["1/2"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Track Id",
-                  text=["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Artist Id",
-                  text=["11111111-2222-3333-4444-555555555555"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Album Artist Id",
-                  text=["66666666-7777-8888-9999-aaaaaaaaaaaa"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Album Id",
-                  text=["bbbbbbbb-cccc-dddd-eeee-ffffffffffff"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Release Type",
-                  text=["album"]))
-    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Release Status",
-                  text=["official"]))
+    tags.add(
+        TXXX(
+            encoding=Encoding.UTF8,
+            desc="MusicBrainz Track Id",
+            text=["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+        )
+    )
+    tags.add(
+        TXXX(
+            encoding=Encoding.UTF8,
+            desc="MusicBrainz Artist Id",
+            text=["11111111-2222-3333-4444-555555555555"],
+        )
+    )
+    tags.add(
+        TXXX(
+            encoding=Encoding.UTF8,
+            desc="MusicBrainz Album Artist Id",
+            text=["66666666-7777-8888-9999-aaaaaaaaaaaa"],
+        )
+    )
+    tags.add(
+        TXXX(
+            encoding=Encoding.UTF8,
+            desc="MusicBrainz Album Id",
+            text=["bbbbbbbb-cccc-dddd-eeee-ffffffffffff"],
+        )
+    )
+    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Release Type", text=["album"]))
+    tags.add(TXXX(encoding=Encoding.UTF8, desc="MusicBrainz Release Status", text=["official"]))
     tags.save(str(path), v2_version=3)
     print(f"  created {path.name}")
 
@@ -109,6 +124,7 @@ def create_well_tagged_mp3(path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Fixture 2: partial_tags.mp3
 # ---------------------------------------------------------------------------
+
 
 def create_partial_tags_mp3(path: Path) -> None:
     tags = {
@@ -127,6 +143,7 @@ def create_partial_tags_mp3(path: Path) -> None:
 # Fixture 3: minimal_tags.ogg  (via ffmpeg)
 # ---------------------------------------------------------------------------
 
+
 def create_minimal_ogg(path: Path) -> None:
     # Generate a silent WAV first, then convert to OGG via ffmpeg
     wav_tmp = path.with_suffix(".tmp.wav")
@@ -134,11 +151,16 @@ def create_minimal_ogg(path: Path) -> None:
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-i", str(wav_tmp),
-                "-c:a", "libvorbis",
-                "-metadata", "title=Minimal Track",
-                "-metadata", "artist=Minimal Artist",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(wav_tmp),
+                "-c:a",
+                "libvorbis",
+                "-metadata",
+                "title=Minimal Track",
+                "-metadata",
+                "artist=Minimal Artist",
                 str(path),
             ],
             capture_output=True,
@@ -155,6 +177,7 @@ def create_minimal_ogg(path: Path) -> None:
 # WAV helper
 # ---------------------------------------------------------------------------
 
+
 def _write_wav(path: Path, num_frames: int = 4410) -> None:
     with wave.open(str(path), "w") as wf:
         wf.setnchannels(2)
@@ -167,6 +190,7 @@ def _write_wav(path: Path, num_frames: int = 4410) -> None:
 # Fixture 4: no_tags.wav
 # ---------------------------------------------------------------------------
 
+
 def create_no_tags_wav(path: Path) -> None:
     _write_wav(path, num_frames=4410)
     print(f"  created {path.name}")
@@ -176,14 +200,16 @@ def create_no_tags_wav(path: Path) -> None:
 # Fixture 5: corrupt.mp3
 # ---------------------------------------------------------------------------
 
+
 def create_corrupt_mp3(path: Path) -> None:
-    path.write_bytes(b"\x00\xFF\xFE\xAB\xCD" * 20 + b"not an mp3 at all!!!")
+    path.write_bytes(b"\x00\xff\xfe\xab\xcd" * 20 + b"not an mp3 at all!!!")
     print(f"  created {path.name}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print(f"Writing fixtures to: {FIXTURES_DIR}")

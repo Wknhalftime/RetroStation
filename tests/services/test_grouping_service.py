@@ -1,4 +1,5 @@
 """Tests for the 4-step grouping service algorithm."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -130,10 +131,13 @@ def test_mbid_shortcut_inherits_work_id() -> None:
 def test_fuzzy_match_same_song_different_version() -> None:
     repos = _make_repos()
     _, existing_work = _seed_file_in_work(
-        repos, artist_name="Beatles", track_title="Hey Jude",
+        repos,
+        artist_name="Beatles",
+        track_title="Hey Jude",
     )
     incoming = _make_file(
-        artist_name="Beatles", track_title="Hey Jude (Remastered)",
+        artist_name="Beatles",
+        track_title="Hey Jude (Remastered)",
     )
     result = assign_work(incoming, **repos)
     assert result is not None
@@ -143,7 +147,9 @@ def test_fuzzy_match_same_song_different_version() -> None:
 def test_different_song_same_artist_gets_new_work() -> None:
     repos = _make_repos()
     _, existing_work = _seed_file_in_work(
-        repos, artist_name="Beatles", track_title="Hey Jude",
+        repos,
+        artist_name="Beatles",
+        track_title="Hey Jude",
     )
     incoming = _make_file(artist_name="Beatles", track_title="Let It Be")
     result = assign_work(incoming, **repos)
@@ -157,7 +163,8 @@ def test_different_song_same_artist_gets_new_work() -> None:
 def test_no_match_creates_local_work() -> None:
     repos = _make_repos()
     incoming = _make_file(
-        artist_name="New Artist", track_title="Brand New Song",
+        artist_name="New Artist",
+        track_title="Brand New Song",
     )
     result = assign_work(incoming, **repos)
     assert result is not None
@@ -234,7 +241,9 @@ def test_version_tag_stripped_before_match() -> None:
     """A live version matches the existing canonical work."""
     repos = _make_repos()
     _, existing_work = _seed_file_in_work(
-        repos, artist_name="Alanis", track_title="You Oughta Know",
+        repos,
+        artist_name="Alanis",
+        track_title="You Oughta Know",
     )
     incoming = _make_file(
         artist_name="Alanis",
@@ -262,7 +271,8 @@ def test_version_creates_recording_with_correct_type() -> None:
 def test_no_version_creates_original_recording() -> None:
     repos = _make_repos()
     incoming = _make_file(
-        artist_name="Alanis", track_title="You Oughta Know",
+        artist_name="Alanis",
+        track_title="You Oughta Know",
     )
     result = assign_work(incoming, **repos)
     assert result is not None
@@ -276,13 +286,15 @@ def test_two_versions_share_work_separate_recordings() -> None:
     repos = _make_repos()
     r1 = assign_work(
         _make_file(
-            artist_name="Alanis", track_title="You Oughta Know",
+            artist_name="Alanis",
+            track_title="You Oughta Know",
         ),
         **repos,
     )
     # Seed the first file so candidate lookup works
     f1 = _make_file(
-        artist_name="Alanis", track_title="You Oughta Know",
+        artist_name="Alanis",
+        track_title="You Oughta Know",
     )
     f1 = dataclasses.replace(
         f1,
@@ -339,7 +351,8 @@ def test_orphan_work_found_by_candidate_query() -> None:
     # Seed artist + work WITHOUT attaching a library_files row.
     norm_artist = normalize_artist("Alice In Chains")
     artist_id = repos["artist_repo"].upsert_local_artist(
-        "Alice In Chains", norm_artist,
+        "Alice In Chains",
+        norm_artist,
     )
     existing_work = repos["work_repo"].create_local("Would?", artist_id)
 
@@ -371,11 +384,16 @@ def test_create_local_work_idempotent_on_normalized_title() -> None:
     assert r1 is not None and r2 is not None
     assert r1.work_id == r2.work_id
     # Only one work total for the artist.
-    artist_id = repos["artist_repo"].get_by_normalized_name(
-        normalize_artist("Alice In Chains"),
-    ).id
+    artist_id = (
+        repos["artist_repo"]
+        .get_by_normalized_name(
+            normalize_artist("Alice In Chains"),
+        )
+        .id
+    )
     works = repos["work_repo"].get_by_artist(artist_id)
     assert len(works) == 1
+
 
 def test_album_version_collapses_to_base_work() -> None:
     """A file tagged `(Album Version)` lands on the same work as the plain file.
@@ -386,7 +404,9 @@ def test_album_version_collapses_to_base_work() -> None:
     """
     repos = _make_repos()
     _plain, plain_work = _seed_file_in_work(
-        repos, artist_name="Alice In Chains", track_title="Down In A Hole",
+        repos,
+        artist_name="Alice In Chains",
+        track_title="Down In A Hole",
     )
     result = assign_work(
         _make_file(
@@ -402,7 +422,9 @@ def test_album_version_collapses_to_base_work() -> None:
 def test_unhashed_file_does_not_share_work_with_other_unhashed_files() -> None:
     repos = _make_repos()
     other, other_work = _seed_file_in_work(
-        repos, artist_name="Someone Else", track_title="Different Song",
+        repos,
+        artist_name="Someone Else",
+        track_title="Different Song",
     )
     repos["library_file_repo"].upsert(dataclasses.replace(other, file_hash=None))
     incoming = dataclasses.replace(_make_file(), file_hash=None)

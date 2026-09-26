@@ -45,15 +45,10 @@ class TestFormatLowConfidence:
 class TestFormatAmbiguousGap:
     def test_typical(self) -> None:
         assert (
-            format_ambiguous_gap(3.2, 10.0)
-            == "Top candidates within 3 points (gap < 10 required)"
+            format_ambiguous_gap(3.2, 10.0) == "Top candidates within 3 points (gap < 10 required)"
         )
 
     def test_zero_gap(self) -> None:
         assert (
-            format_ambiguous_gap(0.0, 10.0)
-            == "Top candidates within 0 points (gap < 10 required)"
+            format_ambiguous_gap(0.0, 10.0) == "Top candidates within 0 points (gap < 10 required)"
         )
-
-
-

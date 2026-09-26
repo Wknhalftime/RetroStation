@@ -1289,7 +1289,7 @@ def test_extract_altlen_with_other_tag_other_tag_wins() -> None:
 
 
 def test_extract_version_tags_nested_parens_removed_whole() -> None:
-    """"(Live Version (Edit))" must go as one group, not leave the outer ")".
+    """ "(Live Version (Edit))" must go as one group, not leave the outer ")".
 
     Six works in the library were titled "Back In The Saddle)" and the like
     because the group regex stopped at the first ")".
@@ -1298,7 +1298,8 @@ def test_extract_version_tags_nested_parens_removed_whole() -> None:
     assert base == "Back In The Saddle"
     assert tags == ["Live Version (Edit)"]
     assert extract_version_info("Back In The Saddle (Live Version (Edit))") == (
-        "Back In The Saddle", VersionType.LIVE,
+        "Back In The Saddle",
+        VersionType.LIVE,
     )
 
 
@@ -1322,7 +1323,8 @@ def test_extract_version_info_language_marker_is_explicit() -> None:
 def test_extract_version_info_year_and_venue_is_live() -> None:
     # Bootleg-style tags: "(1998/West In West Palm Beach, FL)", "(2003-06-21, Wembley)".
     assert extract_version_info("Same Old Song And Dance (1998/West In West Palm Beach, FL)") == (
-        "Same Old Song And Dance", VersionType.LIVE,
+        "Same Old Song And Dance",
+        VersionType.LIVE,
     )
     assert extract_version_info("Dream On (2003-06-21, Wembley)") == ("Dream On", VersionType.LIVE)
 
@@ -1336,7 +1338,8 @@ def test_extract_version_info_year_alone_is_not_live() -> None:
 def test_extract_version_info_lyrics_marker_is_stripped() -> None:
     # "(Lyrics!)" is the pool's explicit-lyrics flag, like "[Language]".
     assert extract_version_info("Falling In Love [Top 40 Mix](Lyrics!)") == (
-        "Falling In Love", VersionType.REMIX,
+        "Falling In Love",
+        VersionType.REMIX,
     )
 
 

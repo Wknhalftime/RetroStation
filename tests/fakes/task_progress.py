@@ -52,4 +52,3 @@ class FakeTaskProgressRepository(TaskProgressRepository):
             completed_at=None,
         )
         return 1
-

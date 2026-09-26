@@ -57,9 +57,7 @@ class TestScoreFileRow:
         assert lower[0] == upper[0]
 
     def test_bitrate_and_duration_passed_through(self) -> None:
-        _, bitrate, duration = score_file_row(
-            self._row(bitrate=320, duration_ms=240000)
-        )
+        _, bitrate, duration = score_file_row(self._row(bitrate=320, duration_ms=240000))
         assert bitrate == 320
         assert duration == 240000
 
@@ -72,9 +70,7 @@ class TestScoreFileRow:
         row = self._row(release_status="official", release_type="album", fmt="flac")
         score, _, _ = score_file_row(row)
         expected = (
-            RELEASE_STATUS_SCORE["official"]
-            + RELEASE_TYPE_SCORE["album"]
-            + FORMAT_BONUS["flac"]
+            RELEASE_STATUS_SCORE["official"] + RELEASE_TYPE_SCORE["album"] + FORMAT_BONUS["flac"]
         )
         assert score == expected
 
@@ -102,12 +98,18 @@ class TestScoreFileRow:
         # higher duration must win as the third tuple element.
         rows = [
             self._row(
-                release_status="official", release_type="album", fmt="flac",
-                bitrate=320, duration_ms=180000,
+                release_status="official",
+                release_type="album",
+                fmt="flac",
+                bitrate=320,
+                duration_ms=180000,
             ),
             self._row(
-                release_status="official", release_type="album", fmt="flac",
-                bitrate=320, duration_ms=240000,
+                release_status="official",
+                release_type="album",
+                fmt="flac",
+                bitrate=320,
+                duration_ms=240000,
             ),
         ]
         best = max(rows, key=score_file_row)

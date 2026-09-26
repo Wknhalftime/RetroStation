@@ -57,32 +57,30 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         return [f for f in self._data.values() if f.audio.artist_mbid == artist_mbid]
 
     def get_by_normalized_artist_name(
-        self, normalized_name: str, limit: int = 100,
+        self,
+        normalized_name: str,
+        limit: int = 100,
     ) -> list[LibraryFile]:
         if not normalized_name:
             return []
-        hits = [
-            f for f in self._data.values()
-            if f.audio.normalized_artist_name == normalized_name
-        ]
+        hits = [f for f in self._data.values() if f.audio.normalized_artist_name == normalized_name]
         return sorted(hits, key=lambda f: str(f.id))[:limit]
 
     def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
-        return [
-            f for f in self._data.values()
-            if f.audio.recording_mbid == recording_mbid
-        ]
+        return [f for f in self._data.values() if f.audio.recording_mbid == recording_mbid]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         return [
-            f for f in self._data.values()
+            f
+            for f in self._data.values()
             if f.audio.release_mbid == release_mbid
             and f.enrichment_status == EnrichmentStatus.PENDING
         ]
 
     def get_pending_enrichment_by_recording(self, recording_mbid: str) -> list[LibraryFile]:
         return [
-            f for f in self._data.values()
+            f
+            for f in self._data.values()
             if f.audio.recording_mbid == recording_mbid
             and f.audio.release_mbid is None
             and f.enrichment_status == EnrichmentStatus.PENDING
@@ -91,7 +89,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_pending_enrichment_with_release(self) -> list[LibraryFile]:
         return sorted(
             (
-                f for f in self._data.values()
+                f
+                for f in self._data.values()
                 if f.enrichment_status == EnrichmentStatus.PENDING
                 and f.audio.release_mbid is not None
                 and f.audio.recording_mbid is not None
@@ -150,13 +149,16 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def relocate(self, file_id: UUID, new_path: str) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(
-                self._data[file_id], file_path=new_path, file_status=FileStatus.PRESENT,
+                self._data[file_id],
+                file_path=new_path,
+                file_status=FileStatus.PRESENT,
             )
 
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(
-                self._data[file_id], work_id=work_id,
+                self._data[file_id],
+                work_id=work_id,
             )
 
     def get_by_work(self, work_id: str) -> list[LibraryFile]:
@@ -187,13 +189,16 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(
-                self._data[file_id], file_size=file_size, file_mtime_ns=file_mtime_ns,
+                self._data[file_id],
+                file_size=file_size,
+                file_mtime_ns=file_mtime_ns,
             )
 
     def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         return sorted(
             (
-                f for f in self._data.values()
+                f
+                for f in self._data.values()
                 if f.file_hash is None
                 and f.file_size == file_size
                 and f.file_mtime_ns == file_mtime_ns
@@ -204,7 +209,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
         rows = sorted(
             (
-                f for f in self._data.values()
+                f
+                for f in self._data.values()
                 if f.file_hash is None
                 and f.file_status == FileStatus.PRESENT
                 and (after_path is None or f.file_path > after_path)
@@ -214,7 +220,11 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         return rows[:limit]
 
     def set_file_hash(
-        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+        self,
+        file_id: UUID,
+        file_hash: str,
+        file_size: int,
+        file_mtime_ns: int,
     ) -> bool:
         f = self._data.get(file_id)
         if (
@@ -228,7 +238,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
 
     def count_unhashed(self) -> int:
         return sum(
-            1 for f in self._data.values()
+            1
+            for f in self._data.values()
             if f.file_hash is None and f.file_status == FileStatus.PRESENT
         )
 

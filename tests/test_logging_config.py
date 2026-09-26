@@ -5,6 +5,7 @@ stdout pipe nobody reads; every write then raises ``OSError: [Errno 22]
 Invalid argument``. On 2026-09-25 that surfaced as ``mb_enrichment_task``
 failing with that message and no traceback.
 """
+
 from __future__ import annotations
 
 import sys

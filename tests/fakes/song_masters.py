@@ -16,6 +16,7 @@ class FakeSongMasterRepository(SongMasterRepository):
 
     def list_auto_for_works(self, work_ids: list[str]) -> list[SongMaster]:
         return [
-            m for work_id, m in self._data.items()
+            m
+            for work_id, m in self._data.items()
             if work_id in work_ids and m.selection_method == SelectionMethod.AUTO
         ]

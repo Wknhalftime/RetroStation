@@ -6,6 +6,7 @@ service cleans up the duplicates it left behind. Two works are duplicates when
 they share an artist and their titles are equal under the same comparison the
 fuzzy matcher treats as a perfect score: ``strict_normalize(normalize_title())``.
 """
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -77,7 +78,8 @@ def plan_duplicate_merges(footprints: Sequence[WorkFootprint]) -> list[WorkMerge
 
 
 def _manual_choice_to_carry(
-    plan: WorkMergePlan, song_master_repo: SongMasterRepository,
+    plan: WorkMergePlan,
+    song_master_repo: SongMasterRepository,
 ) -> UUID | None:
     """Return a source's manual master file if the target has no manual master."""
     target_master = song_master_repo.get_by_work(plan.target_id)
@@ -107,5 +109,8 @@ def merge_work_group(
     carried = _manual_choice_to_carry(plan, song_master_repo)
     work_repo.merge_into(plan.target_id, plan.source_ids)
     reselect_master_from_files(
-        plan.target_id, song_master_repo, library_file_repo, manual_file_id=carried,
+        plan.target_id,
+        song_master_repo,
+        library_file_repo,
+        manual_file_id=carried,
     )

@@ -9,6 +9,7 @@ Covers:
 - Counter/ingest parity: ``count_csv_rows`` and ``ingest_csv`` classify
   the same rows as "valid".
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -35,9 +36,7 @@ def _make_csv(valid_rows: int, *, invalid_rows: int = 0) -> bytes:
     for i in range(valid_rows):
         # Unique artist+title so the normalized signature is unique per row
         # and every row really does count as one "event".
-        lines.append(
-            f"KAZR,2005-03-02 00:{i // 60:02d}:{i % 60:02d},Artist_{i},Title_{i}"
-        )
+        lines.append(f"KAZR,2005-03-02 00:{i // 60:02d}:{i % 60:02d},Artist_{i},Title_{i}")
     for i in range(invalid_rows):
         # Missing Artist/Title — _is_valid_ingest_row should reject.
         lines.append(f"KAZR,2005-03-02 00:00:{i:02d},,")

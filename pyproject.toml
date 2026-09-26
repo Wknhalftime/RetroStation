@@ -38,12 +38,25 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.6",
     "pytest-recording>=0.13",
+    # audit tooling (retrostation-audit-kit.md section 3)
+    "import-linter>=2.0",
+    "poethepoet",
+    "pip-audit",
+    "deptry",
+    "vulture",
+    "syrupy",
+    "pytest-randomly",
+    "pytest-socket",
+    "diff-cover",
+    "pre-commit",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-n logical"
+# pytest-randomly is installed for the audit but kept opt-in (`poe tests` passes
+# -p randomly), so everyday runs and CI keep file order until that is ruled on.
+addopts = "-n logical -p no:randomly"
 # Per-test hang ceiling. Catches deadlocks (e.g. a runaway TRUNCATE blocked on
 # a leaked ACCESS EXCLUSIVE lock) before they consume the whole CI job. Use
 # @pytest.mark.timeout(N) on individual tests that legitimately need longer.
@@ -58,6 +71,8 @@ markers = [
 strict = true
 python_version = "3.13"
 ignore_missing_imports = false
+# redundant-expr is proposed by the audit (poe types), not enforced yet: it flags 9 lines.
+enable_error_code = ["ignore-without-code", "truthy-bool"]
 
 [[tool.mypy.overrides]]
 # mutagen ships no py.typed; its stubs have unresolved exports.
@@ -70,12 +85,28 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
+# Enforced in CI and pre-commit. Rules the audit proposes are in [tool.poe.env]
+# RUFF_PROPOSED; adopting one means moving it here.
 select = ["E", "F", "I", "UP", "B", "SIM", "N", "BLE"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-statements = 40
 
 [tool.ruff.lint.per-file-ignores]
 # Standalone CLI scripts and fixture generators use best-effort broad catches.
-"scripts/*" = ["BLE001"]
+"scripts/*" = ["BLE001", "T20"]
+"tests/**" = ["S101", "PLR2004", "FBT", "ARG"]
 "tests/fixtures/*" = ["BLE001"]
+# vulture whitelists are bare names by design.
+"vulture_whitelist.py" = ["F821", "B018"]
+
+[tool.deptry]
+# The dev extra is tooling (pytest, ruff, the audit kit); nothing imports it at runtime.
+optional_dependencies_dev_groups = ["dev"]
 
 [tool.coverage.run]
 source = ["backend"]
@@ -86,3 +117,83 @@ branch = true
 fail_under = 80
 precision = 1
 show_missing = true
+
+# ---- dependency direction ----
+[tool.importlinter]
+root_package = "backend"
+# import-linter 2.x reads this only at top level; it is required for the external
+# forbidden modules in the domain-purity contract.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: entry points -> services -> adapters -> ports -> domain"
+type = "layers"
+layers = [
+    "backend.main",
+    "backend.routers | backend.tasks",
+    "backend.services",
+    "backend.db",
+    "backend.repositories",
+    "backend.domain",
+]
+# AUDIT BASELINE 2026-09-26: violations present when the contract was adopted.
+# Recorded, not fixed. lint-imports errors on an ignore that no longer matches, so
+# delete each line when its import goes.
+ignore_imports = [
+    "backend.db.repositories.broadcast_track_identities -> backend.services.matching_reasons",
+    "backend.db.ingest_transaction -> backend.services.repository_factory",
+    # routers enqueue Huey tasks; `|` makes the two independent (see the audit notes)
+    "backend.routers.tasks -> backend.tasks.library_enrichment_tasks",
+    "backend.routers.matching -> backend.tasks.artist_matching_tasks",
+    "backend.routers.matching -> backend.tasks.identity_matching_tasks",
+    "backend.routers.library.scan -> backend.tasks.library_scan_tasks",
+    "backend.routers.ingestion -> backend.tasks.ingestion_tasks",
+]
+
+[[tool.importlinter.contracts]]
+name = "Services depend on repository ports, not Pg adapters"
+type = "forbidden"
+source_modules = ["backend.services"]
+forbidden_modules = ["backend.db"]
+ignore_imports = [
+    # composition root: the one place services may build Pg repositories
+    "backend.services.repository_factory -> backend.db.**",
+    # AUDIT BASELINE 2026-09-26 (see the layers contract above)
+    "backend.services.identity_resolution_service -> backend.db.repositories.library_files",
+    "backend.services.identity_resolution_service -> backend.db.repositories.recordings",
+    "backend.services.identity_resolution_service -> backend.db.repositories.song_masters",
+    "backend.services.identity_resolution_service -> backend.db.sync_conn",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain stays pure (stdlib only today)"
+type = "forbidden"
+source_modules = ["backend.domain"]
+forbidden_modules = ["fastapi", "psycopg", "huey", "httpx", "mutagen",
+                     "backend.db", "backend.services", "backend.repositories"]
+
+# ---- one command per audit step ----
+[tool.poe.env]
+# Proposed by the audit kit: reported by `poe audit` and the non-blocking CI job, not
+# enforced until ruled on.
+RUFF_PROPOSED = "C90,PLR0912,PLR0913,PLR0915,FBT,TRY,PGH003,T20,ERA,PTH,DTZ,S,ARG,TD,FIX"
+MYPY_PROPOSED = "redundant-expr"
+
+[tool.poe.tasks]
+lint        = { cmd = "ruff check . --extend-select ${RUFF_PROPOSED} --output-format json --exit-zero", capture_stdout = "audit/ruff.json" }
+lint-stats  = { cmd = "ruff check . --extend-select ${RUFF_PROPOSED} --statistics --exit-zero", capture_stdout = "audit/ruff-stats.txt" }
+lint-proposed = "ruff check . --extend-select ${RUFF_PROPOSED} --exit-zero"
+fmt-check   = "ruff format --check ."
+types       = { cmd = "mypy backend --strict --enable-error-code ${MYPY_PROPOSED} --junit-xml audit/mypy.xml" }
+layers      = { cmd = "lint-imports", capture_stdout = "audit/import-linter.txt" }
+# vulture scores every unused function, method and attribute at 60%, so 80 reported nothing.
+deadcode    = { cmd = "vulture backend vulture_whitelist.py --min-confidence 60", capture_stdout = "audit/vulture.txt" }
+deps        = "deptry . --json-output audit/deptry.json"
+vulns       = "pip-audit -f json -o audit/pip-audit.json"
+tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json"
+hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
+audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
+audit.ignore_fail = "return_non_zero"
+mutate      = "mutmut run"   # WSL; scope with [tool.mutmut] paths_to_mutate = the hotspot module
+refactor-gate.sequence = ["fmt-check", "layers", "types", "tests",
+                          { cmd = "diff-cover audit/coverage.xml --compare-branch master --fail-under 100" }]

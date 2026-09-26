@@ -3,6 +3,7 @@
 The engine walks strategies in order and returns the first non-None result.
 Strategies produce values only — persistence lives in the service function.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -105,10 +106,12 @@ def test_engine_preserves_strategy_order() -> None:
             order.append(self._name)
             return self._result
 
-    engine = IdentityMatchingEngine([
-        _Recorder("a", None),
-        _Recorder("b", None),
-        _Recorder("c", None),
-    ])
+    engine = IdentityMatchingEngine(
+        [
+            _Recorder("a", None),
+            _Recorder("b", None),
+            _Recorder("c", None),
+        ]
+    )
     engine.resolve(_identity(), _artist())
     assert order == ["a", "b", "c"]

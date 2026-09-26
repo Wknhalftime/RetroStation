@@ -25,8 +25,7 @@ class FakeRecordingRepository(RecordingRepository):
 
     def list_needing_enhancement(self) -> list[Recording]:
         return [
-            r for r in self._data.values()
-            if r.needs_enhancement and r.enhancement_error is None
+            r for r in self._data.values() if r.needs_enhancement and r.enhancement_error is None
         ]
 
     def mark_enhanced(self, mbid: str) -> None:
@@ -34,13 +33,13 @@ class FakeRecordingRepository(RecordingRepository):
             rec.needs_enhancement = False
 
     def get_or_create_local(
-        self, work_id: str, version_type: str, title: str,
+        self,
+        work_id: str,
+        version_type: str,
+        title: str,
     ) -> str:
         for rec in self._data.values():
-            if (
-                rec.work_id == work_id
-                and rec.version_type == VersionType(version_type)
-            ):
+            if rec.work_id == work_id and rec.version_type == VersionType(version_type):
                 return rec.id
         recording_id = str(uuid4())
         self._data[recording_id] = Recording(

@@ -67,7 +67,8 @@ def normalize_backfill_task(db_url: str) -> None:
     update.
     """
     with task_failure_telemetry(
-        TaskType.LIBRARY_ENRICHMENT, LogCategory.ENRICHMENT,
+        TaskType.LIBRARY_ENRICHMENT,
+        LogCategory.ENRICHMENT,
         database_url=db_url,
     ) as task_id:
         total = 0
@@ -120,7 +121,9 @@ def normalize_backfill_task(db_url: str) -> None:
                 total += len(rows)
                 last_id = rows[-1]["id"]
                 logger.info(
-                    "backfill_progress", processed=total, task_id=task_id,
+                    "backfill_progress",
+                    processed=total,
+                    task_id=task_id,
                 )
 
         logger.info("backfill_complete", total=total, task_id=task_id)

@@ -53,9 +53,7 @@ class PgLibraryFolderRepository(LibraryFolderRepository, LibraryFolderHashStagin
         return [self._row_to_model(r) for r in rows]
 
     def get_all(self) -> list[LibraryFolder]:
-        rows = self._conn.execute(
-            "SELECT * FROM library_folders ORDER BY full_path"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM library_folders ORDER BY full_path").fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def update_hash(self, folder_id: UUID, folder_hash: str) -> None:

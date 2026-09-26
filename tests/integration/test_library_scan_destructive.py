@@ -5,6 +5,7 @@ through something a user's disk actually does — a crashed worker, a
 folder copied from a Mac, a deleted album, an unreadable folder, a rename
 — and asserts the scan's outcome against the real PostgreSQL repositories.
 """
+
 from __future__ import annotations
 
 import os
@@ -53,7 +54,9 @@ def _link_to_work(repos: RepositoryFactory, file_path: Path) -> str:
 
 
 def _changed_after_staging(
-    migrated_db: str, tmp_path: Path, staged_age: timedelta,
+    migrated_db: str,
+    tmp_path: Path,
+    staged_age: timedelta,
 ) -> list[str]:
     """Stage the album's hash *staged_age* ago, change the album, then poll."""
     album = tmp_path / "album"
@@ -74,13 +77,17 @@ def _changed_after_staging(
 
         _put("partial_tags.mp3", album / "b.mp3")
         changed, _ = detect_changed_folders(
-            repos.library_folders, repos.library_folders, str(tmp_path), now,
+            repos.library_folders,
+            repos.library_folders,
+            str(tmp_path),
+            now,
         )
     return changed
 
 
 def test_crashed_scan_does_not_hide_its_folders_forever(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     """A worker killed mid-scan never clears its staged hashes. The poll
     treats staged folders as in flight, so without an expiry those folders
@@ -135,7 +142,9 @@ def test_deleted_folder_marks_its_files_missing(migrated_db: str, tmp_path: Path
 
 
 def test_unreadable_folder_does_not_abort_the_scan(
-    migrated_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    migrated_db: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One folder the worker cannot list must not fail the batch (the task
     re-raises, so every later poll fails on it again) nor mark its files
@@ -178,7 +187,8 @@ def test_case_only_rename_keeps_links(migrated_db: str, tmp_path: Path) -> None:
         _scan(repos, album)
 
         present = [
-            f for f in repos.library_files.get_by_folder_path(str(album))
+            f
+            for f in repos.library_files.get_by_folder_path(str(album))
             if f.file_status == FileStatus.PRESENT
         ]
         assert [f.file_path for f in present] == [str(album / "track.mp3")]
@@ -203,7 +213,8 @@ def _retag(path: Path) -> None:
 
 
 def test_case_only_rename_with_new_tags_keeps_the_row(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     """Picard and Mp3tag retag and rename in one go, so the content hash of
     the renamed file no longer matches its old row. The old spelling still
@@ -235,7 +246,9 @@ def test_case_only_rename_with_new_tags_keeps_the_row(
 
 @pytest.mark.parametrize("old_first", [True, False], ids=["old-first", "new-first"])
 def test_case_only_folder_rename_keeps_one_row(
-    migrated_db: str, tmp_path: Path, old_first: bool,
+    migrated_db: str,
+    tmp_path: Path,
+    old_first: bool,
 ) -> None:
     """The watcher sees the old spelling vanish and the new one appear. On a
     case-insensitive disk the vanished spelling still lists its files, so
@@ -271,7 +284,9 @@ def test_case_only_folder_rename_keeps_one_row(
 
 @pytest.mark.parametrize("old_first", [True, False], ids=["old-first", "new-first"])
 def test_moved_file_keeps_links(
-    migrated_db: str, tmp_path: Path, old_first: bool,
+    migrated_db: str,
+    tmp_path: Path,
+    old_first: bool,
 ) -> None:
     old = _put("well_tagged.mp3", tmp_path / "unsorted" / "kiss.mp3")
     new = tmp_path / "Prince" / "kiss.mp3"
@@ -301,9 +316,14 @@ def test_drive_root_folder_lookup_finds_its_files(migrated_db: str) -> None:
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        repos.library_files.upsert(LibraryFile(
-            id=uuid4(), file_path="X:\\song.mp3", file_hash="h", format="mp3",
-        ))
+        repos.library_files.upsert(
+            LibraryFile(
+                id=uuid4(),
+                file_path="X:\\song.mp3",
+                file_hash="h",
+                format="mp3",
+            )
+        )
         found = repos.library_files.get_by_folder_path("X:\\")
 
     assert [f.file_path for f in found] == ["X:\\song.mp3"]
@@ -318,7 +338,8 @@ def test_drive_root_folder_lookup_finds_its_files(migrated_db: str) -> None:
     ),
 )
 def test_legacy_row_replaced_by_older_file_is_reread(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     """A row with no stored stat trusts 'file older than its index row'.
     A replacement restored from an archive keeps its old mtime."""
@@ -343,7 +364,8 @@ def test_legacy_row_replaced_by_older_file_is_reread(
 
 
 def test_repeat_visits_do_not_duplicate_quarantine(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     album = tmp_path / "album"
     bad = _put("corrupt.mp3", album / "bad.mp3")
@@ -359,7 +381,8 @@ def test_repeat_visits_do_not_duplicate_quarantine(
 
 
 def test_duplicate_copy_does_not_steal_the_originals_row(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     """Same bytes in two places, both still on disk, are two library files."""
     original = _put("well_tagged.mp3", tmp_path / "album" / "kiss.mp3")

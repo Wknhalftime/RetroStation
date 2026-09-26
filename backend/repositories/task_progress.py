@@ -42,4 +42,3 @@ class TaskProgressRepository(ABC):
         other keys must use ``upsert`` (full document replace).
         """
         ...
-

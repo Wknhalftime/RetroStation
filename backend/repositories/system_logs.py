@@ -29,4 +29,3 @@ class SystemLogRepository(ABC):
         category: LogCategory | None = None,
         trace_id: str | None = None,
     ) -> int: ...
-

@@ -8,6 +8,7 @@ loop that used to live in ingestion_task. It must:
 - Re-raise the last DeadlockDetected once the attempts are exhausted.
 - Reject invalid configuration.
 """
+
 from __future__ import annotations
 
 import psycopg

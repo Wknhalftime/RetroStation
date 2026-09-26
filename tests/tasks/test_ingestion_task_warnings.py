@@ -8,6 +8,7 @@ Two distinct signals, both previously invisible to the operator:
   plus a reason breakdown, matching the existing ``progress_data.warning``
   convention used by the library scan task.
 """
+
 from __future__ import annotations
 
 from backend.services.ingestion_service import (

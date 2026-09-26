@@ -7,6 +7,7 @@ other router test skips the migration step.
 
 Marked `slow` so it runs in the nightly lane, not the PR CI fast path.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -67,6 +68,5 @@ def test_lifespan_runs_migrations_when_flag_unset(
         get_settings.cache_clear()
 
     assert len(calls) == 1, (
-        f"lifespan should invoke run_migrations exactly once when flag is "
-        f"unset, got {len(calls)}"
+        f"lifespan should invoke run_migrations exactly once when flag is unset, got {len(calls)}"
     )

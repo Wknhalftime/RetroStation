@@ -4,6 +4,7 @@
 enrichment calls this when a file leaves grouping's local work for the
 MusicBrainz work its recording performs.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,18 +22,23 @@ pytestmark = pytest.mark.integration
 
 
 def _file(repos: RepositoryFactory, tmp_path: Path, work_id: str) -> LibraryFile:
-    return repos.library_files.upsert(LibraryFile(
-        id=uuid4(),
-        file_path=str(tmp_path / f"{uuid4()}.mp3"),
-        file_hash=str(uuid4()),
-        format="mp3",
-        work_id=work_id,
-        audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),
-    ))
+    return repos.library_files.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path=str(tmp_path / f"{uuid4()}.mp3"),
+            file_hash=str(uuid4()),
+            format="mp3",
+            work_id=work_id,
+            audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),
+        )
+    )
 
 
 def _match(
-    conn: psycopg.Connection[DictRow], repos: RepositoryFactory, file_id: UUID, work_id: str,
+    conn: psycopg.Connection[DictRow],
+    repos: RepositoryFactory,
+    file_id: UUID,
+    work_id: str,
 ) -> UUID:
     artist = repos.broadcast_artists.upsert(
         BroadcastArtist(id=uuid4(), original_name="Metallica", normalized_name=str(uuid4())),

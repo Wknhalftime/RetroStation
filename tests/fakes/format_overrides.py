@@ -14,8 +14,12 @@ class FakeFormatOverrideRepository(FormatOverrideRepository):
 
     def get(self, work_id: str, format_name: str) -> FormatOverride | None:
         return next(
-            (o for o in self._data.values()
-             if o.work_id == work_id and o.format_name == format_name), None
+            (
+                o
+                for o in self._data.values()
+                if o.work_id == work_id and o.format_name == format_name
+            ),
+            None,
         )
 
     def list_by_work(self, work_id: str) -> list[FormatOverride]:

@@ -117,4 +117,3 @@ async def get_logs_by_trace(
     )
     rows = await cur.fetchall()
     return [_parse_entry(r) for r in rows]
-

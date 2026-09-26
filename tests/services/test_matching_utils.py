@@ -119,9 +119,7 @@ class TestBroadcastTitleVariants:
         assert broadcast_title_variants("Smooth f/Rob Thomas") == ("smooth",)
 
     def test_f_slash_credit_after_ellipsis_or_in_parens_is_stripped(self) -> None:
-        assert broadcast_title_variants("Livin' My Life Like..f/C.Marks") == (
-            "livin my life like",
-        )
+        assert broadcast_title_variants("Livin' My Life Like..f/C.Marks") == ("livin my life like",)
         assert broadcast_title_variants("Smooth (f/Rob Thomas)") == ("smooth",)
 
     def test_slash_inside_a_word_is_not_a_credit(self) -> None:
@@ -131,10 +129,12 @@ class TestBroadcastTitleVariants:
         """w/ is a credit in "The First Noel w/Faith Hill" but part of the
         title in "Killing Me Softly W/His Song", so both forms are scored."""
         assert broadcast_title_variants("The First Noel w/Faith Hill") == (
-            "the first noel w faith hill", "the first noel",
+            "the first noel w faith hill",
+            "the first noel",
         )
         assert broadcast_title_variants("Killing Me Softly W/His Song") == (
-            "killing me softly w his song", "killing me softly",
+            "killing me softly w his song",
+            "killing me softly",
         )
 
     def test_w_slash_o_and_w_slash_out_mean_without(self) -> None:
@@ -148,7 +148,6 @@ class TestBroadcastTitleVariants:
     def test_title_that_is_only_a_credit_is_kept(self) -> None:
         assert broadcast_title_variants("f/Nobody") == ("f nobody",)
 
-
     def test_bracketed_group_does_not_change_the_full_forms(self) -> None:
         assert broadcast_title_variants("Train In Vain (Stand By Me)") == (
             "train in vain stand by me",
@@ -159,9 +158,7 @@ class TestBroadcastTitleCoreVariants:
     """The full forms again without their bracketed groups, when that differs."""
 
     def test_alt_title_in_brackets_is_stripped(self) -> None:
-        assert broadcast_title_core_variants("Train In Vain (Stand By Me)") == (
-            "train in vain",
-        )
+        assert broadcast_title_core_variants("Train In Vain (Stand By Me)") == ("train in vain",)
         assert broadcast_title_core_variants("(Keep Feeling) Fascination") == ("fascination",)
 
     def test_plain_title_and_part_numbers_give_nothing(self) -> None:
@@ -178,7 +175,8 @@ class TestLibraryTitleVariants:
 
     def test_bracketed_group_adds_a_stripped_form(self) -> None:
         assert library_title_variants(
-            "Brass in Pocket (I'm Special)", "brass in pocket im special",
+            "Brass in Pocket (I'm Special)",
+            "brass in pocket im special",
         ) == ("brass in pocket im special", "brass in pocket")
 
     def test_missing_stored_form_is_derived_from_the_tag(self) -> None:

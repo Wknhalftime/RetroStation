@@ -11,11 +11,13 @@ def test_protocol_has_search_recording() -> None:
 
 
 def test_fake_search_recording_returns_seeded_results() -> None:
-    fc = FakeMbClient(recording_searches={
-        ("mbid-prince", "purple rain edit"): [
-            {"id": "rec-1", "title": "Purple Rain (Edit)", "score": 97},
-        ],
-    })
+    fc = FakeMbClient(
+        recording_searches={
+            ("mbid-prince", "purple rain edit"): [
+                {"id": "rec-1", "title": "Purple Rain (Edit)", "score": 97},
+            ],
+        }
+    )
     out = fc.search_recording(artist_mbid="mbid-prince", title="purple rain edit")
     assert len(out) == 1
     assert out[0]["id"] == "rec-1"
@@ -39,10 +41,12 @@ def test_protocol_has_search_recordings_by_mbids() -> None:
 
 
 def test_fake_search_recordings_by_mbids_returns_seeded_subset() -> None:
-    fc = FakeMbClient(recordings={
-        "rec-1": {"id": "rec-1", "title": "One"},
-        "rec-2": {"id": "rec-2", "title": "Two"},
-    })
+    fc = FakeMbClient(
+        recordings={
+            "rec-1": {"id": "rec-1", "title": "One"},
+            "rec-2": {"id": "rec-2", "title": "Two"},
+        }
+    )
     out = fc.search_recordings_by_mbids(["rec-1", "rec-missing"])
     assert out == {"rec-1": {"id": "rec-1", "title": "One"}}
     assert "search_recordings_by_mbids:rec-1,rec-missing" in fc.calls

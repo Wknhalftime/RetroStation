@@ -14,6 +14,7 @@ def _get_model():  # type: ignore[no-untyped-def]
     if _model is None:
         logger.info("loading_embedding_model", model="BAAI/bge-m3")
         from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer("BAAI/bge-m3")
         logger.info("embedding_model_loaded")
     return _model

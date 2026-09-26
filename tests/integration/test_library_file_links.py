@@ -5,6 +5,7 @@ A re-scan produces a fresh ``LibraryFile`` with neither, and before this
 the upsert wrote those NULLs straight over the existing links — every full
 scan silently un-grouped and un-enriched the whole library.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +27,9 @@ def _linked_file(repos: RepositoryFactory, path: str) -> LibraryFile:
     artist_id = repos.artists.upsert_local_artist("Prince", "prince")
     work_id = repos.works.create_local("Kiss", artist_id)
     recording_id = repos.recordings.get_or_create_local(
-        work_id, VersionType.ORIGINAL.value, "Kiss",
+        work_id,
+        VersionType.ORIGINAL.value,
+        "Kiss",
     )
     return LibraryFile(
         id=uuid4(),
@@ -42,7 +45,8 @@ def _linked_file(repos: RepositoryFactory, path: str) -> LibraryFile:
 
 
 def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     path = str(tmp_path / "kiss.flac")
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -53,8 +57,12 @@ def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
 
         # What a re-scan hands the repository after a retag: new hash, no links.
         retagged = LibraryFile(
-            id=uuid4(), file_path=path, file_hash="retagged-hash", format="flac",
-            file_size=101, file_mtime_ns=6,
+            id=uuid4(),
+            file_path=path,
+            file_hash="retagged-hash",
+            format="flac",
+            file_size=101,
+            file_mtime_ns=6,
         )
         repos.library_files.upsert_write_only(retagged)
         conn.commit()
@@ -78,7 +86,10 @@ def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Pa
         conn.commit()
 
         same = LibraryFile(
-            id=uuid4(), file_path=path, file_hash="original-hash", format="flac",
+            id=uuid4(),
+            file_path=path,
+            file_hash="original-hash",
+            format="flac",
         )
         repos.library_files.upsert_write_only(same)
         conn.commit()

@@ -25,8 +25,13 @@ def _upsert_params(cache: MusicBrainzCache) -> tuple[Any, ...]:
     # registers the right Postgres OID, so orjson can be swapped in later via
     # psycopg.types.json.set_json_dumps() without touching this code.
     return (
-        cache.id, cache.cache_key, cache.entity_type, cache.entity_mbid,
-        Jsonb(cache.response_data), cache.cached_at, cache.expires_at,
+        cache.id,
+        cache.cache_key,
+        cache.entity_type,
+        cache.entity_mbid,
+        Jsonb(cache.response_data),
+        cache.cached_at,
+        cache.expires_at,
     )
 
 
@@ -73,7 +78,5 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
             cur.executemany(_UPSERT_SQL, [_upsert_params(c) for c in caches])
 
     def delete_expired(self) -> int:
-        result = self._conn.execute(
-            "DELETE FROM mb_cache WHERE expires_at < now()"
-        )
+        result = self._conn.execute("DELETE FROM mb_cache WHERE expires_at < now()")
         return result.rowcount

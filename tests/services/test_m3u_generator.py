@@ -50,6 +50,7 @@ def _make_identity(
 
 def _make_event(*, identity: BroadcastTrackIdentity, playlist_id: object) -> BroadcastPlayEvent:
     from uuid import UUID
+
     return BroadcastPlayEvent(
         id=uuid4(),
         identity_id=identity.id,
@@ -62,6 +63,7 @@ def _make_file(
     *, file_path: str = "/music/track.flac", duration_ms: int | None = 301_000
 ) -> LibraryFile:
     from backend.domain.library import AudioMetadata
+
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
@@ -121,6 +123,7 @@ def _call_generate(
     station_format: str | None = None,
 ) -> str:
     from uuid import UUID
+
     events = event_repo.get_by_playlist(UUID(str(playlist_id)))
     return generate_m3u(
         events=events,
@@ -145,9 +148,14 @@ class TestBasicExport:
         """Matched event emits the file path in the output."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         identity = _make_identity(title="Smells Like Teen Spirit")
@@ -184,9 +192,14 @@ class TestNavidromePathMapping:
         """local_path_prefix is replaced by navidrome_path_prefix in the output."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos(
             settings={
                 "local_path_prefix": "/music",
@@ -227,9 +240,14 @@ class TestSongMasterOverride:
         the direct match file."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         identity = _make_identity(title="Track A")
@@ -284,9 +302,14 @@ class TestFormatOverrideWins:
         """format_override for the matching station_format beats song_master."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         identity = _make_identity(title="Radio Hit")
@@ -363,9 +386,14 @@ class TestUnmatchedEventsSkipped:
         """Events with non-matched identities produce only the #EXTM3U header."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         identity = _make_identity(title="Pending Song", match_status=match_status)
@@ -395,9 +423,14 @@ class TestUnmatchedEventsSkipped:
         """A playlist with no events produces only the #EXTM3U header."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         result = _call_generate(
@@ -421,9 +454,14 @@ class TestDurationHandling:
         """Files with no duration_ms emit -1 in EXTINF."""
         playlist_id = uuid4()
         (
-            event_repo, identity_repo, match_repo,
-            file_repo, recording_repo,
-            master_repo, override_repo, settings_repo,
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
         ) = _build_repos()
 
         identity = _make_identity(title="No Duration")

@@ -17,6 +17,7 @@ different cadence shape (e.g. 1 + in-retry tick), DELETE-AND-REPLACE those
 tests; the loose-bound and order-invariant tests above them will continue to
 protect the public contract.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -256,7 +257,9 @@ def test_coalesce_propagates_callback_exceptions() -> None:
 
     with pytest.raises(RuntimeError, match="logic bug in callback"):
         coalesce_artist_lookups(
-            {"mbid-a"}, _all_success_artists(["mbid-a"]), on_progress=RaisingCallback(),
+            {"mbid-a"},
+            _all_success_artists(["mbid-a"]),
+            on_progress=RaisingCallback(),
         )
 
 
@@ -271,15 +274,17 @@ def _seed_running_row(repo: FakeTaskProgressRepository, task_id: str) -> None:
     `mb_enrichment_task` task entry.
     """
     now = datetime.now(tz=UTC)
-    repo.upsert(TaskProgress(
-        task_id=task_id,
-        task_type=TaskType.MB_ENRICHMENT,
-        status=TaskStatus.RUNNING,
-        progress_data={"processed": 627, "total": 17193, "phase": "recordings"},
-        started_at=now,
-        updated_at=now,
-        completed_at=None,
-    ))
+    repo.upsert(
+        TaskProgress(
+            task_id=task_id,
+            task_type=TaskType.MB_ENRICHMENT,
+            status=TaskStatus.RUNNING,
+            progress_data={"processed": 627, "total": 17193, "phase": "recordings"},
+            started_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
+    )
 
 
 def _make_ctx(repo: TaskProgressRepository, task_id: str = "task-1") -> _PhaseContext:
@@ -425,15 +430,17 @@ def test_emit_pre_pass_heartbeat_resurrects_failed_row() -> None:
     # Simulate WS stale-cleanup tentatively flipping the row.
     existing = repo.get_by_id("task-1")
     assert existing is not None
-    repo.upsert(TaskProgress(
-        task_id="task-1",
-        task_type=TaskType.MB_ENRICHMENT,
-        status=TaskStatus.FAILED,
-        progress_data=existing.progress_data,
-        started_at=existing.started_at,
-        updated_at=existing.updated_at,
-        completed_at=datetime.now(tz=UTC),
-    ))
+    repo.upsert(
+        TaskProgress(
+            task_id="task-1",
+            task_type=TaskType.MB_ENRICHMENT,
+            status=TaskStatus.FAILED,
+            progress_data=existing.progress_data,
+            started_at=existing.started_at,
+            updated_at=existing.updated_at,
+            completed_at=datetime.now(tz=UTC),
+        )
+    )
     assert repo.get_by_id("task-1").status == TaskStatus.FAILED  # type: ignore[union-attr]
 
     ctx = _make_ctx(repo)

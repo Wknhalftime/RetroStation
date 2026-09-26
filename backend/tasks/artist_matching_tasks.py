@@ -41,7 +41,8 @@ def artist_matching_task(playlist_id: str) -> None:
         with (
             connect_sync(settings.database_url) as conn,
             MusicBrainzApiClient(
-                PgMusicBrainzCacheRepository(conn), ttl_days=settings.mb_cache_ttl_days,
+                PgMusicBrainzCacheRepository(conn),
+                ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client,
         ):
             # `with MusicBrainzApiClient(...)` is required — the client owns an
@@ -55,16 +56,13 @@ def artist_matching_task(playlist_id: str) -> None:
             # get_all_for_playlist(pid). See plan §"Reset scope rationale".
             playlist_artists = broadcast_artist_repo.get_all_for_playlist(pid)
             deferred_artist_ids = [
-                a.id for a in playlist_artists
+                a.id
+                for a in playlist_artists
                 if a.match_status == MatchStatus.NEEDS_REVIEW
                 and a.reason_code == ReasonCode.DEFERRED_RETRY
             ]
-            artists_reset = broadcast_artist_repo.reset_deferred_by_ids(
-                deferred_artist_ids
-            )
-            identities_reset = track_identity_repo.reset_deferred_by_artist_ids(
-                deferred_artist_ids
-            )
+            artists_reset = broadcast_artist_repo.reset_deferred_by_ids(deferred_artist_ids)
+            identities_reset = track_identity_repo.reset_deferred_by_artist_ids(deferred_artist_ids)
             logger.info(
                 "deferred_reset_summary",
                 playlist_id=playlist_id,

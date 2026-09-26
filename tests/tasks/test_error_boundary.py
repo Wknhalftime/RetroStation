@@ -6,6 +6,7 @@ ERROR SystemLog entry land in the DB, and the original exception is
 re-raised. The simplest honest way to verify both guarantees is to run
 against the actual repo implementations.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -19,9 +20,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def settings_db_url(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[str]:
+def settings_db_url(migrated_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Point `get_settings()` at the migrated test DB for the duration of
     one test. Clears the lru_cache both on entry AND on teardown — the
     second clear prevents a leaked Settings instance (still holding the
@@ -84,11 +83,13 @@ def test_task_failure_telemetry_no_writes_on_success(
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         progress_row = conn.execute(
-            "SELECT 1 FROM progress_tracking WHERE task_id = %s", (task_id,),
+            "SELECT 1 FROM progress_tracking WHERE task_id = %s",
+            (task_id,),
         ).fetchone()
         assert progress_row is None
         log_row = conn.execute(
-            "SELECT 1 FROM system_logs WHERE trace_id = %s", (task_id,),
+            "SELECT 1 FROM system_logs WHERE trace_id = %s",
+            (task_id,),
         ).fetchone()
         assert log_row is None
 
@@ -101,7 +102,9 @@ def test_task_failure_telemetry_caller_supplied_task_id(
     with (
         pytest.raises(ValueError, match="boom"),
         task_failure_telemetry(
-            TaskType.MATCHING, LogCategory.MATCHING, task_id=supplied,
+            TaskType.MATCHING,
+            LogCategory.MATCHING,
+            task_id=supplied,
         ) as task_id,
     ):
         assert task_id == supplied
@@ -112,7 +115,8 @@ def test_task_failure_telemetry_caller_supplied_task_id(
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         row = conn.execute(
-            "SELECT status FROM progress_tracking WHERE task_id = %s", (supplied,),
+            "SELECT status FROM progress_tracking WHERE task_id = %s",
+            (supplied,),
         ).fetchone()
         assert row is not None
         assert row["status"] == TaskStatus.FAILED.value
@@ -136,6 +140,7 @@ def test_task_failure_telemetry_catches_uuid_parse_errors(
         ),
     ):
         from uuid import UUID
+
         UUID("not-a-valid-uuid")  # raises ValueError
 
     import psycopg
@@ -143,7 +148,8 @@ def test_task_failure_telemetry_catches_uuid_parse_errors(
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         row = conn.execute(
-            "SELECT status FROM progress_tracking WHERE task_id = %s", (supplied,),
+            "SELECT status FROM progress_tracking WHERE task_id = %s",
+            (supplied,),
         ).fetchone()
         assert row is not None
         assert row["status"] == TaskStatus.FAILED.value

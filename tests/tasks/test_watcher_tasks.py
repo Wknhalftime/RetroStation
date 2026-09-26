@@ -1,4 +1,5 @@
 """Unit tests for library_watcher_poll and library_scan_files_task."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -21,6 +22,7 @@ class TestWatcherPollNoPath:
             mock_factory.return_value.user_settings = mock_settings
             with patch("backend.tasks.library_watcher_tasks.diff_tree") as mock_diff:
                 from backend.tasks.library_watcher_tasks import library_watcher_poll
+
                 library_watcher_poll.call_local()
                 mock_diff.assert_not_called()
 
@@ -38,6 +40,7 @@ class TestWatcherPollNoPath:
             mock_factory.return_value.user_settings = mock_settings
             with patch("backend.tasks.library_watcher_tasks.diff_tree") as mock_diff:
                 from backend.tasks.library_watcher_tasks import library_watcher_poll
+
                 library_watcher_poll.call_local()
                 mock_diff.assert_not_called()
 
@@ -60,6 +63,7 @@ class TestWatcherPollNoChanges:
         ):
             mock_factory.return_value.user_settings = mock_settings
             from backend.tasks.library_watcher_tasks import library_watcher_poll
+
             library_watcher_poll.call_local()
             mock_scan.assert_not_called()
 
@@ -72,7 +76,10 @@ class TestWatcherPollPassesEveryChangedFolder:
     )
     @patch("backend.tasks.library_watcher_tasks.library_scan_files_task")
     def test_nested_changed_folders_are_not_collapsed(
-        self, mock_scan: MagicMock, _mock_diff: MagicMock, mock_connect: MagicMock,
+        self,
+        mock_scan: MagicMock,
+        _mock_diff: MagicMock,
+        mock_connect: MagicMock,
     ) -> None:
         """The targeted scan is non-recursive, so collapsing a child into its
         parent would scan the parent (nothing to do) and drop the child."""
@@ -90,6 +97,7 @@ class TestWatcherPollPassesEveryChangedFolder:
             folders.get_folders_with_staged_hashes.return_value = set()
 
             from backend.tasks.library_watcher_tasks import library_watcher_poll
+
             library_watcher_poll.call_local()
 
         scanned_paths = mock_scan.call_args[0][0]
@@ -120,6 +128,7 @@ class TestWatcherPollUsesSettingValue:
             mock_factory.return_value.library_folders = mock_library_folders
 
             from backend.tasks.library_watcher_tasks import library_watcher_poll
+
             library_watcher_poll.call_local()
 
             # If .value unwrap was wrong the task would have returned early;

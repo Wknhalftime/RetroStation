@@ -7,6 +7,7 @@ new code should import it from `backend.domain.enums` directly.
 `reason_detail` strings are for curators only. They may include dynamic values
 (score, gap). Keep them in this module so strategies never inline f-strings.
 """
+
 from __future__ import annotations
 
 import math
@@ -45,7 +46,4 @@ def format_deferred_retry() -> str:
     # candidates. The cascade through bulk_defer_by_artist propagates this
     # same reason to child identities. "Unresolved across all matching tiers"
     # covers both without misleading curators about which path was taken.
-    return (
-        "Unresolved across all matching tiers — "
-        "deferred for retry on next playlist"
-    )
+    return "Unresolved across all matching tiers — deferred for retry on next playlist"

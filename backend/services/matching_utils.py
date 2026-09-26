@@ -44,12 +44,14 @@ _STRIP_FEAT = re.compile(
 # into a space, after which "f rob thomas" can't be told from title words,
 # so the credit comes off the raw title. f/ always means featuring.
 _F_CREDIT = re.compile(
-    r"\s*[\(\[]?\s*(?<![a-z0-9])f/\s*[^\)\]]+[\)\]]?\s*$", re.IGNORECASE,
+    r"\s*[\(\[]?\s*(?<![a-z0-9])f/\s*[^\)\]]+[\)\]]?\s*$",
+    re.IGNORECASE,
 )
 # w/ is also "with" inside a title ("Killing Me Softly W/His Song"), and
 # w/o and w/out mean "without".
 _W_CREDIT = re.compile(
-    r"\s*[\(\[]?\s*(?<![a-z0-9])w/(?!o\b|out\b)\s*[^\)\]]+[\)\]]?\s*$", re.IGNORECASE,
+    r"\s*[\(\[]?\s*(?<![a-z0-9])w/(?!o\b|out\b)\s*[^\)\]]+[\)\]]?\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -95,7 +97,8 @@ def broadcast_title_core_variants(original_title: str) -> tuple[str, ...]:
 
 
 def library_title_variants(
-    track_title: str | None, normalized_title: str | None,
+    track_title: str | None,
+    normalized_title: str | None,
 ) -> tuple[str, ...]:
     """Normalized forms of a library file's title to score a broadcast title against.
 
@@ -147,7 +150,4 @@ def is_likely_truncated(name: str, max_len: int) -> bool:
     """
     if not name:
         return False
-    return (
-        len(name) >= max_len - TRUNCATION_TOLERANCE_CHARS
-        and name[-1].isalnum()
-    )
+    return len(name) >= max_len - TRUNCATION_TOLERANCE_CHARS and name[-1].isalnum()

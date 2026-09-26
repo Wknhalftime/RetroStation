@@ -5,16 +5,14 @@ identical to the value passed to ``ingestion_task(...)``. This is the
 "single source of truth" rule — the client and the ``progress_tracking``
 table must agree on one ID.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-CSV_PAYLOAD = (
-    b"Station,Played,Artist,Title\r\n"
-    b"KAZR,2005-03-02 00:01:00,Artist_A,Title_A\r\n"
-)
+CSV_PAYLOAD = b"Station,Played,Artist,Title\r\nKAZR,2005-03-02 00:01:00,Artist_A,Title_A\r\n"
 
 
 def test_upload_playlist_returns_task_id_matching_enqueue(
@@ -56,6 +54,4 @@ def test_upload_playlists_mint_distinct_task_ids_across_requests(
 
     assert len(set(ids)) == 3, "Every upload must mint a distinct task_id"
     enqueue_ids = [call.args[3] for call in enqueue.call_args_list]
-    assert enqueue_ids == ids, (
-        "Each enqueue call must receive the same task_id the client got back"
-    )
+    assert enqueue_ids == ids, "Each enqueue call must receive the same task_id the client got back"

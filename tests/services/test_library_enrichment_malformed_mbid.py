@@ -5,6 +5,7 @@ the client raises. Before the fix that exception escaped enrich_by_release /
 enrich_by_recording, the task rolled back, and the files stayed 'pending' —
 so every enrichment run re-queried MusicBrainz for the same bad ID.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -31,9 +32,7 @@ _MALFORMED_MBID = "not-a-uuid"
 _VALID_RECORDING_MBID = "a3c5b4e2-1f0d-4c3b-9a8e-7d6f5e4c3b2a"
 
 
-def _pending_file(
-    release_mbid: str | None, recording_mbid: str | None
-) -> LibraryFile:
+def _pending_file(release_mbid: str | None, recording_mbid: str | None) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4()}.flac",
@@ -64,9 +63,7 @@ def _run_release(files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid
     )
 
 
-def _run_recording(
-    files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid: str
-) -> int:
+def _run_recording(files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid: str) -> int:
     return enrich_by_recording(
         mbid,
         _repos(files),

@@ -140,7 +140,11 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def set_file_hash(
-        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+        self,
+        file_id: UUID,
+        file_hash: str,
+        file_size: int,
+        file_mtime_ns: int,
     ) -> bool:
         """Record a deferred content hash; True if it was recorded.
 
@@ -159,4 +163,3 @@ class LibraryFileRepository(ABC):
     def has_any(self) -> bool:
         """Whether the table has any row at all, of any status."""
         ...
-

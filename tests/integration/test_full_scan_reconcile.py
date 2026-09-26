@@ -4,6 +4,7 @@ Before this, the full scan only ever upserted what it found. A deleted
 file stayed PRESENT forever, and a moved or renamed file was inserted as a
 bare new row while its work/recording links stayed on the old one.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -119,7 +120,8 @@ def test_case_only_rename_keeps_links(migrated_db: str, tmp_path: Path) -> None:
 
 
 def test_case_only_rename_with_new_tags_keeps_the_row(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     """A tagger's rename also rewrites the tags, so the content no longer
     matches; the old spelling naming the same file is what identifies it."""
@@ -208,9 +210,14 @@ def test_files_outside_root_are_untouched(migrated_db: str, tmp_path: Path) -> N
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        repos.library_files.upsert(LibraryFile(
-            id=uuid4(), file_path=sibling, file_hash="elsewhere", format="mp3",
-        ))
+        repos.library_files.upsert(
+            LibraryFile(
+                id=uuid4(),
+                file_path=sibling,
+                file_hash="elsewhere",
+                format="mp3",
+            )
+        )
         conn.commit()
         _full_scan(conn, root)
 

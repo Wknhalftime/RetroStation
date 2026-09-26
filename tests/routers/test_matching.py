@@ -69,9 +69,7 @@ def _insert_artist(
         normalized_name=original_name.lower(),
         match_status=match_status,
         artist_candidates=(
-            [{"mbid": "abc-123", "name": original_name, "score": 100}]
-            if with_candidates
-            else None
+            [{"mbid": "abc-123", "name": original_name, "score": 100}] if with_candidates else None
         ),
     )
     # upsert won't persist candidates; insert directly so candidates land in JSONB column
@@ -189,9 +187,7 @@ def _insert_work(conn: psycopg.Connection, work_id: str, artist_id: str) -> str:
     return work_id
 
 
-def _insert_recording(
-    conn: psycopg.Connection, rec_id: str, work_id: str | None = None
-) -> str:
+def _insert_recording(conn: psycopg.Connection, rec_id: str, work_id: str | None = None) -> str:
     conn.execute(
         "INSERT INTO recordings (id, title, work_id) VALUES (%s, %s, %s)",
         (rec_id, f"Recording {rec_id}", work_id),
@@ -462,7 +458,9 @@ class TestResolveArtist:
         _, _, artist, _, _ = _seed_review_chain(db_conn)
         # Add a second identity that is already MANUAL_MATCHED
         protected = _insert_identity(
-            db_conn, artist, original_title="Protected Song",
+            db_conn,
+            artist,
+            original_title="Protected Song",
             match_status=MatchStatus.MANUAL_MATCHED,
         )
 
@@ -502,9 +500,7 @@ class TestResolveArtist:
         )
         assert resp.status_code == 422
 
-    def test_manual_match_resets_review_children_and_enqueues(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_manual_match_resets_review_children_and_enqueues(self, client, db_conn, monkeypatch):
         """MANUAL_MATCHED on an artist must (a) reset all review-relevant
         children to PENDING, (b) delete their stale match rows, and (c)
         enqueue identity_matching_task for each affected playlist. This is
@@ -561,7 +557,8 @@ class TestResolveArtist:
         db_conn.commit()
         _insert_match_row(db_conn, review_child, confidence_score=83.0)
         pending_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Doperide",
             match_status=MatchStatus.PENDING,
         )
@@ -572,9 +569,7 @@ class TestResolveArtist:
         # Stub the enqueue so the test doesn't depend on Huey worker state.
         # No raising=False — if the dotted path is wrong, fail loudly.
         mock = MagicMock()
-        monkeypatch.setattr(
-            "backend.routers.matching.identity_matching_task", mock
-        )
+        monkeypatch.setattr("backend.routers.matching.identity_matching_task", mock)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
@@ -615,8 +610,7 @@ class TestResolveArtist:
 
         # (4) The artist-keyed match row from the upsert is present.
         artist_match = db_conn.execute(
-            "SELECT target_id, target_type, match_tier "
-            "FROM matches WHERE artist_id = %s",
+            "SELECT target_id, target_type, match_tier FROM matches WHERE artist_id = %s",
             (artist.id,),
         ).fetchone()
         assert artist_match is not None
@@ -624,9 +618,7 @@ class TestResolveArtist:
         assert artist_match["target_type"] == "artist"
         assert artist_match["match_tier"] == "manual"
 
-    def test_manual_match_commits_before_enqueue(
-        self, client, db_conn, migrated_db, monkeypatch
-    ):
+    def test_manual_match_commits_before_enqueue(self, client, db_conn, migrated_db, monkeypatch):
         """The cascade must commit BEFORE enqueueing identity_matching_task.
         Otherwise a fast Huey worker (separate process, separate connection)
         could pick up the task and read stale data — children still
@@ -644,7 +636,8 @@ class TestResolveArtist:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         review_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Your Disease",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
@@ -673,9 +666,7 @@ class TestResolveArtist:
             )
 
         mock = MagicMock(side_effect=capture_visible_state)
-        monkeypatch.setattr(
-            "backend.routers.matching.identity_matching_task", mock
-        )
+        monkeypatch.setattr("backend.routers.matching.identity_matching_task", mock)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
@@ -692,9 +683,7 @@ class TestResolveArtist:
             f"(pending + 0 matches), not the pre-commit state. Got {observed!r}."
         )
 
-    def test_manual_match_returns_200_when_enqueue_fails(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_manual_match_returns_200_when_enqueue_fails(self, client, db_conn, monkeypatch):
         """If identity_matching_task raises (Huey backend down, file lock,
         etc.) AFTER the cascade has committed, the request must still return
         200 — the user's manual link succeeded, the children are durably
@@ -709,7 +698,8 @@ class TestResolveArtist:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         review_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Your Disease",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
@@ -719,9 +709,7 @@ class TestResolveArtist:
         _insert_event(db_conn, playlist, review_child)
 
         mock = MagicMock(side_effect=RuntimeError("huey backend down"))
-        monkeypatch.setattr(
-            "backend.routers.matching.identity_matching_task", mock
-        )
+        monkeypatch.setattr("backend.routers.matching.identity_matching_task", mock)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
@@ -751,9 +739,7 @@ class TestResolveArtist:
         # The mock was actually called (not bypassed); it just raised.
         mock.assert_called_once_with(str(playlist.id))
 
-    def test_manual_match_does_not_touch_resolved_children(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_manual_match_does_not_touch_resolved_children(self, client, db_conn, monkeypatch):
         """MANUAL_MATCHED cascade must leave AUTO_MATCHED, MANUAL_MATCHED,
         AUTO_REJECTED, and MANUAL_REJECTED children alone. Mirrors the
         existing test_manual_reject_does_not_cascade_protected invariant."""
@@ -764,28 +750,33 @@ class TestResolveArtist:
         )
         # One review-relevant child to trigger the cascade.
         review_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Your Disease",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
         # Resolved siblings — must remain untouched.
         auto_matched_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Click Click Boom",
             match_status=MatchStatus.AUTO_MATCHED,
         )
         manual_matched_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Always",
             match_status=MatchStatus.MANUAL_MATCHED,
         )
         auto_rejected_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Faultline",
             match_status=MatchStatus.AUTO_REJECTED,
         )
         manual_rejected_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Beg",
             match_status=MatchStatus.MANUAL_REJECTED,
         )
@@ -798,9 +789,7 @@ class TestResolveArtist:
         _insert_event(db_conn, playlist, review_child)
 
         mock = MagicMock()
-        monkeypatch.setattr(
-            "backend.routers.matching.identity_matching_task", mock
-        )
+        monkeypatch.setattr("backend.routers.matching.identity_matching_task", mock)
 
         resp = client.post(
             f"/api/v1/matching/artists/{artist.id}/resolve",
@@ -987,17 +976,13 @@ class TestResolveIdentity:
 
 
 class TestResolveIdentityWorkId:
-    def test_persists_work_id_from_lib_file_work_id(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_persists_work_id_from_lib_file_work_id(self, client, db_conn, monkeypatch):
         """library_files.work_id is set → matches.work_id matches."""
         _, _, _, identity, _ = _seed_review_chain(db_conn)
         artist_id = _insert_canonical_artist(db_conn, "art-w1")
         work_id = _insert_work(db_conn, "work-w1", artist_id)
         rec_id = _insert_recording(db_conn, "rec-w1", work_id=work_id)
-        lib_file = _insert_library_file(
-            db_conn, recording_id=rec_id, work_id=work_id
-        )
+        lib_file = _insert_library_file(db_conn, recording_id=rec_id, work_id=work_id)
 
         # Stub recalc — exercise the wiring without re-running master
         # selection in the test path.
@@ -1039,9 +1024,7 @@ class TestResolveIdentityWorkId:
         _, _, _, identity, _ = _seed_review_chain(db_conn)
         rec_id = "rec-only-no-work"
         _insert_recording(db_conn, rec_id, work_id=None)
-        lib_file = _insert_library_file(
-            db_conn, recording_id=rec_id, work_id=None
-        )
+        lib_file = _insert_library_file(db_conn, recording_id=rec_id, work_id=None)
 
         captured: list[str] = []
         monkeypatch.setattr(
@@ -1104,16 +1087,12 @@ class TestResolveIdentityWorkId:
         artist_id = _insert_canonical_artist(db_conn, "art-fail")
         work_id = _insert_work(db_conn, "work-fail", artist_id)
         rec_id = _insert_recording(db_conn, "rec-fail", work_id=work_id)
-        lib_file = _insert_library_file(
-            db_conn, recording_id=rec_id, work_id=work_id
-        )
+        lib_file = _insert_library_file(db_conn, recording_id=rec_id, work_id=work_id)
 
         def _boom(db_url: str, w: str) -> None:
             raise RuntimeError("recalc exploded")
 
-        monkeypatch.setattr(
-            "backend.routers.matching.recalculate_for_work_sync", _boom
-        )
+        monkeypatch.setattr("backend.routers.matching.recalculate_for_work_sync", _boom)
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
@@ -1157,9 +1136,7 @@ class TestResolveIdentityWorkId:
         ).fetchone()
         assert row is None
 
-    def test_unknown_library_file_id_returns_422_and_aborts(
-        self, client, db_conn
-    ):
+    def test_unknown_library_file_id_returns_422_and_aborts(self, client, db_conn):
         """library_file_id pointing at a non-existent row → deterministic 422
         from LibraryFileNotFoundError; the surrounding async transaction
         rolls back so neither the status update nor the prior-match DELETE
@@ -1210,9 +1187,7 @@ class TestMatchingRun:
         assert data["enqueue"]["playlists_queued"] >= 0
         assert data["enqueue"]["enqueue_failures"] == 0
 
-    def test_default_mode_enqueues_unresolved_artists_only(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_default_mode_enqueues_unresolved_artists_only(self, client, db_conn, monkeypatch):
         """Without perform_reset, behavior is byte-identical to legacy /run:
         only playlists with NEEDS_REVIEW/PENDING artists are enqueued.
         Playlists whose artist is already resolved are NOT enqueued, even
@@ -1244,7 +1219,9 @@ class TestMatchingRun:
             db_conn, original_name="Resolved", match_status=MatchStatus.AUTO_MATCHED
         )
         identity_b = _insert_identity(
-            db_conn, artist_b, match_status=MatchStatus.NEEDS_REVIEW,
+            db_conn,
+            artist_b,
+            match_status=MatchStatus.NEEDS_REVIEW,
             original_title="Stale Title",
         )
         _insert_event(db_conn, playlist_b, identity_b)
@@ -1263,9 +1240,7 @@ class TestMatchingRun:
         and their matches rows are deleted. AUTO_MATCHED identities (and
         their matches rows) are untouched.
         """
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         station = _insert_station(db_conn, call_letters="KRRR")
         playlist = _insert_playlist(db_conn, station)
@@ -1291,9 +1266,7 @@ class TestMatchingRun:
         _insert_match_row(db_conn, c, confidence_score=0.0)
         _insert_event(db_conn, playlist, c)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
         data = resp.json()
         assert data["reset"]["performed"] is True
@@ -1326,15 +1299,11 @@ class TestMatchingRun:
         assert b_match is not None
         assert float(b_match["confidence_score"]) == 99.0
 
-    def test_perform_reset_preserves_manual_decisions(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_perform_reset_preserves_manual_decisions(self, client, db_conn, monkeypatch):
         """MANUAL_MATCHED and MANUAL_REJECTED rows are sacred: status and
         their matches rows must survive a reset.
         """
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         station = _insert_station(db_conn, call_letters="KMMM")
         playlist = _insert_playlist(db_conn, station)
@@ -1344,22 +1313,22 @@ class TestMatchingRun:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         manual_matched = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="MM",
             match_status=MatchStatus.MANUAL_MATCHED,
         )
         _insert_match_row(db_conn, manual_matched, confidence_score=100.0)
         _insert_event(db_conn, playlist, manual_matched)
         manual_rejected = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="MR",
             match_status=MatchStatus.MANUAL_REJECTED,
         )
         _insert_event(db_conn, playlist, manual_rejected)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
 
         mm = db_conn.execute(
@@ -1402,29 +1371,24 @@ class TestMatchingRun:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         identity = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Stale Title",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
         _insert_match_row(db_conn, identity, confidence_score=89.0)
         _insert_event(db_conn, playlist, identity)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
         assert str(playlist.id) in enqueue_calls
         assert resp.json()["enqueue"]["playlists_queued"] >= 1
 
-    def test_perform_reset_no_op_when_nothing_resettable(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_perform_reset_no_op_when_nothing_resettable(self, client, db_conn, monkeypatch):
         """No identities or artists in resettable states → reset counts are
         zero, response is 202, enqueue list is empty (no orphan playlists).
         """
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         # Only AUTO_MATCHED rows exist — nothing to reset.
         station = _insert_station(db_conn, call_letters="KNNN")
@@ -1435,15 +1399,14 @@ class TestMatchingRun:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         identity = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Done",
             match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_event(db_conn, playlist, identity)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
         data = resp.json()
         assert data["reset"]["performed"] is True
@@ -1452,9 +1415,7 @@ class TestMatchingRun:
         assert data["reset"]["matches_deleted"] == 0
         assert data["enqueue"]["playlists_queued"] == 0
 
-    def test_perform_reset_collects_enqueue_failures(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_perform_reset_collects_enqueue_failures(self, client, db_conn, monkeypatch):
         """When Huey enqueue raises, the response is still 202 with the
         failure surfaced in enqueue.enqueue_failures and
         failed_playlist_ids. The reset transaction is durable regardless.
@@ -1473,15 +1434,14 @@ class TestMatchingRun:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         identity = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Will Fail",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
         _insert_event(db_conn, playlist, identity)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
         data = resp.json()
         # Reset committed regardless of enqueue failure.
@@ -1518,9 +1478,7 @@ class TestMatchingRun:
             _MATCHING_RUN_LOCK_OBJ_ID,
         )
 
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         # Hold the lock on a different session.
         db_conn.execute(
@@ -1530,9 +1488,7 @@ class TestMatchingRun:
         db_conn.commit()
 
         try:
-            resp = client.post(
-                "/api/v1/matching/run", json={"perform_reset": True}
-            )
+            resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
             assert resp.status_code == 409
             assert resp.json()["detail"] == "matching_run_in_progress"
         finally:
@@ -1542,9 +1498,7 @@ class TestMatchingRun:
             )
             db_conn.commit()
 
-    def test_perform_reset_releases_lock_on_success(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_perform_reset_releases_lock_on_success(self, client, db_conn, monkeypatch):
         """After a successful /matching/run, the lock is released and a
         subsequent /matching/run can acquire it. Guards against the leaked-
         lock failure mode where a missed finally-block release would block
@@ -1555,14 +1509,10 @@ class TestMatchingRun:
             _MATCHING_RUN_LOCK_OBJ_ID,
         )
 
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         # First run, perform_reset=True.
-        resp1 = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp1 = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp1.status_code == 202
 
         # Lock is now released. A different session should be able to
@@ -1580,18 +1530,14 @@ class TestMatchingRun:
         )
         db_conn.commit()
 
-    def test_perform_reset_nulls_reason_metadata_on_reset_rows(
-        self, client, db_conn, monkeypatch
-    ):
+    def test_perform_reset_nulls_reason_metadata_on_reset_rows(self, client, db_conn, monkeypatch):
         """When a row transitions back to PENDING, match_tier / reason_code /
         reason_detail must be cleared so PENDING never carries stale matcher
         metadata. Matches the convention in resolve_artist's cascade
         ([matching.py:562-575](backend/routers/matching.py:562)) — "NULL =
         no reason for pending" is a project-wide invariant.
         """
-        monkeypatch.setattr(
-            "backend.routers.matching.artist_matching_task", lambda _pid: None
-        )
+        monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 
         station = _insert_station(db_conn, call_letters="KRSN")
         playlist = _insert_playlist(db_conn, station)
@@ -1609,7 +1555,8 @@ class TestMatchingRun:
 
         # Identity in NEEDS_REVIEW with stale match_tier + reason fields.
         identity = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Stale Title",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
@@ -1626,9 +1573,7 @@ class TestMatchingRun:
         db_conn.commit()
         _insert_event(db_conn, playlist, identity)
 
-        resp = client.post(
-            "/api/v1/matching/run", json={"perform_reset": True}
-        )
+        resp = client.post("/api/v1/matching/run", json={"perform_reset": True})
         assert resp.status_code == 202
 
         # Identity row: status flipped + all three metadata fields nulled.
@@ -1659,9 +1604,7 @@ class TestMatchingRun:
         assert a_row["reason_code"] is None
         assert a_row["reason_detail"] is None
 
-    async def test_release_run_lock_completes_under_cancellation(
-        self, migrated_db: str
-    ):
+    async def test_release_run_lock_completes_under_cancellation(self, migrated_db: str):
         """Cancellation safety contract for `_release_run_lock`: when the
         calling task is cancelled mid-await, the unlock SQL must still
         reach Postgres before the function returns. Otherwise a request
@@ -1757,6 +1700,7 @@ class TestMatchingRun:
 # TestComputeTriageBucket  (pure unit — no DB required)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
@@ -1767,10 +1711,10 @@ class TestMatchingRun:
         (50.0, "needs_attention"),
         (54.9, "needs_attention"),
         (64.9, "needs_attention"),
-        (65.0, "quick_review"),                       # boundary
+        (65.0, "quick_review"),  # boundary
         (79.9, "quick_review"),
         (80.0, "quick_review"),
-        (99.9, "quick_review"),                       # in queue = not auto-matched
+        (99.9, "quick_review"),  # in queue = not auto-matched
     ],
 )
 def test_compute_triage_bucket_boundary(score: float | None, expected: str) -> None:
@@ -1996,7 +1940,9 @@ class TestQueueResponseShape:
         _insert_match_row(db_conn, identity_review, confidence_score=45.0)
         # High-score AUTO_MATCHED child (would be "quick_review" if counted)
         identity_matched = _insert_identity(
-            db_conn, artist, original_title="Resolved Song",
+            db_conn,
+            artist,
+            original_title="Resolved Song",
             match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_match_row(db_conn, identity_matched, confidence_score=95.0)
@@ -2067,7 +2013,8 @@ class TestQueueResponseShape:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Your Disease",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
@@ -2099,13 +2046,15 @@ class TestQueueResponseShape:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         review_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Needs Work",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
         _insert_match_row(db_conn, review_child, confidence_score=45.0)
         resolved_child = _insert_identity(
-            db_conn, artist,
+            db_conn,
+            artist,
             original_title="Already Done",
             match_status=MatchStatus.AUTO_MATCHED,
         )
@@ -2115,8 +2064,7 @@ class TestQueueResponseShape:
         resp = client.get("/api/v1/matching/queue")
         assert resp.status_code == 200
         item = next(
-            i for i in resp.json()["items"]
-            if i["original_name"] == "Resolved Parent Mixed"
+            i for i in resp.json()["items"] if i["original_name"] == "Resolved Parent Mixed"
         )
         assert item["triage_bucket"] == "blocked"
 
@@ -2126,9 +2074,7 @@ class TestQueueResponseShape:
         names = [i["original_name"] for i in resp_filtered.json()["items"]]
         assert "Resolved Parent Mixed" in names
 
-    def test_total_includes_auto_matched_artists_with_review_children(
-        self, client, db_conn
-    ):
+    def test_total_includes_auto_matched_artists_with_review_children(self, client, db_conn):
         """`total` must count newly-visible AUTO_MATCHED parents whose
         children are review-relevant — this metric drove pagination before
         and pre-fix it silently dropped these artists."""
@@ -2147,7 +2093,8 @@ class TestQueueResponseShape:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_identity(
-            db_conn, artist2,
+            db_conn,
+            artist2,
             original_title="Child Needs Review",
             match_status=MatchStatus.NEEDS_REVIEW,
         )
@@ -2265,12 +2212,8 @@ class TestProposedMatch:
         loser = _insert_library_file(db_conn, track_title="Loser")
         winner = _insert_library_file(db_conn, track_title="Winner")
         # Lower-score row inserted first, then higher-score winner.
-        _insert_match_row(
-            db_conn, identity, confidence_score=55.0, library_file_id=loser.id
-        )
-        _insert_match_row(
-            db_conn, identity, confidence_score=82.0, library_file_id=winner.id
-        )
+        _insert_match_row(db_conn, identity, confidence_score=55.0, library_file_id=loser.id)
+        _insert_match_row(db_conn, identity, confidence_score=82.0, library_file_id=winner.id)
 
         resp = client.get("/api/v1/matching/queue")
         assert resp.status_code == 200
@@ -2291,7 +2234,8 @@ class TestProposedMatch:
         under an artist named Jimi Hendrix) is replayed here.
         """
         _, _, artist, identity, _ = _seed_review_chain(
-            db_conn, artist_name="Jimi Hendrix",
+            db_conn,
+            artist_name="Jimi Hendrix",
         )
         # Cross-artist library file (U2's "Star Spangled Banner") seeded
         # under a Jimi Hendrix identity — exactly what the buggy matcher
@@ -2321,9 +2265,7 @@ class TestProposedMatch:
         # can see the matcher tried; only the file pointer is suppressed.
         assert qi["confidence_score"] == pytest.approx(77.0, abs=1e-4)
 
-    def test_approve_via_resolve_identity_uses_queue_proposed_match(
-        self, client, db_conn
-    ):
+    def test_approve_via_resolve_identity_uses_queue_proposed_match(self, client, db_conn):
         """End-to-end Approve flow: read library_file_id from /queue and POST it
         to /resolve. The resulting matches row must point at the same file with
         tier=manual / score=1.0."""
@@ -2391,7 +2333,10 @@ class TestProposedMatch:
 
 
 def _set_reason_code(
-    conn: psycopg.Connection, table: str, row_id: UUID, reason_code: str,
+    conn: psycopg.Connection,
+    table: str,
+    row_id: UUID,
+    reason_code: str,
 ) -> None:
     # table is a test-controlled literal, never user input.
     conn.execute(
@@ -2408,7 +2353,10 @@ class TestUnlikelyArtists:
     so the UI can say how many are hidden."""
 
     def _seed_scored(
-        self, db_conn: psycopg.Connection, name: str, score: float | None,
+        self,
+        db_conn: psycopg.Connection,
+        name: str,
+        score: float | None,
     ) -> tuple[BroadcastArtist, BroadcastTrackIdentity]:
         artist = _insert_artist(db_conn, original_name=name)
         identity = _insert_identity(db_conn, artist, match_status=MatchStatus.NEEDS_REVIEW)
@@ -2449,14 +2397,22 @@ class TestUnlikelyArtists:
         """The Kittie case: Brackish auto-matched at 87, every other title is
         a sub-50 guess at Brackish. Only review items decide visibility."""
         artist = _insert_artist(
-            db_conn, original_name="Kittie", match_status=MatchStatus.AUTO_MATCHED,
+            db_conn,
+            original_name="Kittie",
+            match_status=MatchStatus.AUTO_MATCHED,
         )
         matched = _insert_identity(
-            db_conn, artist, "Brackish", match_status=MatchStatus.AUTO_MATCHED,
+            db_conn,
+            artist,
+            "Brackish",
+            match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_match_row(db_conn, matched, confidence_score=87.5)
         review = _insert_identity(
-            db_conn, artist, "We Are Shadows", match_status=MatchStatus.NEEDS_REVIEW,
+            db_conn,
+            artist,
+            "We Are Shadows",
+            match_status=MatchStatus.NEEDS_REVIEW,
         )
         _insert_match_row(db_conn, review, confidence_score=27.0)
 
@@ -2536,10 +2492,18 @@ class TestSearchMbArtists:
         fake = FakeMbClient(
             responses={
                 "The Beatles": [
-                    {"id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d", "name": "The Beatles",
-                     "sort-name": "Beatles, The", "score": 100},
-                    {"id": "fake-id-2", "name": "Beatles Cover Band",
-                     "sort-name": "Beatles Cover Band", "score": 72},
+                    {
+                        "id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d",
+                        "name": "The Beatles",
+                        "sort-name": "Beatles, The",
+                        "score": 100,
+                    },
+                    {
+                        "id": "fake-id-2",
+                        "name": "Beatles Cover Band",
+                        "sort-name": "Beatles Cover Band",
+                        "score": 72,
+                    },
                 ]
             }
         )

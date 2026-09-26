@@ -1,4 +1,5 @@
 """Unit tests for planning and merging duplicate local works."""
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -20,10 +21,18 @@ from tests.fakes.works import FakeWorkRepository
 
 
 def _fp(
-    work_id: str, title: str, artist: str = "a1", files: int = 0, matches: int = 0,
+    work_id: str,
+    title: str,
+    artist: str = "a1",
+    files: int = 0,
+    matches: int = 0,
 ) -> WorkFootprint:
     return WorkFootprint(
-        id=work_id, title=title, artist_id=artist, file_count=files, match_count=matches,
+        id=work_id,
+        title=title,
+        artist_id=artist,
+        file_count=files,
+        match_count=matches,
     )
 
 
@@ -47,10 +56,12 @@ def test_same_title_different_artist_is_not_a_duplicate() -> None:
 
 
 def test_titles_equal_after_normalization_group_together() -> None:
-    plans = plan_duplicate_merges([
-        _fp("w1", "You Give Love a Bad Name"),
-        _fp("w2", "You Give Love A Bad Name"),
-    ])
+    plans = plan_duplicate_merges(
+        [
+            _fp("w1", "You Give Love a Bad Name"),
+            _fp("w2", "You Give Love A Bad Name"),
+        ]
+    )
     assert len(plans) == 1
 
 
@@ -59,19 +70,23 @@ def test_title_that_normalizes_to_nothing_never_groups() -> None:
 
 
 def test_majority_spelling_survives_over_a_stray_bracket() -> None:
-    plans = plan_duplicate_merges([
-        _fp("w1", "Walk This Way)", files=1),
-        _fp("w2", "Walk This Way", files=1),
-        _fp("w3", "Walk This Way", files=1),
-    ])
+    plans = plan_duplicate_merges(
+        [
+            _fp("w1", "Walk This Way)", files=1),
+            _fp("w2", "Walk This Way", files=1),
+            _fp("w3", "Walk This Way", files=1),
+        ]
+    )
     assert plans[0].target_id in {"w2", "w3"}
 
 
 def test_decode_scarred_title_never_survives() -> None:
-    plans = plan_duplicate_merges([
-        _fp("w1", "This Ain�t a Love Song", files=5),
-        _fp("w2", "This Ain't a Love Song"),
-    ])
+    plans = plan_duplicate_merges(
+        [
+            _fp("w1", "This Ain�t a Love Song", files=5),
+            _fp("w2", "This Ain't a Love Song"),
+        ]
+    )
     assert plans[0].target_id == "w2"
 
 
@@ -81,10 +96,12 @@ def test_more_files_breaks_a_spelling_tie() -> None:
 
 
 def test_more_matches_breaks_a_file_tie() -> None:
-    plans = plan_duplicate_merges([
-        _fp("w1", "Would?", files=1),
-        _fp("w2", "Would?", files=1, matches=3),
-    ])
+    plans = plan_duplicate_merges(
+        [
+            _fp("w1", "Would?", files=1),
+            _fp("w2", "Would?", files=1, matches=3),
+        ]
+    )
     assert plans[0].target_id == "w2"
 
 
@@ -94,9 +111,13 @@ def test_smallest_id_breaks_a_full_tie() -> None:
 
 
 def test_group_of_three_lists_every_other_member_as_a_source() -> None:
-    plans = plan_duplicate_merges([
-        _fp("w3", "Would?"), _fp("w1", "Would?", files=1), _fp("w2", "Would?"),
-    ])
+    plans = plan_duplicate_merges(
+        [
+            _fp("w3", "Would?"),
+            _fp("w1", "Would?", files=1),
+            _fp("w2", "Would?"),
+        ]
+    )
     assert plans == [WorkMergePlan(target_id="w1", source_ids=("w2", "w3"))]
 
 
@@ -127,7 +148,10 @@ def _file_in(files: FakeLibraryFileRepository, work_id: str, fmt: str = "mp3") -
 
 def _master(work_id: str, file_id: UUID, method: SelectionMethod) -> SongMaster:
     return SongMaster(
-        id=uuid4(), work_id=work_id, preferred_file_id=file_id, selection_method=method,
+        id=uuid4(),
+        work_id=work_id,
+        preferred_file_id=file_id,
+        selection_method=method,
     )
 
 
@@ -138,7 +162,10 @@ def _merge(
     files: FakeLibraryFileRepository,
 ) -> None:
     merge_work_group(
-        plan, work_repo=works, song_master_repo=masters, library_file_repo=files,
+        plan,
+        work_repo=works,
+        song_master_repo=masters,
+        library_file_repo=files,
     )
 
 

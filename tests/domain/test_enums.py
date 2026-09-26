@@ -1,4 +1,5 @@
 """Tests for FileStatus enum and LibraryFolder model."""
+
 from uuid import uuid4
 
 from backend.domain.enums import FileStatus
