@@ -1,0 +1,24 @@
+# Install once per clone: uv run pre-commit install
+# Hooks run the tool versions pinned in uv.lock (via `uv run`), so pre-commit and CI
+# can never disagree about the ruff version.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: uv run ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: lint-imports
+        name: import-linter contracts
+        entry: uv run lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false

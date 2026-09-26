@@ -22,6 +22,24 @@ jobs:
           enable-cache: true
       - run: uv sync --all-extras
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run lint-imports
+
+  lint-proposed:
+    # Rules the audit proposes but nobody has ruled on yet: report, never block.
+    # Adopting a rule moves it into [tool.ruff.lint] select / [tool.mypy] and out of here.
+    name: Proposed rules (non-blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run poe lint-proposed
+      - run: uv run poe types
+        continue-on-error: true
 
   typecheck:
     name: Typecheck (mypy --strict)
