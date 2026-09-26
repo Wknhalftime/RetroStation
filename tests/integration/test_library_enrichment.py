@@ -244,3 +244,55 @@ def test_enrich_missing_recording_marks_failed() -> None:
     updated = library_file_repo.get_by_id(lf.id)
     assert updated is not None
     assert updated.enrichment_status == EnrichmentStatus.FAILED
+
+
+def test_enrich_by_release_links_a_merged_recording_to_its_survivor() -> None:
+    """The file's tag names a recording MusicBrainz merged into another one.
+
+    The release lists only the survivor. Instead of failing the file, look
+    the tagged recording up (the client follows the redirect) and link the
+    file to the recording the release actually carries.
+    """
+    merged = "00000000-0000-4000-8000-00000000dead"
+    library_file_repo = FakeLibraryFileRepository()
+    recording_repo = FakeRecordingRepository()
+    mb_client = FakeMbClient(
+        releases={_RELEASE_MBID: _FAKE_RELEASE},
+        # lookup_recording(merged) answers with the survivor, as a 301 would.
+        recordings={merged: {"id": _RECORDING_MBID, "title": "Test Track"}},
+    )
+    lf = _pending_file(recording_mbid=merged)
+    library_file_repo.upsert(lf)
+
+    count = enrich_by_release(
+        _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
+        FakeWorkRepository(), FakeArtistRepository(), mb_client,
+    )
+
+    assert count == 1
+    updated = library_file_repo.get_by_id(lf.id)
+    assert updated is not None
+    assert updated.recording_id == _RECORDING_MBID
+    assert updated.enrichment_status == EnrichmentStatus.ENRICHED
+    assert f"lookup_recording:{merged}" in mb_client.calls
+
+
+def test_enrich_by_release_still_fails_a_recording_from_another_release() -> None:
+    stranger = "00000000-0000-4000-8000-0000000000ff"
+    library_file_repo = FakeLibraryFileRepository()
+    mb_client = FakeMbClient(
+        releases={_RELEASE_MBID: _FAKE_RELEASE},
+        recordings={stranger: {"id": stranger, "title": "Elsewhere"}},
+    )
+    lf = _pending_file(recording_mbid=stranger)
+    library_file_repo.upsert(lf)
+
+    count = enrich_by_release(
+        _RELEASE_MBID, library_file_repo, library_file_repo, FakeRecordingRepository(),
+        FakeWorkRepository(), FakeArtistRepository(), mb_client,
+    )
+
+    assert count == 0
+    updated = library_file_repo.get_by_id(lf.id)
+    assert updated is not None
+    assert updated.enrichment_status == EnrichmentStatus.FAILED
