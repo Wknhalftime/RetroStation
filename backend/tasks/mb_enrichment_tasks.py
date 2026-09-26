@@ -498,7 +498,7 @@ def _run_artist_phase(
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        with MusicBrainzApiClient(cache_repo) as mb_client:
+        with MusicBrainzApiClient(cache_repo, ttl_days=settings.mb_cache_ttl_days) as mb_client:
             live_start = mb_client.live_fetches
             hits_start = mb_client.cache_hits
             rows_queued = len(pending_artists)
@@ -670,7 +670,7 @@ def _run_recordings_phase(
     with connect_sync(settings.database_url) as conn:
         repos = RepositoryFactory(conn)
         cache_repo = PgMusicBrainzCacheRepository(conn)
-        with MusicBrainzApiClient(cache_repo) as mb_client:
+        with MusicBrainzApiClient(cache_repo, ttl_days=settings.mb_cache_ttl_days) as mb_client:
             live_start = mb_client.live_fetches
             hits_start = mb_client.cache_hits
             # Pre-pass: one lookup_recording per distinct MBID. Read from

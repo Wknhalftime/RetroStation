@@ -250,6 +250,17 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def get_pending_enrichment_with_release(self) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE enrichment_status = %s
+                 AND release_mbid IS NOT NULL
+                 AND recording_mbid IS NOT NULL
+               ORDER BY file_path""",
+            (EnrichmentStatus.PENDING.value,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def update_recording_link(
         self,
         file_id: UUID,

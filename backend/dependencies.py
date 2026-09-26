@@ -43,7 +43,9 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
     settings = get_settings()
     with (
         connect_sync(settings.database_url) as conn,
-        MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as client,
+        MusicBrainzApiClient(
+            PgMusicBrainzCacheRepository(conn), ttl_days=settings.mb_cache_ttl_days,
+        ) as client,
     ):
         try:
             yield client

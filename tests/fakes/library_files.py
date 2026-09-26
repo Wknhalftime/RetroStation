@@ -76,6 +76,17 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             and f.enrichment_status == EnrichmentStatus.PENDING
         ]
 
+    def get_pending_enrichment_with_release(self) -> list[LibraryFile]:
+        return sorted(
+            (
+                f for f in self._data.values()
+                if f.enrichment_status == EnrichmentStatus.PENDING
+                and f.audio.release_mbid is not None
+                and f.audio.recording_mbid is not None
+            ),
+            key=lambda f: f.file_path,
+        )
+
     def update_recording_link(
         self, file_id: UUID, recording_id: str | None, enrichment_status: EnrichmentStatus
     ) -> None:

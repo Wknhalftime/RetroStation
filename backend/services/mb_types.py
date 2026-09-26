@@ -98,7 +98,13 @@ MbRelease = TypedDict(
     total=False,
 )
 
-# Returned by lookup_recording
+class MbReleaseRef(TypedDict, total=False):
+    id: str
+    title: str
+
+
+# Returned by lookup_recording (with relations) and search_recordings_by_mbids
+# (with releases, no relations).
 MbRecording = TypedDict(
     "MbRecording",
     {
@@ -106,6 +112,7 @@ MbRecording = TypedDict(
         "title": str,
         "artist-credit": list[MbArtistCredit],
         "relations": list[MbRelation],
+        "releases": list[MbReleaseRef],
         "length": int,
     },
     total=False,

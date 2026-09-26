@@ -40,7 +40,9 @@ def artist_matching_task(playlist_id: str) -> None:
     with task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id:
         with (
             connect_sync(settings.database_url) as conn,
-            MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as mb_client,
+            MusicBrainzApiClient(
+                PgMusicBrainzCacheRepository(conn), ttl_days=settings.mb_cache_ttl_days,
+            ) as mb_client,
         ):
             # `with MusicBrainzApiClient(...)` is required — the client owns an
             # httpx.Client that only closes in __exit__. Without the context

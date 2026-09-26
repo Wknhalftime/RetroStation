@@ -31,3 +31,18 @@ def test_fake_search_recording_tracks_calls() -> None:
     fc = FakeMbClient()
     fc.search_recording(artist_mbid="mbid-x", title="title-y")
     assert "search_recording:mbid-x:title-y" in fc.calls
+
+
+def test_protocol_has_search_recordings_by_mbids() -> None:
+    fc: MusicBrainzClientProtocol = FakeMbClient()
+    assert hasattr(fc, "search_recordings_by_mbids")
+
+
+def test_fake_search_recordings_by_mbids_returns_seeded_subset() -> None:
+    fc = FakeMbClient(recordings={
+        "rec-1": {"id": "rec-1", "title": "One"},
+        "rec-2": {"id": "rec-2", "title": "Two"},
+    })
+    out = fc.search_recordings_by_mbids(["rec-1", "rec-missing"])
+    assert out == {"rec-1": {"id": "rec-1", "title": "One"}}
+    assert "search_recordings_by_mbids:rec-1,rec-missing" in fc.calls

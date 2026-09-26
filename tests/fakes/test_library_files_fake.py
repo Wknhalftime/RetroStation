@@ -147,3 +147,23 @@ def test_update_file_stat_records_size_and_mtime() -> None:
     assert got is not None
     assert got.file_size == 4096
     assert got.file_mtime_ns == 1_700_000_000_000_000_000
+
+
+def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:
+    from backend.domain.enums import EnrichmentStatus
+
+    repo = FakeLibraryFileRepository()
+    both = _file("A", recording_mbid="rec-1")
+    both = LibraryFile(
+        **{**both.__dict__, "audio": AudioMetadata(release_mbid="rel-1", recording_mbid="rec-1")}
+    )
+    no_release = _file("B", recording_mbid="rec-2")
+    enriched = LibraryFile(**{
+        **_file("C").__dict__,
+        "audio": AudioMetadata(release_mbid="rel-1", recording_mbid="rec-3"),
+        "enrichment_status": EnrichmentStatus.ENRICHED,
+    })
+    for f in (both, no_release, enriched):
+        repo.upsert(f)
+
+    assert repo.get_pending_enrichment_with_release() == [both]

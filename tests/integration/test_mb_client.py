@@ -63,3 +63,57 @@ def test_mb_search_artist_real_api(migrated_db: str) -> None:
             assert len(results2) > 0
 
             conn.commit()
+
+
+def test_cache_get_many_returns_only_unexpired_hits(migrated_db: str) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from backend.domain.system import MusicBrainzCache
+
+    now = datetime.now(tz=UTC)
+
+    def entry(key: str, expires_in: timedelta) -> MusicBrainzCache:
+        return MusicBrainzCache(
+            id=uuid4(), cache_key=key, entity_type="recording-search", entity_mbid=key,
+            response_data={"id": key}, cached_at=now, expires_at=now + expires_in,
+        )
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgMusicBrainzCacheRepository(conn)
+        repo.set(entry("live", timedelta(days=1)))
+        repo.set(entry("stale", timedelta(days=-1)))
+
+        hits = repo.get_many(["live", "stale", "never-stored"])
+
+        assert set(hits) == {"live"}
+        assert hits["live"].response_data == {"id": "live"}
+        assert repo.get_many([]) == {}
+        conn.commit()
+
+
+def test_cache_set_many_inserts_and_overwrites(migrated_db: str) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from backend.domain.system import MusicBrainzCache
+
+    now = datetime.now(tz=UTC)
+
+    def entry(key: str, data: dict[str, object]) -> MusicBrainzCache:
+        return MusicBrainzCache(
+            id=uuid4(), cache_key=key, entity_type="recording-search", entity_mbid=key,
+            response_data=data, cached_at=now, expires_at=now + timedelta(days=1),
+        )
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgMusicBrainzCacheRepository(conn)
+        repo.set(entry("a", {"v": 1}))
+
+        repo.set_many([entry("a", {"v": 2}), entry("b", {"v": 3})])
+
+        hits = repo.get_many(["a", "b"])
+        assert hits["a"].response_data == {"v": 2}
+        assert hits["b"].response_data == {"v": 3}
+        repo.set_many([])
+        conn.commit()
