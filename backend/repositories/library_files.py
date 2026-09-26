@@ -93,6 +93,29 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
+    def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
+        """Rows whose path equals *file_path* when case is ignored, itself included.
+
+        Case-only rename detection: on a case-insensitive disk every such
+        row names the same file.
+        """
+        ...
+
+    @abstractmethod
+    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
+        """Groups of two or more rows whose paths are equal when case is ignored."""
+        ...
+
+    @abstractmethod
+    def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+        """Move every reference to *source_id* onto *target_id*, then delete it.
+
+        For two rows that name the same file. A match the target already
+        has for the same broadcast identity is dropped rather than doubled.
+        """
+        ...
+
+    @abstractmethod
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         """Record the on-disk size and mtime without touching any other column.
 

@@ -185,6 +185,90 @@ def test_case_only_rename_keeps_links(migrated_db: str, tmp_path: Path) -> None:
         assert present[0].work_id == work_id
 
 
+def _skip_unless_case_insensitive(folder: Path) -> None:
+    """A case-only rename is only a rename where the old spelling still resolves."""
+    probe = folder / "CaseProbe"
+    probe.touch()
+    try:
+        if not (folder / "caseprobe").exists():
+            pytest.skip("case-only renames are real moves on a case-sensitive filesystem")
+    finally:
+        probe.unlink()
+
+
+def _retag(path: Path) -> None:
+    """What a tagger does when it renames: new bytes, new size, new mtime."""
+    with path.open("ab") as f:
+        f.write(b"\0" * 256)
+
+
+def test_case_only_rename_with_new_tags_keeps_the_row(
+    migrated_db: str, tmp_path: Path,
+) -> None:
+    """Picard and Mp3tag retag and rename in one go, so the content hash of
+    the renamed file no longer matches its old row. The old spelling still
+    names the same file, which is enough to know it is the same row."""
+    _skip_unless_case_insensitive(tmp_path)
+    album = tmp_path / "album"
+    track = _put("well_tagged.mp3", album / "Track.mp3")
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        _scan(repos, album)
+        work_id = _link_to_work(repos, track)
+        row = repos.library_files.get_by_path(str(track))
+        assert row is not None
+        conn.commit()
+
+        renamed = album / "track.mp3"
+        track.rename(renamed)
+        _retag(renamed)
+        _scan(repos, album)
+
+        rows = repos.library_files.get_by_folder_path(str(album))
+        assert [(f.file_path, f.file_status) for f in rows] == [
+            (str(renamed), FileStatus.PRESENT),
+        ]
+        assert rows[0].id == row.id
+        assert rows[0].work_id == work_id
+
+
+@pytest.mark.parametrize("old_first", [True, False], ids=["old-first", "new-first"])
+def test_case_only_folder_rename_keeps_one_row(
+    migrated_db: str, tmp_path: Path, old_first: bool,
+) -> None:
+    """The watcher sees the old spelling vanish and the new one appear. On a
+    case-insensitive disk the vanished spelling still lists its files, so
+    visiting it must not bring the old rows back as present."""
+    _skip_unless_case_insensitive(tmp_path)
+    old_album = tmp_path / "Keep The Faith"
+    new_album = tmp_path / "Keep the Faith"
+    track = _put("well_tagged.mp3", old_album / "track.mp3")
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        diff_tree(str(tmp_path), repos.library_folders)  # baseline
+        _scan(repos, old_album)
+        work_id = _link_to_work(repos, track)
+        row = repos.library_files.get_by_path(str(track))
+        assert row is not None
+        conn.commit()
+
+        old_album.rename(new_album)
+        changed, _ = diff_tree(str(tmp_path), repos.library_folders)
+        assert {str(old_album), str(new_album)} <= set(changed)
+        order = [old_album, new_album] if old_first else [new_album, old_album]
+        for folder in order:
+            _scan(repos, folder)
+
+        statuses = repos.library_files.get_path_statuses_under(str(tmp_path))
+        assert statuses == {str(new_album / "track.mp3"): FileStatus.PRESENT}
+        kept = repos.library_files.get_by_path(str(new_album / "track.mp3"))
+        assert kept is not None
+        assert kept.id == row.id
+        assert kept.work_id == work_id
+
+
 @pytest.mark.parametrize("old_first", [True, False], ids=["old-first", "new-first"])
 def test_moved_file_keeps_links(
     migrated_db: str, tmp_path: Path, old_first: bool,

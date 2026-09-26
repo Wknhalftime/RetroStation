@@ -563,18 +563,35 @@ def _reextract_and_upsert(
         result.files_written += 1
 
 
+def _is_same_file(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def _is_gone_or_same_file(old: Path, new: Path) -> bool:
     """True when *old* no longer exists, or names *new* under another spelling.
 
     The second case is a case-only rename on a case-insensitive filesystem,
     where the old spelling still resolves to the renamed file.
     """
-    if not os.path.exists(old):
+    return not os.path.exists(old) or _is_same_file(old, new)
+
+
+def _spelled_as_on_disk(folder: Path) -> bool:
+    """False when *folder* resolves only because the filesystem ignores case.
+
+    After a case-only folder rename the old spelling still opens the folder,
+    and a listing through it reports every file under the old spelling.
+    realpath gives the disk's own spelling; when it differs by more than
+    case (a junction, a subst drive, 8.3 short names) the spelling is
+    accepted as it is.
+    """
+    real = os.path.realpath(folder)
+    if os.path.normcase(real) != os.path.normcase(str(folder)):
         return True
-    try:
-        return os.path.samefile(old, new)
-    except OSError:
-        return False
+    return real == str(folder)
 
 
 def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
@@ -590,12 +607,29 @@ def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[
     return candidates
 
 
+def _respelled_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
+    """The row whose path is *lf*'s in another case and names the same file.
+
+    That is a case-only rename, whatever the file now holds: taggers rename
+    and retag in one go, so its content no longer matches the old row.
+    """
+    for candidate in file_repo.get_by_path_ignoring_case(lf.file_path):
+        if candidate.file_path != lf.file_path and _is_same_file(
+            Path(candidate.file_path), Path(lf.file_path),
+        ):
+            return candidate
+    return None
+
+
 def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
     """The row this newly seen file was moved or renamed from, if any.
 
     A row with identical content whose own file is still on disk is a
     duplicate copy, not the origin of a move, and is left alone.
     """
+    respelled = _respelled_from(lf, file_repo)
+    if respelled is not None:
+        return respelled
     for candidate in _move_candidates(lf, file_repo):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
             Path(candidate.file_path), Path(lf.file_path),
@@ -768,9 +802,11 @@ def _list_audio_files(folder_path: Path) -> dict[str, Path] | None:
     """Audio files directly in *folder_path*; empty if it is gone, None if unlistable.
 
     Gone and unreadable must stay distinct: gone marks every file missing,
-    while a folder we merely failed to list still holds its files.
+    while a folder we merely failed to list still holds its files. A
+    spelling the folder no longer has (a case-only rename) is gone: its
+    files belong to the new spelling.
     """
-    if not folder_path.is_dir():
+    if not folder_path.is_dir() or not _spelled_as_on_disk(folder_path):
         return {}
     try:
         return {

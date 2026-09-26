@@ -118,6 +118,40 @@ def test_case_only_rename_keeps_links(migrated_db: str, tmp_path: Path) -> None:
         assert repos.library_files.get_by_path(str(track)) is None
 
 
+def test_case_only_rename_with_new_tags_keeps_the_row(
+    migrated_db: str, tmp_path: Path,
+) -> None:
+    """A tagger's rename also rewrites the tags, so the content no longer
+    matches; the old spelling naming the same file is what identifies it."""
+    probe = tmp_path / "CaseProbe"
+    probe.touch()
+    if not (tmp_path / "caseprobe").exists():
+        pytest.skip("case-only renames are real moves on a case-sensitive filesystem")
+    probe.unlink()
+    track = _put("well_tagged.mp3", tmp_path / "album" / "Track.mp3")
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        _full_scan(conn, tmp_path)
+        work_id = _link_to_work(repos, track)
+        row_id = _id_of(repos, track)
+        conn.commit()
+
+        renamed = track.with_name("track.mp3")
+        track.rename(renamed)
+        with renamed.open("ab") as f:
+            f.write(b"\0" * 256)
+        _full_scan(conn, tmp_path)
+
+        assert repos.library_files.get_path_statuses_under(str(tmp_path)) == {
+            str(renamed): FileStatus.PRESENT,
+        }
+        kept = repos.library_files.get_by_path(str(renamed))
+        assert kept is not None
+        assert kept.id == row_id
+        assert kept.work_id == work_id
+
+
 def test_duplicate_copy_stays_a_separate_row(migrated_db: str, tmp_path: Path) -> None:
     original = _put("well_tagged.mp3", tmp_path / "album" / "kiss.mp3")
 

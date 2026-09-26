@@ -168,6 +168,22 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         return [f for f in self._data.values() if f.file_hash == file_hash]
 
+    def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
+        return sorted(
+            (f for f in self._data.values() if f.file_path.lower() == file_path.lower()),
+            key=lambda f: f.file_path,
+        )
+
+    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
+        groups: dict[str, list[LibraryFile]] = {}
+        for f in sorted(self._data.values(), key=lambda f: f.file_path):
+            groups.setdefault(f.file_path.lower(), []).append(f)
+        return [g for g in groups.values() if len(g) > 1]
+
+    def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+        # The fake holds no matches or masters; only the row itself goes.
+        self._data.pop(source_id, None)
+
     def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
         if file_id in self._data:
             self._data[file_id] = dataclasses.replace(

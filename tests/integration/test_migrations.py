@@ -8,9 +8,19 @@ def test_all_migrations_applied(migrated_db: str) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
     versions = [r[0] for r in rows]
-    assert len(versions) == 26
+    assert len(versions) == 27
     assert versions[0].startswith("0001")
-    assert versions[-1].startswith("0026")
+    assert versions[-1].startswith("0027")
+
+
+def test_path_lower_index_exists(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db) as conn:
+        indexes = {
+            r[0] for r in conn.execute(
+                "SELECT indexname FROM pg_indexes WHERE tablename = 'library_files'"
+            ).fetchall()
+        }
+    assert "idx_library_files_path_lower" in indexes
 
 
 def test_file_hash_is_nullable_with_backlog_indexes(migrated_db: str) -> None:
