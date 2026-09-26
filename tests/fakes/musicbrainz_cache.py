@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from backend.domain.system import MusicBrainzCache
@@ -7,12 +8,21 @@ from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self) -> None:
         self._data: dict[str, MusicBrainzCache] = {}
+        self.reads = 0  # get_many calls, so tests can count round trips
 
     def get(self, cache_key: str) -> MusicBrainzCache | None:
         entry = self._data.get(cache_key)
         if entry and entry.expires_at > datetime.now(tz=UTC):
             return entry
         return None
+
+    def get_many(self, cache_keys: Sequence[str]) -> dict[str, MusicBrainzCache]:
+        self.reads += 1
+        now = datetime.now(tz=UTC)
+        return {
+            key: entry for key in cache_keys
+            if (entry := self._data.get(key)) is not None and entry.expires_at > now
+        }
 
     def set(self, cache: MusicBrainzCache) -> None:
         self._data[cache.cache_key] = cache

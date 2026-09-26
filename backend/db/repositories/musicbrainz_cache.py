@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import psycopg
@@ -32,6 +33,15 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
             (cache_key,),
         ).fetchone()
         return self._row_to_model(row) if row else None
+
+    def get_many(self, cache_keys: Sequence[str]) -> dict[str, MusicBrainzCache]:
+        if not cache_keys:
+            return {}
+        rows = self._conn.execute(
+            "SELECT * FROM mb_cache WHERE cache_key = ANY(%s) AND expires_at > now()",
+            (list(cache_keys),),
+        ).fetchall()
+        return {row["cache_key"]: self._row_to_model(row) for row in rows}
 
     def set(self, cache: MusicBrainzCache) -> None:
         # Jsonb() is psycopg3's type wrapper for jsonb columns — handles

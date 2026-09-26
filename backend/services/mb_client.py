@@ -25,6 +25,8 @@ _RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
 # MusicBrainz caps search results at 100 per request.
 _SEARCH_BATCH_SIZE = 100
+# Marker stored for an MBID the search index does not know, so it is not asked again.
+_NOT_IN_INDEX = "not_in_index"
 
 # --- Module-level mutable state (rate-limiting) ---
 _rate_lock: threading.Lock = threading.Lock()
@@ -279,18 +281,27 @@ class MusicBrainzApiClient:
         Search results carry artist credits, length and releases, but no
         work relations.
         """
-        found: dict[str, MbRecording] = {}
-        misses: list[str] = []
+        wanted: list[str] = []
         for mbid in dict.fromkeys(mbids):
             if MusicBrainzId.parse(mbid) is None:
                 logger.warning("malformed_recording_mbid_skipped", recording_mbid=mbid)
                 continue
-            cached_entry = self._cache.get(f"recording-by-mbid:{mbid}")
-            if cached_entry is not None:
-                self.cache_hits += 1
-                found[mbid] = cast(MbRecording, cached_entry.response_data)
-            else:
+            wanted.append(mbid)
+
+        found: dict[str, MbRecording] = {}
+        misses: list[str] = []
+        cached = self._cache.get_many([f"recording-by-mbid:{m}" for m in wanted])
+        for mbid in wanted:
+            entry = cached.get(f"recording-by-mbid:{mbid}")
+            if entry is None:
                 misses.append(mbid)
+                continue
+            self.cache_hits += 1
+            # A negative entry means the search index has no such MBID
+            # (merged or deleted); keep it out of the result without asking.
+            if entry.response_data.get(_NOT_IN_INDEX):
+                continue
+            found[mbid] = cast(MbRecording, entry.response_data)
 
         for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
             batch = misses[start:start + _SEARCH_BATCH_SIZE]
@@ -317,6 +328,14 @@ class MusicBrainzApiClient:
                     entity_mbid=rec_id,
                     response_data=dict(recording),
                 )
+            for mbid in batch:
+                if mbid not in found:
+                    self._cache_write(
+                        cache_key=f"recording-by-mbid:{mbid}",
+                        entity_type="recording-search",
+                        entity_mbid=mbid,
+                        response_data={_NOT_IN_INDEX: True},
+                    )
             logger.info(
                 "mb_api_search_recordings_by_mbids",
                 asked=len(batch),
