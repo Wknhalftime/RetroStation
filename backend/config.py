@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     mb_auto_link_score: int = 95
     mb_score_gap: int = 10
+    # MusicBrainz payloads for a given MBID do not change; refresh by clearing mb_cache.
+    mb_cache_ttl_days: int = 3650
     strong_match_threshold: int = 80
     min_presentation_score: int = 50
     broadcast_name_max_len: int = 30

@@ -101,6 +101,7 @@ def instrument(timers: Timers, phase: str) -> list[str]:
 
     # Top-level phases. The task imports the service functions by name, so
     # they are wrapped where the task looks them up.
+    patch(let, "enrich_by_recording_batch", "phase.enrich_by_recording_batch")
     patch(let, "enrich_by_release", "phase.enrich_by_release")
     patch(let, "enrich_by_recording", "phase.enrich_by_recording")
 
@@ -108,6 +109,8 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     # the HTTP round trip. ``mb.fetch`` includes the wait; subtract
     # ``mb.rate_limit_wait`` for network time.
     client = mbc.MusicBrainzApiClient
+    patch(client, "search_recordings_by_mbids", "mb.search_recordings_by_mbids",
+          "phase.enrich_by_recording_batch")
     patch(client, "lookup_release", "mb.lookup_release", "phase.enrich_by_release")
     patch(client, "lookup_recording", "mb.lookup_recording", "phase.enrich_by_recording")
     patch(client, "_fetch", "mb.fetch", "mb.lookup_*")
@@ -118,8 +121,8 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     # Database round trips inside the per-release / per-recording work.
     for cls, prefix, attrs in (
         (pg_files.PgLibraryFileRepository, "files", (
-            "get_pending_enrichment_by_release", "get_pending_enrichment_by_recording",
-            "update_recording_link", "update_work_id",
+            "get_pending_enrichment_with_release", "get_pending_enrichment_by_release",
+            "get_pending_enrichment_by_recording", "update_recording_link", "update_work_id",
         )),
         (pg_recordings.PgRecordingRepository, "recordings", ("upsert",)),
         (pg_works.PgWorkRepository, "works", ("upsert_from_mb",)),
