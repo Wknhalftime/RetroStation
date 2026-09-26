@@ -2333,7 +2333,10 @@ class TestProposedMatch:
 
 
 def _set_reason_code(
-    conn: psycopg.Connection, table: str, row_id: UUID, reason_code: str,
+    conn: psycopg.Connection,
+    table: str,
+    row_id: UUID,
+    reason_code: str,
 ) -> None:
     # table is a test-controlled literal, never user input.
     conn.execute(
@@ -2350,7 +2353,10 @@ class TestUnlikelyArtists:
     so the UI can say how many are hidden."""
 
     def _seed_scored(
-        self, db_conn: psycopg.Connection, name: str, score: float | None,
+        self,
+        db_conn: psycopg.Connection,
+        name: str,
+        score: float | None,
     ) -> tuple[BroadcastArtist, BroadcastTrackIdentity]:
         artist = _insert_artist(db_conn, original_name=name)
         identity = _insert_identity(db_conn, artist, match_status=MatchStatus.NEEDS_REVIEW)
@@ -2391,14 +2397,22 @@ class TestUnlikelyArtists:
         """The Kittie case: Brackish auto-matched at 87, every other title is
         a sub-50 guess at Brackish. Only review items decide visibility."""
         artist = _insert_artist(
-            db_conn, original_name="Kittie", match_status=MatchStatus.AUTO_MATCHED,
+            db_conn,
+            original_name="Kittie",
+            match_status=MatchStatus.AUTO_MATCHED,
         )
         matched = _insert_identity(
-            db_conn, artist, "Brackish", match_status=MatchStatus.AUTO_MATCHED,
+            db_conn,
+            artist,
+            "Brackish",
+            match_status=MatchStatus.AUTO_MATCHED,
         )
         _insert_match_row(db_conn, matched, confidence_score=87.5)
         review = _insert_identity(
-            db_conn, artist, "We Are Shadows", match_status=MatchStatus.NEEDS_REVIEW,
+            db_conn,
+            artist,
+            "We Are Shadows",
+            match_status=MatchStatus.NEEDS_REVIEW,
         )
         _insert_match_row(db_conn, review, confidence_score=27.0)
 
