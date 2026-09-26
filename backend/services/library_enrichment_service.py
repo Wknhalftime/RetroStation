@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import structlog
 
 from backend.domain.catalog import MusicBrainzId, Recording
@@ -253,3 +255,86 @@ def enrich_by_recording(
         enriched=enriched_count,
     )
     return enriched_count
+
+
+@dataclass(frozen=True)
+class BatchEnrichment:
+    """What one batched pass did: files linked, and files left pending."""
+
+    enriched: int
+    unresolved: tuple[LibraryFile, ...]
+
+
+def _upsert_artist_from_credits(
+    credits: list[MbArtistCredit], artist_repo: ArtistCatalogRepository,
+) -> str | None:
+    artist_info = _extract_artist_from_credits(credits)
+    if artist_info is None:
+        return None
+    artist_mbid, artist_name, artist_sort_name = artist_info
+    return artist_repo.upsert_musicbrainz_artist(
+        mbid=artist_mbid,
+        name=artist_name,
+        sort_name=artist_sort_name,
+        normalized_name=normalize_artist(artist_name),
+    )
+
+
+def enrich_by_recording_batch(
+    pending_files: list[LibraryFile],
+    files: LibraryFileRepository,
+    recording_repo: RecordingRepository,
+    artist_repo: ArtistCatalogRepository,
+    mb_client: MusicBrainzClientProtocol,
+) -> BatchEnrichment:
+    """Link pending files from one recording search instead of a lookup per release.
+
+    Every distinct recording MBID goes into ``search_recordings_by_mbids``
+    (100 per request). A file is linked when its recording came back and
+    lists the file's release; the recording's own artist credit (the track
+    artist) is upserted. Anything else, a recording MusicBrainz no longer
+    knows under that MBID, a recording no longer on that release, a file
+    with no recording MBID, is returned as unresolved and left pending,
+    untouched, for the per-release path to handle as it does today. Search
+    results carry no work relations, so no work is linked here, the same as
+    the release path.
+    """
+    searchable = [f for f in pending_files if f.audio.recording_mbid]
+    found = mb_client.search_recordings_by_mbids(
+        list(dict.fromkeys(f.audio.recording_mbid for f in searchable if f.audio.recording_mbid))
+    )
+
+    unresolved: list[LibraryFile] = [f for f in pending_files if not f.audio.recording_mbid]
+    enriched = 0
+    for library_file in searchable:
+        rec_mbid = library_file.audio.recording_mbid
+        assert rec_mbid is not None
+        rec_data = found.get(rec_mbid)
+        release_mbid = library_file.audio.release_mbid
+        on_release = rec_data is not None and (
+            release_mbid is None
+            or any(r.get("id") == release_mbid for r in rec_data.get("releases", []))
+        )
+        if rec_data is None or not on_release:
+            unresolved.append(library_file)
+            continue
+        _upsert_artist_from_credits(rec_data.get("artist-credit", []), artist_repo)
+        rec_title = rec_data.get("title", "")
+        _, version_type = extract_version_info(rec_title)
+        recording_repo.upsert(Recording(
+            id=rec_mbid,
+            title=rec_title,
+            work_id=None,
+            duration_ms=rec_data.get("length"),
+            version_type=version_type,
+        ))
+        _link_file_to_recording(library_file, rec_mbid, None, files)
+        enriched += 1
+
+    logger.info(
+        "enrich_by_recording_batch_complete",
+        files=len(pending_files),
+        enriched=enriched,
+        unresolved=len(unresolved),
+    )
+    return BatchEnrichment(enriched=enriched, unresolved=tuple(unresolved))
