@@ -9,6 +9,7 @@ class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self) -> None:
         self._data: dict[str, MusicBrainzCache] = {}
         self.reads = 0  # get_many calls, so tests can count round trips
+        self.writes = 0  # set_many calls
 
     def get(self, cache_key: str) -> MusicBrainzCache | None:
         entry = self._data.get(cache_key)
@@ -26,6 +27,11 @@ class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
 
     def set(self, cache: MusicBrainzCache) -> None:
         self._data[cache.cache_key] = cache
+
+    def set_many(self, caches: Sequence[MusicBrainzCache]) -> None:
+        self.writes += 1
+        for cache in caches:
+            self._data[cache.cache_key] = cache
 
     def delete_expired(self) -> int:
         now = datetime.now(tz=UTC)

@@ -173,22 +173,35 @@ class MusicBrainzApiClient:
         Factored out so every cache-write site emits the same observable
         event (`mb_cache_set`) without copy-pasting the construction block.
         """
+        entry = self._cache_entry(
+            cache_key=cache_key, entity_type=entity_type,
+            entity_mbid=entity_mbid, response_data=response_data,
+        )
+        self._cache.set(entry)
+        logger.debug(
+            "mb_cache_set",
+            cache_key=cache_key,
+            entity_type=entity_type,
+            expires_at=entry.expires_at.isoformat(),
+        )
+
+    def _cache_entry(
+        self,
+        *,
+        cache_key: str,
+        entity_type: str,
+        entity_mbid: str,
+        response_data: dict[str, Any],
+    ) -> MusicBrainzCache:
         now = datetime.now(tz=UTC)
-        expires_at = now + timedelta(days=self._ttl_days)
-        self._cache.set(MusicBrainzCache(
+        return MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
             entity_type=entity_type,
             entity_mbid=entity_mbid,
             response_data=response_data,
             cached_at=now,
-            expires_at=expires_at,
-        ))
-        logger.debug(
-            "mb_cache_set",
-            cache_key=cache_key,
-            entity_type=entity_type,
-            expires_at=expires_at.isoformat(),
+            expires_at=now + timedelta(days=self._ttl_days),
         )
 
     @retry(
@@ -343,24 +356,21 @@ class MusicBrainzApiClient:
             asked = set(batch)
             for recording in recordings:
                 rec_id = recording.get("id")
-                if not rec_id or rec_id not in asked:
-                    continue
-                slim = _slim_recording(recording)
-                found[rec_id] = slim
-                self._cache_write(
-                    cache_key=f"recording-by-mbid:{rec_id}",
+                if rec_id and rec_id in asked:
+                    found[rec_id] = _slim_recording(recording)
+            # One write per batch: the hits, plus a negative entry for every
+            # MBID the index did not know so it is not asked again.
+            self._cache.set_many([
+                self._cache_entry(
+                    cache_key=f"recording-by-mbid:{mbid}",
                     entity_type="recording-search",
-                    entity_mbid=rec_id,
-                    response_data=dict(slim),
+                    entity_mbid=mbid,
+                    response_data=(
+                        dict(found[mbid]) if mbid in found else {_NOT_IN_INDEX: True}
+                    ),
                 )
-            for mbid in batch:
-                if mbid not in found:
-                    self._cache_write(
-                        cache_key=f"recording-by-mbid:{mbid}",
-                        entity_type="recording-search",
-                        entity_mbid=mbid,
-                        response_data={_NOT_IN_INDEX: True},
-                    )
+                for mbid in batch
+            ])
             logger.info(
                 "mb_api_search_recordings_by_mbids",
                 asked=len(batch),
