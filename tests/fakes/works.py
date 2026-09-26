@@ -66,10 +66,14 @@ class FakeWorkRepository(WorkRepository):
         return work_id
 
     def delete_if_empty(self, work_id: str) -> bool:
-        if work_id in self._data:
-            del self._data[work_id]
-            return True
-        return False
+        # Mirrors PgWorkRepository for the links the fakes model: a work that
+        # still has files (via the injected library file repo) stays.
+        if work_id not in self._data:
+            return False
+        if self._library_file_repo is not None and self._library_file_repo.get_by_work(work_id):
+            return False
+        del self._data[work_id]
+        return True
 
     def get_candidates_by_normalized_artist(
         self, normalized_artist_name: str, limit: int = 100,

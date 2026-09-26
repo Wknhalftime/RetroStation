@@ -120,12 +120,18 @@ class PgWorkRepository(WorkRepository):
 
 
     def delete_if_empty(self, work_id: str) -> bool:
-        count = self._conn.execute(
-            "SELECT count(*) AS cnt FROM library_files"
-            " WHERE work_id = %s",
-            (work_id,),
+        # Every table with a FK to works except song_masters, which goes
+        # with the work: a work anything else still points at stays.
+        referenced = self._conn.execute(
+            """SELECT EXISTS (SELECT 1 FROM library_files WHERE work_id = %(id)s)
+                   OR EXISTS (SELECT 1 FROM matches WHERE work_id = %(id)s)
+                   OR EXISTS (SELECT 1 FROM matches
+                              WHERE target_type = %(work)s AND target_id = %(id)s)
+                   OR EXISTS (SELECT 1 FROM format_overrides WHERE work_id = %(id)s)
+                   AS referenced""",
+            {"id": work_id, "work": TargetType.WORK.value},
         ).fetchone()
-        if count and count["cnt"] > 0:
+        if referenced is None or referenced["referenced"]:
             return False
         self._conn.execute(
             "DELETE FROM song_masters WHERE work_id = %s",

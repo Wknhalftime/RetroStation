@@ -11,7 +11,9 @@ from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
+from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
+from backend.services.master_selection_service import reselect_master_from_files
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation
 from backend.services.normalization import extract_version_info, normalize_artist
@@ -92,20 +94,45 @@ def _mark_files_failed(
 def _link_file_to_recording(
     library_file: LibraryFile,
     recording_mbid: str,
-    work_id: str | None,
     files: LibraryFileRepository,
 ) -> None:
-    """Mark a library file as ENRICHED and link it to its recording and optional work."""
+    """Mark a library file as ENRICHED and link it to its recording."""
     files.update_recording_link(
         library_file.id, recording_mbid, EnrichmentStatus.ENRICHED
     )
-    if work_id is not None:
-        files.update_work_id(library_file.id, work_id)
     logger.debug(
         "library_file_enriched",
         file_id=str(library_file.id),
         recording_mbid=recording_mbid,
     )
+
+
+def _move_file_to_work(
+    library_file: LibraryFile,
+    work_id: str,
+    files: LibraryFileRepository,
+    work_repo: WorkRepository,
+    song_master_repo: SongMasterRepository,
+) -> None:
+    """Attach a file to the work MusicBrainz says its recording performs.
+
+    Grouping gave the file a local work at scan time. The file moves to the
+    MusicBrainz work, which then gets (or re-picks) an auto song master from
+    the files on it; the work the file left is deleted once nothing
+    references it, taking its now-stale song master with it.
+    """
+    previous_work_id = library_file.work_id
+    if previous_work_id == work_id:
+        return
+    files.update_work_id(library_file.id, work_id)
+    reselect_master_from_files(work_id, song_master_repo, files)
+    if previous_work_id is not None and work_repo.delete_if_empty(previous_work_id):
+        logger.info(
+            "empty_work_deleted_after_move",
+            work_id=previous_work_id,
+            file_id=str(library_file.id),
+            moved_to=work_id,
+        )
 
 
 def enrich_by_release(
@@ -114,6 +141,7 @@ def enrich_by_release(
     enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
+    song_master_repo: SongMasterRepository,
     artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
@@ -186,7 +214,9 @@ def enrich_by_release(
         work_id = _upsert_recording_with_work(
             rec_mbid, rec_data, artist_id, work_repo, recording_repo
         )
-        _link_file_to_recording(library_file, rec_mbid, work_id, files)
+        _link_file_to_recording(library_file, rec_mbid, files)
+        if work_id is not None:
+            _move_file_to_work(library_file, work_id, files, work_repo, song_master_repo)
         enriched_count += 1
 
     logger.info(
@@ -204,6 +234,7 @@ def enrich_by_recording(
     enrichment_queries: LibraryFileEnrichmentRepository,
     recording_repo: RecordingRepository,
     work_repo: WorkRepository,
+    song_master_repo: SongMasterRepository,
     artist_repo: ArtistCatalogRepository,
     mb_client: MusicBrainzClientProtocol,
 ) -> int:
@@ -247,7 +278,9 @@ def enrich_by_recording(
 
     enriched_count = 0
     for library_file in pending_files:
-        _link_file_to_recording(library_file, recording_mbid, work_id, files)
+        _link_file_to_recording(library_file, recording_mbid, files)
+        if work_id is not None:
+            _move_file_to_work(library_file, work_id, files, work_repo, song_master_repo)
         enriched_count += 1
 
     logger.info(
@@ -329,7 +362,7 @@ def enrich_by_recording_batch(
             duration_ms=rec_data.get("length"),
             version_type=version_type,
         ))
-        _link_file_to_recording(library_file, rec_mbid, None, files)
+        _link_file_to_recording(library_file, rec_mbid, files)
         enriched += 1
 
     logger.info(

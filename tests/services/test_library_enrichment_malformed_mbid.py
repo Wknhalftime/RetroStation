@@ -22,6 +22,7 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recordings import FakeRecordingRepository
+from tests.fakes.song_masters import FakeSongMasterRepository
 from tests.fakes.works import FakeWorkRepository
 
 _MALFORMED_MBID = "not-a-uuid"
@@ -48,6 +49,7 @@ def _run_release(files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid
         files,
         FakeRecordingRepository(),
         FakeWorkRepository(),
+        FakeSongMasterRepository(),
         FakeArtistRepository(),
         mb_client,
     )
@@ -62,6 +64,7 @@ def _run_recording(
         files,
         FakeRecordingRepository(),
         FakeWorkRepository(),
+        FakeSongMasterRepository(),
         FakeArtistRepository(),
         mb_client,
     )
