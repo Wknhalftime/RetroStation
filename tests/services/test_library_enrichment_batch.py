@@ -11,11 +11,17 @@ from uuid import uuid4
 
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.services.library_enrichment_service import enrich_by_recording_batch
+from backend.services.library_enrichment_service import (
+    EnrichmentRepos,
+    enrich_by_recording_batch,
+)
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recordings import FakeRecordingRepository
+from tests.fakes.song_masters import FakeSongMasterRepository
+from tests.fakes.works import FakeWorkRepository
 
 _RELEASE = "00000000-0000-4000-8000-000000000001"
 _OTHER_RELEASE = "00000000-0000-4000-8000-000000000009"
@@ -58,9 +64,16 @@ class _Repos:
     def run(self, pending: list[LibraryFile]) -> Any:
         for f in pending:
             self.files.upsert(f)
-        return enrich_by_recording_batch(
-            pending, self.files, self.recordings, self.artists, self.client,
+        repos = EnrichmentRepos(
+            files=self.files,
+            enrichment_queries=self.files,
+            recordings=self.recordings,
+            works=FakeWorkRepository(),
+            song_masters=FakeSongMasterRepository(),
+            matches=FakeMatchRepository(),
+            artists=self.artists,
         )
+        return enrich_by_recording_batch(pending, repos, self.client)
 
 
 def test_links_files_whose_recording_lists_their_release() -> None:

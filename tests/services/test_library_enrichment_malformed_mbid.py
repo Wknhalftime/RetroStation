@@ -15,6 +15,7 @@ import pytest
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.library_enrichment_service import (
+    EnrichmentRepos,
     enrich_by_recording,
     enrich_by_release,
 )
@@ -43,16 +44,22 @@ def _pending_file(
     )
 
 
+def _repos(files: FakeLibraryFileRepository) -> EnrichmentRepos:
+    return EnrichmentRepos(
+        files=files,
+        enrichment_queries=files,
+        recordings=FakeRecordingRepository(),
+        works=FakeWorkRepository(),
+        song_masters=FakeSongMasterRepository(),
+        matches=FakeMatchRepository(),
+        artists=FakeArtistRepository(),
+    )
+
+
 def _run_release(files: FakeLibraryFileRepository, mb_client: FakeMbClient, mbid: str) -> int:
     return enrich_by_release(
         mbid,
-        files,
-        files,
-        FakeRecordingRepository(),
-        FakeWorkRepository(),
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        FakeArtistRepository(),
+        _repos(files),
         mb_client,
     )
 
@@ -62,13 +69,7 @@ def _run_recording(
 ) -> int:
     return enrich_by_recording(
         mbid,
-        files,
-        files,
-        FakeRecordingRepository(),
-        FakeWorkRepository(),
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        FakeArtistRepository(),
+        _repos(files),
         mb_client,
     )
 

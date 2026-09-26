@@ -7,6 +7,7 @@ from backend.domain.enums import EnrichmentStatus, MatchTier, SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
 from backend.services.library_enrichment_service import (
+    EnrichmentRepos,
     enrich_by_recording,
     enrich_by_release,
 )
@@ -60,6 +61,25 @@ _FAKE_RELEASE = {
 }
 
 
+def _repos(
+    library_file_repo: FakeLibraryFileRepository,
+    recording_repo: FakeRecordingRepository,
+    work_repo: FakeWorkRepository,
+    artist_repo: FakeArtistRepository,
+    song_master_repo: FakeSongMasterRepository | None = None,
+    match_repo: FakeMatchRepository | None = None,
+) -> EnrichmentRepos:
+    return EnrichmentRepos(
+        files=library_file_repo,
+        enrichment_queries=library_file_repo,
+        recordings=recording_repo,
+        works=work_repo,
+        song_masters=song_master_repo or FakeSongMasterRepository(),
+        matches=match_repo or FakeMatchRepository(),
+        artists=artist_repo,
+    )
+
+
 def _pending_file(
     release_mbid: str | None = _RELEASE_MBID,
     recording_mbid: str | None = _RECORDING_MBID,
@@ -90,13 +110,7 @@ def test_enrich_by_release_links_recording() -> None:
 
     count = enrich_by_release(
         _RELEASE_MBID,
-        library_file_repo,
-        library_file_repo,
-        recording_repo,
-        work_repo,
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        artist_repo,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo),
         mb_client,
     )
 
@@ -142,13 +156,7 @@ def test_enrich_missing_release_marks_failed() -> None:
 
     count = enrich_by_release(
         _RELEASE_MBID,
-        library_file_repo,
-        library_file_repo,
-        recording_repo,
-        work_repo,
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        artist_repo,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo),
         mb_client,
     )
 
@@ -201,13 +209,7 @@ def test_enrich_by_recording_links_file() -> None:
 
     count = enrich_by_recording(
         _RECORDING_MBID,
-        library_file_repo,
-        library_file_repo,
-        recording_repo,
-        work_repo,
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        artist_repo,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo),
         mb_client,
     )
 
@@ -242,13 +244,7 @@ def test_enrich_missing_recording_marks_failed() -> None:
 
     count = enrich_by_recording(
         _RECORDING_MBID,
-        library_file_repo,
-        library_file_repo,
-        recording_repo,
-        work_repo,
-        FakeSongMasterRepository(),
-        FakeMatchRepository(),
-        artist_repo,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo),
         mb_client,
     )
 
@@ -289,8 +285,9 @@ def test_enrich_by_release_moves_file_to_mb_work_and_reselects_master() -> None:
     ))
 
     count = enrich_by_release(
-        _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
+        _RELEASE_MBID,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo, song_master_repo),
+        mb_client,
     )
 
     assert count == 1
@@ -326,8 +323,9 @@ def test_enrich_by_release_keeps_local_work_that_still_has_files() -> None:
     song_master_repo.upsert(local_master)
 
     enrich_by_release(
-        _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
+        _RELEASE_MBID,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo, song_master_repo),
+        mb_client,
     )
 
     assert work_repo.get_by_id(local_work) is not None
@@ -362,8 +360,9 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
     library_file_repo.upsert(lf)
 
     enrich_by_recording(
-        _RECORDING_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, FakeMatchRepository(), artist_repo, mb_client,
+        _RECORDING_MBID,
+        _repos(library_file_repo, recording_repo, work_repo, artist_repo, song_master_repo),
+        mb_client,
     )
 
     moved = library_file_repo.get_by_id(lf.id)
@@ -396,8 +395,12 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
     ))
 
     enrich_by_release(
-        _RELEASE_MBID, library_file_repo, library_file_repo, recording_repo,
-        work_repo, song_master_repo, match_repo, artist_repo, mb_client,
+        _RELEASE_MBID,
+        _repos(
+            library_file_repo, recording_repo, work_repo, artist_repo,
+            song_master_repo, match_repo,
+        ),
+        mb_client,
     )
 
     match = match_repo.get_by_identity(identity_id)
