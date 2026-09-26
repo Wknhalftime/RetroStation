@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -10,6 +11,7 @@ import httpx
 import structlog
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from backend.domain.catalog import MusicBrainzId
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 from backend.services.mb_types import MbArtist, MbArtistResult, MbRecording, MbRelease
@@ -21,6 +23,8 @@ _MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
 _USER_AGENT = "RetroStation/0.1.0 (https://github.com/retrostation)"
 _RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
+# MusicBrainz caps search results at 100 per request.
+_SEARCH_BATCH_SIZE = 100
 
 # --- Module-level mutable state (rate-limiting) ---
 _rate_lock: threading.Lock = threading.Lock()
@@ -74,6 +78,7 @@ class MusicBrainzClientProtocol(Protocol):
     def search_recording(
         self, artist_mbid: str, title: str, limit: int = 10
     ) -> list[MbRecording]: ...
+    def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, MbRecording]: ...
 
 
 class MusicBrainzApiClient:
@@ -108,8 +113,11 @@ class MusicBrainzApiClient:
     per thread.
     """
 
-    def __init__(self, cache_repo: MusicBrainzCacheRepository) -> None:
+    def __init__(
+        self, cache_repo: MusicBrainzCacheRepository, ttl_days: int = _CACHE_TTL_DAYS,
+    ) -> None:
         self._cache = cache_repo
+        self._ttl_days = ttl_days
         self._http = httpx.Client(
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
             timeout=30.0,
@@ -140,7 +148,7 @@ class MusicBrainzApiClient:
         event (`mb_cache_set`) without copy-pasting the construction block.
         """
         now = datetime.now(tz=UTC)
-        expires_at = now + timedelta(days=_CACHE_TTL_DAYS)
+        expires_at = now + timedelta(days=self._ttl_days)
         self._cache.set(MusicBrainzCache(
             id=uuid4(),
             cache_key=cache_key,
@@ -260,6 +268,61 @@ class MusicBrainzApiClient:
             results=len(recordings),
         )
         return recordings
+
+    def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, MbRecording]:
+        """Fetch many recordings by MBID, up to 100 per search request.
+
+        Each recording that comes back is cached under its own key, so a
+        batch only requests MBIDs not seen before. MBIDs MusicBrainz no
+        longer answers to (merged or deleted) and malformed ones are absent
+        from the result; callers fall back to a direct lookup for those.
+        Search results carry artist credits, length and releases, but no
+        work relations.
+        """
+        found: dict[str, MbRecording] = {}
+        misses: list[str] = []
+        for mbid in dict.fromkeys(mbids):
+            if MusicBrainzId.parse(mbid) is None:
+                logger.warning("malformed_recording_mbid_skipped", recording_mbid=mbid)
+                continue
+            cached_entry = self._cache.get(f"recording-by-mbid:{mbid}")
+            if cached_entry is not None:
+                self.cache_hits += 1
+                found[mbid] = cast(MbRecording, cached_entry.response_data)
+            else:
+                misses.append(mbid)
+
+        for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
+            batch = misses[start:start + _SEARCH_BATCH_SIZE]
+            self.live_fetches += 1
+            response = self._fetch(
+                f"{_MUSICBRAINZ_API}/recording/",
+                {
+                    "query": "rid:(" + " OR ".join(batch) + ")",
+                    "fmt": "json",
+                    "limit": str(_SEARCH_BATCH_SIZE),
+                },
+            )
+            payload: dict[str, object] = response.json()
+            recordings = cast(list[MbRecording], payload.get("recordings", []))
+            asked = set(batch)
+            for recording in recordings:
+                rec_id = recording.get("id")
+                if not rec_id or rec_id not in asked:
+                    continue
+                found[rec_id] = recording
+                self._cache_write(
+                    cache_key=f"recording-by-mbid:{rec_id}",
+                    entity_type="recording-search",
+                    entity_mbid=rec_id,
+                    response_data=dict(recording),
+                )
+            logger.info(
+                "mb_api_search_recordings_by_mbids",
+                asked=len(batch),
+                found=len(recordings),
+            )
+        return found
 
     def lookup_release(self, mbid: str) -> MbRelease | None:
         """Fetch a release by MBID, including recordings, artist-credits, and release-groups.
