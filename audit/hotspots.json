@@ -1,0 +1,218 @@
+{
+  "since": "12 months ago",
+  "commits": 182,
+  "hotspots": [
+    {
+      "file": "backend/services/library_scan_service.py",
+      "changes": 18,
+      "total_ccn": 104,
+      "max_ccn": 9,
+      "worst": "scan_directory (line 393)",
+      "score": 1872
+    },
+    {
+      "file": "backend/services/identity_matching_service.py",
+      "changes": 20,
+      "total_ccn": 48,
+      "max_ccn": 10,
+      "worst": "apply (line 308)",
+      "score": 960
+    },
+    {
+      "file": "backend/tasks/mb_enrichment_tasks.py",
+      "changes": 18,
+      "total_ccn": 53,
+      "max_ccn": 11,
+      "worst": "_enhance_artist (line 100)",
+      "score": 954
+    },
+    {
+      "file": "backend/db/repositories/library_files.py",
+      "changes": 24,
+      "total_ccn": 39,
+      "max_ccn": 2,
+      "worst": "_row_to_model (line 123)",
+      "score": 936
+    },
+    {
+      "file": "backend/routers/library/works.py",
+      "changes": 16,
+      "total_ccn": 58,
+      "max_ccn": 11,
+      "worst": "merge_works (line 673)",
+      "score": 928
+    },
+    {
+      "file": "backend/routers/matching.py",
+      "changes": 15,
+      "total_ccn": 57,
+      "max_ccn": 8,
+      "worst": "resolve_identity (line 771)",
+      "score": 855
+    },
+    {
+      "file": "backend/services/artist_matching_service.py",
+      "changes": 14,
+      "total_ccn": 55,
+      "max_ccn": 10,
+      "worst": "apply (line 190)",
+      "score": 770
+    },
+    {
+      "file": "backend/services/mb_client.py",
+      "changes": 16,
+      "total_ccn": 44,
+      "max_ccn": 9,
+      "worst": "search_recordings_by_mbids (line 318)",
+      "score": 704
+    },
+    {
+      "file": "backend/services/library_enrichment_service.py",
+      "changes": 15,
+      "total_ccn": 46,
+      "max_ccn": 12,
+      "worst": "enrich_by_release (line 183)",
+      "score": 690
+    },
+    {
+      "file": "backend/repositories/library_files.py",
+      "changes": 19,
+      "total_ccn": 27,
+      "max_ccn": 1,
+      "worst": "upsert (line 10)",
+      "score": 513
+    },
+    {
+      "file": "backend/services/normalization.py",
+      "changes": 10,
+      "total_ccn": 49,
+      "max_ccn": 9,
+      "worst": "extract_version_info (line 441)",
+      "score": 490
+    },
+    {
+      "file": "backend/services/ingestion_service.py",
+      "changes": 14,
+      "total_ccn": 26,
+      "max_ccn": 13,
+      "worst": "ingest_csv (line 205)",
+      "score": 364
+    },
+    {
+      "file": "backend/tasks/ingestion_tasks.py",
+      "changes": 13,
+      "total_ccn": 27,
+      "max_ccn": 11,
+      "worst": "ingestion_task (line 177)",
+      "score": 351
+    },
+    {
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "changes": 16,
+      "total_ccn": 18,
+      "max_ccn": 14,
+      "worst": "library_scan_files_task (line 103)",
+      "score": 288
+    },
+    {
+      "file": "backend/db/repositories/works.py",
+      "changes": 12,
+      "total_ccn": 24,
+      "max_ccn": 4,
+      "worst": "_merge_recordings (line 222)",
+      "score": 288
+    }
+  ],
+  "coupling": [
+    {
+      "a": "backend/domain/enums.py",
+      "b": "backend/domain/models.py",
+      "shared_commits": 5,
+      "degree": 0.71
+    },
+    {
+      "a": "backend/db/repositories/library_files.py",
+      "b": "backend/repositories/library_files.py",
+      "shared_commits": 12,
+      "degree": 0.63
+    },
+    {
+      "a": "backend/services/identity_matching_service.py",
+      "b": "backend/services/matching_utils.py",
+      "shared_commits": 5,
+      "degree": 0.62
+    },
+    {
+      "a": "backend/services/folder_hash_service.py",
+      "b": "backend/tasks/library_watcher_tasks.py",
+      "shared_commits": 5,
+      "degree": 0.62
+    },
+    {
+      "a": "backend/repositories/library_files.py",
+      "b": "backend/repositories/works.py",
+      "shared_commits": 4,
+      "degree": 0.57
+    },
+    {
+      "a": "backend/tasks/library_enrichment_tasks.py",
+      "b": "backend/tasks/mb_enrichment_tasks.py",
+      "shared_commits": 9,
+      "degree": 0.53
+    },
+    {
+      "a": "backend/services/matching_utils.py",
+      "b": "backend/tasks/identity_matching_tasks.py",
+      "shared_commits": 4,
+      "degree": 0.5
+    },
+    {
+      "a": "backend/services/identity_matching_service.py",
+      "b": "backend/services/master_selection_service.py",
+      "shared_commits": 4,
+      "degree": 0.5
+    },
+    {
+      "a": "backend/services/ingestion_service.py",
+      "b": "backend/tasks/ingestion_tasks.py",
+      "shared_commits": 6,
+      "degree": 0.46
+    },
+    {
+      "a": "backend/services/identity_matching_service.py",
+      "b": "backend/tasks/identity_matching_tasks.py",
+      "shared_commits": 6,
+      "degree": 0.46
+    },
+    {
+      "a": "backend/services/library_scan_service.py",
+      "b": "backend/tasks/library_watcher_tasks.py",
+      "shared_commits": 7,
+      "degree": 0.44
+    },
+    {
+      "a": "backend/routers/v1.py",
+      "b": "backend/services/repository_factory.py",
+      "shared_commits": 4,
+      "degree": 0.44
+    },
+    {
+      "a": "backend/services/library_enrichment_service.py",
+      "b": "backend/services/mb_client.py",
+      "shared_commits": 6,
+      "degree": 0.4
+    },
+    {
+      "a": "backend/services/library_enrichment_service.py",
+      "b": "backend/tasks/library_enrichment_tasks.py",
+      "shared_commits": 6,
+      "degree": 0.4
+    },
+    {
+      "a": "backend/services/library_scan_service.py",
+      "b": "backend/tasks/library_tasks.py",
+      "shared_commits": 6,
+      "degree": 0.4
+    }
+  ]
+}

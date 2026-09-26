@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite errors="0" failures="1" name="mypy" skips="0" tests="1" time="47.192">
+  <testcase classname="mypy" file="mypy" line="1" name="mypy-py3_13-win32" time="47.192">
+    <failure message="mypy produced messages">backend\services\library_scan_service.py:347: error: If condition is always false  [redundant-expr]
+backend\db\repositories\library_files.py:472: error: If condition is always true  [redundant-expr]
+backend\routers\library\works.py:714: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:962: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:963: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:964: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:965: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:966: error: If condition is always true  [redundant-expr]
+backend\tasks\mb_enrichment_tasks.py:967: error: If condition is always true  [redundant-expr]
+pyproject.toml: note: unused section(s): module = ['tests.fixtures.create_audio_fixtures']</failure>
+  </testcase>
+</testsuite>

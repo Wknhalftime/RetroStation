@@ -1,0 +1,242 @@
+[
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\library\\artists.py",
+            "line": 7,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\library\\files.py",
+            "line": 8,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\library\\scan.py",
+            "line": 7,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\library\\status.py",
+            "line": 7,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\library\\works.py",
+            "line": 9,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\matching.py",
+            "line": 12,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\playlists.py",
+            "line": 12,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\settings.py",
+            "line": 7,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\stations.py",
+            "line": 12,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\system_logs.py",
+            "line": 9,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP003",
+            "message": "'pydantic' imported but it is a transitive dependency"
+        },
+        "module": "pydantic",
+        "location": {
+            "file": "backend\\routers\\tasks.py",
+            "line": 10,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP002",
+            "message": "'pgvector' defined as a dependency but not used in the codebase"
+        },
+        "module": "pgvector",
+        "location": {
+            "file": "pyproject.toml",
+            "line": null,
+            "column": null
+        }
+    },
+    {
+        "error": {
+            "code": "DEP002",
+            "message": "'python-multipart' defined as a dependency but not used in the codebase"
+        },
+        "module": "python-multipart",
+        "location": {
+            "file": "pyproject.toml",
+            "line": null,
+            "column": null
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'bench_scan' imported but missing from the dependency definitions"
+        },
+        "module": "bench_scan",
+        "location": {
+            "file": "scripts\\bench_enrich.py",
+            "line": 57,
+            "column": 1
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'leann' imported but missing from the dependency definitions"
+        },
+        "module": "leann",
+        "location": {
+            "file": "scripts\\leann_mcp_server.py",
+            "line": 22,
+            "column": 9
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'leann' imported but missing from the dependency definitions"
+        },
+        "module": "leann",
+        "location": {
+            "file": "scripts\\leann_reindex.py",
+            "line": 168,
+            "column": 5
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'leann' imported but missing from the dependency definitions"
+        },
+        "module": "leann",
+        "location": {
+            "file": "scripts\\leann_reindex.py",
+            "line": 169,
+            "column": 5
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'leann' imported but missing from the dependency definitions"
+        },
+        "module": "leann",
+        "location": {
+            "file": "scripts\\leann_reindex.py",
+            "line": 230,
+            "column": 5
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'leann' imported but missing from the dependency definitions"
+        },
+        "module": "leann",
+        "location": {
+            "file": "scripts\\leann_reindex.py",
+            "line": 231,
+            "column": 5
+        }
+    },
+    {
+        "error": {
+            "code": "DEP001",
+            "message": "'llama_index' imported but missing from the dependency definitions"
+        },
+        "module": "llama_index",
+        "location": {
+            "file": "scripts\\leann_reindex.py",
+            "line": 232,
+            "column": 5
+        }
+    }
+]
