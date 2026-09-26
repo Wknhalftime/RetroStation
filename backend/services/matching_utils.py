@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from backend.services.normalization import normalize_title
+from backend.services.normalization import normalize_title, strip_bracketed_groups
 
 
 def rule_matches(source_pattern: str, normalized_value: str) -> bool:
@@ -53,6 +53,17 @@ _W_CREDIT = re.compile(
 )
 
 
+def _credit_stripped_forms(original_title: str) -> list[str]:
+    """The raw title with its f/ credit stripped, then also without a trailing
+    w/ credit when there is one. Never empty. See broadcast_title_variants."""
+    primary = _F_CREDIT.sub("", original_title) or original_title
+    forms = [primary]
+    without_with = _W_CREDIT.sub("", primary)
+    if without_with and without_with != primary:
+        forms.append(without_with)
+    return forms
+
+
 def broadcast_title_variants(original_title: str) -> tuple[str, ...]:
     """Normalized forms of a raw broadcast title to score library titles against.
 
@@ -62,11 +73,45 @@ def broadcast_title_variants(original_title: str) -> tuple[str, ...]:
     keep whichever form scores better. A title that is nothing but a
     credit is kept whole.
     """
-    primary = _F_CREDIT.sub("", original_title) or original_title
-    forms = [normalize_title(primary)]
-    without_with = _W_CREDIT.sub("", primary)
-    if without_with and without_with != primary:
-        forms.append(normalize_title(without_with))
+    return tuple(normalize_title(f) for f in _credit_stripped_forms(original_title))
+
+
+def broadcast_title_core_variants(original_title: str) -> tuple[str, ...]:
+    """The broadcast_title_variants again with their bracketed groups stripped.
+
+    "(Stand By Me)" is an alternate title the library tag may not carry and
+    "(Live)" a version it may; scoring the title without them recovers an
+    otherwise exact match. Only forms that differ from the full ones are
+    returned, so a plain title gives an empty tuple. Part numbers are never
+    stripped (see strip_bracketed_groups).
+    """
+    full = broadcast_title_variants(original_title)
+    forms: list[str] = []
+    for raw in _credit_stripped_forms(original_title):
+        core = normalize_title(strip_bracketed_groups(raw))
+        if core and core not in full and core not in forms:
+            forms.append(core)
+    return tuple(forms)
+
+
+def library_title_variants(
+    track_title: str | None, normalized_title: str | None,
+) -> tuple[str, ...]:
+    """Normalized forms of a library file's title to score a broadcast title against.
+
+    The first is the stored normalized_title (set by library_scan_service via
+    normalize_title()), or normalize_title(track_title) for legacy rows that
+    pre-date the backfill. Both sides of the comparison must live in that same
+    canonical space: token_sort_ratio has no processor, so plain "Halo" vs
+    "halo" would score 75. A bracketed group in the tag adds a form without
+    it, mirroring broadcast_title_variants.
+    """
+    full = normalized_title or normalize_title(track_title or "")
+    forms = [full]
+    if track_title:
+        core = normalize_title(strip_bracketed_groups(track_title))
+        if core and core != full:
+            forms.append(core)
     return tuple(forms)
 
 
