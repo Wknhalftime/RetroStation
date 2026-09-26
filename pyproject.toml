@@ -180,7 +180,11 @@ RUFF_PROPOSED = "C90,PLR0912,PLR0913,PLR0915,FBT,TRY,PGH003,T20,ERA,PTH,DTZ,S,AR
 MYPY_PROPOSED = "redundant-expr"
 
 [tool.poe.tasks]
-lint        = { cmd = "ruff check . --extend-select ${RUFF_PROPOSED} --output-format json --exit-zero", capture_stdout = "audit/ruff.json" }
+# ruff writes absolute paths; relative_paths.py makes the report checkout-independent.
+lint.sequence = [
+    { cmd = "ruff check . --extend-select ${RUFF_PROPOSED} --output-format json --exit-zero", capture_stdout = "audit/ruff.json" },
+    { cmd = "python scripts/audit/relative_paths.py audit/ruff.json" },
+]
 lint-stats  = { cmd = "ruff check . --extend-select ${RUFF_PROPOSED} --statistics --exit-zero", capture_stdout = "audit/ruff-stats.txt" }
 lint-proposed = "ruff check . --extend-select ${RUFF_PROPOSED} --exit-zero"
 fmt-check   = "ruff format --check ."
