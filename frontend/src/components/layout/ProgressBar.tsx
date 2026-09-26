@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 const TASK_TYPE_LABELS: Record<string, string> = {
   scan: "Scanning library",
   library_enrichment: "Enriching library metadata",
+  hash_backfill: "Fingerprinting library files",
   mb_enrichment: "Enhancing MusicBrainz entities",
   ingestion: "Ingesting tracks",
   matching: "Matching tracks",

@@ -98,6 +98,7 @@ class TaskType(StrEnum):
     RULES_APPLY        = "rules_apply"
     MATCHING           = "matching"
     M3U_EXPORT         = "m3u_export"
+    HASH_BACKFILL      = "hash_backfill"
 
 
 class TaskStatus(StrEnum):
