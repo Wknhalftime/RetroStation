@@ -44,6 +44,30 @@ function partitionByReviewState(
   return { review, resolved };
 }
 
+// A needs_review item whose best guess is below the presentation floor is
+// the artist's nearest title, not a candidate: usually a song the library
+// doesn't have. Curator-unmatched items also land in "blocked" (unmatch drops
+// the score) but they are the curator's own work in progress, so they stay.
+function isUnlikely(identity: QueueIdentity): boolean {
+  return (
+    identity.match_status === "needs_review" &&
+    identity.triage_bucket === "blocked" &&
+    identity.reason_code !== "USER_UNMATCHED"
+  );
+}
+
+function partitionByLikelihood(
+  identities: QueueIdentity[]
+): { likely: QueueIdentity[]; unlikely: QueueIdentity[] } {
+  const likely: QueueIdentity[] = [];
+  const unlikely: QueueIdentity[] = [];
+  for (const id of identities) {
+    if (isUnlikely(id)) unlikely.push(id);
+    else likely.push(id);
+  }
+  return { likely, unlikely };
+}
+
 const BUCKET_PRIORITY: Record<TriageBucket, number> = {
   quick_review: 0,
   needs_attention: 1,
@@ -161,8 +185,24 @@ function reviewChipFor(identity: QueueIdentity): ReviewChip {
         chipBg: "bg-rose-50",
         chipText: "text-rose-700",
         Icon: Ban,
-        label: identity.reason_code ? `Blocked · ${identity.reason_code}` : "Blocked",
+        label: blockedLabel(identity.reason_code, scoreSuffix),
       };
+  }
+}
+
+function blockedLabel(reasonCode: string | null | undefined, scoreSuffix: string): string {
+  switch (reasonCode) {
+    case "LOW_CONFIDENCE":
+      return `Likely not in library${scoreSuffix}`;
+    case "NO_CANDIDATES":
+    case "NO_LOCAL_FILES":
+      return "Not in library";
+    case null:
+    case undefined:
+    case "":
+      return "Blocked";
+    default:
+      return `Blocked · ${reasonCode}`;
   }
 }
 
@@ -206,7 +246,10 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   const isPending = resolveIdentity.isPending || unmatchIdentity.isPending;
   const { review: reviewIdentities, resolved: resolvedIdentities } =
     partitionByReviewState(identities);
-  const sortedReview = sortReviewIdentities(reviewIdentities);
+  const { likely: likelyReview, unlikely: unlikelyReview } =
+    partitionByLikelihood(reviewIdentities);
+  const sortedReview = sortReviewIdentities(likelyReview);
+  const sortedUnlikely = sortReviewIdentities(unlikelyReview);
   const resolvedSummary = summariseResolved(resolvedIdentities);
 
   function handleApprove(identity: QueueIdentity) {
@@ -250,7 +293,21 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
           onReject={handleReject}
           onFileSearch={onFileSearch}
           hasResolved={resolvedIdentities.length > 0}
+          hasUnlikely={sortedUnlikely.length > 0}
         />
+
+        {sortedUnlikely.length > 0 && (
+          <UnlikelySection
+            // Keyed by artist so each artist starts from its own default.
+            key={artist.id}
+            items={sortedUnlikely}
+            defaultOpen={sortedReview.length === 0}
+            isPending={isPending}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onFileSearch={onFileSearch}
+          />
+        )}
 
         {resolvedIdentities.length > 0 && (
           <ResolvedSection
@@ -280,6 +337,13 @@ interface ReviewSectionProps {
   onReject: (id: QueueIdentity) => void;
   onFileSearch: (identityId: string) => void;
   hasResolved: boolean;
+  hasUnlikely: boolean;
+}
+
+function emptyReviewMessage(hasResolved: boolean, hasUnlikely: boolean): string {
+  if (hasUnlikely) return "No likely matches for this artist.";
+  if (hasResolved) return "Nothing left to review for this artist. ✓";
+  return "No identities for this artist.";
 }
 
 function ReviewSection({
@@ -289,6 +353,7 @@ function ReviewSection({
   onReject,
   onFileSearch,
   hasResolved,
+  hasUnlikely,
 }: ReviewSectionProps) {
   return (
     <section aria-labelledby="needs-review-heading">
@@ -311,9 +376,7 @@ function ReviewSection({
 
       {items.length === 0 ? (
         <p className="py-4 text-sm text-gray-500">
-          {hasResolved
-            ? "Nothing left to review for this artist. ✓"
-            : "No identities for this artist."}
+          {emptyReviewMessage(hasResolved, hasUnlikely)}
         </p>
       ) : (
         <div className="space-y-2">
@@ -446,6 +509,82 @@ function ReviewCard({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// No likely match section (collapsible)
+// ---------------------------------------------------------------------------
+
+interface UnlikelySectionProps {
+  items: QueueIdentity[];
+  defaultOpen: boolean;
+  isPending: boolean;
+  onApprove: (id: QueueIdentity) => void;
+  onReject: (id: QueueIdentity) => void;
+  onFileSearch: (identityId: string) => void;
+}
+
+function UnlikelySection({
+  items,
+  defaultOpen,
+  isPending,
+  onApprove,
+  onReject,
+  onFileSearch,
+}: UnlikelySectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const panelId = "unlikely-section-panel";
+
+  return (
+    <section className="mt-4" aria-labelledby="unlikely-heading">
+      <header
+        className={cn(
+          "sticky top-0 z-10 -mx-5 border-y border-gray-100",
+          "bg-white/95 backdrop-blur"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="flex w-full items-baseline justify-between px-5 py-2 text-left hover:bg-gray-50"
+        >
+          <span className="flex items-baseline gap-2">
+            <ChevronRight
+              className={cn(
+                "h-3.5 w-3.5 self-center text-gray-500 transition-transform motion-reduce:transition-none",
+                open && "rotate-90"
+              )}
+              aria-hidden="true"
+            />
+            <h3
+              id="unlikely-heading"
+              className="text-xs font-semibold uppercase tracking-wide text-gray-700"
+            >
+              No likely match ({items.length})
+            </h3>
+          </span>
+          <span className="text-[11px] text-gray-400">Probably not in your library</span>
+        </button>
+      </header>
+
+      {open && (
+        <div id={panelId} className="space-y-2 pt-2">
+          {items.map((identity) => (
+            <ReviewCard
+              key={identity.id}
+              identity={identity}
+              isPending={isPending}
+              onApprove={onApprove}
+              onReject={onReject}
+              onFileSearch={onFileSearch}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -94,11 +94,20 @@ function useDebounce<T>(value: T, delay: number): T {
 
 const PAGE_SIZE = 25;
 
+function unlikelyToggleLabel(count: number): string {
+  const artists = count === 1 ? "artist" : "artists";
+  return `Show ${count.toLocaleString("en-US")} ${artists} with no likely match`;
+}
+
 export function MatcherBrowser() {
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebounce(searchInput, 300);
   const [sort, setSort] = useState<QueueSort>("created_at");
+  // Artists whose every review item is a sub-50% guess (or no guess at all)
+  // are mostly songs the library doesn't have; they stay out of the list
+  // unless the curator asks for them.
+  const [includeUnlikely, setIncludeUnlikely] = useState(false);
 
   // Switching pages can scroll the selected artist off-screen (the right-side
   // panels would otherwise keep acting on an artist not shown in the list).
@@ -118,7 +127,7 @@ export function MatcherBrowser() {
   useEffect(() => {
     setPage(1);
     setSelectedArtistId(null);
-  }, [debouncedSearch, sort]);
+  }, [debouncedSearch, sort, includeUnlikely]);
 
   const offset = (page - 1) * PAGE_SIZE;
   const { data, isLoading, isError, isPlaceholderData } = useMatchingQueue(
@@ -126,6 +135,7 @@ export function MatcherBrowser() {
     offset,
     debouncedSearch,
     sort,
+    includeUnlikely,
   );
   const rerunMatching = useRerunMatching();
   const resolveIdentity = useResolveIdentity();
@@ -155,6 +165,8 @@ export function MatcherBrowser() {
 
   const artists: QueueArtist[] = data?.items ?? [];
   const total: number = data?.total ?? 0;
+  const unlikelyTotal: number = data?.unlikely_total ?? 0;
+  const hasHiddenOrShownUnlikely = unlikelyTotal > 0 || includeUnlikely;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const selectedArtist: QueueArtist | null = selectedArtistId
@@ -340,7 +352,11 @@ export function MatcherBrowser() {
           is zero), show the centered empty state. If a search is active we
           fall through to the sidebar so the curator can edit/clear the term
           even when the filtered result is empty. */}
-      {!isLoading && !isError && total === 0 && debouncedSearch.length === 0 && (
+      {!isLoading &&
+        !isError &&
+        total === 0 &&
+        debouncedSearch.length === 0 &&
+        !hasHiddenOrShownUnlikely && (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             title="Queue is empty"
@@ -349,7 +365,9 @@ export function MatcherBrowser() {
         </div>
       )}
 
-      {!isLoading && !isError && (total > 0 || debouncedSearch.length > 0) && (
+      {!isLoading &&
+        !isError &&
+        (total > 0 || debouncedSearch.length > 0 || hasHiddenOrShownUnlikely) && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left — artist list */}
           <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -397,11 +415,24 @@ export function MatcherBrowser() {
                   className="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-7 pr-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
+              {hasHiddenOrShownUnlikely && (
+                <label className="flex items-center gap-2 text-xs text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={includeUnlikely}
+                    onChange={(e) => setIncludeUnlikely(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-gray-300"
+                  />
+                  {unlikelyToggleLabel(unlikelyTotal)}
+                </label>
+              )}
             </div>
             <ul className="flex-1 overflow-y-auto">
               {artists.length === 0 && (
                 <li className="px-4 py-6 text-center text-xs text-gray-400">
-                  No artists match this search.
+                  {debouncedSearch.length > 0
+                    ? "No artists match this search."
+                    : "No likely matches left to review."}
                 </li>
               )}
               {artists.map((artist) => (

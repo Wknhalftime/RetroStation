@@ -20,7 +20,8 @@ const matchingQueueKey = (
   offset: number,
   search: string,
   sort: QueueSort,
-) => ["matching", "queue", { limit, offset, search, sort }] as const;
+  includeUnlikely: boolean,
+) => ["matching", "queue", { limit, offset, search, sort, includeUnlikely }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -31,6 +32,7 @@ export function useMatchingQueue(
   offset = 0,
   search: string = "",
   sort: QueueSort = "created_at",
+  includeUnlikely = false,
 ) {
   // Trim once and feed both the cache key and the URL through the same value
   // so "  prince" and "prince" share a cache entry and a single request.
@@ -39,12 +41,13 @@ export function useMatchingQueue(
     limit: String(limit),
     offset: String(offset),
     sort,
+    include_unlikely: String(includeUnlikely),
   });
   if (trimmedSearch.length > 0) {
     params.set("search", trimmedSearch);
   }
   return useQuery<MatchingQueue>({
-    queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort),
+    queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort, includeUnlikely),
     queryFn: () => apiFetch<MatchingQueue>(`/api/v1/matching/queue?${params.toString()}`),
     placeholderData: keepPreviousData,
   });
