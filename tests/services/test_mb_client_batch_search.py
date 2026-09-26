@@ -174,3 +174,37 @@ def test_cached_recordings_are_read_in_one_call_per_batch(
     client.search_recordings_by_mbids(mbids)
 
     assert cache.reads == 1
+
+
+def test_cache_keeps_only_the_fields_enrichment_reads(
+    make_client: Any, cache: FakeMusicBrainzCacheRepository,
+) -> None:
+    # A raw search hit is ~30 KB (every release the recording appears on,
+    # aliases, tags); reading 100 of those per batch costs more than the
+    # network did. Store just what enrich_by_recording_batch consumes.
+    mbid = _mbid(1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"count": 1, "recordings": [{
+            "id": mbid, "title": "Song", "length": 1234, "score": 100, "video": None,
+            "tags": [{"name": "rock"}], "isrcs": ["USXXX"], "first-release-date": "1999",
+            "artist-credit": [{"name": "A", "artist": {
+                "id": "a1", "name": "A", "sort-name": "A", "aliases": [{"name": "AA"}],
+            }}],
+            "releases": [{"id": "r1", "title": "R", "media": [{"format": "CD"}],
+                          "release-events": [{"date": "1999"}]}],
+        }]})
+
+    client = MusicBrainzApiClient(cache)
+    client._http = httpx.Client(transport=httpx.MockTransport(handler))
+    found = client.search_recordings_by_mbids([mbid])
+
+    slim = {
+        "id": mbid, "title": "Song", "length": 1234,
+        "artist-credit": [{"name": "A", "artist": {"id": "a1", "name": "A", "sort-name": "A"}}],
+        "releases": [{"id": "r1"}],
+    }
+    entry = cache.get(f"recording-by-mbid:{mbid}")
+    assert entry is not None
+    assert entry.response_data == slim
+    assert found[mbid] == slim

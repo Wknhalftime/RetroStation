@@ -83,6 +83,30 @@ class MusicBrainzClientProtocol(Protocol):
     def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, MbRecording]: ...
 
 
+def _slim_recording(recording: MbRecording) -> MbRecording:
+    """Keep only what enrichment reads from a search hit.
+
+    A raw hit runs to tens of kilobytes (every release the recording appears
+    on, aliases, tags); 100 of those per batch cost more to read back from
+    the cache than the network did. Releases keep only their id.
+    """
+    slim: dict[str, Any] = {"id": recording.get("id"), "title": recording.get("title", "")}
+    if recording.get("length") is not None:
+        slim["length"] = recording["length"]
+    credits: list[dict[str, Any]] = []
+    for credit in recording.get("artist-credit", []):
+        artist = credit.get("artist") or {}
+        credits.append({
+            "name": credit.get("name"),
+            "artist": {k: artist.get(k) for k in ("id", "name", "sort-name") if k in artist},
+        })
+    slim["artist-credit"] = credits
+    slim["releases"] = [
+        {"id": release["id"]} for release in recording.get("releases", []) if release.get("id")
+    ]
+    return cast(MbRecording, slim)
+
+
 class MusicBrainzApiClient:
     """MusicBrainz API client with caching, rate limiting, and exponential-backoff retry.
 
@@ -321,12 +345,13 @@ class MusicBrainzApiClient:
                 rec_id = recording.get("id")
                 if not rec_id or rec_id not in asked:
                     continue
-                found[rec_id] = recording
+                slim = _slim_recording(recording)
+                found[rec_id] = slim
                 self._cache_write(
                     cache_key=f"recording-by-mbid:{rec_id}",
                     entity_type="recording-search",
                     entity_mbid=rec_id,
-                    response_data=dict(recording),
+                    response_data=dict(slim),
                 )
             for mbid in batch:
                 if mbid not in found:
