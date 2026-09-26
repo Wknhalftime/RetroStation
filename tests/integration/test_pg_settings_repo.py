@@ -44,7 +44,9 @@ class TestUpsertAndGet:
 
             result = repo.list_all()
             assert [(s.key, s.value) for s in result] == [
-                ("alpha", "1"), ("beta", "2"), ("gamma", "3"),
+                ("alpha", "1"),
+                ("beta", "2"),
+                ("gamma", "3"),
             ]
 
     def test_list_all_ordered_by_key(self, migrated_db: str) -> None:

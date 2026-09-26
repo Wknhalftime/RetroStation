@@ -58,9 +58,7 @@ class ArtistEnhanceOutcome(StrEnum):
     FAILED = "failed"
 
 
-_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset(
-    {"disambiguation", "sort_name", "mbid"}
-)
+_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset({"disambiguation", "sort_name", "mbid"})
 
 
 class _UnexpectedArtistUpdateColumnError(Exception):
@@ -91,8 +89,7 @@ def _apply_artist_updates(
 
     query = sql.SQL("UPDATE artists SET {sets} WHERE id = %s").format(
         sets=sql.SQL(", ").join(
-            sql.SQL("{col} = %s").format(col=sql.Identifier(col))
-            for col in updates
+            sql.SQL("{col} = %s").format(col=sql.Identifier(col)) for col in updates
         )
     )
     # Placeholder order follows updates.keys() iteration order; Python 3.7+
@@ -274,7 +271,12 @@ def coalesce_artist_lookups(
     last_heartbeat_at = 0.0
     for i, mbid in enumerate(distinct, start=1):
         last_heartbeat_at = _heartbeat_with_slow_warning(
-            on_progress, last_heartbeat_at, i, total, mbid, phase_label="artists",
+            on_progress,
+            last_heartbeat_at,
+            i,
+            total,
+            mbid,
+            phase_label="artists",
         )
         try:
             result[mbid] = client.lookup_artist(mbid)
@@ -286,7 +288,12 @@ def coalesce_artist_lookups(
             )
         finally:
             last_heartbeat_at = _heartbeat_with_slow_warning(
-                on_progress, last_heartbeat_at, i, total, mbid, phase_label="artists",
+                on_progress,
+                last_heartbeat_at,
+                i,
+                total,
+                mbid,
+                phase_label="artists",
             )
     return result
 
@@ -316,7 +323,12 @@ def coalesce_recording_lookups(
     last_heartbeat_at = 0.0
     for i, mbid in enumerate(distinct, start=1):
         last_heartbeat_at = _heartbeat_with_slow_warning(
-            on_progress, last_heartbeat_at, i, total, mbid, phase_label="recordings",
+            on_progress,
+            last_heartbeat_at,
+            i,
+            total,
+            mbid,
+            phase_label="recordings",
         )
         try:
             result[mbid] = client.lookup_recording(mbid)
@@ -328,7 +340,12 @@ def coalesce_recording_lookups(
             )
         finally:
             last_heartbeat_at = _heartbeat_with_slow_warning(
-                on_progress, last_heartbeat_at, i, total, mbid, phase_label="recordings",
+                on_progress,
+                last_heartbeat_at,
+                i,
+                total,
+                mbid,
+                phase_label="recordings",
             )
     return result
 
@@ -441,19 +458,21 @@ def _advance_progress(
     except handler so the FAILED upsert reports an accurate count.
     """
     ctx.processed += 1
-    ctx.progress_repo.upsert(TaskProgress(
-        task_id=ctx.task_id,
-        task_type=TaskType.MB_ENRICHMENT,
-        status=TaskStatus.RUNNING,
-        progress_data={
-            "processed": ctx.processed,
-            "total": ctx.total,
-            "current_item": current_item,
-            "phase": phase,
-        },
-        started_at=ctx.task_started_at,
-        updated_at=datetime.now(UTC),
-    ))
+    ctx.progress_repo.upsert(
+        TaskProgress(
+            task_id=ctx.task_id,
+            task_type=TaskType.MB_ENRICHMENT,
+            status=TaskStatus.RUNNING,
+            progress_data={
+                "processed": ctx.processed,
+                "total": ctx.total,
+                "current_item": current_item,
+                "phase": phase,
+            },
+            started_at=ctx.task_started_at,
+            updated_at=datetime.now(UTC),
+        )
+    )
 
 
 def _phase_metrics(
@@ -474,9 +493,7 @@ def _phase_metrics(
         "distinct_mbids": distinct_mbids,
         "live_fetches_delta": live_fetches_delta,
         "cache_hits_delta": cache_hits_delta,
-        "duplicate_mbid_ratio": (
-            1.0 - (distinct_mbids / rows_queued) if rows_queued else None
-        ),
+        "duplicate_mbid_ratio": (1.0 - (distinct_mbids / rows_queued) if rows_queued else None),
     }
 
 
@@ -503,15 +520,15 @@ def _run_artist_phase(
             live_start = mb_client.live_fetches
             hits_start = mb_client.cache_hits
             rows_queued = len(pending_artists)
-            distinct_mbids = {
-                a.mbid for a in pending_artists if a.mbid is not None
-            }
+            distinct_mbids = {a.mbid for a in pending_artists if a.mbid is not None}
 
             def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
                 _emit_pre_pass_heartbeat(ctx, "artists", current, total, mbid)
 
             mbid_map = coalesce_artist_lookups(
-                distinct_mbids, mb_client, on_progress=_artist_heartbeat,
+                distinct_mbids,
+                mb_client,
+                on_progress=_artist_heartbeat,
             )
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
@@ -523,9 +540,7 @@ def _run_artist_phase(
                 "mb_artist_phase_start",
                 rows_queued=rows_queued,
                 distinct_mbids=len(distinct_mbids),
-                bare_artists=sum(
-                    1 for a in pending_artists if a.mbid is None
-                ),
+                bare_artists=sum(1 for a in pending_artists if a.mbid is None),
             )
 
             for artist in pending_artists:
@@ -674,6 +689,7 @@ def _run_recordings_phase(
         with MusicBrainzApiClient(cache_repo, ttl_days=settings.mb_cache_ttl_days) as mb_client:
             live_start = mb_client.live_fetches
             hits_start = mb_client.cache_hits
+
             # Pre-pass: one lookup_recording per distinct MBID. Read from
             # the map inside the loop; absent keys (transient pre-pass
             # failure) fall through to a live fallback lookup — same
@@ -710,11 +726,7 @@ def _run_recordings_phase(
                     # that was already authoritative). Map miss -> the
                     # pre-pass failed transiently for this MBID, retry
                     # the lookup live inside this same try/except.
-                    data = (
-                        cached_payload
-                        if cache_hit
-                        else mb_client.lookup_recording(recording.id)
-                    )
+                    data = cached_payload if cache_hit else mb_client.lookup_recording(recording.id)
                     if data and recording.duration_ms is None:
                         length_ms = data.get("length")
                         if length_ms is not None:
@@ -816,31 +828,35 @@ def mb_enrichment_task() -> dict[str, int]:
 
         total = len(pending_artists) + len(pending_works) + len(pending_recordings)
 
-        progress_repo.upsert(TaskProgress(
-            task_id=task_id,
-            task_type=TaskType.MB_ENRICHMENT,
-            status=TaskStatus.RUNNING,
-            progress_data={
-                "processed": 0,
-                "total": total,
-                "current_item": "",
-                "phase": "artists",
-            },
-            started_at=task_started_at,
-            updated_at=task_started_at,
-        ))
+        progress_repo.upsert(
+            TaskProgress(
+                task_id=task_id,
+                task_type=TaskType.MB_ENRICHMENT,
+                status=TaskStatus.RUNNING,
+                progress_data={
+                    "processed": 0,
+                    "total": total,
+                    "current_item": "",
+                    "phase": "artists",
+                },
+                started_at=task_started_at,
+                updated_at=task_started_at,
+            )
+        )
 
-        sys_log_repo.create(SystemLog(
-            category=LogCategory.ENRICHMENT,
-            level=LogLevel.INFO,
-            message="mb_enrichment_started",
-            trace_id=task_id,
-            details={
-                "artists": len(pending_artists),
-                "works": len(pending_works),
-                "recordings": len(pending_recordings),
-            },
-        ))
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.ENRICHMENT,
+                level=LogLevel.INFO,
+                message="mb_enrichment_started",
+                trace_id=task_id,
+                details={
+                    "artists": len(pending_artists),
+                    "works": len(pending_works),
+                    "recordings": len(pending_recordings),
+                },
+            )
+        )
 
         # Single ctx shared across phases. Helpers mutate ctx.processed /
         # ctx.done / ctx.failed / ctx.metrics per row so the outer except
@@ -867,56 +883,64 @@ def mb_enrichment_task() -> dict[str, int]:
             "orphans_deleted": ctx.orphans_deleted,
         }
 
-        progress_repo.upsert(TaskProgress(
-            task_id=task_id,
-            task_type=TaskType.MB_ENRICHMENT,
-            status=TaskStatus.COMPLETED,
-            progress_data={
-                "processed": ctx.processed,
-                "total": total,
-                **completion_details,
-            },
-            started_at=task_started_at,
-            updated_at=datetime.now(UTC),
-            completed_at=datetime.now(UTC),
-        ))
+        progress_repo.upsert(
+            TaskProgress(
+                task_id=task_id,
+                task_type=TaskType.MB_ENRICHMENT,
+                status=TaskStatus.COMPLETED,
+                progress_data={
+                    "processed": ctx.processed,
+                    "total": total,
+                    **completion_details,
+                },
+                started_at=task_started_at,
+                updated_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+        )
 
-        sys_log_repo.create(SystemLog(
-            category=LogCategory.ENRICHMENT,
-            level=LogLevel.INFO,
-            message="mb_enrichment_completed",
-            trace_id=task_id,
-            details=completion_details,
-        ))
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.ENRICHMENT,
+                level=LogLevel.INFO,
+                message="mb_enrichment_completed",
+                trace_id=task_id,
+                details=completion_details,
+            )
+        )
 
     except Exception as exc:
         if progress_repo is not None:
             with contextlib.suppress(Exception):
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.MB_ENRICHMENT,
-                    status=TaskStatus.FAILED,
-                    progress_data={
-                        # Read live counter from ctx so a mid-loop raise
-                        # records the actual rows processed, not the
-                        # pre-phase value.
-                        "processed": ctx.processed if ctx is not None else 0,
-                        "total": total,
-                        "error": str(exc),
-                    },
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                    completed_at=datetime.now(UTC),
-                ))
+                progress_repo.upsert(
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.MB_ENRICHMENT,
+                        status=TaskStatus.FAILED,
+                        progress_data={
+                            # Read live counter from ctx so a mid-loop raise
+                            # records the actual rows processed, not the
+                            # pre-phase value.
+                            "processed": ctx.processed if ctx is not None else 0,
+                            "total": total,
+                            "error": str(exc),
+                        },
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC),
+                    )
+                )
         if sys_log_repo is not None:
             with contextlib.suppress(Exception):
-                sys_log_repo.create(SystemLog(
-                    category=LogCategory.ENRICHMENT,
-                    level=LogLevel.ERROR,
-                    message="mb_enrichment_failed",
-                    trace_id=task_id,
-                    details={"error": str(exc), "traceback": traceback.format_exc()},
-                ))
+                sys_log_repo.create(
+                    SystemLog(
+                        category=LogCategory.ENRICHMENT,
+                        level=LogLevel.ERROR,
+                        message="mb_enrichment_failed",
+                        trace_id=task_id,
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
+                    )
+                )
         raise
 
     finally:

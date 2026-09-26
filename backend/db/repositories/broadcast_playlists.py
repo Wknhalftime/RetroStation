@@ -28,17 +28,13 @@ class PgBroadcastPlaylistRepository(BroadcastPlaylistRepository):
                VALUES (%s, %s, %s, %s)""",
             (playlist.id, playlist.name, playlist.content_hash, playlist.station_id),
         )
-        row = self._conn.execute(
-            "SELECT * FROM playlists WHERE id = %s", (playlist.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM playlists WHERE id = %s", (playlist.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
     def get_by_id(self, playlist_id: UUID) -> BroadcastPlaylist | None:
-        row = self._conn.execute(
-            "SELECT * FROM playlists WHERE id = %s", (playlist_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM playlists WHERE id = %s", (playlist_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def get_by_content_hash(self, content_hash: str) -> BroadcastPlaylist | None:
@@ -53,4 +49,3 @@ class PgBroadcastPlaylistRepository(BroadcastPlaylistRepository):
             (station_id,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
-

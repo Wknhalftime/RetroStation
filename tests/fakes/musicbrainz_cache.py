@@ -21,7 +21,8 @@ class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         self.reads += 1
         now = datetime.now(tz=UTC)
         return {
-            key: entry for key in cache_keys
+            key: entry
+            for key in cache_keys
             if (entry := self._data.get(key)) is not None and entry.expires_at > now
         }
 
@@ -39,4 +40,3 @@ class FakeMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         for k in expired:
             del self._data[k]
         return len(expired)
-

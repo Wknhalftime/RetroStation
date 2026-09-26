@@ -12,6 +12,7 @@ Tier 2 fuzzy fallback) live in tests/services/test_identity_matching_strategies.
 This file covers the orchestrator's end-to-end behavior: persistence,
 work_id collection, and reason-code propagation.
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -119,14 +120,16 @@ def _setup_resolved_artist(
         match_status=MatchStatus.AUTO_MATCHED,
     )
     artist_repo.upsert(artist)
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        target_id=canonical_mbid,
-        target_type=TargetType.ARTIST,
-        confidence_score=100.0,
-        match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            target_id=canonical_mbid,
+            target_type=TargetType.ARTIST,
+            confidence_score=100.0,
+            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+        )
+    )
     return artist
 
 
@@ -166,13 +169,15 @@ def test_match_identities_for_playlist_tier0_rule_hit_collects_work_id() -> None
     playlist_id = uuid4()
     _register_pending_for_playlist(identity_repo, identity, playlist_id)
 
-    rules_repo.create(MappingRule(
-        id=uuid4(),
-        source_pattern=identity.normalized_signature,
-        target_type=TargetType.LIBRARY_FILE,
-        target_id=lib_file.file_path,
-        priority=10,
-    ))
+    rules_repo.create(
+        MappingRule(
+            id=uuid4(),
+            source_pattern=identity.normalized_signature,
+            target_type=TargetType.LIBRARY_FILE,
+            target_id=lib_file.file_path,
+            priority=10,
+        )
+    )
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
@@ -672,16 +677,25 @@ def test_bulk_defer_by_artist_returns_count_and_only_touches_pending() -> None:
     other = uuid4()
 
     pending_target = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=target,
-        original_title="A", normalized_title="a", normalized_signature="sig-a",
+        id=uuid4(),
+        broadcast_artist_id=target,
+        original_title="A",
+        normalized_title="a",
+        normalized_signature="sig-a",
     )
     matched_target = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=target,
-        original_title="B", normalized_title="b", normalized_signature="sig-b",
+        id=uuid4(),
+        broadcast_artist_id=target,
+        original_title="B",
+        normalized_title="b",
+        normalized_signature="sig-b",
     )
     pending_other = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=other,
-        original_title="C", normalized_title="c", normalized_signature="sig-c",
+        id=uuid4(),
+        broadcast_artist_id=other,
+        original_title="C",
+        normalized_title="c",
+        normalized_signature="sig-c",
     )
     repo.upsert(pending_target)
     repo.upsert(matched_target)
@@ -711,16 +725,25 @@ def test_reset_deferred_by_artist_ids_promotes_only_under_those_artists() -> Non
     artist_b = uuid4()
 
     a = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist_a,
-        original_title="A", normalized_title="a", normalized_signature="sig-1",
+        id=uuid4(),
+        broadcast_artist_id=artist_a,
+        original_title="A",
+        normalized_title="a",
+        normalized_signature="sig-1",
     )
     b = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist_b,
-        original_title="B", normalized_title="b", normalized_signature="sig-2",
+        id=uuid4(),
+        broadcast_artist_id=artist_b,
+        original_title="B",
+        normalized_title="b",
+        normalized_signature="sig-2",
     )
     rejected = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist_a,
-        original_title="C", normalized_title="c", normalized_signature="sig-3",
+        id=uuid4(),
+        broadcast_artist_id=artist_a,
+        original_title="C",
+        normalized_title="c",
+        normalized_signature="sig-3",
     )
     repo.upsert(a)
     repo.upsert(b)

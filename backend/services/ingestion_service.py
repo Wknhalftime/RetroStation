@@ -126,8 +126,7 @@ def _validate_header(fieldnames: Sequence[str] | None) -> None:
     """
     if not fieldnames:
         raise CsvSchemaError(
-            "CSV has no header row; expected columns: "
-            f"{', '.join(_REQUIRED_COLUMNS)}."
+            f"CSV has no header row; expected columns: {', '.join(_REQUIRED_COLUMNS)}."
         )
     present = {name.strip() for name in fieldnames if name}
     missing = [column for column in _REQUIRED_COLUMNS if column not in present]
@@ -155,11 +154,7 @@ def _decode_csv_bytes(file_bytes: bytes) -> str:
     detected = chardet.detect(file_bytes)
     detected_encoding = (detected.get("encoding") or "").lower()
     confidence = detected.get("confidence") or 0.0
-    if (
-        detected_encoding
-        and detected_encoding != "ascii"
-        and confidence >= _MIN_CHARDET_CONFIDENCE
-    ):
+    if detected_encoding and detected_encoding != "ascii" and confidence >= _MIN_CHARDET_CONFIDENCE:
         try:
             text = file_bytes.decode(detected_encoding)
         except (UnicodeDecodeError, LookupError):
@@ -252,17 +247,17 @@ def ingest_csv(
     # Check for duplicate
     existing = playlist_repo.get_by_content_hash(content_hash)
     if existing is not None:
-        raise DuplicatePlaylistError(
-            f"CSV already ingested as playlist {existing.id}"
-        )
+        raise DuplicatePlaylistError(f"CSV already ingested as playlist {existing.id}")
 
     # Create playlist
-    playlist = playlist_repo.create(BroadcastPlaylist(
-        id=uuid4(),
-        name=posixpath.basename(file_name),
-        content_hash=content_hash,
-        station_id=UUID(station_id) if station_id else None,
-    ))
+    playlist = playlist_repo.create(
+        BroadcastPlaylist(
+            id=uuid4(),
+            name=posixpath.basename(file_name),
+            content_hash=content_hash,
+            station_id=UUID(station_id) if station_id else None,
+        )
+    )
     result.playlist_id = str(playlist.id)
 
     # Parse CSV
@@ -298,11 +293,13 @@ def ingest_csv(
         # Upsert artist
         if norm_artist not in seen_artists:
             input_id = uuid4()
-            stored = broadcast_artist_repo.upsert(BroadcastArtist(
-                id=input_id,
-                original_name=raw_artist,
-                normalized_name=norm_artist,
-            ))
+            stored = broadcast_artist_repo.upsert(
+                BroadcastArtist(
+                    id=input_id,
+                    original_name=raw_artist,
+                    normalized_name=norm_artist,
+                )
+            )
             seen_artists[norm_artist] = stored
             if stored.id == input_id:
                 result.artists_created += 1
@@ -311,13 +308,15 @@ def ingest_csv(
         # Upsert identity
         if signature not in seen_signatures:
             identity_input_id = uuid4()
-            identity = track_identity_repo.upsert(BroadcastTrackIdentity(
-                id=identity_input_id,
-                broadcast_artist_id=artist.id,
-                original_title=raw_title,
-                normalized_title=norm_title,
-                normalized_signature=signature,
-            ))
+            identity = track_identity_repo.upsert(
+                BroadcastTrackIdentity(
+                    id=identity_input_id,
+                    broadcast_artist_id=artist.id,
+                    original_title=raw_title,
+                    normalized_title=norm_title,
+                    normalized_signature=signature,
+                )
+            )
             seen_signatures[signature] = identity
             if identity.id == identity_input_id:
                 result.identities_created += 1
@@ -333,30 +332,26 @@ def ingest_csv(
         broadcast_day = seen_broadcast_dates.get(date_str)
 
         # Create event
-        play_event_repo.create(BroadcastPlayEvent(
-            id=uuid4(),
-            identity_id=identity.id,
-            playlist_id=playlist.id,
-            played_at=played_at,
-            broadcast_day_id=broadcast_day.id if broadcast_day else None,
-        ))
+        play_event_repo.create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=played_at,
+                broadcast_day_id=broadcast_day.id if broadcast_day else None,
+            )
+        )
         result.events_created += 1
         result.rows_processed += 1
 
-        if (
-            on_row_processed is not None
-            and result.rows_processed % _PROGRESS_REPORT_INTERVAL == 0
-        ):
+        if on_row_processed is not None and result.rows_processed % _PROGRESS_REPORT_INTERVAL == 0:
             on_row_processed(result.rows_processed)
 
     # Final fire: only when the last cadence tick did NOT already land on
     # result.rows_processed. This includes 0 (no loop iterations, but the
     # attempt-zero signal already sent 0) and any exact multiple of the
     # interval. Prevents a duplicate callback emit.
-    if (
-        on_row_processed is not None
-        and result.rows_processed % _PROGRESS_REPORT_INTERVAL != 0
-    ):
+    if on_row_processed is not None and result.rows_processed % _PROGRESS_REPORT_INTERVAL != 0:
         on_row_processed(result.rows_processed)
 
     if result.rows_skipped > 0:

@@ -5,6 +5,7 @@ The poll task runs every 4 minutes, diffs folder hashes, and enqueues a
 targeted scan for changed folders. The scan task processes changed folders
 using smart per-folder diffing and chains into enrichment.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -58,7 +59,8 @@ def library_watcher_poll() -> None:
     settings = get_settings()
 
     with connect_sync(
-        settings.database_url, autocommit=False,
+        settings.database_url,
+        autocommit=False,
     ) as conn:
         repos = RepositoryFactory(conn)
 
@@ -68,7 +70,10 @@ def library_watcher_poll() -> None:
             return
 
         changed, pending = detect_changed_folders(
-            repos.library_folders, repos.library_folders, root_path, datetime.now(UTC),
+            repos.library_folders,
+            repos.library_folders,
+            root_path,
+            datetime.now(UTC),
         )
         conn.commit()
 
@@ -95,9 +100,7 @@ def library_watcher_poll() -> None:
 
 
 @huey.task()  # type: ignore[untyped-decorator]
-def library_scan_files_task(
-    folder_paths: list[str], task_id: str
-) -> None:
+def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
     """Smart scan of specific folders, then chain into enrichment."""
     settings = get_settings()
     scan_task_id = uuid.uuid4().hex
@@ -110,13 +113,15 @@ def library_scan_files_task(
     try:
         # Autocommit connection for progress tracking
         progress_conn = connect_sync(
-            settings.database_url, autocommit=True,
+            settings.database_url,
+            autocommit=True,
         )
         progress_repo = PgTaskProgressRepository(progress_conn)
 
         # Data connection
         library_conn = connect_sync(
-            settings.database_url, autocommit=False,
+            settings.database_url,
+            autocommit=False,
         )
 
         repos = RepositoryFactory(library_conn)
@@ -190,7 +195,8 @@ def library_scan_files_task(
                     )
                     if grouping:
                         repos.library_files.update_work_id(
-                            lf.id, grouping.work_id,
+                            lf.id,
+                            grouping.work_id,
                         )
                         if grouping.recording_id:
                             repos.library_files.update_recording_link(
@@ -271,6 +277,7 @@ def library_scan_files_task(
             from backend.tasks.library_enrichment_tasks import (
                 library_enrichment_task,
             )
+
             library_enrichment_task()
 
     except Exception as exc:

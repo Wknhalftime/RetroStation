@@ -117,11 +117,7 @@ def _decide_artist_zone(
     """
     auto_match = (
         top_score >= mb_auto_link_score
-        or (
-            has_competitor
-            and top_score >= strong_match_threshold
-            and gap >= score_gap
-        )
+        or (has_competitor and top_score >= strong_match_threshold and gap >= score_gap)
         or (
             has_competitor
             and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
@@ -255,7 +251,11 @@ class NormalizationStrategy:
         gap = (top_score - scored[1][0]) if has_competitor else 100.0
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
+            top_score,
+            gap,
+            self._strong_match_threshold,
+            self._gap,
+            has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
         assert best.mbid is not None  # guaranteed by the with_mbid filter above
@@ -329,7 +329,11 @@ class MusicBrainzApiStrategy:
         gap = float(best.get("score", 0) - second)
 
         status, rc, rd = _decide_artist_zone(
-            top_score, gap, self._strong_match_threshold, self._gap, has_competitor,
+            top_score,
+            gap,
+            self._strong_match_threshold,
+            self._gap,
+            has_competitor,
             mb_auto_link_score=self._mb_auto_link_score,
         )
 
@@ -461,13 +465,18 @@ def _run_local_phase(
     Returns (resolved_results, unresolved_artists). Unresolved artists fall
     through to Phase 2 (truncated-MB + DeferredRetryStrategy fallback).
     """
-    engine = ArtistMatchingEngine([
-        MappingRuleStrategy(rules),
-        NormalizationStrategy(
-            all_canonical, strong_match_threshold, mb_score_gap, mb_auto_link_score,
-            min_presentation_score=min_presentation_score,
-        ),
-    ])
+    engine = ArtistMatchingEngine(
+        [
+            MappingRuleStrategy(rules),
+            NormalizationStrategy(
+                all_canonical,
+                strong_match_threshold,
+                mb_score_gap,
+                mb_auto_link_score,
+                min_presentation_score=min_presentation_score,
+            ),
+        ]
+    )
     resolved: dict[UUID, ArtistMatchResult] = {}
     unresolved: list[BroadcastArtist] = []
     for broadcast_artist in pending:
@@ -506,8 +515,7 @@ def _build_truncated_search_map(
     MB calls for non-truncated names.
     """
     truncated = [
-        a for a in unresolved
-        if is_likely_truncated(a.original_name, broadcast_name_max_len)
+        a for a in unresolved if is_likely_truncated(a.original_name, broadcast_name_max_len)
     ]
     if not truncated:
         return {}, 0
@@ -528,16 +536,21 @@ def _run_mb_or_deferred_phase(
     DeferredRetryStrategy is terminal — every artist gets a result
     (Invariant 2 — no orphaned ``result is None`` state).
     """
-    engine = ArtistMatchingEngine([
-        TruncatedNameMbStrategy(
-            inner=MusicBrainzApiStrategy(
-                mb_client, strong_match_threshold, mb_score_gap, mb_auto_link_score,
-                search_map=search_map,
+    engine = ArtistMatchingEngine(
+        [
+            TruncatedNameMbStrategy(
+                inner=MusicBrainzApiStrategy(
+                    mb_client,
+                    strong_match_threshold,
+                    mb_score_gap,
+                    mb_auto_link_score,
+                    search_map=search_map,
+                ),
+                max_len=broadcast_name_max_len,
             ),
-            max_len=broadcast_name_max_len,
-        ),
-        DeferredRetryStrategy(),
-    ])
+            DeferredRetryStrategy(),
+        ]
+    )
     out: dict[UUID, ArtistMatchResult] = {}
     for broadcast_artist in unresolved:
         result = engine.resolve(broadcast_artist)
@@ -571,23 +584,23 @@ def _persist_artist_result(
     )
     if result.status != MatchStatus.AUTO_MATCHED:
         return
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=broadcast_artist.id,
-        target_id=result.target_id,
-        target_type=TargetType.ARTIST,
-        confidence_score=result.confidence_score,
-        match_tier=result.tier,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=broadcast_artist.id,
+            target_id=result.target_id,
+            target_type=TargetType.ARTIST,
+            confidence_score=result.confidence_score,
+            match_tier=result.tier,
+        )
+    )
     # Catalog upsert moved out of MusicBrainzApiStrategy (SRP). Only the MB
     # tier populates mb_candidate, so this fires only on MB hits.
     if result.mb_candidate is not None:
         artist_repo.upsert_musicbrainz_artist(
             mbid=result.mb_candidate["id"],
             name=result.mb_candidate["name"],
-            sort_name=result.mb_candidate.get(
-                "sort-name", result.mb_candidate["name"]
-            ),
+            sort_name=result.mb_candidate.get("sort-name", result.mb_candidate["name"]),
             normalized_name=normalize_artist(result.mb_candidate["name"]),
             disambiguation=result.mb_candidate.get("disambiguation"),
         )
@@ -630,28 +643,44 @@ def match_artists_for_playlist(
 
     try:
         resolved, unresolved = _run_local_phase(
-            pending, rules, all_canonical,
-            strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            pending,
+            rules,
+            all_canonical,
+            strong_match_threshold,
+            mb_score_gap,
+            mb_auto_link_score,
             min_presentation_score=min_presentation_score,
         )
         search_map, distinct_search_keys = _build_truncated_search_map(
-            unresolved, mb_client, broadcast_name_max_len,
-        )
-        resolved.update(_run_mb_or_deferred_phase(
-            unresolved, mb_client, search_map,
-            strong_match_threshold, mb_score_gap, mb_auto_link_score,
+            unresolved,
+            mb_client,
             broadcast_name_max_len,
-        ))
+        )
+        resolved.update(
+            _run_mb_or_deferred_phase(
+                unresolved,
+                mb_client,
+                search_map,
+                strong_match_threshold,
+                mb_score_gap,
+                mb_auto_link_score,
+                broadcast_name_max_len,
+            )
+        )
 
         for broadcast_artist in pending:
             _persist_artist_result(
-                broadcast_artist, resolved[broadcast_artist.id],
-                broadcast_artist_repo, artist_repo, match_repo,
+                broadcast_artist,
+                resolved[broadcast_artist.id],
+                broadcast_artist_repo,
+                artist_repo,
+                match_repo,
             )
 
         _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
         deferred_artist_ids = [
-            artist_id for artist_id, result in resolved.items()
+            artist_id
+            for artist_id, result in resolved.items()
             if result.reason_code == ReasonCode.DEFERRED_RETRY
         ]
         _cascade_deferred(deferred_artist_ids, track_identity_repo)

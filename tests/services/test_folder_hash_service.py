@@ -1,4 +1,5 @@
 """Unit tests for folder_hash_service."""
+
 from __future__ import annotations
 
 import hashlib
@@ -162,7 +163,8 @@ class TestDiffTree:
         assert pending == []
 
     def test_skips_folders_with_in_flight_staged_hashes(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Folders with uncommitted staged hashes are excluded from both
         ``changed`` and ``pending`` to prevent duplicate staging across
@@ -179,7 +181,8 @@ class TestDiffTree:
         jazz_folder = repo.get_by_path(canonicalize_path(str(sub)))
         assert jazz_folder is not None
         repo.stage_hashes(
-            [(jazz_folder.id, "fake_in_flight_hash")], "in_flight_task",
+            [(jazz_folder.id, "fake_in_flight_hash")],
+            "in_flight_task",
         )
 
         # Now add a new file to the jazz directory
@@ -227,7 +230,9 @@ class TestDiffTreeVanishedFolders:
         assert canonicalize_path(str(album)) not in changes
 
     def test_folder_under_unlistable_dir_not_reported(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         album, repo = self._seed(tmp_path)
         real_walk = os.walk
@@ -240,7 +245,8 @@ class TestDiffTreeVanishedFolders:
                     yield entry
 
         monkeypatch.setattr(
-            "backend.services.folder_hash_service.os.walk", _walk_denied,
+            "backend.services.folder_hash_service.os.walk",
+            _walk_denied,
         )
         changes, _ = diff_tree(str(tmp_path), repo)
         assert canonicalize_path(str(album)) not in changes

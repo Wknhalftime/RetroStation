@@ -1,4 +1,5 @@
 """Local-first song grouping -- 4-step matching algorithm with version dedup."""
+
 from __future__ import annotations
 
 import logging
@@ -107,8 +108,7 @@ def _fuzzy_match_work(
             score = 0.7 * full_ratio_score + 0.3 * partial_ratio_score
 
         if score > best_score or (
-            score == best_score
-            and (best_work_id is None or candidate_id < best_work_id)
+            score == best_score and (best_work_id is None or candidate_id < best_work_id)
         ):
             best_score = score
             best_work_id = candidate_id
@@ -191,7 +191,9 @@ def assign_work(
         )
 
     recording_id = recording_repo.get_or_create_local(
-        work_id, version_type.value, raw_title,
+        work_id,
+        version_type.value,
+        raw_title,
     )
     logger.info(
         "grouping_recording_linked",

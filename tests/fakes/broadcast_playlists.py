@@ -20,4 +20,3 @@ class FakeBroadcastPlaylistRepository(BroadcastPlaylistRepository):
 
     def list_by_station(self, station_id: UUID) -> list[BroadcastPlaylist]:
         return [p for p in self._data.values() if p.station_id == station_id]
-

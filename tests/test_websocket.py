@@ -180,9 +180,7 @@ class TestWebSocketBroadcast:
         _seed_task(db_conn, "ws-done", status=TaskStatus.COMPLETED)
         _seed_task(db_conn, "ws-failed", status=TaskStatus.FAILED)
 
-        db_conn.execute(
-            "UPDATE progress_tracking SET updated_at = now() - interval '10 seconds'"
-        )
+        db_conn.execute("UPDATE progress_tracking SET updated_at = now() - interval '10 seconds'")
         db_conn.commit()
 
         with ws_client.websocket_connect("/ws?token=dev-token") as ws:
@@ -302,11 +300,13 @@ class TestWebSocketHeartbeatResurrection:
             (
                 "ws-heartbeat-resurrect",
                 TaskType.MB_ENRICHMENT.value,
-                json.dumps({
-                    "processed": 627,
-                    "total": 17193,
-                    "phase": "recordings",
-                }),
+                json.dumps(
+                    {
+                        "processed": 627,
+                        "total": 17193,
+                        "phase": "recordings",
+                    }
+                ),
             ),
         )
         db_conn.commit()
@@ -350,9 +350,7 @@ class TestWebSocketHeartbeatResurrection:
                 if "ws-heartbeat-resurrect" not in ids:
                     absent = True
                     break
-            assert absent, (
-                "post-grace frame must NOT contain the stale-flipped row"
-            )
+            assert absent, "post-grace frame must NOT contain the stale-flipped row"
 
             # Now the heartbeat fires. NOTE: `db_conn` is the test fixture's
             # standard (non-autocommit) sync connection; we approximate the
@@ -414,14 +412,11 @@ class TestWebSocketHeartbeatResurrection:
                 ids = [t["task_id"] for t in frame["tasks"]]
                 if "ws-heartbeat-resurrect" in ids:
                     task = next(
-                        t for t in frame["tasks"]
-                        if t["task_id"] == "ws-heartbeat-resurrect"
+                        t for t in frame["tasks"] if t["task_id"] == "ws-heartbeat-resurrect"
                     )
                     assert task["status"] == "running"
                     assert task["progress_data"]["phase"] == "recordings-prepass"
                     assert task["progress_data"]["prepass_current"] == 8042
                     present = True
                     break
-            assert present, (
-                "post-heartbeat frame must contain the resurrected row"
-            )
+            assert present, "post-heartbeat frame must contain the resurrected row"

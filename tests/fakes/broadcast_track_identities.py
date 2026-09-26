@@ -11,12 +11,8 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         self._data: dict[UUID, BroadcastTrackIdentity] = {}
         self._playlist_identities: dict[UUID, set[UUID]] = {}
 
-    def register_playlist_identity(
-        self, playlist_id: UUID, identity_id: UUID
-    ) -> None:
-        self._playlist_identities.setdefault(playlist_id, set()).add(
-            identity_id
-        )
+    def register_playlist_identity(self, playlist_id: UUID, identity_id: UUID) -> None:
+        self._playlist_identities.setdefault(playlist_id, set()).add(identity_id)
 
     def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:
         existing = self.get_by_signature(identity.normalized_signature)
@@ -28,39 +24,23 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def get_by_id(self, identity_id: UUID) -> BroadcastTrackIdentity | None:
         return self._data.get(identity_id)
 
-    def get_by_signature(
-        self, normalized_signature: str
-    ) -> BroadcastTrackIdentity | None:
+    def get_by_signature(self, normalized_signature: str) -> BroadcastTrackIdentity | None:
         return next(
-            (i for i in self._data.values()
-             if i.normalized_signature == normalized_signature), None
+            (i for i in self._data.values() if i.normalized_signature == normalized_signature), None
         )
 
-    def get_for_artist(
-        self, broadcast_artist_id: UUID
-    ) -> list[BroadcastTrackIdentity]:
-        return [
-            i for i in self._data.values()
-            if i.broadcast_artist_id == broadcast_artist_id
-        ]
+    def get_for_artist(self, broadcast_artist_id: UUID) -> list[BroadcastTrackIdentity]:
+        return [i for i in self._data.values() if i.broadcast_artist_id == broadcast_artist_id]
 
-    def get_pending_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastTrackIdentity]:
+    def get_pending_for_playlist(self, playlist_id: UUID) -> list[BroadcastTrackIdentity]:
         ids = self._playlist_identities.get(playlist_id, set())
         return [
-            i for i in self._data.values()
-            if i.id in ids and i.match_status == MatchStatus.PENDING
+            i for i in self._data.values() if i.id in ids and i.match_status == MatchStatus.PENDING
         ]
 
-    def get_unembedded_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastTrackIdentity]:
+    def get_unembedded_for_playlist(self, playlist_id: UUID) -> list[BroadcastTrackIdentity]:
         ids = self._playlist_identities.get(playlist_id, set())
-        return [
-            i for i in self._data.values()
-            if i.id in ids and i.embedding is None
-        ]
+        return [i for i in self._data.values() if i.id in ids and i.embedding is None]
 
     def update_match_status(
         self,
@@ -143,4 +123,3 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 )
                 reset += 1
         return reset
-

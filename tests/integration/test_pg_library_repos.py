@@ -336,9 +336,9 @@ def test_get_by_normalized_artist_name_pg(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFileRepository(conn)
         seeds = [
-            ("/p/1.mp3", "Prince",        "prince",        "rec-a"),
+            ("/p/1.mp3", "Prince", "prince", "rec-a"),
             ("/p/2.mp3", "Prince Buster", "prince buster", None),
-            ("/p/3.mp3", "Madonna",       "madonna",       None),
+            ("/p/3.mp3", "Madonna", "madonna", None),
         ]
         for path, name, norm, mbid in seeds:
             repo.upsert(
@@ -409,23 +409,31 @@ def test_library_file_pending_enrichment_with_release(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repo = PgLibraryFileRepository(conn)
         both = _make_file(
-            file_path="/c/1.flac", release_mbid="rel-1", recording_mbid="rec-1",
+            file_path="/c/1.flac",
+            release_mbid="rel-1",
+            recording_mbid="rec-1",
             enrichment_status=EnrichmentStatus.PENDING,
         )
         other_release = _make_file(
-            file_path="/c/2.flac", release_mbid="rel-2", recording_mbid="rec-2",
+            file_path="/c/2.flac",
+            release_mbid="rel-2",
+            recording_mbid="rec-2",
             enrichment_status=EnrichmentStatus.PENDING,
         )
         no_recording = _make_file(
-            file_path="/c/3.flac", release_mbid="rel-1",
+            file_path="/c/3.flac",
+            release_mbid="rel-1",
             enrichment_status=EnrichmentStatus.PENDING,
         )
         no_release = _make_file(
-            file_path="/c/4.flac", recording_mbid="rec-4",
+            file_path="/c/4.flac",
+            recording_mbid="rec-4",
             enrichment_status=EnrichmentStatus.PENDING,
         )
         done = _make_file(
-            file_path="/c/5.flac", release_mbid="rel-1", recording_mbid="rec-5",
+            file_path="/c/5.flac",
+            release_mbid="rel-1",
+            recording_mbid="rec-5",
             enrichment_status=EnrichmentStatus.ENRICHED,
         )
         for f in (both, other_release, no_recording, no_release, done):

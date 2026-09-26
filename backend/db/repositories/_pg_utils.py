@@ -3,6 +3,7 @@
 These helpers live here rather than in a service module so that the DB layer
 never needs to import from ``backend.services``.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -28,4 +29,3 @@ def format_embedding(embedding: list[float]) -> str:
     Example: ``[0.1, 0.2, 0.3]`` → ``"[0.1,0.2,0.3]"``
     """
     return "[" + ",".join(str(v) for v in embedding) + "]"
-

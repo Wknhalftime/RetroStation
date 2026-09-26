@@ -132,7 +132,5 @@ async def retry_enrichment(_token: Token) -> RetryEnrichmentResult:
 
     return RetryEnrichmentResult(
         reset=reset_count,
-        message=(
-            f"Reset {reset_count} failed file(s) to pending and queued enrichment."
-        ),
+        message=(f"Reset {reset_count} failed file(s) to pending and queued enrichment."),
     )

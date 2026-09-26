@@ -107,7 +107,5 @@ def _ensure_migrations_table(conn: psycopg.Connection[Any]) -> None:
 
 
 def _get_applied_versions(conn: psycopg.Connection[Any]) -> set[str]:
-    rows = conn.execute(
-        "SELECT version FROM schema_migrations ORDER BY version ASC"
-    ).fetchall()
+    rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version ASC").fetchall()
     return {row[0] for row in rows}

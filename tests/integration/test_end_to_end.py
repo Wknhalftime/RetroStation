@@ -37,9 +37,13 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         # Setup
         station_repo = PgBroadcastStationRepository(conn)
-        station = station_repo.create(BroadcastStation(
-            id=uuid4(), call_letters="KAZR-FM-E2E", name="KAZR E2E",
-        ))
+        station = station_repo.create(
+            BroadcastStation(
+                id=uuid4(),
+                call_letters="KAZR-FM-E2E",
+                name="KAZR E2E",
+            )
+        )
 
         # Step 1: Ingest
         file_bytes = FIXTURE_PATH.read_bytes()
@@ -56,6 +60,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         conn.commit()
 
         from uuid import UUID
+
         playlist_id = UUID(result.playlist_id)
 
         # The actual row count is 3167 (verified in Task 3)
@@ -65,20 +70,29 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         # Step 2: Skip embedding (would need real model — tested separately)
 
         # Step 3: Artist matching with FakeMbClient
-        fake_mb = FakeMbClient({
-            "METALLICA": [
-                {"id": "mbid-metallica", "name": "Metallica",
-                 "sort-name": "Metallica", "score": 100},
-            ],
-            "OZZY OSBOURNE": [
-                {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
-                 "sort-name": "Osbourne, Ozzy", "score": 100},
-            ],
-            "AC/DC": [
-                {"id": "mbid-acdc", "name": "AC/DC",
-                 "sort-name": "AC/DC", "score": 100},
-            ],
-        })
+        fake_mb = FakeMbClient(
+            {
+                "METALLICA": [
+                    {
+                        "id": "mbid-metallica",
+                        "name": "Metallica",
+                        "sort-name": "Metallica",
+                        "score": 100,
+                    },
+                ],
+                "OZZY OSBOURNE": [
+                    {
+                        "id": "mbid-ozzy",
+                        "name": "Ozzy Osbourne",
+                        "sort-name": "Osbourne, Ozzy",
+                        "score": 100,
+                    },
+                ],
+                "AC/DC": [
+                    {"id": "mbid-acdc", "name": "AC/DC", "sort-name": "AC/DC", "score": 100},
+                ],
+            }
+        )
 
         match_artists_for_playlist(
             playlist_id=playlist_id,
@@ -98,8 +112,10 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         status_counts = {r["match_status"]: r["count"] for r in all_artists_rows}
 
         # Some artists matched via MB (the 3 we seeded), rest are NEEDS_REVIEW
-        assert MatchStatus.AUTO_MATCHED.value in status_counts or \
-               MatchStatus.NEEDS_REVIEW.value in status_counts
+        assert (
+            MatchStatus.AUTO_MATCHED.value in status_counts
+            or MatchStatus.NEEDS_REVIEW.value in status_counts
+        )
 
         # Step 4: Identity matching (no library → NEEDS_REVIEW)
         match_identities_for_playlist(

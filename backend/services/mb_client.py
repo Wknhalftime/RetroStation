@@ -55,9 +55,8 @@ def _lucene_escape(value: str) -> str:
 
 def _is_transient_mb_error(exc: BaseException) -> bool:
     """Return True for HTTP errors that are transient and worth retrying (429, 5xx)."""
-    return (
-        isinstance(exc, httpx.HTTPStatusError)
-        and (exc.response.status_code == 429 or exc.response.status_code >= 500)
+    return isinstance(exc, httpx.HTTPStatusError) and (
+        exc.response.status_code == 429 or exc.response.status_code >= 500
     )
 
 
@@ -96,10 +95,12 @@ def _slim_recording(recording: MbRecording) -> MbRecording:
     credits: list[dict[str, Any]] = []
     for credit in recording.get("artist-credit", []):
         artist = credit.get("artist") or {}
-        credits.append({
-            "name": credit.get("name"),
-            "artist": {k: artist.get(k) for k in ("id", "name", "sort-name") if k in artist},
-        })
+        credits.append(
+            {
+                "name": credit.get("name"),
+                "artist": {k: artist.get(k) for k in ("id", "name", "sort-name") if k in artist},
+            }
+        )
     slim["artist-credit"] = credits
     slim["releases"] = [
         {"id": release["id"]} for release in recording.get("releases", []) if release.get("id")
@@ -183,8 +184,10 @@ class MusicBrainzApiClient:
         event (`mb_cache_set`) without copy-pasting the construction block.
         """
         entry = self._cache_entry(
-            cache_key=cache_key, entity_type=entity_type,
-            entity_mbid=entity_mbid, response_data=response_data,
+            cache_key=cache_key,
+            entity_type=entity_type,
+            entity_mbid=entity_mbid,
+            response_data=response_data,
         )
         self._cache.set(entry)
         logger.debug(
@@ -267,9 +270,7 @@ class MusicBrainzApiClient:
         logger.info("mb_api_search", name=name, results=len(artists))
         return artists
 
-    def search_recording(
-        self, artist_mbid: str, title: str, limit: int = 10
-    ) -> list[MbRecording]:
+    def search_recording(self, artist_mbid: str, title: str, limit: int = 10) -> list[MbRecording]:
         """Search MusicBrainz for recordings by artist MBID and title.
 
         Results are cached in the local MusicBrainz cache as a transparent
@@ -283,17 +284,14 @@ class MusicBrainzApiClient:
         if cached_entry is not None:
             self.cache_hits += 1
             logger.debug("mb_cache_hit", cache_key=cache_key)
-            return cast(
-                list[MbRecording], cached_entry.response_data.get("recordings", [])
-            )
+            return cast(list[MbRecording], cached_entry.response_data.get("recordings", []))
 
         self.live_fetches += 1
         response = self._fetch(
             f"{_MUSICBRAINZ_API}/recording/",
             {
                 "query": (
-                    f"arid:{_lucene_escape(artist_mbid)} "
-                    f'AND recording:"{_lucene_escape(title)}"'
+                    f'arid:{_lucene_escape(artist_mbid)} AND recording:"{_lucene_escape(title)}"'
                 ),
                 "fmt": "json",
                 "limit": str(limit),
@@ -350,7 +348,7 @@ class MusicBrainzApiClient:
             found[mbid] = cast(MbRecording, entry.response_data)
 
         for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
-            batch = misses[start:start + _SEARCH_BATCH_SIZE]
+            batch = misses[start : start + _SEARCH_BATCH_SIZE]
             self.live_fetches += 1
             response = self._fetch(
                 f"{_MUSICBRAINZ_API}/recording/",
@@ -369,17 +367,19 @@ class MusicBrainzApiClient:
                     found[rec_id] = _slim_recording(recording)
             # One write per batch: the hits, plus a negative entry for every
             # MBID the index did not know so it is not asked again.
-            self._cache.set_many([
-                self._cache_entry(
-                    cache_key=f"recording-by-mbid:{mbid}",
-                    entity_type="recording-search",
-                    entity_mbid=mbid,
-                    response_data=(
-                        dict(found[mbid]) if mbid in found else {_NOT_IN_INDEX: True}
-                    ),
-                )
-                for mbid in batch
-            ])
+            self._cache.set_many(
+                [
+                    self._cache_entry(
+                        cache_key=f"recording-by-mbid:{mbid}",
+                        entity_type="recording-search",
+                        entity_mbid=mbid,
+                        response_data=(
+                            dict(found[mbid]) if mbid in found else {_NOT_IN_INDEX: True}
+                        ),
+                    )
+                    for mbid in batch
+                ]
+            )
             logger.info(
                 "mb_api_search_recordings_by_mbids",
                 asked=len(batch),

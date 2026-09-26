@@ -50,4 +50,3 @@ class FakeSystemLogRepository(SystemLogRepository):
         if trace_id is not None:
             results = [r for r in results if r.trace_id == trace_id]
         return len(results)
-

@@ -87,11 +87,13 @@ class TestWellTaggedMp3:
 
     def test_release_type_album(self) -> None:
         from backend.domain.enums import ReleaseType
+
         lf = extract_tags(_require(WELL_TAGGED))
         assert lf.audio.release_type == ReleaseType.ALBUM
 
     def test_release_status_official(self) -> None:
         from backend.domain.enums import ReleaseStatus
+
         lf = extract_tags(_require(WELL_TAGGED))
         assert lf.audio.release_status == ReleaseStatus.OFFICIAL
 
@@ -255,6 +257,7 @@ class TestScanDirectory:
         # Create a small audio dir with one valid WAV and one .txt file
         wav_src = _require(NO_TAGS_WAV)
         import shutil
+
         shutil.copy(wav_src, tmp_path / "valid.wav")
         (tmp_path / "readme.txt").write_text("not audio")
         (tmp_path / "image.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 20)
@@ -277,6 +280,7 @@ class TestScanDirectory:
         if not AUDIO_DIR.exists():
             pytest.skip("Audio fixtures directory not found")
         from uuid import UUID
+
         files, quarantine = scan_directory(AUDIO_DIR)
         all_ids = [lf.id for lf in files] + [q.id for q in quarantine]
         for uid in all_ids:
@@ -303,9 +307,7 @@ class TestScanDirectory:
         if not AUDIO_DIR.exists():
             pytest.skip("Audio fixtures directory not found")
         received: list[LibraryQuarantine] = []
-        _, quarantine = scan_directory(
-            AUDIO_DIR, on_quarantine=lambda q: received.append(q)
-        )
+        _, quarantine = scan_directory(AUDIO_DIR, on_quarantine=lambda q: received.append(q))
         assert len(received) == len(quarantine)
 
 
@@ -455,7 +457,9 @@ class TestReadTags:
         assert tags_only.file_hash is None
         assert tags_only.audio == full.audio
         assert (tags_only.format, tags_only.file_size, tags_only.file_mtime_ns) == (
-            full.format, full.file_size, full.file_mtime_ns,
+            full.format,
+            full.file_size,
+            full.file_mtime_ns,
         )
 
     def test_scan_directory_without_hashing_still_quarantines_bad_files(self) -> None:

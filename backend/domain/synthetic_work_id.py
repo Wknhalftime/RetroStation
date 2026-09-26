@@ -24,4 +24,4 @@ def decode(work_id: str) -> tuple[str, str] | None:
     colon_idx = raw.find(":")
     if colon_idx == -1:
         return None
-    return raw[:colon_idx], raw[colon_idx + 1:]
+    return raw[:colon_idx], raw[colon_idx + 1 :]

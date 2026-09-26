@@ -11,23 +11,17 @@ from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheReposito
 from backend.services.mb_client import MusicBrainzApiClient
 
 
-def test_mb_search_artist_cache_hit(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mb_search_artist_cache_hit(migrated_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Cache-hit path: second call returns cached data without an HTTP round-trip."""
     canned = {"artists": [{"id": "some-mbid", "name": "Metallica", "score": 100}]}
     call_count = 0
 
-    def _fake_fetch(
-        self: MusicBrainzApiClient, url: str, params: dict[str, str]
-    ) -> httpx.Response:
+    def _fake_fetch(self: MusicBrainzApiClient, url: str, params: dict[str, str]) -> httpx.Response:
         nonlocal call_count
         call_count += 1
         return httpx.Response(200, json=canned)
 
-    monkeypatch.setattr(
-        "backend.services.mb_client.MusicBrainzApiClient._fetch", _fake_fetch
-    )
+    monkeypatch.setattr("backend.services.mb_client.MusicBrainzApiClient._fetch", _fake_fetch)
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         cache_repo = PgMusicBrainzCacheRepository(conn)
@@ -75,8 +69,13 @@ def test_cache_get_many_returns_only_unexpired_hits(migrated_db: str) -> None:
 
     def entry(key: str, expires_in: timedelta) -> MusicBrainzCache:
         return MusicBrainzCache(
-            id=uuid4(), cache_key=key, entity_type="recording-search", entity_mbid=key,
-            response_data={"id": key}, cached_at=now, expires_at=now + expires_in,
+            id=uuid4(),
+            cache_key=key,
+            entity_type="recording-search",
+            entity_mbid=key,
+            response_data={"id": key},
+            cached_at=now,
+            expires_at=now + expires_in,
         )
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -102,8 +101,13 @@ def test_cache_set_many_inserts_and_overwrites(migrated_db: str) -> None:
 
     def entry(key: str, data: dict[str, object]) -> MusicBrainzCache:
         return MusicBrainzCache(
-            id=uuid4(), cache_key=key, entity_type="recording-search", entity_mbid=key,
-            response_data=data, cached_at=now, expires_at=now + timedelta(days=1),
+            id=uuid4(),
+            cache_key=key,
+            entity_type="recording-search",
+            entity_mbid=key,
+            response_data=data,
+            cached_at=now,
+            expires_at=now + timedelta(days=1),
         )
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:

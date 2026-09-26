@@ -357,15 +357,17 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     (re.compile(r"in concert"), VersionType.LIVE),
     (re.compile(r"cover version"), VersionType.COVER),
     (re.compile(r"a\s+cappella"), VersionType.A_CAPPELLA),
-    (re.compile(r"deluxe edition|special edition|limited edition|anniversary edition"),
-     VersionType.EDITION),
+    (
+        re.compile(r"deluxe edition|special edition|limited edition|anniversary edition"),
+        VersionType.EDITION,
+    ),
     (re.compile(r"alt version|alternate version|alternative version"), VersionType.ALTERNATE),
     # Single keywords
     (re.compile(r"\blive\b|\bconcert\b"), VersionType.LIVE),
     (re.compile(r"\bacoustic\b|unplugged"), VersionType.ACOUSTIC),
     (re.compile(r"\b(?:remix|remixed)\b|\bdub\b|\bmix\b"), VersionType.REMIX),
     (re.compile(r"remaster"), VersionType.REMASTER),
-    (re.compile(r"edition"), VersionType.EDITION),   # after "deluxe edition" etc.
+    (re.compile(r"edition"), VersionType.EDITION),  # after "deluxe edition" etc.
     (re.compile(r"\bedit\b"), VersionType.RADIO_EDIT),
     (re.compile(r"\bdemo\b"), VersionType.DEMO),
     (re.compile(r"extended"), VersionType.EXTENDED),
@@ -385,21 +387,21 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     # Broad catch-alls for common bracketed version indicators not covered above.
     # Order here matters: placed AFTER every specific rule so existing
     # classifications (ORIGINAL, LIVE, ACOUSTIC, …) still win.
-    (re.compile(r"\bversion\b"),  VersionType.REMIX),
-    (re.compile(r"\bamended\b"),  VersionType.REMIX),
-    (re.compile(r"\bbootleg\b"),  VersionType.REMIX),
-    (re.compile(r"\bvideo\b"),    VersionType.REMIX),
-    (re.compile(r"\bstudio\b"),   VersionType.REMIX),
-    (re.compile(r"\bintro\b"),    VersionType.REMIX),
-    (re.compile(r"\bcut\b"),      VersionType.REMIX),
-    (re.compile(r"\bfade\b"),     VersionType.REMIX),
+    (re.compile(r"\bversion\b"), VersionType.REMIX),
+    (re.compile(r"\bamended\b"), VersionType.REMIX),
+    (re.compile(r"\bbootleg\b"), VersionType.REMIX),
+    (re.compile(r"\bvideo\b"), VersionType.REMIX),
+    (re.compile(r"\bstudio\b"), VersionType.REMIX),
+    (re.compile(r"\bintro\b"), VersionType.REMIX),
+    (re.compile(r"\bcut\b"), VersionType.REMIX),
+    (re.compile(r"\bfade\b"), VersionType.REMIX),
     # Spanish-language last-resort catch-alls. Placed last so English / structural
     # rules above get first shot. `versión` keeps its accent because
     # classify_version_descriptor lowercases but does NOT strip accents, so
     # `\bversion\b` above does not match the accented form.
-    (re.compile(r"\bversi[oó]n\b"),            VersionType.REMIX),
+    (re.compile(r"\bversi[oó]n\b"), VersionType.REMIX),
     (re.compile(r"\ben\s+(?:vivo|directo)\b"), VersionType.REMIX),
-    (re.compile(r"\bac[uú]stic[oa]\b"),        VersionType.REMIX),
+    (re.compile(r"\bac[uú]stic[oa]\b"), VersionType.REMIX),
 ]
 
 

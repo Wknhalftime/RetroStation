@@ -1,4 +1,5 @@
 """Unit tests for FakeSystemLogRepository."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ def _make_log(
 # create / list
 # ---------------------------------------------------------------------------
 
+
 def test_create_and_list_returns_entry() -> None:
     repo = FakeSystemLogRepository()
     log = _make_log()
@@ -39,9 +41,9 @@ def test_create_and_list_returns_entry() -> None:
 
 def test_list_ordered_by_created_at_descending() -> None:
     repo = FakeSystemLogRepository()
-    repo.create(_make_log(message="first",  offset_seconds=0))
+    repo.create(_make_log(message="first", offset_seconds=0))
     repo.create(_make_log(message="second", offset_seconds=10))
-    repo.create(_make_log(message="third",  offset_seconds=20))
+    repo.create(_make_log(message="third", offset_seconds=20))
     results = repo.list()
     assert [r.message for r in results] == ["third", "second", "first"]
 
@@ -49,6 +51,7 @@ def test_list_ordered_by_created_at_descending() -> None:
 # ---------------------------------------------------------------------------
 # Filters
 # ---------------------------------------------------------------------------
+
 
 def test_filter_by_level() -> None:
     repo = FakeSystemLogRepository()
@@ -79,7 +82,7 @@ def test_filter_by_trace_id() -> None:
 def test_filter_combined() -> None:
     repo = FakeSystemLogRepository()
     repo.create(_make_log(category=LogCategory.SCAN, level=LogLevel.ERROR, trace_id="t1"))
-    repo.create(_make_log(category=LogCategory.SCAN, level=LogLevel.INFO,  trace_id="t1"))
+    repo.create(_make_log(category=LogCategory.SCAN, level=LogLevel.INFO, trace_id="t1"))
     repo.create(_make_log(category=LogCategory.ENRICHMENT, level=LogLevel.ERROR, trace_id="t1"))
     results = repo.list(category=LogCategory.SCAN, level=LogLevel.ERROR, trace_id="t1")
     assert len(results) == 1
@@ -88,6 +91,7 @@ def test_filter_combined() -> None:
 # ---------------------------------------------------------------------------
 # Pagination
 # ---------------------------------------------------------------------------
+
 
 def test_pagination_limit() -> None:
     repo = FakeSystemLogRepository()
@@ -111,6 +115,7 @@ def test_pagination_offset() -> None:
 # count
 # ---------------------------------------------------------------------------
 
+
 def test_count_all() -> None:
     repo = FakeSystemLogRepository()
     for _ in range(7):
@@ -129,4 +134,3 @@ def test_count_filtered() -> None:
 def test_count_empty() -> None:
     repo = FakeSystemLogRepository()
     assert repo.count() == 0
-

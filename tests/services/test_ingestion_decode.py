@@ -8,6 +8,7 @@ The ladder must:
 - Raise CsvDecodeError (not a raw UnicodeDecodeError) on anything it cannot
   confidently decode, instead of silently mojibake-ing the content.
 """
+
 from __future__ import annotations
 
 import pytest

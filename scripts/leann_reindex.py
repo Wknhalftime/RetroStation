@@ -56,6 +56,7 @@ def _should_skip_debounce() -> bool:
     try:
         last_run = float(TIMESTAMP_FILE.read_text().strip())
         import time
+
         elapsed = time.time() - last_run
         if elapsed < DEBOUNCE_SECONDS:
             print(
@@ -72,8 +73,10 @@ def _record_timestamp() -> None:
     """Record the current time as last successful reindex."""
     import contextlib
     import time
+
     with contextlib.suppress(OSError):
         TIMESTAMP_FILE.write_text(str(time.time()))
+
 
 # ── Configuration ──────────────────────────────────────────────
 LEANN_ROOT = Path("D:/PythonStuff/leann")
@@ -294,9 +297,7 @@ def main() -> None:
     _acquire_lock()
     try:
         can_incremental = (
-            INDEX_PATH.exists()
-            and index_is_non_compact()
-            and index_uses_correct_model()
+            INDEX_PATH.exists() and index_is_non_compact() and index_uses_correct_model()
         )
 
         if can_incremental:

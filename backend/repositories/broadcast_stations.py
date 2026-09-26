@@ -22,4 +22,3 @@ class BroadcastStationRepository(ABC):
 
     @abstractmethod
     def delete(self, station_id: UUID) -> None: ...
-

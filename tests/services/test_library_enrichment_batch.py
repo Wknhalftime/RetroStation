@@ -4,6 +4,7 @@ The batch links every file whose recording came back and lists the file's
 release; everything else is left pending, untouched, for the per-release
 path to handle exactly as it does today.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -35,10 +36,12 @@ def _search_hit(rec_mbid: str, title: str, *releases: str) -> dict[str, Any]:
         "id": rec_mbid,
         "title": title,
         "length": 180000,
-        "artist-credit": [{
-            "name": "Track Artist",
-            "artist": {"id": _ARTIST, "name": "Track Artist", "sort-name": "Artist, Track"},
-        }],
+        "artist-credit": [
+            {
+                "name": "Track Artist",
+                "artist": {"id": _ARTIST, "name": "Track Artist", "sort-name": "Artist, Track"},
+            }
+        ],
         "releases": [{"id": r, "title": "Some Release"} for r in releases],
     }
 
@@ -77,9 +80,13 @@ class _Repos:
 
 
 def test_links_files_whose_recording_lists_their_release() -> None:
-    repos = _Repos(FakeMbClient(recordings={
-        _REC_A: _search_hit(_REC_A, "Song A (Live)", _RELEASE, _OTHER_RELEASE),
-    }))
+    repos = _Repos(
+        FakeMbClient(
+            recordings={
+                _REC_A: _search_hit(_REC_A, "Song A (Live)", _RELEASE, _OTHER_RELEASE),
+            }
+        )
+    )
     lf = _pending(_REC_A)
 
     outcome = repos.run([lf])
@@ -116,9 +123,13 @@ def test_missing_recording_is_left_pending_for_the_fallback() -> None:
 
 
 def test_recording_not_on_the_files_release_is_left_pending() -> None:
-    repos = _Repos(FakeMbClient(recordings={
-        _REC_A: _search_hit(_REC_A, "Song A", _OTHER_RELEASE),
-    }))
+    repos = _Repos(
+        FakeMbClient(
+            recordings={
+                _REC_A: _search_hit(_REC_A, "Song A", _OTHER_RELEASE),
+            }
+        )
+    )
     lf = _pending(_REC_A)
 
     outcome = repos.run([lf])
@@ -143,10 +154,12 @@ def test_files_without_a_recording_mbid_are_not_searched() -> None:
 
 
 def test_one_search_covers_every_distinct_recording_once() -> None:
-    client = FakeMbClient(recordings={
-        _REC_A: _search_hit(_REC_A, "Song A", _RELEASE),
-        _REC_B: _search_hit(_REC_B, "Song B", _RELEASE),
-    })
+    client = FakeMbClient(
+        recordings={
+            _REC_A: _search_hit(_REC_A, "Song A", _RELEASE),
+            _REC_B: _search_hit(_REC_B, "Song B", _RELEASE),
+        }
+    )
     repos = _Repos(client)
 
     outcome = repos.run([_pending(_REC_A), _pending(_REC_A), _pending(_REC_B)])

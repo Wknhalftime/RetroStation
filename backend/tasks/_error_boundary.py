@@ -16,6 +16,7 @@ Reference pattern: `backend.tasks.mb_enrichment_tasks.mb_enrichment_task`.
 The helper extracts the outer try/except into one place so every pipeline
 task shares the same reporting shape.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -116,15 +117,17 @@ def _report_failure(
             # are logged so the UI's "stuck in RUNNING" state is diagnosable
             # rather than silent.
             try:
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=task_type,
-                    status=TaskStatus.FAILED,
-                    progress_data={"error": error_message},
-                    started_at=started_at,
-                    updated_at=now,
-                    completed_at=now,
-                ))
+                progress_repo.upsert(
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=task_type,
+                        status=TaskStatus.FAILED,
+                        progress_data={"error": error_message},
+                        started_at=started_at,
+                        updated_at=now,
+                        completed_at=now,
+                    )
+                )
             except Exception as progress_exc:  # noqa: BLE001
                 logger.warning(
                     "task_failure_progress_write_failed",
@@ -135,13 +138,15 @@ def _report_failure(
                 )
 
             try:
-                sys_log_repo.create(SystemLog(
-                    category=log_category,
-                    level=LogLevel.ERROR,
-                    message=f"{task_type.value}_failed",
-                    trace_id=task_id,
-                    details={"error": error_message},
-                ))
+                sys_log_repo.create(
+                    SystemLog(
+                        category=log_category,
+                        level=LogLevel.ERROR,
+                        message=f"{task_type.value}_failed",
+                        trace_id=task_id,
+                        details={"error": error_message},
+                    )
+                )
             except Exception as syslog_exc:  # noqa: BLE001
                 logger.warning(
                     "task_failure_systemlog_write_failed",

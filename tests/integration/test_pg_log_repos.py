@@ -73,8 +73,10 @@ def test_track_identity_upsert_and_conflict(migrated_db: str) -> None:
             BroadcastArtist(id=uuid4(), original_name="PEARL JAM", normalized_name="pearl jam")
         )
         i1 = BroadcastTrackIdentity(
-            id=uuid4(), broadcast_artist_id=artist.id,
-            original_title="Alive", normalized_title="alive",
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Alive",
+            normalized_title="alive",
             normalized_signature="abc123def456abc123def456abc123de",
         )
         result = identity_repo.upsert(i1)
@@ -82,8 +84,10 @@ def test_track_identity_upsert_and_conflict(migrated_db: str) -> None:
 
         # Conflict returns existing
         i2 = BroadcastTrackIdentity(
-            id=uuid4(), broadcast_artist_id=artist.id,
-            original_title="Alive (Live)", normalized_title="alive",
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Alive (Live)",
+            normalized_title="alive",
             normalized_signature="abc123def456abc123def456abc123de",
         )
         result2 = identity_repo.upsert(i2)
@@ -97,15 +101,22 @@ def test_track_identity_bulk_reject_by_artist(migrated_db: str) -> None:
         identity_repo = PgBroadcastTrackIdentityRepository(conn)
 
         artist = artist_repo.upsert(
-            BroadcastArtist(id=uuid4(), original_name="UNKNOWN ARTIST",
-                      normalized_name="unknown artist test reject")
+            BroadcastArtist(
+                id=uuid4(),
+                original_name="UNKNOWN ARTIST",
+                normalized_name="unknown artist test reject",
+            )
         )
         for i in range(3):
-            identity_repo.upsert(BroadcastTrackIdentity(
-                id=uuid4(), broadcast_artist_id=artist.id,
-                original_title=f"Song {i}", normalized_title=f"song {i}",
-                normalized_signature=f"reject_test_{i}_{'0' * 19}",
-            ))
+            identity_repo.upsert(
+                BroadcastTrackIdentity(
+                    id=uuid4(),
+                    broadcast_artist_id=artist.id,
+                    original_title=f"Song {i}",
+                    normalized_title=f"song {i}",
+                    normalized_signature=f"reject_test_{i}_{'0' * 19}",
+                )
+            )
 
         identity_repo.bulk_reject_by_artist(artist.id)
         identities = identity_repo.get_for_artist(artist.id)
@@ -121,38 +132,59 @@ def test_play_event_create_returns_persisted_row_on_conflict(migrated_db: str) -
     that trusts the returned model gets a uuid the DB never stored.
     """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        station = PgBroadcastStationRepository(conn).create(BroadcastStation(
-            id=uuid4(), call_letters="KAZR-CONFLICT", name="KAZR Conflict Test",
-        ))
-        playlist = PgBroadcastPlaylistRepository(conn).create(BroadcastPlaylist(
-            id=uuid4(), name="conflict.csv",
-            content_hash="conflict_test_" + "0" * 50,
-            station_id=station.id,
-        ))
-        artist = PgBroadcastArtistRepository(conn).upsert(BroadcastArtist(
-            id=uuid4(),
-            original_name="CONFLICT ARTIST",
-            normalized_name="conflict artist test",
-        ))
-        identity = PgBroadcastTrackIdentityRepository(conn).upsert(BroadcastTrackIdentity(
-            id=uuid4(), broadcast_artist_id=artist.id,
-            original_title="Conflict Song", normalized_title="conflict song",
-            normalized_signature="conflict_sig_" + "0" * 19,
-        ))
+        station = PgBroadcastStationRepository(conn).create(
+            BroadcastStation(
+                id=uuid4(),
+                call_letters="KAZR-CONFLICT",
+                name="KAZR Conflict Test",
+            )
+        )
+        playlist = PgBroadcastPlaylistRepository(conn).create(
+            BroadcastPlaylist(
+                id=uuid4(),
+                name="conflict.csv",
+                content_hash="conflict_test_" + "0" * 50,
+                station_id=station.id,
+            )
+        )
+        artist = PgBroadcastArtistRepository(conn).upsert(
+            BroadcastArtist(
+                id=uuid4(),
+                original_name="CONFLICT ARTIST",
+                normalized_name="conflict artist test",
+            )
+        )
+        identity = PgBroadcastTrackIdentityRepository(conn).upsert(
+            BroadcastTrackIdentity(
+                id=uuid4(),
+                broadcast_artist_id=artist.id,
+                original_title="Conflict Song",
+                normalized_title="conflict song",
+                normalized_signature="conflict_sig_" + "0" * 19,
+            )
+        )
         played_at = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
         repo = PgBroadcastPlayEventRepository(conn)
 
-        first = repo.create(BroadcastPlayEvent(
-            id=uuid4(), identity_id=identity.id, playlist_id=playlist.id,
-            played_at=played_at,
-        ))
+        first = repo.create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=played_at,
+            )
+        )
 
         duplicate_candidate_id = uuid4()
         assert duplicate_candidate_id != first.id
-        second = repo.create(BroadcastPlayEvent(
-            id=duplicate_candidate_id, identity_id=identity.id,
-            playlist_id=playlist.id, played_at=played_at,
-        ))
+        second = repo.create(
+            BroadcastPlayEvent(
+                id=duplicate_candidate_id,
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=played_at,
+            )
+        )
 
         # Contract: returned row reflects what is persisted, not the caller's
         # losing candidate.
@@ -230,13 +262,15 @@ def test_track_identity_update_match_status_persists_reason_columns(
         artist = artist_repo.upsert(
             BroadcastArtist(id=uuid4(), original_name="BOWIE", normalized_name="bowie")
         )
-        identity = identity_repo.upsert(BroadcastTrackIdentity(
-            id=uuid4(),
-            broadcast_artist_id=artist.id,
-            original_title="Heroes",
-            normalized_title="heroes",
-            normalized_signature="bowie00heroes00bowie00heroes0000",
-        ))
+        identity = identity_repo.upsert(
+            BroadcastTrackIdentity(
+                id=uuid4(),
+                broadcast_artist_id=artist.id,
+                original_title="Heroes",
+                normalized_title="heroes",
+                normalized_signature="bowie00heroes00bowie00heroes0000",
+            )
+        )
         identity_repo.update_match_status(
             identity.id,
             MatchStatus.NEEDS_REVIEW,
@@ -262,17 +296,17 @@ def test_track_identity_update_match_status_clears_reason_when_not_passed(
         artist_repo = PgBroadcastArtistRepository(conn)
         identity_repo = PgBroadcastTrackIdentityRepository(conn)
         artist = artist_repo.upsert(
-            BroadcastArtist(
-                id=uuid4(), original_name="KATE BUSH", normalized_name="kate bush"
+            BroadcastArtist(id=uuid4(), original_name="KATE BUSH", normalized_name="kate bush")
+        )
+        identity = identity_repo.upsert(
+            BroadcastTrackIdentity(
+                id=uuid4(),
+                broadcast_artist_id=artist.id,
+                original_title="Running Up That Hill",
+                normalized_title="running up that hill",
+                normalized_signature="katebush0running0katebush0runnin",
             )
         )
-        identity = identity_repo.upsert(BroadcastTrackIdentity(
-            id=uuid4(),
-            broadcast_artist_id=artist.id,
-            original_title="Running Up That Hill",
-            normalized_title="running up that hill",
-            normalized_signature="katebush0running0katebush0runnin",
-        ))
         identity_repo.update_match_status(
             identity.id,
             MatchStatus.NEEDS_REVIEW,
@@ -303,9 +337,7 @@ def test_broadcast_artist_get_by_ids(migrated_db: str) -> None:
             BroadcastArtist(id=uuid4(), original_name="PRINCE", normalized_name="prince_batch")
         )
         a2 = repo.upsert(
-            BroadcastArtist(
-                id=uuid4(), original_name="MADONNA", normalized_name="madonna_batch"
-            )
+            BroadcastArtist(id=uuid4(), original_name="MADONNA", normalized_name="madonna_batch")
         )
         _ = repo.upsert(
             BroadcastArtist(id=uuid4(), original_name="BOWIE", normalized_name="bowie_batch")

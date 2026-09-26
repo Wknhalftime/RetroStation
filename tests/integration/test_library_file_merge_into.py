@@ -4,6 +4,7 @@ Every table with a foreign key to ``library_files`` must be re-pointed
 before the stale row is deleted, and a match the keeper already has for
 the same broadcast identity must not be doubled (UNIQUE identity/file).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,25 +24,35 @@ pytestmark = pytest.mark.integration
 
 
 def _file(repos: RepositoryFactory, path: str, work_id: str) -> LibraryFile:
-    return repos.library_files.upsert(LibraryFile(
-        id=uuid4(),
-        file_path=path,
-        file_hash=str(uuid4()),
-        format="flac",
-        work_id=work_id,
-        audio=AudioMetadata(artist_name="Seal", track_title="Kiss from a Rose"),
-    ))
+    return repos.library_files.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path=path,
+            file_hash=str(uuid4()),
+            format="flac",
+            work_id=work_id,
+            audio=AudioMetadata(artist_name="Seal", track_title="Kiss from a Rose"),
+        )
+    )
 
 
 def _identity(repos: RepositoryFactory) -> UUID:
-    artist = repos.broadcast_artists.upsert(BroadcastArtist(
-        id=uuid4(), original_name="SEAL", normalized_name=str(uuid4()),
-    ))
-    identity = repos.broadcast_identities.upsert(BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist.id,
-        original_title="Kiss From A Rose", normalized_title="kiss from a rose",
-        normalized_signature=str(uuid4()),
-    ))
+    artist = repos.broadcast_artists.upsert(
+        BroadcastArtist(
+            id=uuid4(),
+            original_name="SEAL",
+            normalized_name=str(uuid4()),
+        )
+    )
+    identity = repos.broadcast_identities.upsert(
+        BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Kiss From A Rose",
+            normalized_title="kiss from a rose",
+            normalized_signature=str(uuid4()),
+        )
+    )
     return identity.id
 
 
@@ -61,7 +72,8 @@ def _matched_identities(conn: psycopg.Connection[DictRow], file_id: UUID) -> lis
 
 
 def test_merge_into_moves_references_and_deletes_the_stale_row(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
@@ -75,10 +87,14 @@ def test_merge_into_moves_references_and_deletes_the_stale_row(
         _match(conn, shared, stale.id)
         _match(conn, shared, keeper.id)
         _match(conn, moving, stale.id)
-        repos.song_masters.upsert(SongMaster(
-            id=uuid4(), work_id=work_id, preferred_file_id=stale.id,
-            selection_method=SelectionMethod.AUTO,
-        ))
+        repos.song_masters.upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=work_id,
+                preferred_file_id=stale.id,
+                selection_method=SelectionMethod.AUTO,
+            )
+        )
         conn.execute(
             """INSERT INTO format_overrides (work_id, format_name, preferred_file_id)
                VALUES (%s, 'hot_ac', %s)""",
@@ -93,14 +109,16 @@ def test_merge_into_moves_references_and_deletes_the_stale_row(
         assert master is not None
         assert master.preferred_file_id == keeper.id
         override = conn.execute(
-            "SELECT preferred_file_id FROM format_overrides WHERE work_id = %s", (work_id,),
+            "SELECT preferred_file_id FROM format_overrides WHERE work_id = %s",
+            (work_id,),
         ).fetchone()
         assert override is not None
         assert override["preferred_file_id"] == keeper.id
 
 
 def test_case_duplicate_groups_hold_only_paths_equal_ignoring_case(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)

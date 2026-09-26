@@ -27,8 +27,7 @@ class FakeWorkRepository(WorkRepository):
 
     def list_needing_enhancement(self) -> list[Work]:
         return [
-            w for w in self._data.values()
-            if w.needs_enhancement and w.enhancement_error is None
+            w for w in self._data.values() if w.needs_enhancement and w.enhancement_error is None
         ]
 
     def mark_enhanced(self, mbid: str) -> None:
@@ -76,7 +75,9 @@ class FakeWorkRepository(WorkRepository):
         return True
 
     def get_candidates_by_normalized_artist(
-        self, normalized_artist_name: str, limit: int = 100,
+        self,
+        normalized_artist_name: str,
+        limit: int = 100,
     ) -> list[tuple[str, str]]:
         # Mirrors PgWorkRepository: resolve normalized artist name → artist_id
         # via the artist repo, then return every work for that artist (including
@@ -86,11 +87,7 @@ class FakeWorkRepository(WorkRepository):
         artist = self._artist_repo.get_by_normalized_name(normalized_artist_name)
         if artist is None:
             return []
-        result = [
-            (w.id, w.title)
-            for w in self._data.values()
-            if w.artist_id == artist.id
-        ]
+        result = [(w.id, w.title) for w in self._data.values() if w.artist_id == artist.id]
         result.sort(key=lambda x: x[1])
         return result[:limit]
 

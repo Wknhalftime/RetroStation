@@ -57,17 +57,13 @@ async def get_all_settings(conn: DbConn, _token: Token) -> dict[str, str]:
     Returns:
         Dictionary mapping each setting key to its value.
     """
-    cur = await conn.execute(
-        "SELECT key, value FROM user_settings ORDER BY key"
-    )
+    cur = await conn.execute("SELECT key, value FROM user_settings ORDER BY key")
     rows = await cur.fetchall()
     return {row["key"]: row["value"] for row in rows}
 
 
 @router.put("/{key}", response_model=SettingEntry)
-async def put_setting(
-    key: str, body: SettingValue, conn: DbConn, _token: Token
-) -> SettingEntry:
+async def put_setting(key: str, body: SettingValue, conn: DbConn, _token: Token) -> SettingEntry:
     """Create or update a setting by key (UPSERT).
 
     Args:

@@ -106,8 +106,7 @@ def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
         file.audio.disc_number,
         file.audio.duration_ms,
         file.audio.bitrate,
-        json.dumps(file.audio.raw_metadata)
-        if file.audio.raw_metadata is not None else None,
+        json.dumps(file.audio.raw_metadata) if file.audio.raw_metadata is not None else None,
         file.audio.artist_name,
         file.audio.normalized_artist_name,
         file.audio.normalized_title,
@@ -180,9 +179,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         self._conn.execute(_UPSERT_SQL, _upsert_params(file))
 
     def get_by_id(self, file_id: UUID) -> LibraryFile | None:
-        row = self._conn.execute(
-            "SELECT * FROM library_files WHERE id = %s", (file_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM library_files WHERE id = %s", (file_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def get_by_path(self, file_path: str) -> LibraryFile | None:
@@ -207,7 +204,9 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return [self._row_to_model(r) for r in rows]
 
     def get_by_normalized_artist_name(
-        self, normalized_name: str, limit: int = 100,
+        self,
+        normalized_name: str,
+        limit: int = 100,
     ) -> list[LibraryFile]:
         # Empty input would never legitimately match; reject up-front so a
         # NULL/empty broadcast artist normalization can't poison results.
@@ -323,7 +322,9 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         )
 
     def update_work_id(
-        self, file_id: UUID, work_id: str | None,
+        self,
+        file_id: UUID,
+        work_id: str | None,
     ) -> None:
         self._conn.execute(
             "UPDATE library_files SET work_id = %s WHERE id = %s",
@@ -428,7 +429,11 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return [self._row_to_model(r) for r in rows]
 
     def set_file_hash(
-        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+        self,
+        file_id: UUID,
+        file_hash: str,
+        file_size: int,
+        file_mtime_ns: int,
     ) -> bool:
         result = self._conn.execute(
             """UPDATE library_files SET file_hash = %s

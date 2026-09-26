@@ -18,6 +18,7 @@ from tests.fakes.matches import FakeMatchRepository
 
 class StubMbClient:
     """Returns canned results for testing."""
+
     def __init__(self, results: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self._results = results or {}
         # MusicBrainzClientProtocol now declares counter attributes; keep them
@@ -35,7 +36,8 @@ def _make_pending_artist(
     playlist_id: Any,
 ) -> BroadcastArtist:
     artist = BroadcastArtist(
-        id=uuid4(), original_name=name,
+        id=uuid4(),
+        original_name=name,
         normalized_name=normalize_artist(name),
     )
     broadcast_artist_repo.upsert(artist)
@@ -52,10 +54,14 @@ def test_tier1_exact_match() -> None:
     # Seed canonical artist — mbid must be populated so
     # NormalizationStrategy will emit an MBID as Match.target_id (consumed
     # downstream by the identity-tier MBID-graph lookup).
-    artist_repo.upsert(Artist(
-        id="mbid-metallica", name="Metallica", sort_name="Metallica",
-        mbid="mbid-metallica",
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="mbid-metallica",
+            name="Metallica",
+            sort_name="Metallica",
+            mbid="mbid-metallica",
+        )
+    )
 
     _make_pending_artist("METALLICA", broadcast_artist_repo, playlist_id)
 
@@ -84,12 +90,18 @@ def test_tier3_mb_api_auto_matched() -> None:
     name = "OZZY OSBOURNE THE METAL LEGEND"
     _make_pending_artist(name, broadcast_artist_repo, playlist_id)
 
-    mb_client = StubMbClient({
-        name: [
-            {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
-             "sort-name": "Osbourne, Ozzy", "score": 100},
-        ]
-    })
+    mb_client = StubMbClient(
+        {
+            name: [
+                {
+                    "id": "mbid-ozzy",
+                    "name": "Ozzy Osbourne",
+                    "sort-name": "Osbourne, Ozzy",
+                    "score": 100,
+                },
+            ]
+        }
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -132,10 +144,15 @@ def test_global_rule_exact_match() -> None:
     rules_repo = FakeMappingRuleRepository()
     match_repo = FakeMatchRepository()
 
-    rules_repo.create(MappingRule(
-        id=uuid4(), source_pattern="ac dc",
-        target_type=TargetType.ARTIST, target_id="mbid-acdc", priority=10,
-    ))
+    rules_repo.create(
+        MappingRule(
+            id=uuid4(),
+            source_pattern="ac dc",
+            target_type=TargetType.ARTIST,
+            target_id="mbid-acdc",
+            priority=10,
+        )
+    )
 
     _make_pending_artist("AC/DC", broadcast_artist_repo, playlist_id)
 
@@ -163,9 +180,12 @@ def test_cascade_auto_rejected() -> None:
     broadcast_artist_repo.update_match_status(artist.id, MatchStatus.AUTO_REJECTED)
 
     from backend.domain.broadcast import BroadcastTrackIdentity
+
     identity = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=artist.id,
-        original_title="Song", normalized_title="song",
+        id=uuid4(),
+        broadcast_artist_id=artist.id,
+        original_title="Song",
+        normalized_title="song",
         normalized_signature="cascade_test_sig_00000000000000",
     )
     track_identity_repo.upsert(identity)

@@ -6,6 +6,7 @@ the version stripper. When the stripper is fixed (nested parentheses,
 are re-derived. Only real changes count: a casing-only difference between
 the work title and its files is left alone.
 """
+
 from __future__ import annotations
 
 import importlib

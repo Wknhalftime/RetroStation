@@ -40,16 +40,21 @@ class PgMatchRepository(MatchRepository):
                 library_file_id, target_id, target_type, work_id, trace_id,
                 created_at)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (match.id, match.confidence_score, match.match_tier.value,
-             match.identity_id, match.artist_id, match.library_file_id,
-             match.target_id,
-             match.target_type.value if match.target_type else None,
-             work_id,
-             match.trace_id, match.created_at),
+            (
+                match.id,
+                match.confidence_score,
+                match.match_tier.value,
+                match.identity_id,
+                match.artist_id,
+                match.library_file_id,
+                match.target_id,
+                match.target_type.value if match.target_type else None,
+                work_id,
+                match.trace_id,
+                match.created_at,
+            ),
         )
-        row = self._conn.execute(
-            "SELECT * FROM matches WHERE id = %s", (match.id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM matches WHERE id = %s", (match.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
@@ -73,6 +78,4 @@ class PgMatchRepository(MatchRepository):
         )
 
     def delete_for_identity(self, identity_id: UUID) -> None:
-        self._conn.execute(
-            "DELETE FROM matches WHERE identity_id = %s", (identity_id,)
-        )
+        self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))

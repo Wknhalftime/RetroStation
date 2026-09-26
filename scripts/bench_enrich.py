@@ -109,25 +109,44 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     # the HTTP round trip. ``mb.fetch`` includes the wait; subtract
     # ``mb.rate_limit_wait`` for network time.
     client = mbc.MusicBrainzApiClient
-    patch(client, "search_recordings_by_mbids", "mb.search_recordings_by_mbids",
-          "phase.enrich_by_recording_batch")
+    patch(
+        client,
+        "search_recordings_by_mbids",
+        "mb.search_recordings_by_mbids",
+        "phase.enrich_by_recording_batch",
+    )
     patch(client, "lookup_release", "mb.lookup_release", "phase.enrich_by_release")
     patch(client, "lookup_recording", "mb.lookup_recording", "phase.enrich_by_recording")
     patch(client, "_fetch", "mb.fetch", "mb.lookup_*")
     patch(mbc, "_rate_limit", "mb.rate_limit_wait", "mb.fetch")
     patch(pg_cache.PgMusicBrainzCacheRepository, "get", "db.mb_cache.get", "mb.lookup_*")
-    patch(pg_cache.PgMusicBrainzCacheRepository, "get_many", "db.mb_cache.get_many",
-          "mb.search_recordings_by_mbids")
+    patch(
+        pg_cache.PgMusicBrainzCacheRepository,
+        "get_many",
+        "db.mb_cache.get_many",
+        "mb.search_recordings_by_mbids",
+    )
     patch(pg_cache.PgMusicBrainzCacheRepository, "set", "db.mb_cache.set", "mb.lookup_*")
-    patch(pg_cache.PgMusicBrainzCacheRepository, "set_many", "db.mb_cache.set_many",
-          "mb.search_recordings_by_mbids")
+    patch(
+        pg_cache.PgMusicBrainzCacheRepository,
+        "set_many",
+        "db.mb_cache.set_many",
+        "mb.search_recordings_by_mbids",
+    )
 
     # Database round trips inside the per-release / per-recording work.
     for cls, prefix, attrs in (
-        (pg_files.PgLibraryFileRepository, "files", (
-            "get_pending_enrichment_with_release", "get_pending_enrichment_by_release",
-            "get_pending_enrichment_by_recording", "update_recording_link", "update_work_id",
-        )),
+        (
+            pg_files.PgLibraryFileRepository,
+            "files",
+            (
+                "get_pending_enrichment_with_release",
+                "get_pending_enrichment_by_release",
+                "get_pending_enrichment_by_recording",
+                "update_recording_link",
+                "update_work_id",
+            ),
+        ),
         (pg_recordings.PgRecordingRepository, "recordings", ("upsert",)),
         (pg_works.PgWorkRepository, "works", ("upsert_from_mb",)),
         (pg_artists.PgArtistRepository, "artists", ("upsert_musicbrainz_artist",)),
@@ -144,8 +163,7 @@ def instrument(timers: Timers, phase: str) -> list[str]:
         patch(met, "_run_works_phase", "phase.mb_works")
         patch(met, "_run_recordings_phase", "phase.mb_recordings")
         patch(met, "coalesce_artist_lookups", "mb.coalesce_artists", "phase.mb_artists")
-        patch(met, "coalesce_recording_lookups", "mb.coalesce_recordings",
-              "phase.mb_recordings")
+        patch(met, "coalesce_recording_lookups", "mb.coalesce_recordings", "phase.mb_recordings")
         patch(met, "_enhance_artist", "mb.enhance_artist", "phase.mb_artists")
         patch(client, "lookup_artist", "mb.lookup_artist", "phase.mb_artists")
         patch(client, "search_artist", "mb.search_artist", "phase.mb_artists")
@@ -225,7 +243,8 @@ def _pg_bin(explicit: str | None, tool: str) -> str:
     if found:
         return found
     for pattern in (
-        "C:/Program Files/PostgreSQL/*/bin", "D:/Program Files/PostgreSQL/*/bin",
+        "C:/Program Files/PostgreSQL/*/bin",
+        "D:/Program Files/PostgreSQL/*/bin",
     ):
         for bindir in sorted(glob.glob(pattern), reverse=True):
             candidate = Path(bindir) / f"{tool}.exe"
@@ -244,14 +263,19 @@ def clone_database(source_dsn: str, admin_dsn: str, dbname: str, pg_bin: str | N
     target_dsn = _with_dbname(admin_dsn, dbname)
 
     dump = subprocess.Popen(
-        [_pg_bin(pg_bin, "pg_dump"), "--format=custom", "--no-owner", "--no-privileges",
-         f"--dbname={source_dsn}"],
+        [
+            _pg_bin(pg_bin, "pg_dump"),
+            "--format=custom",
+            "--no-owner",
+            "--no-privileges",
+            f"--dbname={source_dsn}",
+        ],
         stdout=subprocess.PIPE,
     )
     restore = subprocess.run(
-        [_pg_bin(pg_bin, "pg_restore"), "--no-owner", "--no-privileges",
-         f"--dbname={target_dsn}"],
-        stdin=dump.stdout, check=False,
+        [_pg_bin(pg_bin, "pg_restore"), "--no-owner", "--no-privileges", f"--dbname={target_dsn}"],
+        stdin=dump.stdout,
+        check=False,
     )
     if dump.stdout is not None:
         dump.stdout.close()
@@ -383,12 +407,17 @@ def cmd_prepare(args: argparse.Namespace) -> None:
             "SELECT enrichment_status, count(*) FROM library_files GROUP BY 1 ORDER BY 1"
         ).fetchall()
         cache = conn.execute("SELECT count(*) FROM mb_cache").fetchone()
-    print(json.dumps({
-        "db": args.db,
-        "cloned_in_s": round(time.perf_counter() - start, 1),
-        "library_files": {status: n for status, n in statuses},
-        "mb_cache_rows": cache[0] if cache else None,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "db": args.db,
+                "cloned_in_s": round(time.perf_counter() - start, 1),
+                "library_files": {status: n for status, n in statuses},
+                "mb_cache_rows": cache[0] if cache else None,
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -437,7 +466,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         "s_per_lookup": round(elapsed / lookups, 3) if lookups else None,
         "ms_per_file": (
             round(elapsed / workload["pending_files"] * 1000, 2)
-            if workload["pending_files"] else None
+            if workload["pending_files"]
+            else None
         ),
         "timers": timers.report(),
         "missing_patches": missing_patches,
@@ -471,9 +501,11 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 print(f"   - {row[:300]}")
             for row in sorted(rb - ra)[: args.show]:
                 print(f"   + {row[:300]}")
-    print(f"\n{a['label']} ({a['cache']}): {a['elapsed_s']}s   "
-          f"{b['label']} ({b['cache']}): {b['elapsed_s']}s   "
-          f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}")
+    print(
+        f"\n{a['label']} ({a['cache']}): {a['elapsed_s']}s   "
+        f"{b['label']} ({b['cache']}): {b['elapsed_s']}s   "
+        f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}"
+    )
     if not identical:
         raise SystemExit(1)
 
@@ -502,10 +534,14 @@ def main() -> None:
     p_run.add_argument("--no-instrument", action="store_true")
     p_run.add_argument("--no-fingerprint", action="store_true")
     cache = p_run.add_mutually_exclusive_group(required=True)
-    cache.add_argument("--cold", action="store_true",
-                       help="empty the MusicBrainz cache first (live network, rate-limited)")
-    cache.add_argument("--warm", action="store_true",
-                       help="keep the cache (no network; measures local cost only)")
+    cache.add_argument(
+        "--cold",
+        action="store_true",
+        help="empty the MusicBrainz cache first (live network, rate-limited)",
+    )
+    cache.add_argument(
+        "--warm", action="store_true", help="keep the cache (no network; measures local cost only)"
+    )
     p_run.set_defaults(func=cmd_run)
 
     p_cmp = sub.add_parser("compare")

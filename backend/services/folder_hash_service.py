@@ -7,6 +7,7 @@ Child folders are deliberately NOT folded in: the targeted scan that acts
 on a changed folder is non-recursive, so an ancestor lighting up because a
 descendant changed would send the scanner somewhere with nothing to do.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -82,7 +83,9 @@ def _walk_folder_paths(root: Path) -> tuple[dict[str, str], list[str], list[str]
             unlistable.append(canonicalize_path(str(exc.filename)))
 
     for dirpath, _dirnames, _filenames in os.walk(
-        str(root), topdown=False, onerror=_record_unlistable,
+        str(root),
+        topdown=False,
+        onerror=_record_unlistable,
     ):
         canonical = canonicalize_path(dirpath)
         all_dirs.append(canonical)
@@ -183,9 +186,7 @@ def diff_tree(
 
     is_first_run = not folder_repo.has_any()
     folder_hashes, all_dirs, unlistable = _walk_folder_paths(root)
-    existing_folders: dict[str, LibraryFolder] = {
-        f.full_path: f for f in folder_repo.get_all()
-    }
+    existing_folders: dict[str, LibraryFolder] = {f.full_path: f for f in folder_repo.get_all()}
     _sync_new_folders(all_dirs, folder_hashes, existing_folders, is_first_run, folder_repo)
 
     if is_first_run:
@@ -197,7 +198,9 @@ def diff_tree(
     in_flight_ids = in_flight_ids or set()
     vanished = _vanished_folder_hashes(str(root), folder_hashes, existing_folders, unlistable)
     changed, pending = _compute_diff(
-        {**folder_hashes, **vanished}, existing_folders, in_flight_ids,
+        {**folder_hashes, **vanished},
+        existing_folders,
+        in_flight_ids,
     )
 
     if in_flight_ids:

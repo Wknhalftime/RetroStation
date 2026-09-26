@@ -1,4 +1,5 @@
 """Library-scan behaviour for rows whose content hash a first scan deferred."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -38,8 +39,12 @@ class TestMoveDetectionWithoutHash:
     def test_file_without_hash_is_never_matched_by_hash(self, tmp_path: Path) -> None:
         repo = FakeLibraryFileRepository()
         gone = LibraryFile(
-            id=uuid4(), file_path=str(tmp_path / "old" / "a.flac"), file_hash=None,
-            format="flac", file_size=1, file_mtime_ns=1,
+            id=uuid4(),
+            file_path=str(tmp_path / "old" / "a.flac"),
+            file_hash=None,
+            format="flac",
+            file_size=1,
+            file_mtime_ns=1,
         )
         repo.upsert(gone)
         repo.mark_missing(gone.file_path)
@@ -53,9 +58,13 @@ def _fresh_extract(path: Path, file_hash: str = "new_hash") -> LibraryFile:
     """What extract_tags returns for a freshly read file: hash, stat, no links."""
     st = path.stat()
     return LibraryFile(
-        id=uuid4(), file_path=str(path), file_hash=file_hash, format="flac",
+        id=uuid4(),
+        file_path=str(path),
+        file_hash=file_hash,
+        format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
-        file_size=st.st_size, file_mtime_ns=st.st_mtime_ns,
+        file_size=st.st_size,
+        file_mtime_ns=st.st_mtime_ns,
     )
 
 
@@ -70,10 +79,14 @@ class TestReappearedUnhashed:
         repo.upsert(_indexed_unhashed(path, enrichment_status=EnrichmentStatus.ENRICHED))
         repo.mark_missing(str(path))
 
-        with patch(_HASH, side_effect=AssertionError("hashed")), \
-             patch(_EXTRACT, side_effect=AssertionError("re-read")):
+        with (
+            patch(_HASH, side_effect=AssertionError("hashed")),
+            patch(_EXTRACT, side_effect=AssertionError("re-read")),
+        ):
             result = scan_folder_incrementally(
-                folder_path=path.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=path.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         got = repo.get_by_path(str(path))
@@ -86,15 +99,20 @@ class TestReappearedUnhashed:
     def test_changed_stat_is_reread(self, tmp_path: Path) -> None:
         path = _write(tmp_path / "album" / "a.flac")
         repo, q = FakeLibraryFileRepository(), FakeLibraryQuarantineRepository()
-        repo.upsert(_indexed_unhashed(
-            path, enrichment_status=EnrichmentStatus.ENRICHED,
-            file_size=path.stat().st_size + 1,
-        ))
+        repo.upsert(
+            _indexed_unhashed(
+                path,
+                enrichment_status=EnrichmentStatus.ENRICHED,
+                file_size=path.stat().st_size + 1,
+            )
+        )
         repo.mark_missing(str(path))
 
         with patch(_EXTRACT, return_value=_fresh_extract(path)):
             result = scan_folder_incrementally(
-                folder_path=path.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=path.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         got = repo.get_by_path(str(path))
@@ -112,7 +130,9 @@ class TestPresentUnhashed:
 
         with patch(_EXTRACT, return_value=_fresh_extract(path)):
             result = scan_folder_incrementally(
-                folder_path=path.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=path.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         got = repo.get_by_path(str(path))
@@ -125,10 +145,14 @@ class TestPresentUnhashed:
         repo, q = FakeLibraryFileRepository(), FakeLibraryQuarantineRepository()
         repo.upsert(_indexed_unhashed(path))
 
-        with patch(_HASH, side_effect=AssertionError("hashed")), \
-             patch(_EXTRACT, side_effect=AssertionError("re-read")):
+        with (
+            patch(_HASH, side_effect=AssertionError("hashed")),
+            patch(_EXTRACT, side_effect=AssertionError("re-read")),
+        ):
             result = scan_folder_incrementally(
-                folder_path=path.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=path.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         assert (result.files_skipped, result.files_written) == (1, 0)
@@ -139,15 +163,21 @@ class TestMoveOfUnhashedFile:
         old = tmp_path / "unsorted" / "kiss.flac"  # never on disk: already moved away
         new = _write(tmp_path / "Prince" / "kiss.flac")
         repo, q = FakeLibraryFileRepository(), FakeLibraryQuarantineRepository()
-        repo.upsert(_indexed_unhashed(
-            new, file_path=str(old), work_id="w-kiss",
-            enrichment_status=EnrichmentStatus.ENRICHED,
-        ))
+        repo.upsert(
+            _indexed_unhashed(
+                new,
+                file_path=str(old),
+                work_id="w-kiss",
+                enrichment_status=EnrichmentStatus.ENRICHED,
+            )
+        )
         repo.mark_missing(str(old))
 
         with patch(_EXTRACT, return_value=_fresh_extract(new, "kiss_hash")):
             result = scan_folder_incrementally(
-                folder_path=new.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=new.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         got = repo.get_by_path(str(new))
@@ -160,7 +190,8 @@ class TestMoveOfUnhashedFile:
         assert len(repo.get_by_hash("kiss_hash")) == 1
 
     def test_copy_does_not_adopt_unhashed_row_whose_file_still_exists(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         old = _write(tmp_path / "unsorted" / "kiss.flac")
         new = _write(tmp_path / "Prince" / "kiss.flac")
@@ -171,7 +202,9 @@ class TestMoveOfUnhashedFile:
 
         with patch(_EXTRACT, return_value=_fresh_extract(new, "kiss_hash")):
             result = scan_folder_incrementally(
-                folder_path=new.parent, file_repo=repo, quarantine_repo=q,
+                folder_path=new.parent,
+                file_repo=repo,
+                quarantine_repo=q,
             )
 
         assert result.files_relocated == 0

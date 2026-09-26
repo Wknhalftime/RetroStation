@@ -51,9 +51,7 @@ def _file_search_fragments(
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     if search:
-        order_clause = (
-            "ORDER BY similarity(LOWER(track_title), LOWER(%s)) DESC, track_title, id"
-        )
+        order_clause = "ORDER BY similarity(LOWER(track_title), LOWER(%s)) DESC, track_title, id"
         order_params: tuple[Any, ...] = (search,)
     else:
         order_clause = "ORDER BY track_title NULLS LAST, id"

@@ -11,8 +11,11 @@ class FakeBroadcastDayRepository(BroadcastDayRepository):
 
     def get_or_create(self, station_id: UUID, broadcast_date: date) -> BroadcastDay:
         existing = next(
-            (d for d in self._data.values()
-             if d.station_id == station_id and d.broadcast_date == broadcast_date),
+            (
+                d
+                for d in self._data.values()
+                if d.station_id == station_id and d.broadcast_date == broadcast_date
+            ),
             None,
         )
         if existing:
@@ -22,9 +25,7 @@ class FakeBroadcastDayRepository(BroadcastDayRepository):
         return new
 
     def get_dates_for_station(self, station_id: UUID) -> list[date]:
-        return sorted(
-            d.broadcast_date for d in self._data.values() if d.station_id == station_id
-        )
+        return sorted(d.broadcast_date for d in self._data.values() if d.station_id == station_id)
 
     def get_by_id(self, day_id: UUID) -> BroadcastDay | None:
         return self._data.get(day_id)

@@ -102,7 +102,7 @@ def generate_m3u(
 
         file_path = resolved_file.file_path
         if local_prefix and navidrome_prefix and file_path.startswith(local_prefix):
-            file_path = navidrome_prefix + file_path[len(local_prefix):]
+            file_path = navidrome_prefix + file_path[len(local_prefix) :]
 
         duration_secs: int = (
             resolved_file.audio.duration_ms // 1000

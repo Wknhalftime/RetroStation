@@ -36,7 +36,8 @@ _SAMPLE_SIZE = 10
 
 
 def _reference_counts(
-    conn: psycopg.Connection[Any], stale_ids: list[str],
+    conn: psycopg.Connection[Any],
+    stale_ids: list[str],
 ) -> dict[str, int]:
     row = conn.execute(
         """SELECT

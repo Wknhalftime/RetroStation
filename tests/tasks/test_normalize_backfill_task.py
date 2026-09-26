@@ -6,6 +6,7 @@ Verifies:
   + ERROR SystemLog via the shared task_failure_telemetry boundary,
   and the original exception is re-raised.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -22,7 +23,8 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def settings_db_url(
-    migrated_db: str, monkeypatch: pytest.MonkeyPatch,
+    migrated_db: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[str]:
     """Point get_settings() at the migrated test DB for the duration of the
     test; clear the lru_cache on teardown so a leaked Settings instance
@@ -41,7 +43,8 @@ def settings_db_url(
 
 
 def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
-    migrated_db: str, settings_db_url: str,
+    migrated_db: str,
+    settings_db_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If the batch loop raises, task_failure_telemetry must persist a FAILED
@@ -59,9 +62,9 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
                (id, file_path, file_hash, format, file_status, raw_metadata)
                VALUES (gen_random_uuid(), %s, %s, %s, 'present', %s::jsonb)""",
             (
-                '/music/test.flac',
-                'hash-' + 'a' * 32,
-                'flac',
+                "/music/test.flac",
+                "hash-" + "a" * 32,
+                "flac",
                 '{"artist": "Prince", "title": "Purple Rain"}',
             ),
         )
@@ -74,7 +77,8 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
         raise BoomError("deliberate mid-batch failure")
 
     monkeypatch.setattr(
-        'backend.tasks.normalize_backfill_tasks.normalize_artist', _explode,
+        "backend.tasks.normalize_backfill_tasks.normalize_artist",
+        _explode,
     )
 
     with pytest.raises(BoomError):
@@ -108,7 +112,8 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
 
 
 def test_normalize_backfill_terminates_on_rows_without_artist(
-    migrated_db: str, settings_db_url: str,
+    migrated_db: str,
+    settings_db_url: str,
 ) -> None:
     """Regression: rows whose raw_metadata has no artist key stay NULL
     after UPDATE (normalized_artist_name remains NULL). Without cursor-
@@ -126,11 +131,14 @@ def test_normalize_backfill_terminates_on_rows_without_artist(
                  (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb),
                  (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb)""",
             (
-                '/music/a.flac', 'hash-a-' + 'a' * 30,
+                "/music/a.flac",
+                "hash-a-" + "a" * 30,
                 '{"artist": "Prince"}',
-                '/music/b.flac', 'hash-b-' + 'b' * 30,
-                '{}',  # no artist / title
-                '/music/c.flac', 'hash-c-' + 'c' * 30,
+                "/music/b.flac",
+                "hash-b-" + "b" * 30,
+                "{}",  # no artist / title
+                "/music/c.flac",
+                "hash-c-" + "c" * 30,
                 '{"something_else": "x"}',  # unrecognized keys
             ),
         )

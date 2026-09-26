@@ -25,4 +25,3 @@ class MusicBrainzCacheRepository(ABC):
     def delete_expired(self) -> int:
         """Delete all rows where expires_at < now(). Returns count deleted."""
         ...
-

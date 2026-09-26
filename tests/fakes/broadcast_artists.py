@@ -12,9 +12,7 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
         # playlist_id -> set of artist_ids (simulates the JOIN through play_events)
         self._playlist_artists: dict[UUID, set[UUID]] = {}
 
-    def register_playlist_artist(
-        self, playlist_id: UUID, artist_id: UUID
-    ) -> None:
+    def register_playlist_artist(self, playlist_id: UUID, artist_id: UUID) -> None:
         """Test helper: record that an artist appears in a playlist."""
         self._playlist_artists.setdefault(playlist_id, set()).add(artist_id)
 
@@ -31,37 +29,22 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
     def get_by_ids(self, ids: list[UUID]) -> list[BroadcastArtist]:
         return [self._data[i] for i in ids if i in self._data]
 
-    def get_by_normalized_name(
-        self, normalized_name: str
-    ) -> BroadcastArtist | None:
-        return next(
-            (a for a in self._data.values()
-             if a.normalized_name == normalized_name), None
-        )
+    def get_by_normalized_name(self, normalized_name: str) -> BroadcastArtist | None:
+        return next((a for a in self._data.values() if a.normalized_name == normalized_name), None)
 
-    def get_all_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastArtist]:
+    def get_all_for_playlist(self, playlist_id: UUID) -> list[BroadcastArtist]:
         ids = self._playlist_artists.get(playlist_id, set())
         return [a for a in self._data.values() if a.id in ids]
 
-    def get_pending_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastArtist]:
+    def get_pending_for_playlist(self, playlist_id: UUID) -> list[BroadcastArtist]:
         ids = self._playlist_artists.get(playlist_id, set())
         return [
-            a for a in self._data.values()
-            if a.id in ids and a.match_status == MatchStatus.PENDING
+            a for a in self._data.values() if a.id in ids and a.match_status == MatchStatus.PENDING
         ]
 
-    def get_unembedded_for_playlist(
-        self, playlist_id: UUID
-    ) -> list[BroadcastArtist]:
+    def get_unembedded_for_playlist(self, playlist_id: UUID) -> list[BroadcastArtist]:
         ids = self._playlist_artists.get(playlist_id, set())
-        return [
-            a for a in self._data.values()
-            if a.id in ids and a.embedding is None
-        ]
+        return [a for a in self._data.values() if a.id in ids and a.embedding is None]
 
     def update_match_status(
         self,

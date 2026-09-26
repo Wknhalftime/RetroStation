@@ -4,6 +4,7 @@ Before this, entries were never removed. A file quarantined while half
 copied, then fixed or deleted, stayed in the quarantine count forever,
 and the full scan added a fresh duplicate entry on every run.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -58,7 +59,8 @@ def _entries(repos: RepositoryFactory, path: Path) -> int:
 
 
 def test_visit_clears_entry_for_a_file_that_now_reads(
-    migrated_db: str, tmp_path: Path,
+    migrated_db: str,
+    tmp_path: Path,
 ) -> None:
     track = _put("corrupt.mp3", tmp_path / "album" / "a.mp3")
 
@@ -112,7 +114,9 @@ def test_visit_leaves_subfolder_entries_alone(migrated_db: str, tmp_path: Path) 
 
 
 def test_unreadable_folder_keeps_its_entries(
-    migrated_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    migrated_db: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     track = _put("corrupt.mp3", tmp_path / "album" / "a.mp3")
 

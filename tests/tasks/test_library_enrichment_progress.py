@@ -1,4 +1,5 @@
 """Progress-emission tests for library_enrichment_task."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -81,6 +82,7 @@ class TestLibraryEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         library_enrichment_task.call_local()
 
         calls = _progress_calls(mock_progress_repo)
@@ -124,6 +126,7 @@ class TestLibraryEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         library_enrichment_task.call_local()
 
         calls = _progress_calls(mock_progress_repo)
@@ -153,6 +156,7 @@ class TestLibraryEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         library_enrichment_task.call_local()
 
         statuses = [c.status for c in _progress_calls(mock_progress_repo)]
@@ -194,14 +198,14 @@ class TestLibraryEnrichmentProgress:
         mock_sys_log_cls.return_value = mock_sys_log
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         with pytest.raises(RuntimeError):
             library_enrichment_task.call_local()
 
         statuses = [c.status for c in _progress_calls(mock_progress_repo)]
         assert TaskStatus.FAILED in statuses
         failed = next(
-            c for c in _progress_calls(mock_progress_repo)
-            if c.status == TaskStatus.FAILED
+            c for c in _progress_calls(mock_progress_repo) if c.status == TaskStatus.FAILED
         )
         assert "db down" in failed.progress_data["error"]
         # Failure SystemLog includes trace_id matching the progress task_id
@@ -233,6 +237,7 @@ class TestLibraryEnrichmentProgress:
         mock_sys_log_cls.return_value = mock_sys_log
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         library_enrichment_task.call_local()
 
         first_progress = _progress_calls(mock_progress_repo)[0]
@@ -288,13 +293,15 @@ class TestLibraryEnrichmentBatchedPass:
         files_repo = mock_repo_cls.return_value.library_files
         files_repo.get_pending_enrichment_with_release.return_value = pending
         mock_batch.side_effect = lambda files, *_a, **_k: BatchEnrichment(
-            enriched=len(files), unresolved=(),
+            enriched=len(files),
+            unresolved=(),
         )
         mock_connect.side_effect = _fake_connect_factory(release_rows=[{"release_mbid": "r1"}])
         mock_progress_repo = MagicMock()
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         outcome = library_enrichment_task.call_local()
 
         chunks = [call.args[0] for call in mock_batch.call_args_list]
@@ -338,6 +345,7 @@ class TestLibraryEnrichmentBatchedPass:
         mock_progress_cls.return_value = MagicMock()
 
         from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
         outcome = library_enrichment_task.call_local()
 
         # The batch raised a transient error: it counts as one failure, its

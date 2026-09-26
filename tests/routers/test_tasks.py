@@ -46,9 +46,7 @@ def _seed_task(
 ) -> TaskProgress:
     repo = PgTaskProgressRepository(conn)
     task = repo.upsert(
-        _make_task(
-            task_id, task_type, status, progress_data, started_at, updated_at
-        )
+        _make_task(task_id, task_type, status, progress_data, started_at, updated_at)
     )
     conn.commit()
     return task
@@ -75,11 +73,15 @@ class TestActiveTasks:
         _seed_task(db_conn, "task-running-1", status=TaskStatus.RUNNING)
         _seed_task(db_conn, "task-running-2", status=TaskStatus.RUNNING)
         _seed_task(
-            db_conn, "task-completed", status=TaskStatus.COMPLETED,
+            db_conn,
+            "task-completed",
+            status=TaskStatus.COMPLETED,
             updated_at=old,
         )
         _seed_task(
-            db_conn, "task-failed", status=TaskStatus.FAILED,
+            db_conn,
+            "task-failed",
+            status=TaskStatus.FAILED,
             updated_at=old,
         )
 
@@ -98,10 +100,14 @@ class TestActiveTasks:
     ) -> None:
         """Terminal tasks updated within 30s appear in the response."""
         _seed_task(
-            db_conn, "task-recent-fail", status=TaskStatus.FAILED,
+            db_conn,
+            "task-recent-fail",
+            status=TaskStatus.FAILED,
         )
         _seed_task(
-            db_conn, "task-recent-done", status=TaskStatus.COMPLETED,
+            db_conn,
+            "task-recent-done",
+            status=TaskStatus.COMPLETED,
         )
 
         resp = client.get("/api/v1/tasks/active")
@@ -163,7 +169,9 @@ class TestActiveTasks:
 
         old = datetime.now(tz=UTC) - timedelta(minutes=5)
         _seed_task(
-            db_conn, "task-done", status=TaskStatus.COMPLETED,
+            db_conn,
+            "task-done",
+            status=TaskStatus.COMPLETED,
             updated_at=old,
         )
 
@@ -178,9 +186,7 @@ class TestActiveTasks:
 
 
 class TestRetryEnrichment:
-    def test_resets_failed_files_and_returns_count(
-        self, client: TestClient
-    ) -> None:
+    def test_resets_failed_files_and_returns_count(self, client: TestClient) -> None:
         """retry_enrichment endpoint resets failed files and returns count."""
         mock_repo = MagicMock()
         mock_repo.reset_failed_enrichments.return_value = 5

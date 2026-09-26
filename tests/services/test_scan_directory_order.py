@@ -45,8 +45,17 @@ def library(tmp_path: Path) -> Path:
 def _file_event(lf: LibraryFile) -> Event:
     a = lf.audio
     return (
-        "file", lf.file_path, lf.file_hash, lf.format, lf.file_size, lf.file_mtime_ns,
-        a.track_title, a.artist_name, a.recording_mbid, a.duration_ms, a.bitrate,
+        "file",
+        lf.file_path,
+        lf.file_hash,
+        lf.format,
+        lf.file_size,
+        lf.file_mtime_ns,
+        a.track_title,
+        a.artist_name,
+        a.recording_mbid,
+        a.duration_ms,
+        a.bitrate,
         tuple(sorted((a.raw_metadata or {}).items())),
     )
 

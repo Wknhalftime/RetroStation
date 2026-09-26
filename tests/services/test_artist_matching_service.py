@@ -13,6 +13,7 @@ and the engine's dispatch is covered in test_artist_matching_engine.py. This
 file exercises the wiring: strategy order, persistence, no-match fallback,
 and the AUTO_REJECTED cascade preserved from the legacy implementation.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -64,13 +65,15 @@ def test_match_artists_rule_hit_creates_match_with_manual_tier() -> None:
     rules_repo = FakeMappingRuleRepository()
 
     artist = _pending_artist("AC/DC", broadcast_artist_repo, playlist_id)
-    rules_repo.create(MappingRule(
-        id=uuid4(),
-        source_pattern=artist.normalized_name,
-        target_type=TargetType.ARTIST,
-        target_id="mbid-acdc",
-        priority=10,
-    ))
+    rules_repo.create(
+        MappingRule(
+            id=uuid4(),
+            source_pattern=artist.normalized_name,
+            target_type=TargetType.ARTIST,
+            target_id="mbid-acdc",
+            priority=10,
+        )
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -103,12 +106,14 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
 
     # mbid must be populated: NormalizationStrategy filters out mbid=None
     # canonicals since Match.target_id is consumed as an MBID downstream.
-    artist_repo.upsert(Artist(
-        id="mbid-metallica",
-        name="Metallica",
-        sort_name="Metallica",
-        mbid="mbid-metallica",
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="mbid-metallica",
+            name="Metallica",
+            sort_name="Metallica",
+            mbid="mbid-metallica",
+        )
+    )
     artist = _pending_artist("METALLICA", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -150,12 +155,14 @@ def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
     match_repo = FakeMatchRepository()
 
     # Local artist with no MBID (created from library file scan)
-    artist_repo.upsert(Artist(
-        id="local-uuid-van-halen",
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid=None,
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="local-uuid-van-halen",
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid=None,
+        )
+    )
     broadcast_artist = _pending_artist("VAN HALEN", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -189,19 +196,23 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
     match_repo = FakeMatchRepository()
 
     # MBID-bearing artist takes priority
-    artist_repo.upsert(Artist(
-        id="local-uuid-vh-mb",
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid="mbid-van-halen",
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="local-uuid-vh-mb",
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid="mbid-van-halen",
+        )
+    )
     # Local-only artist with same name — should be ignored
-    artist_repo.upsert(Artist(
-        id="local-uuid-vh-local",
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid=None,
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="local-uuid-vh-local",
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid=None,
+        )
+    )
     broadcast_artist = _pending_artist("VAN HALEN", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -236,12 +247,14 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
 
-    artist_repo.upsert(Artist(
-        id="mbid-metallica",
-        name="Metallica",
-        sort_name="Metallica",
-        mbid="mbid-metallica",
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="mbid-metallica",
+            name="Metallica",
+            sort_name="Metallica",
+            mbid="mbid-metallica",
+        )
+    )
     artist = _pending_artist("Metalikka", broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -303,12 +316,18 @@ def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
 
     truncated = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars, alphanum end
     artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
-    mb_client = FakeMbClient(responses={
-        truncated: [
-            {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
-             "sort-name": "Osbourne, Ozzy", "score": 100},
-        ],
-    })
+    mb_client = FakeMbClient(
+        responses={
+            truncated: [
+                {
+                    "id": "mbid-ozzy",
+                    "name": "Ozzy Osbourne",
+                    "sort-name": "Osbourne, Ozzy",
+                    "score": 100,
+                },
+            ],
+        }
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -405,30 +424,44 @@ def test_coalesce_artist_searches_one_call_per_bucket() -> None:
     pending: list[BroadcastArtist] = []
     variants = ["Metallica", "metallica", "METALLICA"]  # all -> "metallica"
     for i in range(10):
-        pending.append(BroadcastArtist(
-            id=uuid4(), original_name=variants[i % 3], normalized_name="metallica",
-        ))
+        pending.append(
+            BroadcastArtist(
+                id=uuid4(),
+                original_name=variants[i % 3],
+                normalized_name="metallica",
+            )
+        )
     for name in ["Iron Maiden", "Slayer", "Anthrax", "Megadeth"]:
         for _ in range(10):
-            pending.append(BroadcastArtist(
-                id=uuid4(), original_name=name, normalized_name=name.lower(),
-            ))
+            pending.append(
+                BroadcastArtist(
+                    id=uuid4(),
+                    original_name=name,
+                    normalized_name=name.lower(),
+                )
+            )
     assert len(pending) == 50
 
-    mb = FakeMbClient(responses={
-        "Metallica": [{"id": "m", "score": 100}],
-        "Iron Maiden": [{"id": "im", "score": 100}],
-        "Slayer": [{"id": "s", "score": 100}],
-        "Anthrax": [{"id": "a", "score": 100}],
-        "Megadeth": [{"id": "mg", "score": 100}],
-    })
+    mb = FakeMbClient(
+        responses={
+            "Metallica": [{"id": "m", "score": 100}],
+            "Iron Maiden": [{"id": "im", "score": 100}],
+            "Slayer": [{"id": "s", "score": 100}],
+            "Anthrax": [{"id": "a", "score": 100}],
+            "Megadeth": [{"id": "mg", "score": 100}],
+        }
+    )
     search_map, distinct_keys = coalesce_artist_searches(pending, mb)
 
     # Exactly 5 live calls — one per distinct lower()-bucket.
     assert len(mb.calls) == 5
     # All 5 buckets populated in both the map and the returned count.
     assert set(search_map.keys()) == {
-        "metallica", "iron maiden", "slayer", "anthrax", "megadeth",
+        "metallica",
+        "iron maiden",
+        "slayer",
+        "anthrax",
+        "megadeth",
     }
     assert distinct_keys == 5
 
@@ -443,11 +476,13 @@ def test_coalesce_artist_searches_picks_lex_first_representative() -> None:
         BroadcastArtist(id=uuid4(), original_name="Metallica", normalized_name="metallica"),
         BroadcastArtist(id=uuid4(), original_name="METALLICA", normalized_name="metallica"),
     ]
-    mb = FakeMbClient(responses={
-        "METALLICA": [{"id": "all-caps", "score": 100}],
-        "Metallica": [{"id": "mixed", "score": 100}],
-        "metallica": [{"id": "lower", "score": 100}],
-    })
+    mb = FakeMbClient(
+        responses={
+            "METALLICA": [{"id": "all-caps", "score": 100}],
+            "Metallica": [{"id": "mixed", "score": 100}],
+            "metallica": [{"id": "lower", "score": 100}],
+        }
+    )
     # Tuple return discarded deliberately — this test pins call-site behavior
     # only, not the returned map/count.
     _ = coalesce_artist_searches(pending, mb)
@@ -511,19 +546,25 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
 
     # Use 30-char names so the Phase-2 truncation gate routes them to the MB tier.
     name_a = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars
-    name_b = "SLAYER REIGN IN BLOOD ALBUM 86"   # 30 chars
+    name_b = "SLAYER REIGN IN BLOOD ALBUM 86"  # 30 chars
     a1 = _pending_artist(name_a, broadcast_artist_repo, playlist_id)
     a2 = _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
-    mb = FakeMbClient(responses={
-        name_a: [
-            {"id": "mbid-ozzy", "name": "Ozzy Osbourne",
-             "sort-name": "Osbourne, Ozzy", "score": 100},
-        ],
-        name_b: [
-            {"id": "mbid-slayer", "name": "Slayer", "sort-name": "Slayer", "score": 100},
-        ],
-    })
+    mb = FakeMbClient(
+        responses={
+            name_a: [
+                {
+                    "id": "mbid-ozzy",
+                    "name": "Ozzy Osbourne",
+                    "sort-name": "Osbourne, Ozzy",
+                    "score": 100,
+                },
+            ],
+            name_b: [
+                {"id": "mbid-slayer", "name": "Slayer", "sort-name": "Slayer", "score": 100},
+            ],
+        }
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -602,10 +643,12 @@ def test_match_artists_emits_mb_task_summary() -> None:
     _pending_artist(name_a, broadcast_artist_repo, playlist_id)
     _pending_artist(name_b, broadcast_artist_repo, playlist_id)
 
-    mb = FakeMbClient(responses={
-        name_a: [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
-        name_b: [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
-    })
+    mb = FakeMbClient(
+        responses={
+            name_a: [{"id": "o", "name": "Ozzy", "sort-name": "Ozzy", "score": 100}],
+            name_b: [{"id": "s", "name": "Slayer", "sort-name": "Slayer", "score": 100}],
+        }
+    )
     # Simulate the concrete client's counter behavior so the test asserts a
     # real delta computation.
     orig_search = mb.search_artist
@@ -660,8 +703,7 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     _pending_artist(good, broadcast_artist_repo, playlist_id)
 
     mb = _RaisingMbClient(
-        responses={good: [{"id": "g", "name": "GoodBand",
-                           "sort-name": "GoodBand", "score": 100}]},
+        responses={good: [{"id": "g", "name": "GoodBand", "sort-name": "GoodBand", "score": 100}]},
         error_names={flaky},
     )
 
@@ -719,7 +761,8 @@ def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
 
     deferred = _pending_artist("ARTIST A", repo, playlist_id)
     repo.update_match_status(
-        deferred.id, MatchStatus.NEEDS_REVIEW,
+        deferred.id,
+        MatchStatus.NEEDS_REVIEW,
         reason_code=ReasonCode.DEFERRED_RETRY,
         reason_detail=format_deferred_retry(),
     )
@@ -727,7 +770,8 @@ def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
     repo.update_match_status(auto_matched.id, MatchStatus.AUTO_MATCHED)
     other_review = _pending_artist("ARTIST C", repo, playlist_id)
     repo.update_match_status(
-        other_review.id, MatchStatus.NEEDS_REVIEW,
+        other_review.id,
+        MatchStatus.NEEDS_REVIEW,
         reason_code=ReasonCode.LOW_CONFIDENCE,
         reason_detail="Score 55%",
     )
@@ -735,14 +779,13 @@ def test_reset_deferred_by_ids_promotes_only_deferred_returns_count() -> None:
     # must remain DEFERRED_RETRY (proves scope is honored).
     out_of_scope = _pending_artist("ARTIST D", repo, playlist_id)
     repo.update_match_status(
-        out_of_scope.id, MatchStatus.NEEDS_REVIEW,
+        out_of_scope.id,
+        MatchStatus.NEEDS_REVIEW,
         reason_code=ReasonCode.DEFERRED_RETRY,
         reason_detail=format_deferred_retry(),
     )
 
-    rows_reset = repo.reset_deferred_by_ids(
-        [deferred.id, auto_matched.id, other_review.id]
-    )
+    rows_reset = repo.reset_deferred_by_ids([deferred.id, auto_matched.id, other_review.id])
 
     assert rows_reset == 1
     assert repo.get_by_id(deferred.id).match_status == MatchStatus.PENDING  # type: ignore[union-attr]
@@ -774,10 +817,19 @@ def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
     # 30-char name so the Phase-2 truncation gate routes it to the MB tier.
     name = "Resolved Name With Long Display"  # 31 chars
     artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
-    mb_client = FakeMbClient(responses={name: [
-        {"id": "mbid-x", "name": "Resolved Name", "score": 100,
-         "sort-name": "Name, Resolved", "disambiguation": "rock band"},
-    ]})
+    mb_client = FakeMbClient(
+        responses={
+            name: [
+                {
+                    "id": "mbid-x",
+                    "name": "Resolved Name",
+                    "score": 100,
+                    "sort-name": "Name, Resolved",
+                    "disambiguation": "rock band",
+                },
+            ]
+        }
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -850,10 +902,19 @@ def test_orchestration_truncated_unresolved_calls_mb() -> None:
 
     truncated = "A Very Long Truncated Artist"  # 28 chars; within tolerance of 30
     artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
-    mb_client = FakeMbClient(responses={truncated: [
-        {"id": "mb-1", "name": "A Very Long Truncated Artist Name", "score": 96,
-         "sort-name": "Truncated Name", "disambiguation": ""},
-    ]})
+    mb_client = FakeMbClient(
+        responses={
+            truncated: [
+                {
+                    "id": "mb-1",
+                    "name": "A Very Long Truncated Artist Name",
+                    "score": 96,
+                    "sort-name": "Truncated Name",
+                    "disambiguation": "",
+                },
+            ]
+        }
+    )
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
@@ -915,13 +976,15 @@ def test_orchestration_local_match_always_wins_over_truncation_check() -> None:
     mb_client = FakeMbClient()
 
     truncated = "The Beatles That Are Awesome A"  # 30 chars
-    artist_repo.upsert(Artist(
-        id="local-beatles",
-        name=truncated,
-        sort_name=truncated,
-        normalized_name=normalize_artist(truncated),
-        mbid="mbid-beatles",
-    ))
+    artist_repo.upsert(
+        Artist(
+            id="local-beatles",
+            name=truncated,
+            sort_name=truncated,
+            normalized_name=normalize_artist(truncated),
+            mbid="mbid-beatles",
+        )
+    )
     artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
 
     match_artists_for_playlist(
@@ -1008,12 +1071,18 @@ def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
     )
 
     rid = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=rejected.id,
-        original_title="A", normalized_title="a", normalized_signature="A",
+        id=uuid4(),
+        broadcast_artist_id=rejected.id,
+        original_title="A",
+        normalized_title="a",
+        normalized_signature="A",
     )
     did = BroadcastTrackIdentity(
-        id=uuid4(), broadcast_artist_id=deferred.id,
-        original_title="B", normalized_title="b", normalized_signature="B",
+        id=uuid4(),
+        broadcast_artist_id=deferred.id,
+        original_title="B",
+        normalized_title="b",
+        normalized_signature="B",
     )
     track_identity_repo.upsert(rid)
     track_identity_repo.upsert(did)

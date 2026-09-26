@@ -11,6 +11,7 @@ The ingester must instead:
 - Classify per-row rejections so a partially-bad file can explain which
   rows it dropped and why.
 """
+
 from __future__ import annotations
 
 import hashlib

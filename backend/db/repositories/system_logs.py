@@ -96,4 +96,3 @@ class PgSystemLogRepository(SystemLogRepository):
         if row is None:
             return 0
         return int(row["n"])
-

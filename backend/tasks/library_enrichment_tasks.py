@@ -72,14 +72,16 @@ def _report_running(
     total: int,
     current_item: str,
 ) -> None:
-    progress_repo.upsert(TaskProgress(
-        task_id=task_id,
-        task_type=TaskType.LIBRARY_ENRICHMENT,
-        status=TaskStatus.RUNNING,
-        progress_data={"processed": processed, "total": total, "current_item": current_item},
-        started_at=started_at,
-        updated_at=datetime.now(UTC),
-    ))
+    progress_repo.upsert(
+        TaskProgress(
+            task_id=task_id,
+            task_type=TaskType.LIBRARY_ENRICHMENT,
+            status=TaskStatus.RUNNING,
+            progress_data={"processed": processed, "total": total, "current_item": current_item},
+            started_at=started_at,
+            updated_at=datetime.now(UTC),
+        )
+    )
 
 
 @huey.task()  # type: ignore[untyped-decorator]
@@ -118,8 +120,7 @@ def library_enrichment_task() -> dict[str, int]:
 
             batch_files = repos.library_files.get_pending_enrichment_with_release()
             chunks = [
-                batch_files[i:i + _BATCH_FILES]
-                for i in range(0, len(batch_files), _BATCH_FILES)
+                batch_files[i : i + _BATCH_FILES] for i in range(0, len(batch_files), _BATCH_FILES)
             ]
             # Pre-query the later passes so the first progress row carries a
             # total. Pass 2 is re-queried after pass 1 shrinks it.
@@ -129,21 +130,27 @@ def library_enrichment_task() -> dict[str, int]:
 
             # Initial RUNNING row so the UI shows a bar even when total == 0.
             _report_running(
-                progress_repo, task_id, task_started_at,
-                processed=0, total=total, current_item="",
+                progress_repo,
+                task_id,
+                task_started_at,
+                processed=0,
+                total=total,
+                current_item="",
             )
 
-            sys_log_repo.create(SystemLog(
-                category=LogCategory.ENRICHMENT,
-                level=LogLevel.INFO,
-                message="enrichment_started",
-                trace_id=task_id,
-                details={
-                    "batch_count": len(chunks),
-                    "release_count": len(release_mbids),
-                    "recording_count": len(recording_mbids),
-                },
-            ))
+            sys_log_repo.create(
+                SystemLog(
+                    category=LogCategory.ENRICHMENT,
+                    level=LogLevel.INFO,
+                    message="enrichment_started",
+                    trace_id=task_id,
+                    details={
+                        "batch_count": len(chunks),
+                        "release_count": len(release_mbids),
+                        "recording_count": len(recording_mbids),
+                    },
+                )
+            )
 
             enrichment_repos = EnrichmentRepos(
                 files=repos.library_files,
@@ -155,12 +162,15 @@ def library_enrichment_task() -> dict[str, int]:
                 artists=repos.artists,
             )
             with MusicBrainzApiClient(
-                cache_repo, ttl_days=settings.mb_cache_ttl_days,
+                cache_repo,
+                ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client:
                 for index, chunk in enumerate(chunks, start=1):
                     try:
                         outcome = enrich_by_recording_batch(
-                            chunk, enrichment_repos, mb_client,
+                            chunk,
+                            enrichment_repos,
+                            mb_client,
                         )
                         total_enriched += outcome.enriched
                         conn.commit()
@@ -177,8 +187,11 @@ def library_enrichment_task() -> dict[str, int]:
 
                     processed += 1
                     _report_running(
-                        progress_repo, task_id, task_started_at,
-                        processed=processed, total=total,
+                        progress_repo,
+                        task_id,
+                        task_started_at,
+                        processed=processed,
+                        total=total,
                         current_item=f"batch:{index}/{len(chunks)}",
                     )
 
@@ -201,15 +214,20 @@ def library_enrichment_task() -> dict[str, int]:
 
                     processed += 1
                     _report_running(
-                        progress_repo, task_id, task_started_at,
-                        processed=processed, total=total,
+                        progress_repo,
+                        task_id,
+                        task_started_at,
+                        processed=processed,
+                        total=total,
                         current_item=f"release:{release_mbid}",
                     )
 
                 for recording_mbid in recording_mbids:
                     try:
                         count = enrich_by_recording(
-                            recording_mbid, enrichment_repos, mb_client,
+                            recording_mbid,
+                            enrichment_repos,
+                            mb_client,
                         )
                         total_enriched += count
                         conn.commit()
@@ -224,61 +242,72 @@ def library_enrichment_task() -> dict[str, int]:
 
                     processed += 1
                     _report_running(
-                        progress_repo, task_id, task_started_at,
-                        processed=processed, total=total,
+                        progress_repo,
+                        task_id,
+                        task_started_at,
+                        processed=processed,
+                        total=total,
                         current_item=f"recording:{recording_mbid}",
                     )
 
         # COMPLETED upsert after the library connection closes so the final
         # row reflects all committed work.
-        progress_repo.upsert(TaskProgress(
-            task_id=task_id,
-            task_type=TaskType.LIBRARY_ENRICHMENT,
-            status=TaskStatus.COMPLETED,
-            progress_data={
-                "processed": processed,
-                "total": total,
-                "enriched": total_enriched,
-                "failed": total_failed,
-            },
-            started_at=task_started_at,
-            updated_at=datetime.now(UTC),
-            completed_at=datetime.now(UTC),
-        ))
+        progress_repo.upsert(
+            TaskProgress(
+                task_id=task_id,
+                task_type=TaskType.LIBRARY_ENRICHMENT,
+                status=TaskStatus.COMPLETED,
+                progress_data={
+                    "processed": processed,
+                    "total": total,
+                    "enriched": total_enriched,
+                    "failed": total_failed,
+                },
+                started_at=task_started_at,
+                updated_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+        )
 
-        sys_log_repo.create(SystemLog(
-            category=LogCategory.ENRICHMENT,
-            level=LogLevel.INFO,
-            message="enrichment_completed",
-            trace_id=task_id,
-            details={"enriched": total_enriched, "failed": total_failed},
-        ))
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.ENRICHMENT,
+                level=LogLevel.INFO,
+                message="enrichment_completed",
+                trace_id=task_id,
+                details={"enriched": total_enriched, "failed": total_failed},
+            )
+        )
 
     except Exception as exc:
         if progress_repo is not None:
             with contextlib.suppress(Exception):
-                progress_repo.upsert(TaskProgress(
-                    task_id=task_id,
-                    task_type=TaskType.LIBRARY_ENRICHMENT,
-                    status=TaskStatus.FAILED,
-                    progress_data={
-                        "processed": processed,
-                        "total": total,
-                        "error": str(exc),
-                    },
-                    started_at=task_started_at,
-                    updated_at=datetime.now(UTC),
-                    completed_at=datetime.now(UTC),
-                ))
+                progress_repo.upsert(
+                    TaskProgress(
+                        task_id=task_id,
+                        task_type=TaskType.LIBRARY_ENRICHMENT,
+                        status=TaskStatus.FAILED,
+                        progress_data={
+                            "processed": processed,
+                            "total": total,
+                            "error": str(exc),
+                        },
+                        started_at=task_started_at,
+                        updated_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC),
+                    )
+                )
         if sys_log_repo is not None:
             with contextlib.suppress(Exception):
-                sys_log_repo.create(SystemLog(
-                    category=LogCategory.ENRICHMENT,
-                    level=LogLevel.ERROR,
-                    message="enrichment_failed",
-                    trace_id=task_id,
-                    details={"error": str(exc), "traceback": traceback.format_exc()},
-                ))
+                sys_log_repo.create(
+                    SystemLog(
+                        category=LogCategory.ENRICHMENT,
+                        level=LogLevel.ERROR,
+                        message="enrichment_failed",
+                        trace_id=task_id,
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
+                    )
+                )
         raise
 
     finally:

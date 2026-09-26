@@ -25,8 +25,7 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
 
     def list_unenhanced(self) -> list[Artist]:
         return [
-            a for a in self._data.values()
-            if a.needs_enhancement and a.enhancement_error is None
+            a for a in self._data.values() if a.needs_enhancement and a.enhancement_error is None
         ]
 
     def mark_enhanced(self, artist_id: str) -> None:
@@ -60,13 +59,15 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
-        self.musicbrainz_upserts.append({
-            "mbid": mbid,
-            "name": name,
-            "sort_name": sort_name,
-            "normalized_name": normalized_name,
-            "disambiguation": disambiguation,
-        })
+        self.musicbrainz_upserts.append(
+            {
+                "mbid": mbid,
+                "name": name,
+                "sort_name": sort_name,
+                "normalized_name": normalized_name,
+                "disambiguation": disambiguation,
+            }
+        )
         # Check by mbid first
         for artist in self._data.values():
             if artist.mbid == mbid:

@@ -4,6 +4,7 @@ Strategies produce IdentityMatchResult values; they do not persist. The
 orchestrator (Task 10) wires them together. These tests exercise each
 strategy in isolation using in-memory fakes.
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -92,9 +93,7 @@ def _lib_file(
     if normalized_title is None and track_title is not None:
         normalized_title = normalize_title(track_title)
     if normalized_artist_name is _UNSET:
-        norm_artist: str | None = (
-            artist_name.lower() if artist_name is not None else None
-        )
+        norm_artist: str | None = artist_name.lower() if artist_name is not None else None
     else:
         norm_artist = normalized_artist_name  # type: ignore[assignment]
     return LibraryFile(
@@ -177,14 +176,16 @@ def test_tier0_skips_non_library_file_target_type() -> None:
 
 
 def _seed_artist_match(match_repo: FakeMatchRepository, artist_id: UUID, mbid: str) -> None:
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist_id,
-        confidence_score=100.0,
-        match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-        target_id=mbid,
-        target_type=TargetType.ARTIST,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist_id,
+            confidence_score=100.0,
+            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+            target_id=mbid,
+            target_type=TargetType.ARTIST,
+        )
+    )
 
 
 def test_tier1_gates_on_pending_artist_returns_none() -> None:
@@ -209,10 +210,15 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
     # presence. Previous casing mismatch ("Enter Sandman" vs "enter
     # sandman") scored ~85 and relied on the now-removed synthetic-gap
     # auto-match for lone candidates.
-    lib_repo.upsert(_lib_file(
-        "/m/es.flac", track_title="enter sandman", artist_mbid="mbid-m",
-        artist_name="metallica", work_id="w-es",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/m/es.flac",
+            track_title="enter sandman",
+            artist_mbid="mbid-m",
+            artist_name="metallica",
+            work_id="w-es",
+        )
+    )
 
     strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
     identity = _identity(artist.id, title="enter sandman")
@@ -231,12 +237,14 @@ def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
     artist = _artist()
     _seed_artist_match(match_repo, artist.id, "mbid-m")
     # Local file with a partial-match title (scores in 55-64 mid band)
-    lib_repo.upsert(_lib_file(
-        "/m/mystery.flac",
-        track_title="complete unrelated junk words here",
-        artist_mbid="mbid-m",
-        artist_name="metallica",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/m/mystery.flac",
+            track_title="complete unrelated junk words here",
+            artist_mbid="mbid-m",
+            artist_name="metallica",
+        )
+    )
     # MB returns recording -> that recording maps to a DIFFERENT local file.
     # Note: hit has NO artist_mbid so Step A does not find it; only Step B does.
     hit = _lib_file(
@@ -415,25 +423,29 @@ def test_tier1_local_only_target_id_no_mbid_skips_mb_uses_name_search() -> None:
     local_artist_uuid = str(uuid4())
 
     catalog_repo = FakeArtistRepository()
-    catalog_repo.upsert(Artist(
-        id=local_artist_uuid,
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid=None,  # local-only: no MusicBrainz ID yet
-        normalized_name="van halen",
-    ))
+    catalog_repo.upsert(
+        Artist(
+            id=local_artist_uuid,
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid=None,  # local-only: no MusicBrainz ID yet
+            normalized_name="van halen",
+        )
+    )
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist(name="van halen")
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        confidence_score=100.0,
-        match_tier=MatchTier.NORMALIZATION,
-        target_id=local_artist_uuid,
-        target_type=TargetType.ARTIST,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            confidence_score=100.0,
+            match_tier=MatchTier.NORMALIZATION,
+            target_id=local_artist_uuid,
+            target_type=TargetType.ARTIST,
+        )
+    )
     hit = _lib_file("/music/vh/jump.flac", track_title="jump", artist_name="van halen")
     lib_repo.upsert(hit)
     mb = FakeMbClient()  # must NOT be called
@@ -459,25 +471,29 @@ def test_tier1_local_uuid_with_real_mbid_uses_mbid_for_steps_a_b() -> None:
     artist_mbid = "mbid-vh-real"
 
     catalog_repo = FakeArtistRepository()
-    catalog_repo.upsert(Artist(
-        id=local_artist_uuid,
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid=artist_mbid,  # now linked to MusicBrainz
-        normalized_name="van halen",
-    ))
+    catalog_repo.upsert(
+        Artist(
+            id=local_artist_uuid,
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid=artist_mbid,  # now linked to MusicBrainz
+            normalized_name="van halen",
+        )
+    )
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist(name="van halen")
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        confidence_score=100.0,
-        match_tier=MatchTier.NORMALIZATION,
-        target_id=local_artist_uuid,  # still the local UUID from initial match
-        target_type=TargetType.ARTIST,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            confidence_score=100.0,
+            match_tier=MatchTier.NORMALIZATION,
+            target_id=local_artist_uuid,  # still the local UUID from initial match
+            target_type=TargetType.ARTIST,
+        )
+    )
     # Library file linked via the real MBID (Step A path).
     hit = _lib_file(
         "/music/vh/jump.flac",
@@ -507,13 +523,15 @@ def test_tier1_step_c_passes_normalized_name_not_original() -> None:
     """
     local_artist_uuid = str(uuid4())
     catalog_repo = FakeArtistRepository()
-    catalog_repo.upsert(Artist(
-        id=local_artist_uuid,
-        name="Van Halen",
-        sort_name="Van Halen",
-        mbid=None,
-        normalized_name="van halen",
-    ))
+    catalog_repo.upsert(
+        Artist(
+            id=local_artist_uuid,
+            name="Van Halen",
+            sort_name="Van Halen",
+            mbid=None,
+            normalized_name="van halen",
+        )
+    )
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
@@ -523,14 +541,16 @@ def test_tier1_step_c_passes_normalized_name_not_original() -> None:
         normalized_name="van halen",
         match_status=MatchStatus.AUTO_MATCHED,
     )
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        confidence_score=100.0,
-        match_tier=MatchTier.NORMALIZATION,
-        target_id=local_artist_uuid,
-        target_type=TargetType.ARTIST,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            confidence_score=100.0,
+            match_tier=MatchTier.NORMALIZATION,
+            target_id=local_artist_uuid,
+            target_type=TargetType.ARTIST,
+        )
+    )
     hit = _lib_file(
         "/music/vh/jump.flac",
         track_title="jump",
@@ -540,7 +560,10 @@ def test_tier1_step_c_passes_normalized_name_not_original() -> None:
     lib_repo.upsert(hit)
 
     strategy = ResolvedArtistMbidStrategy(
-        lib_repo, match_repo, FakeMbClient(), catalog_repo,
+        lib_repo,
+        match_repo,
+        FakeMbClient(),
+        catalog_repo,
     )
     result = strategy.apply(_identity(artist.id, title="jump"), artist)
 
@@ -560,32 +583,38 @@ def test_tier1_step_c_never_proposes_cross_artist_file() -> None:
     """
     local_artist_uuid = str(uuid4())
     catalog_repo = FakeArtistRepository()
-    catalog_repo.upsert(Artist(
-        id=local_artist_uuid,
-        name="Jimi Hendrix",
-        sort_name="Hendrix, Jimi",
-        mbid=None,
-        normalized_name="jimi hendrix",
-    ))
+    catalog_repo.upsert(
+        Artist(
+            id=local_artist_uuid,
+            name="Jimi Hendrix",
+            sort_name="Hendrix, Jimi",
+            mbid=None,
+            normalized_name="jimi hendrix",
+        )
+    )
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist(name="jimi hendrix")
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        confidence_score=100.0,
-        match_tier=MatchTier.NORMALIZATION,
-        target_id=local_artist_uuid,
-        target_type=TargetType.ARTIST,
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            confidence_score=100.0,
+            match_tier=MatchTier.NORMALIZATION,
+            target_id=local_artist_uuid,
+            target_type=TargetType.ARTIST,
+        )
+    )
     # Wrong-artist seed — must never be proposed.
-    lib_repo.upsert(_lib_file(
-        "/music/u2/star_spangled_banner.flac",
-        track_title="The Star Spangled Banner",
-        artist_name="U2",
-        normalized_artist_name="u2",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/music/u2/star_spangled_banner.flac",
+            track_title="The Star Spangled Banner",
+            artist_name="U2",
+            normalized_artist_name="u2",
+        )
+    )
     # Right-artist seed — must win.
     hendrix = _lib_file(
         "/music/hendrix/star_spangled_banner.flac",
@@ -596,10 +625,14 @@ def test_tier1_step_c_never_proposes_cross_artist_file() -> None:
     lib_repo.upsert(hendrix)
 
     strategy = ResolvedArtistMbidStrategy(
-        lib_repo, match_repo, FakeMbClient(), catalog_repo,
+        lib_repo,
+        match_repo,
+        FakeMbClient(),
+        catalog_repo,
     )
     result = strategy.apply(
-        _identity(artist.id, title="star spangled banner"), artist,
+        _identity(artist.id, title="star spangled banner"),
+        artist,
     )
 
     assert result is not None
@@ -613,37 +646,47 @@ def test_tier1_step_c_no_same_artist_files_returns_no_local_files() -> None:
     """
     local_artist_uuid = str(uuid4())
     catalog_repo = FakeArtistRepository()
-    catalog_repo.upsert(Artist(
-        id=local_artist_uuid,
-        name="Jimi Hendrix",
-        sort_name="Hendrix, Jimi",
-        mbid=None,
-        normalized_name="jimi hendrix",
-    ))
+    catalog_repo.upsert(
+        Artist(
+            id=local_artist_uuid,
+            name="Jimi Hendrix",
+            sort_name="Hendrix, Jimi",
+            mbid=None,
+            normalized_name="jimi hendrix",
+        )
+    )
 
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist(name="jimi hendrix")
-    match_repo.create(Match(
-        id=uuid4(),
-        artist_id=artist.id,
-        confidence_score=100.0,
-        match_tier=MatchTier.NORMALIZATION,
-        target_id=local_artist_uuid,
-        target_type=TargetType.ARTIST,
-    ))
-    lib_repo.upsert(_lib_file(
-        "/music/u2/star_spangled_banner.flac",
-        track_title="The Star Spangled Banner",
-        artist_name="U2",
-        normalized_artist_name="u2",
-    ))
+    match_repo.create(
+        Match(
+            id=uuid4(),
+            artist_id=artist.id,
+            confidence_score=100.0,
+            match_tier=MatchTier.NORMALIZATION,
+            target_id=local_artist_uuid,
+            target_type=TargetType.ARTIST,
+        )
+    )
+    lib_repo.upsert(
+        _lib_file(
+            "/music/u2/star_spangled_banner.flac",
+            track_title="The Star Spangled Banner",
+            artist_name="U2",
+            normalized_artist_name="u2",
+        )
+    )
 
     strategy = ResolvedArtistMbidStrategy(
-        lib_repo, match_repo, FakeMbClient(), catalog_repo,
+        lib_repo,
+        match_repo,
+        FakeMbClient(),
+        catalog_repo,
     )
     result = strategy.apply(
-        _identity(artist.id, title="star spangled banner"), artist,
+        _identity(artist.id, title="star spangled banner"),
+        artist,
     )
 
     assert result is not None
@@ -665,22 +708,28 @@ def test_tier1_step_b_filters_cross_artist_tagged_recording() -> None:
     artist = _artist(name="metallica")
     _seed_artist_match(match_repo, artist.id, "mbid-m")
     # File mistagged with a Metallica recording_mbid but artist is U2.
-    lib_repo.upsert(_lib_file(
-        "/m/wrong_artist.flac",
-        track_title="enter sandman",
-        artist_name="U2",
-        normalized_artist_name="u2",
-        recording_mbid="rec-abc",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/m/wrong_artist.flac",
+            track_title="enter sandman",
+            artist_name="U2",
+            normalized_artist_name="u2",
+            recording_mbid="rec-abc",
+        )
+    )
     mb = FakeMbClient(
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
     strategy = ResolvedArtistMbidStrategy(
-        lib_repo, match_repo, mb, FakeArtistRepository(),
+        lib_repo,
+        match_repo,
+        mb,
+        FakeArtistRepository(),
     )
     result = strategy.apply(
-        _identity(artist.id, title="enter sandman"), artist,
+        _identity(artist.id, title="enter sandman"),
+        artist,
     )
 
     assert result is not None
@@ -741,11 +790,13 @@ def test_tier2_no_candidates_returns_no_candidates_reason() -> None:
 def test_tier2_mid_confidence_needs_review_with_low_confidence_reason() -> None:
     """Single candidate with low-similarity title lands in NEEDS_REVIEW."""
     lib_repo = FakeLibraryFileRepository()
-    lib_repo.upsert(_lib_file(
-        "/m/x.flac",
-        track_title="completely different song words xyz",
-        artist_name="metallica",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/m/x.flac",
+            track_title="completely different song words xyz",
+            artist_name="metallica",
+        )
+    )
     strategy = BroadcastToLocalStrategy(lib_repo)
 
     artist = _artist(status=MatchStatus.PENDING)
@@ -770,13 +821,16 @@ def test_tier2_lone_candidate_high_band_needs_review_not_auto() -> None:
     """
     artist = _artist(status=MatchStatus.PENDING)
     identity = _identity(
-        artist.id, title="enter sandman", signature="metallica|enter sandman",
+        artist.id,
+        title="enter sandman",
+        signature="metallica|enter sandman",
     )
     # Score ~90 vs "enter sandman" — above 80, below 95.
     lib_repo = FakeLibraryFileRepository()
     lib_repo.upsert(
         _lib_file(
-            "/m.flac", track_title="Enter Sandmen",  # one-letter diff -> ~92
+            "/m.flac",
+            track_title="Enter Sandmen",  # one-letter diff -> ~92
             artist_name="metallica",
         )
     )
@@ -798,12 +852,14 @@ def test_tier2_filters_cross_artist_files() -> None:
     artist must not surface the U2 file as a proposal.
     """
     lib_repo = FakeLibraryFileRepository()
-    lib_repo.upsert(_lib_file(
-        "/music/u2/ssb.flac",
-        track_title="The Star Spangled Banner",
-        artist_name="U2",
-        normalized_artist_name="u2",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/music/u2/ssb.flac",
+            track_title="The Star Spangled Banner",
+            artist_name="U2",
+            normalized_artist_name="u2",
+        )
+    )
     hendrix = _lib_file(
         "/music/hendrix/ssb.flac",
         track_title="Star Spangled Banner",
@@ -852,13 +908,17 @@ def test_tier2_lone_candidate_above_auto_link_still_auto_matches() -> None:
     """
     artist = _artist(status=MatchStatus.PENDING)
     identity = _identity(
-        artist.id, title="enter sandman", signature="metallica|enter sandman",
+        artist.id,
+        title="enter sandman",
+        signature="metallica|enter sandman",
     )
     lib_repo = FakeLibraryFileRepository()
     # Exact title match -> score 100
     lib_repo.upsert(
         _lib_file(
-            "/m.flac", track_title="enter sandman", artist_name="metallica",
+            "/m.flac",
+            track_title="enter sandman",
+            artist_name="metallica",
         )
     )
 
@@ -894,8 +954,10 @@ def test_f_slash_credit_does_not_sink_an_exact_title() -> None:
     artist = _artist("santana")
     _seed_artist_match(match_repo, artist.id, "mbid-santana")
     smooth = _lib_file(
-        "/s/smooth.flac", track_title="Smooth (Feat. Rob Thomas)",
-        artist_mbid="mbid-santana", artist_name="santana",
+        "/s/smooth.flac",
+        track_title="Smooth (Feat. Rob Thomas)",
+        artist_mbid="mbid-santana",
+        artist_name="santana",
     )
     lib_repo.upsert(smooth)
 
@@ -927,17 +989,22 @@ def test_w_slash_that_is_part_of_the_title_keeps_its_score() -> None:
     form scores higher against the real title, so it is the one kept."""
     artist = _artist("roberta flack", status=MatchStatus.PENDING)
     lib_repo = FakeLibraryFileRepository()
-    lib_repo.upsert(_lib_file(
-        "/r/kmsw.flac", track_title="Killing Me Softly With His Song",
-        artist_name="roberta flack",
-    ))
+    lib_repo.upsert(
+        _lib_file(
+            "/r/kmsw.flac",
+            track_title="Killing Me Softly With His Song",
+            artist_name="roberta flack",
+        )
+    )
     unstripped = token_sort_ratio(
-        "killing me softly w his song", "killing me softly with his song",
+        "killing me softly w his song",
+        "killing me softly with his song",
     )
 
     strat = BroadcastToLocalStrategy(lib_repo, strong_match_threshold=80)
     result = strat.apply(
-        _logged_identity(artist.id, "Killing Me Softly W/His Song"), artist,
+        _logged_identity(artist.id, "Killing Me Softly W/His Song"),
+        artist,
     )
 
     assert result is not None
@@ -950,7 +1017,9 @@ def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
     artist = _artist("santana")
     _seed_artist_match(match_repo, artist.id, "mbid-santana")
     hit = _lib_file(
-        "/s/smooth.flac", track_title="Smooth", recording_mbid="rec-smooth",
+        "/s/smooth.flac",
+        track_title="Smooth",
+        recording_mbid="rec-smooth",
         artist_name="santana",
     )
     lib_repo.upsert(hit)
@@ -962,7 +1031,6 @@ def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
     assert mb.calls == ["search_recording:mbid-santana:smooth"]
     assert result is not None
     assert result.library_file_id == hit.id
-
 
 
 # ---------------------------------------------------------------------------
@@ -991,7 +1059,9 @@ def test_alt_title_in_parentheses_on_the_library_side_is_stripped_too() -> None:
     """The station may log the short form while the tag carries the subtitle."""
     lib_repo = FakeLibraryFileRepository()
     hit = _lib_file(
-        "/p/brass.flac", track_title="Brass in Pocket (I'm Special)", artist_name="pretenders",
+        "/p/brass.flac",
+        track_title="Brass in Pocket (I'm Special)",
+        artist_name="pretenders",
     )
     lib_repo.upsert(hit)
     strategy = BroadcastToLocalStrategy(lib_repo)
@@ -1012,7 +1082,7 @@ def test_exact_bracketed_form_wins_the_tie_over_the_stripped_one() -> None:
         lib_repo = FakeLibraryFileRepository()
         live = _lib_file("/h/live.flac", track_title="Hello (Live)", artist_name="adele")
         studio = _lib_file("/h/studio.flac", track_title="Hello", artist_name="adele")
-        for f in ((live, studio) if live_first else (studio, live)):
+        for f in (live, studio) if live_first else (studio, live):
             lib_repo.upsert(f)
         strategy = BroadcastToLocalStrategy(lib_repo)
         artist = _artist("adele", status=MatchStatus.PENDING)
@@ -1041,7 +1111,7 @@ def test_part_numbers_still_tell_songs_apart() -> None:
 
 
 def test_stripping_brackets_never_lifts_a_wrong_file_into_the_mid_band() -> None:
-    """"Cry Baby Cry" against "Baby It's You [Mono]" scores 48 in full and 58
+    """ "Cry Baby Cry" against "Baby It's You [Mono]" scores 48 in full and 58
     once "[Mono]" is stripped: inside the 55-64 band, where a 5-point gap
     over the next file auto-matches. A stripped comparison only counts when
     it is a strong match on its own, so the score stays at 48."""

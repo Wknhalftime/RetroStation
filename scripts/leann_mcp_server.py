@@ -20,6 +20,7 @@ def get_searcher():
     global _searcher
     if _searcher is None:
         from leann import LeannSearcher
+
         _searcher = LeannSearcher(INDEX_PATH)
     return _searcher
 
@@ -141,6 +142,7 @@ def _error_result(req_id, message):
 def main():
     # Suppress noisy logs from LEANN/torch to stderr only
     import logging
+
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     for line in sys.stdin:

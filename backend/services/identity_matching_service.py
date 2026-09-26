@@ -76,16 +76,14 @@ class IdentityMatchingStrategy(Protocol):
 
 
 def _filter_to_artist(
-    candidates: list[LibraryFile], artist_normalized_name: str,
+    candidates: list[LibraryFile],
+    artist_normalized_name: str,
 ) -> list[LibraryFile]:
     # Fail closed: a candidate with audio.normalized_artist_name=None is
     # dropped, never accepted as a wildcard match. Do not relax this rule —
     # null-as-wildcard would silently re-open the cross-artist hole the
     # Resolution Center invariant exists to close.
-    return [
-        f for f in candidates
-        if f.audio.normalized_artist_name == artist_normalized_name
-    ]
+    return [f for f in candidates if f.audio.normalized_artist_name == artist_normalized_name]
 
 
 def _candidate_titles(f: LibraryFile) -> tuple[str, ...]:
@@ -120,9 +118,7 @@ def _candidate_scores(
     libs = [normalize_title_for_scoring(t) for t in _candidate_titles(f)]
     exact = float(token_sort_ratio(full_bcs[0], libs[0]))
     full = max(float(token_sort_ratio(bc, libs[0])) for bc in full_bcs)
-    stripped = max(
-        float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs
-    )
+    stripped = max(float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs)
     return (stripped if stripped >= strong_match_threshold else full), exact
 
 
@@ -158,9 +154,7 @@ def _score_candidates(
         # `assert` is stripped under `python -O`; use a real guard so an
         # upstream bug surfaces as a ValueError, not a later IndexError.
         raise ValueError("_score_candidates requires at least one candidate")
-    full_bcs = [
-        normalize_title_for_scoring(t) for t in broadcast_title_variants(original_title)
-    ]
+    full_bcs = [normalize_title_for_scoring(t) for t in broadcast_title_variants(original_title)]
     core_bcs = [
         normalize_title_for_scoring(t) for t in broadcast_title_core_variants(original_title)
     ]
@@ -191,11 +185,7 @@ def _score_candidates(
     # literal identity and a lone result is still trustworthy.
     auto_match = (
         top_score >= MB_AUTO_LINK_SCORE
-        or (
-            has_competitor
-            and top_score >= strong_match_threshold
-            and gap >= MB_SCORE_GAP
-        )
+        or (has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP)
         or (
             has_competitor
             and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
@@ -334,10 +324,7 @@ class ResolvedArtistMbidStrategy:
                 confidence_score=0.0,
                 library_file_id=None,
                 reason_code=ReasonCode.MISSING_MATCH_RECORD,
-                reason_detail=(
-                    "Artist is resolved but no match record found "
-                    "— data inconsistency"
-                ),
+                reason_detail=("Artist is resolved but no match record found — data inconsistency"),
             )
 
         mbid = (artist_match.target_id or "").strip()
@@ -364,9 +351,7 @@ class ResolvedArtistMbidStrategy:
         #                 an MB link after the initial match.
         #   • Not found → target_id is already the MBID; use it directly.
         catalog_artist = self._catalog_repo.get_by_id(mbid)
-        real_mbid: str | None = (
-            catalog_artist.mbid if catalog_artist is not None else mbid
-        )
+        real_mbid: str | None = catalog_artist.mbid if catalog_artist is not None else mbid
 
         if real_mbid:
             # Step A — local library lookup by artist MBID.
@@ -431,9 +416,7 @@ class ResolvedArtistMbidStrategy:
             confidence_score=0.0,
             library_file_id=None,
             reason_code=ReasonCode.NO_LOCAL_FILES,
-            reason_detail=(
-                "Artist MBID confirmed but no matching local recording found"
-            ),
+            reason_detail=("Artist MBID confirmed but no matching local recording found"),
         )
 
     def _mb_recording_search(
@@ -511,9 +494,7 @@ class BroadcastToLocalStrategy:
         # is defense-in-depth so a future query loosening can't quietly
         # reintroduce cross-artist proposals.
         candidate_files = _filter_to_artist(
-            self._library_file_repo.get_by_normalized_artist_name(
-                artist.normalized_name
-            ),
+            self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
             artist.normalized_name,
         )
         if not candidate_files:
@@ -523,10 +504,7 @@ class BroadcastToLocalStrategy:
                 confidence_score=0.0,
                 library_file_id=None,
                 reason_code=ReasonCode.NO_CANDIDATES,
-                reason_detail=(
-                    f"No library files found for artist "
-                    f"'{artist.original_name}'"
-                ),
+                reason_detail=(f"No library files found for artist '{artist.original_name}'"),
             )
         return _score_candidates(
             identity.original_title,
@@ -587,18 +565,21 @@ def match_identities_for_playlist(
 
     # Resolve artists up-front to avoid N+1 queries inside the loop.
     artist_ids = [identity.broadcast_artist_id for identity in pending]
-    artists_by_id = {
-        a.id: a for a in broadcast_artist_repo.get_by_ids(artist_ids)
-    }
+    artists_by_id = {a.id: a for a in broadcast_artist_repo.get_by_ids(artist_ids)}
 
-    engine = IdentityMatchingEngine([
-        IdentityMappingRuleStrategy(rules, library_file_repo),
-        ResolvedArtistMbidStrategy(
-            library_file_repo, match_repo, mb_client, catalog_repo,
-            strong_match_threshold,
-        ),
-        BroadcastToLocalStrategy(library_file_repo, strong_match_threshold),
-    ])
+    engine = IdentityMatchingEngine(
+        [
+            IdentityMappingRuleStrategy(rules, library_file_repo),
+            ResolvedArtistMbidStrategy(
+                library_file_repo,
+                match_repo,
+                mb_client,
+                catalog_repo,
+                strong_match_threshold,
+            ),
+            BroadcastToLocalStrategy(library_file_repo, strong_match_threshold),
+        ]
+    )
 
     auto_matched = 0
     needs_review = 0
@@ -619,10 +600,7 @@ def match_identities_for_playlist(
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.ORPHANED_IDENTITY,
-                reason_detail=(
-                    f"No broadcast_artist row for id "
-                    f"{identity.broadcast_artist_id}"
-                ),
+                reason_detail=(f"No broadcast_artist row for id {identity.broadcast_artist_id}"),
             )
             needs_review += 1
             continue
@@ -638,9 +616,7 @@ def match_identities_for_playlist(
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.NO_CANDIDATES,
-                reason_detail=(
-                    "All matching strategies exhausted — no result produced"
-                ),
+                reason_detail=("All matching strategies exhausted — no result produced"),
             )
             needs_review += 1
             continue
@@ -657,14 +633,16 @@ def match_identities_for_playlist(
         # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
         # the real confidence_score/triage_bucket instead of NULL/"blocked".
         if result.library_file_id is not None:
-            match_repo.create(Match(
-                id=uuid4(),
-                identity_id=identity.id,
-                library_file_id=result.library_file_id,
-                confidence_score=result.confidence_score,
-                match_tier=result.tier,
-                work_id=result.work_id or None,
-            ))
+            match_repo.create(
+                Match(
+                    id=uuid4(),
+                    identity_id=identity.id,
+                    library_file_id=result.library_file_id,
+                    confidence_score=result.confidence_score,
+                    match_tier=result.tier,
+                    work_id=result.work_id or None,
+                )
+            )
 
         if result.status == MatchStatus.AUTO_MATCHED:
             auto_matched += 1

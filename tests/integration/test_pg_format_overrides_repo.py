@@ -82,9 +82,7 @@ class TestCreateAndList:
             _, work_id, lf = _seed_chain(conn)
 
             # Need a second file for the second override
-            lf2 = PgLibraryFileRepository(conn).upsert(
-                _make_file("/music/track.mp3", format="mp3")
-            )
+            lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/track.mp3", format="mp3"))
             conn.commit()
 
             repo = PgFormatOverrideRepository(conn)
@@ -202,9 +200,7 @@ class TestDelete:
     def test_delete_only_removes_target(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             _, work_id, lf = _seed_chain(conn)
-            lf2 = PgLibraryFileRepository(conn).upsert(
-                _make_file("/music/track.mp3", format="mp3")
-            )
+            lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/track.mp3", format="mp3"))
             conn.commit()
 
             repo = PgFormatOverrideRepository(conn)

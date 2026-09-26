@@ -4,6 +4,7 @@ All field names use the actual MusicBrainz JSON key names (including
 hyphens where the API uses them).  Functional TypedDict form is required
 for hyphenated keys, which are not valid Python identifiers.
 """
+
 from __future__ import annotations
 
 from typing import TypedDict
@@ -15,25 +16,31 @@ MbArtistRef = TypedDict(
     total=False,
 )
 
+
 class MbArtistCredit(TypedDict, total=False):
     artist: MbArtistRef
     joinphrase: str
+
 
 class MbWorkRef(TypedDict, total=False):
     id: str
     title: str
 
+
 class MbRelation(TypedDict, total=False):
     type: str
     work: MbWorkRef
 
+
 class MbTrack(TypedDict, total=False):
     recording: MbRecording
+
 
 class MbMedia(TypedDict, total=False):
     tracks: list[MbTrack]
     position: int
     format: str
+
 
 # Top-level response shapes returned by mb_client methods
 
@@ -97,6 +104,7 @@ MbRelease = TypedDict(
     },
     total=False,
 )
+
 
 class MbReleaseRef(TypedDict, total=False):
     id: str

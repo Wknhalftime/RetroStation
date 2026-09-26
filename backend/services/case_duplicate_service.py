@@ -49,16 +49,19 @@ def plan_case_duplicate_repairs(
             unresolved.append([f.file_path for f in group])
             continue
         keeper = keepers[0]
-        repairs.append(CaseDuplicateRepair(
-            keeper_id=keeper.id,
-            keeper_path=keeper.file_path,
-            stale_ids=tuple(f.id for f in group if f.id != keeper.id),
-        ))
+        repairs.append(
+            CaseDuplicateRepair(
+                keeper_id=keeper.id,
+                keeper_path=keeper.file_path,
+                stale_ids=tuple(f.id for f in group if f.id != keeper.id),
+            )
+        )
     return repairs, unresolved
 
 
 def apply_case_duplicate_repair(
-    repair: CaseDuplicateRepair, file_repo: LibraryFileRepository,
+    repair: CaseDuplicateRepair,
+    file_repo: LibraryFileRepository,
 ) -> None:
     """Fold each stale row into the keeper."""
     for stale_id in repair.stale_ids:

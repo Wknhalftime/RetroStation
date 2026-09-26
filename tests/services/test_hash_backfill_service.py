@@ -1,4 +1,5 @@
 """Unit tests for the deferred content-hash backfill."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -15,8 +16,12 @@ def _indexed(path: Path) -> LibraryFile:
     """An unhashed row carrying the file's current stat, as phase 1 stores it."""
     st = path.stat()
     return LibraryFile(
-        id=uuid4(), file_path=str(path), file_hash=None, format="flac",
-        file_size=st.st_size, file_mtime_ns=st.st_mtime_ns,
+        id=uuid4(),
+        file_path=str(path),
+        file_hash=None,
+        format="flac",
+        file_size=st.st_size,
+        file_mtime_ns=st.st_mtime_ns,
     )
 
 

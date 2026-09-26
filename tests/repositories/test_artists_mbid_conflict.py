@@ -50,9 +50,7 @@ def test_upsert_conflicting_mbid_does_not_overwrite(
         disambiguation="singer",
     )
     assert returned_id == original_id
-    row = pg_conn.execute(
-        "SELECT mbid FROM artists WHERE id = %s", (original_id,)
-    ).fetchone()
+    row = pg_conn.execute("SELECT mbid FROM artists WHERE id = %s", (original_id,)).fetchone()
     assert row is not None
     assert row["mbid"] == "mb-A"  # NOT overwritten
 

@@ -14,4 +14,3 @@ class UserSettingRepository(ABC):
 
     @abstractmethod
     def list_all(self) -> list[UserSetting]: ...
-

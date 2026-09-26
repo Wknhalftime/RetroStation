@@ -35,12 +35,10 @@ def _artist_search_fragments(
     if not search:
         return "", "ORDER BY a.sort_name, a.id", (), ()
 
-    where = (
-        "WHERE LOWER(a.name) %% LOWER(%s) "
-        "OR LOWER(a.name) LIKE LOWER(%s) || '%%'"
-    )
+    where = "WHERE LOWER(a.name) %% LOWER(%s) OR LOWER(a.name) LIKE LOWER(%s) || '%%'"
     order = "ORDER BY similarity(LOWER(a.name), LOWER(%s)) DESC, a.sort_name, a.id"
     return where, order, (search, search), (search,)
+
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]

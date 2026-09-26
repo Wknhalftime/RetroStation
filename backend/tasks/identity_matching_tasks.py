@@ -40,7 +40,8 @@ def identity_matching_task(playlist_id: str) -> None:
     with task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id:
         with connect_sync(settings.database_url) as conn:
             with MusicBrainzApiClient(
-                PgMusicBrainzCacheRepository(conn), ttl_days=settings.mb_cache_ttl_days,
+                PgMusicBrainzCacheRepository(conn),
+                ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client:
                 work_ids = match_identities_for_playlist(
                     playlist_id=UUID(playlist_id),

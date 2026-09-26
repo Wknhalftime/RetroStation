@@ -4,6 +4,7 @@ Strategies produce ArtistMatchResult values; they do not persist. The service
 function (PR 4 Task 5) will wire them together and own persistence. These
 tests exercise each strategy in isolation using in-memory fakes.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -202,9 +203,13 @@ def test_mb_lone_candidate_mid_band_needs_review_not_auto() -> None:
     The orchestration layer's upsert is gated on status == AUTO_MATCHED, so a
     NEEDS_REVIEW result naturally won't trigger a catalog write — verified at
     the service layer; here we only check the strategy result shape."""
-    mb = FakeMbClient(responses={"Foo": [
-        {"id": "mbid-only", "name": "Foo Bar", "score": 62},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Foo": [
+                {"id": "mbid-only", "name": "Foo Bar", "score": 62},
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb)
     result = strategy.apply(_broadcast_artist("Foo", "foo"))
 
@@ -264,11 +269,20 @@ def test_mb_strategy_high_score_auto_matches() -> None:
     (test_mb_auto_matched_triggers_catalog_upsert_from_orchestration in
     test_artist_matching_service.py)."""
     mb_id = "mbid-1234"
-    mb = FakeMbClient(responses={"Metallica": [
-        {"id": mb_id, "name": "Metallica", "sort-name": "Metallica",
-         "disambiguation": "US metal band", "score": 100},
-        {"id": "mbid-other", "name": "Metallicka", "score": 50},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Metallica": [
+                {
+                    "id": mb_id,
+                    "name": "Metallica",
+                    "sort-name": "Metallica",
+                    "disambiguation": "US metal band",
+                    "score": 100,
+                },
+                {"id": "mbid-other", "name": "Metallicka", "score": 50},
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb)
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
@@ -292,10 +306,14 @@ def test_mb_strategy_no_results_returns_none() -> None:
 
 
 def test_mb_strategy_all_below_60_returns_none() -> None:
-    mb = FakeMbClient(responses={"Fuzzy": [
-        {"id": "a", "name": "A", "score": 55},
-        {"id": "b", "name": "B", "score": 30},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Fuzzy": [
+                {"id": "a", "name": "A", "score": 55},
+                {"id": "b", "name": "B", "score": 30},
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb)
     assert strategy.apply(_broadcast_artist("Fuzzy", "fuzzy")) is None
 
@@ -305,10 +323,14 @@ def test_mb_strategy_mid_score_needs_review() -> None:
     # with LOW_CONFIDENCE. The orchestration's upsert is gated on AUTO_MATCHED,
     # so a NEEDS_REVIEW result naturally won't trigger one — verified at the
     # service layer; here we only check the strategy result shape.
-    mb = FakeMbClient(responses={"Metallica": [
-        {"id": "mbid-top", "name": "Metallica Alt", "score": 70},
-        {"id": "mbid-two", "name": "Metallic", "score": 68},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Metallica": [
+                {"id": "mbid-top", "name": "Metallica Alt", "score": 70},
+                {"id": "mbid-two", "name": "Metallic", "score": 68},
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb)
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
@@ -420,6 +442,7 @@ def test_mb_strategy_constructor_has_no_repo_dependency() -> None:
     test_mb_auto_matched_triggers_catalog_upsert_from_orchestration in the
     service test)."""
     import inspect
+
     sig = inspect.signature(MusicBrainzApiStrategy.__init__)
     param_names = set(sig.parameters)
     assert "artist_repo" not in param_names
@@ -431,10 +454,19 @@ def test_mb_strategy_constructor_has_no_repo_dependency() -> None:
 def test_mb_strategy_returns_mb_candidate_with_canonical_fields() -> None:
     """The strategy carries the raw MB candidate up via mb_candidate so the
     orchestration can upsert. Strategy itself never writes."""
-    mb = FakeMbClient(responses={"Metallica": [
-        {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica",
-         "disambiguation": "US metal band", "score": 100},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Metallica": [
+                {
+                    "id": "mbid-m",
+                    "name": "Metallica",
+                    "sort-name": "Metallica",
+                    "disambiguation": "US metal band",
+                    "score": 100,
+                },
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb)
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
@@ -451,10 +483,19 @@ def test_mb_strategy_returns_mb_candidate_with_canonical_fields() -> None:
 def test_mb_strategy_populates_mb_candidate_for_needs_review_too() -> None:
     """mb_candidate is set whenever a candidate is selected, regardless of zone.
     The orchestration only triggers upsert when status == AUTO_MATCHED."""
-    mb = FakeMbClient(responses={"Borderline": [
-        {"id": "mbid-bord", "name": "Borderline", "score": 70,
-         "sort-name": "Borderline", "disambiguation": ""},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Borderline": [
+                {
+                    "id": "mbid-bord",
+                    "name": "Borderline",
+                    "score": 70,
+                    "sort-name": "Borderline",
+                    "disambiguation": "",
+                },
+            ]
+        }
+    )
     strategy = MusicBrainzApiStrategy(mb_client=mb, strong_match_threshold=80)
     result = strategy.apply(_broadcast_artist("Borderline", "borderline"))
 
@@ -528,7 +569,8 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     # Default: score 95 clears the unconditional MB_AUTO_LINK_SCORE gate.
     default_result = MusicBrainzApiStrategy(
         FakeMbClient(responses=responses),
-        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80,
+        mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert default_result is not None
     assert default_result.status == MatchStatus.AUTO_MATCHED
@@ -539,7 +581,8 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     # NEEDS_REVIEW with AMBIGUOUS_GAP reason.
     overridden = MusicBrainzApiStrategy(
         FakeMbClient(responses=responses),
-        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80,
+        mb_score_gap=MB_SCORE_GAP,
         mb_auto_link_score=98,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert overridden is not None
@@ -566,7 +609,9 @@ def test_normalization_lone_candidate_high_band_needs_review_not_auto() -> None:
     only = _canonical("Metallica", mbid="mbid-metallica-xxx")
 
     result = NormalizationStrategy(
-        [only], strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        [only],
+        strong_match_threshold=80,
+        mb_score_gap=MB_SCORE_GAP,
     ).apply(bc)
 
     assert result is not None
@@ -588,7 +633,8 @@ def test_mb_lone_candidate_high_band_needs_review_not_auto() -> None:
     )
     result = MusicBrainzApiStrategy(
         fake,
-        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80,
+        mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
 
     assert result is not None
@@ -610,7 +656,8 @@ def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
     )
     result = MusicBrainzApiStrategy(
         fake,
-        strong_match_threshold=80, mb_score_gap=MB_SCORE_GAP,
+        strong_match_threshold=80,
+        mb_score_gap=MB_SCORE_GAP,
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
 
     assert result is not None
@@ -635,8 +682,13 @@ def test_mb_strategy_uses_search_map_when_key_present() -> None:
     mb = FakeMbClient(responses={})
     search_map: dict[str, list[dict[str, object]]] = {
         "metallica": [
-            {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica",
-             "disambiguation": "US metal band", "score": 100},
+            {
+                "id": "mbid-m",
+                "name": "Metallica",
+                "sort-name": "Metallica",
+                "disambiguation": "US metal band",
+                "score": 100,
+            },
         ],
     }
     strategy = MusicBrainzApiStrategy(mb_client=mb, search_map=search_map)
@@ -650,9 +702,13 @@ def test_mb_strategy_uses_search_map_when_key_present() -> None:
 
 def test_mb_strategy_empty_list_in_map_returns_none_no_live_call() -> None:
     # Empty list is the "no candidates from MB" sentinel — must NOT retry live.
-    mb = FakeMbClient(responses={"Obscure Band": [
-        {"id": "mbid-x", "name": "Obscure Band", "score": 100},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Obscure Band": [
+                {"id": "mbid-x", "name": "Obscure Band", "score": 100},
+            ]
+        }
+    )
     search_map: dict[str, list[dict[str, object]]] = {"obscure band": []}
     strategy = MusicBrainzApiStrategy(mb_client=mb, search_map=search_map)
     result = strategy.apply(_broadcast_artist("Obscure Band", "obscure band"))
@@ -665,9 +721,13 @@ def test_mb_strategy_missing_key_falls_back_to_live() -> None:
     # Key absent from map — strategy must call search_artist directly
     # (happens when the pre-pass failed for that key, or the row was added
     # after the pre-pass).
-    mb = FakeMbClient(responses={"Metallica": [
-        {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica", "score": 100},
-    ]})
+    mb = FakeMbClient(
+        responses={
+            "Metallica": [
+                {"id": "mbid-m", "name": "Metallica", "sort-name": "Metallica", "score": 100},
+            ]
+        }
+    )
     search_map: dict[str, list[dict[str, object]]] = {"other band": []}
     strategy = MusicBrainzApiStrategy(mb_client=mb, search_map=search_map)
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
@@ -714,12 +774,14 @@ class _StubInner:
 
 
 def test_truncated_strategy_passes_through_when_name_not_truncated() -> None:
-    inner = _StubInner(canned=ArtistMatchResult(
-        status=MatchStatus.AUTO_MATCHED,
-        tier=MatchTier.MUSICBRAINZ_API,
-        confidence_score=100.0,
-        target_id="x",
-    ))
+    inner = _StubInner(
+        canned=ArtistMatchResult(
+            status=MatchStatus.AUTO_MATCHED,
+            tier=MatchTier.MUSICBRAINZ_API,
+            confidence_score=100.0,
+            target_id="x",
+        )
+    )
     strat = TruncatedNameMbStrategy(inner=inner, max_len=30)
     assert strat.apply(_broadcast_artist("U2", "u2")) is None
     assert inner.calls == []

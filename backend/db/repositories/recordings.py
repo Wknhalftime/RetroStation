@@ -40,8 +40,13 @@ class PgRecordingRepository(RecordingRepository):
                  title = EXCLUDED.title,
                  work_id = COALESCE(EXCLUDED.work_id, recordings.work_id),
                  version_type = EXCLUDED.version_type""",
-            (recording.id, recording.title, recording.work_id,
-             recording.duration_ms, recording.version_type.value),
+            (
+                recording.id,
+                recording.title,
+                recording.work_id,
+                recording.duration_ms,
+                recording.version_type.value,
+            ),
         )
         row = self._conn.execute(
             "SELECT * FROM recordings WHERE id = %s", (recording.id,)
@@ -51,9 +56,7 @@ class PgRecordingRepository(RecordingRepository):
         return self._row_to_model(row)
 
     def get_by_id(self, mbid: str) -> Recording | None:
-        row = self._conn.execute(
-            "SELECT * FROM recordings WHERE id = %s", (mbid,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM recordings WHERE id = %s", (mbid,)).fetchone()
         return self._row_to_model(row) if row else None
 
     def get_by_work(self, work_id: str) -> list[Recording]:
@@ -85,13 +88,15 @@ class PgRecordingRepository(RecordingRepository):
 
     def mark_enhanced(self, mbid: str) -> None:
         self._conn.execute(
-            "UPDATE recordings SET needs_enhancement = FALSE, enhanced_at = now()"
-            " WHERE id = %s",
+            "UPDATE recordings SET needs_enhancement = FALSE, enhanced_at = now() WHERE id = %s",
             (mbid,),
         )
 
     def get_or_create_local(
-        self, work_id: str, version_type: str, title: str,
+        self,
+        work_id: str,
+        version_type: str,
+        title: str,
     ) -> str:
         recording_id = str(uuid4())
         cur = self._conn.execute(
@@ -107,12 +112,9 @@ class PgRecordingRepository(RecordingRepository):
             return cast(str, row["id"])
         # Row already existed — fetch the winner
         existing = self._conn.execute(
-            "SELECT id FROM recordings"
-            " WHERE work_id = %s AND version_type = %s",
+            "SELECT id FROM recordings WHERE work_id = %s AND version_type = %s",
             (work_id, version_type),
         ).fetchone()
         if existing is None:
-            raise RuntimeError(
-                "Recording not found after ON CONFLICT DO NOTHING"
-            )
+            raise RuntimeError("Recording not found after ON CONFLICT DO NOTHING")
         return cast(str, existing["id"])

@@ -4,6 +4,7 @@ Until now the client did not follow redirects, so the lookup raised and
 the files behind a merged release were retried, and failed, on every
 enrichment run.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -26,7 +27,8 @@ def _redirecting_server(entity: str) -> tuple[Any, list[str]]:
         seen.append(request.url.path)
         if request.url.path == f"/ws/2/{entity}/{OLD}":
             return httpx.Response(
-                301, headers={"Location": f"https://musicbrainz.org/ws/2/{entity}/{NEW}?fmt=json"},
+                301,
+                headers={"Location": f"https://musicbrainz.org/ws/2/{entity}/{NEW}?fmt=json"},
             )
         if request.url.path == f"/ws/2/{entity}/{NEW}":
             return httpx.Response(200, json={"id": NEW, "title": "Survivor", "name": "Survivor"})
@@ -45,13 +47,18 @@ def cache() -> FakeMusicBrainzCacheRepository:
     return FakeMusicBrainzCacheRepository()
 
 
-@pytest.mark.parametrize("entity,method", [
-    ("release", "lookup_release"),
-    ("recording", "lookup_recording"),
-    ("artist", "lookup_artist"),
-])
+@pytest.mark.parametrize(
+    "entity,method",
+    [
+        ("release", "lookup_release"),
+        ("recording", "lookup_recording"),
+        ("artist", "lookup_artist"),
+    ],
+)
 def test_lookup_follows_a_merged_mbid_to_the_survivor(
-    cache: FakeMusicBrainzCacheRepository, entity: str, method: str,
+    cache: FakeMusicBrainzCacheRepository,
+    entity: str,
+    method: str,
 ) -> None:
     handler, seen = _redirecting_server(entity)
     with MusicBrainzApiClient(cache, transport=httpx.MockTransport(handler)) as client:

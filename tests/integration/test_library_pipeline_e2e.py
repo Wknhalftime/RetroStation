@@ -6,6 +6,7 @@ Tests the complete flow:
 Verifies that at least one identity gets AUTO_MATCHED when a library file
 exists for a matched artist.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -50,9 +51,13 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
     """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         # --- Setup ---
-        station = PgBroadcastStationRepository(conn).create(BroadcastStation(
-            id=uuid4(), call_letters="KAZR-LIB-E2E", name="KAZR Library E2E",
-        ))
+        station = PgBroadcastStationRepository(conn).create(
+            BroadcastStation(
+                id=uuid4(),
+                call_letters="KAZR-LIB-E2E",
+                name="KAZR Library E2E",
+            )
+        )
 
         # --- Step 1: Ingest CSV ---
         file_bytes = FIXTURE_PATH.read_bytes()
@@ -69,6 +74,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         conn.commit()
 
         from uuid import UUID
+
         playlist_id = UUID(result.playlist_id)
 
         assert result.rows_processed >= 3166
@@ -82,13 +88,15 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # The rule is the cleanest way to give Metallica a stable target_id
         # for the downstream identity-match assertions in this test.
         rules_repo = PgMappingRuleRepository(conn)
-        rules_repo.create(MappingRule(
-            id=uuid4(),
-            source_pattern="metallica",
-            target_type=TargetType.ARTIST,
-            target_id="mbid-metallica-lib",
-            priority=10,
-        ))
+        rules_repo.create(
+            MappingRule(
+                id=uuid4(),
+                source_pattern="metallica",
+                target_type=TargetType.ARTIST,
+                target_id="mbid-metallica-lib",
+                priority=10,
+            )
+        )
         # FakeMbClient is still passed to match_identities_for_playlist below,
         # but its seeded responses are no longer consulted by the artist tier.
         fake_mb = FakeMbClient({})
@@ -204,8 +212,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
 
         # --- Verify: at least one identity is AUTO_MATCHED ---
         auto_matched_rows = conn.execute(
-            "SELECT count(*) AS cnt FROM track_identities "
-            "WHERE match_status = 'auto_matched'"
+            "SELECT count(*) AS cnt FROM track_identities WHERE match_status = 'auto_matched'"
         ).fetchone()
         assert auto_matched_rows is not None
         assert auto_matched_rows["cnt"] >= 1, (

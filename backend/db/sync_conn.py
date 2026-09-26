@@ -1,4 +1,5 @@
 """Sync connection helper — sets search_path to match the async pool."""
+
 from __future__ import annotations
 
 from typing import Any

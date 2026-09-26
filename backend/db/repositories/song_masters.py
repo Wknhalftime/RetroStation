@@ -34,8 +34,14 @@ class PgSongMasterRepository(SongMasterRepository):
                  score = EXCLUDED.score,
                  updated_at = EXCLUDED.updated_at
                WHERE song_masters.selection_method = 'auto'""",
-            (master.id, master.work_id, master.preferred_file_id,
-             master.selection_method.value, master.score, master.updated_at),
+            (
+                master.id,
+                master.work_id,
+                master.preferred_file_id,
+                master.selection_method.value,
+                master.score,
+                master.updated_at,
+            ),
         )
         row = self._conn.execute(
             "SELECT * FROM song_masters WHERE work_id = %s", (master.work_id,)

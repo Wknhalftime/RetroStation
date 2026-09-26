@@ -1,4 +1,5 @@
 """Progress-emission tests for mb_enrichment_task."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -55,9 +56,9 @@ def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
     """
     ent = MagicMock()
     ent.id = mbid
-    ent.mbid = None                    # forces Tier 1 path
-    ent.disambiguation = None          # avoid MagicMock truthiness in Tier 2/3 checks
-    ent.sort_name = f"Name-{mbid}"     # deterministic value, avoids MagicMock `in (...)` comparison
+    ent.mbid = None  # forces Tier 1 path
+    ent.disambiguation = None  # avoid MagicMock truthiness in Tier 2/3 checks
+    ent.sort_name = f"Name-{mbid}"  # deterministic value, avoids MagicMock `in (...)` comparison
     setattr(ent, name_field, f"Name-{mbid}")
     ent.duration_ms = None
     return ent
@@ -101,6 +102,7 @@ class TestMbEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         mb_enrichment_task.call_local()
 
         calls = _progress_calls(mock_progress_repo)
@@ -137,6 +139,7 @@ class TestMbEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         mb_enrichment_task.call_local()
 
         calls = _progress_calls(mock_progress_repo)
@@ -173,12 +176,10 @@ class TestMbEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         mb_enrichment_task.call_local()
 
-        running = [
-            c for c in _progress_calls(mock_progress_repo)
-            if c.status == TaskStatus.RUNNING
-        ]
+        running = [c for c in _progress_calls(mock_progress_repo) if c.status == TaskStatus.RUNNING]
         phases = [c.progress_data.get("phase") for c in running]
         # initial upsert phase=artists, plus one per-entity upsert each phase
         assert "artists" in phases
@@ -220,6 +221,7 @@ class TestMbEnrichmentProgress:
         mock_sys_log_cls.return_value = mock_sys_log
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         with pytest.raises(RuntimeError):
             mb_enrichment_task.call_local()
 
@@ -243,8 +245,7 @@ class TestMbEnrichmentProgress:
         assert TaskStatus.FAILED in statuses
         log_entries = _system_log_calls(mock_sys_log)
         failed = next(
-            c for c in _progress_calls(mock_progress_repo)
-            if c.status == TaskStatus.FAILED
+            c for c in _progress_calls(mock_progress_repo) if c.status == TaskStatus.FAILED
         )
         assert any(entry.trace_id == failed.task_id for entry in log_entries)
         # The traceback goes with the message: a bare str(exc) such as
@@ -274,6 +275,7 @@ class TestMbEnrichmentProgress:
         mock_progress_cls.return_value = mock_progress_repo
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         mb_enrichment_task.call_local()
 
         statuses = [c.status for c in _progress_calls(mock_progress_repo)]
@@ -394,6 +396,7 @@ class TestMbEnrichmentSummary:
         mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
 
         from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
         mb_enrichment_task.call_local()
 
         # Exactly one lookup_recording call per distinct MBID, all from the

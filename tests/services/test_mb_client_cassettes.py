@@ -14,6 +14,7 @@ Run single-process so the 1 req/s rate limiter is honoured:
 
     uv run pytest tests/services/test_mb_client_cassettes.py -n 0 --record-mode=rewrite
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
@@ -135,7 +136,9 @@ def test_lookup_recording_performance_relation_yields_work(
     assert recording["title"] == "Enter Sandman"
     assert isinstance(recording["length"], int)
     assert _extract_artist_from_credits(recording["artist-credit"]) == (
-        METALLICA_MBID, "Metallica", "Metallica",
+        METALLICA_MBID,
+        "Metallica",
+        "Metallica",
     )
     work = _extract_work_from_relations(recording["relations"])
     assert work is not None
@@ -182,7 +185,8 @@ def test_lookup_release_track_performance_relation_yields_work(
     works = [_extract_work_from_relations(track["recording"]["relations"]) for track in tracks]
     assert all(work is not None for work in works)
     assert [work[1] for work in works if work is not None][:2] == [
-        "Battery", "Master of Puppets",
+        "Battery",
+        "Master of Puppets",
     ]
 
 
@@ -242,9 +246,13 @@ MERGED_RECORDING_MBID = "01ec25c7-5684-44e5-8fed-5c48217c3baf"
 def test_search_recordings_by_mbids_carries_enrichment_fields(
     client: MusicBrainzApiClient,
 ) -> None:
-    found = client.search_recordings_by_mbids([
-        ENTER_SANDMAN_RECORDING_MBID, LATE_BLOOM_RECORDING_MBID, MERGED_RECORDING_MBID,
-    ])
+    found = client.search_recordings_by_mbids(
+        [
+            ENTER_SANDMAN_RECORDING_MBID,
+            LATE_BLOOM_RECORDING_MBID,
+            MERGED_RECORDING_MBID,
+        ]
+    )
 
     # Merged MBIDs are not in the search index; the caller falls back for them.
     assert set(found) == {ENTER_SANDMAN_RECORDING_MBID, LATE_BLOOM_RECORDING_MBID}
@@ -252,7 +260,9 @@ def test_search_recordings_by_mbids_carries_enrichment_fields(
     assert late_bloom["title"] == "Late Bloom"
     assert isinstance(late_bloom["length"], int)
     assert _extract_artist_from_credits(late_bloom["artist-credit"]) == (
-        "511c533d-d5f5-4b00-8bc8-b45344fca524", "Amy Ray", "Ray, Amy",
+        "511c533d-d5f5-4b00-8bc8-b45344fca524",
+        "Amy Ray",
+        "Ray, Amy",
     )
     assert STAG_RELEASE_MBID in {r["id"] for r in late_bloom["releases"]}
     # Search results carry no relations: works still need lookup_recording.

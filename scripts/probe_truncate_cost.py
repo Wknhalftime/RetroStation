@@ -69,9 +69,7 @@ def _redact_url(url: str) -> str:
             netloc = f"{netloc}:{parts.port}"
         if parts.username or parts.password:
             netloc = f"***@{netloc}"
-        return urlunsplit(
-            (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
-        )
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     try:
         params = psycopg.conninfo.conninfo_to_dict(url)
     except psycopg.Error:

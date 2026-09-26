@@ -8,6 +8,7 @@ transaction is still open.
 All tests use ``FakeTaskProgressRepository`` per project rule
 "In-memory fakes in tests/fakes/ implement the same ABCs".
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -40,9 +41,7 @@ def _fake_connect_sync(_url: str, *, autocommit: bool = False) -> Any:
     return conn
 
 
-def _result(
-    playlist_id: str = "pl-1", rows: int = 2, skipped: int = 0
-) -> IngestionResult:
+def _result(playlist_id: str = "pl-1", rows: int = 2, skipped: int = 0) -> IngestionResult:
     return IngestionResult(
         playlist_id=playlist_id,
         rows_processed=rows,
@@ -72,18 +71,14 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-1")
 
         statuses = [u.status for u in fake_repo.received_upserts]
         assert statuses[0] == TaskStatus.RUNNING
         assert statuses[-1] == TaskStatus.COMPLETED
         assert all(u.task_id == "tid-1" for u in fake_repo.received_upserts)
-        assert all(
-            u.task_type == TaskType.INGESTION for u in fake_repo.received_upserts
-        )
+        assert all(u.task_type == TaskType.INGESTION for u in fake_repo.received_upserts)
 
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
@@ -110,9 +105,7 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-2")
 
         upserts = fake_repo.received_upserts
@@ -143,9 +136,7 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
             ingestion_task.call_local(CSV_PAYLOAD, "my.csv", str(uuid4()), "tid-3")
 
         terminal = fake_repo.received_upserts[-1]
@@ -175,12 +166,8 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "skipped.csv", str(uuid4()), "tid-sk"
-            )
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+            ingestion_task.call_local(CSV_PAYLOAD, "skipped.csv", str(uuid4()), "tid-sk")
 
         terminal = fake_repo.received_upserts[-1]
         assert terminal.status == TaskStatus.COMPLETED
@@ -258,9 +245,7 @@ class TestIngestionTaskFailurePaths:
         from backend.tasks.ingestion_tasks import ingestion_task
 
         with pytest.raises(CsvDecodeError, match="bad bytes"):
-            ingestion_task.call_local(
-                b"garbage", "bad.csv", str(uuid4()), "tid-dec"
-            )
+            ingestion_task.call_local(b"garbage", "bad.csv", str(uuid4()), "tid-dec")
 
         run_ingest.assert_not_called()
         # Only RUNNING-initial is missing because count_csv_rows runs BEFORE
@@ -297,9 +282,7 @@ class TestIngestionTaskEmbeddingDecoupling:
             side_effect=RuntimeError("broker down"),
         ):
             # Must NOT raise: embedding dispatch is decoupled.
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-e"
-            )
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-e")
 
         terminal = fake_repo.received_upserts[-1]
         assert terminal.status == TaskStatus.COMPLETED
@@ -326,17 +309,17 @@ class TestIngestionTaskBackwardCompat:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
             returned_id = ingestion_task.call_local(
-                CSV_PAYLOAD, "f.csv", str(uuid4())  # no task_id
+                CSV_PAYLOAD,
+                "f.csv",
+                str(uuid4()),  # no task_id
             )
 
         assert isinstance(returned_id, str) and len(returned_id) == 32
-        assert all(
-            u.task_id == returned_id for u in fake_repo.received_upserts
-        ), "Auto-minted task_id must be used consistently across upserts"
+        assert all(u.task_id == returned_id for u in fake_repo.received_upserts), (
+            "Auto-minted task_id must be used consistently across upserts"
+        )
 
 
 class TestIngestionTaskRetryReset:
@@ -373,9 +356,7 @@ class TestIngestionTaskRetryReset:
         from backend.tasks.ingestion_tasks import ingestion_task
 
         with pytest.raises(psycopg.errors.DeadlockDetected):
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "retry.csv", str(uuid4()), "tid-r"
-            )
+            ingestion_task.call_local(CSV_PAYLOAD, "retry.csv", str(uuid4()), "tid-r")
 
         terminal = fake_repo.received_upserts[-1]
         assert terminal.status == TaskStatus.FAILED
@@ -393,10 +374,7 @@ class _MidRunFaultRepo(FakeTaskProgressRepository):
     """
 
     def upsert(self, task: TaskProgress) -> TaskProgress:  # type: ignore[override]
-        if (
-            task.status == TaskStatus.RUNNING
-            and task.progress_data.get("processed", 0) > 0
-        ):
+        if task.status == TaskStatus.RUNNING and task.progress_data.get("processed", 0) > 0:
             self.received_upserts.append(task)
             raise psycopg.OperationalError("simulated progress conn drop")
         return super().upsert(task)
@@ -448,12 +426,8 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-fault"
-            )
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+            ingestion_task.call_local(CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-fault")
 
         terminal = fault_repo.received_upserts[-1]
         assert terminal.status == TaskStatus.COMPLETED, (
@@ -465,8 +439,7 @@ class TestIngestionTaskMidRunTelemetryFault:
         mid_run_attempts = [
             u
             for u in fault_repo.received_upserts
-            if u.status == TaskStatus.RUNNING
-            and u.progress_data.get("processed", 0) > 0
+            if u.status == TaskStatus.RUNNING and u.progress_data.get("processed", 0) > 0
         ]
         assert len(mid_run_attempts) == 2
 
@@ -501,29 +474,18 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-throttle"
-            )
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+            ingestion_task.call_local(CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-throttle")
 
-        warning_events = [
-            call.args[0]
-            for call in mock_logger.warning.call_args_list
-            if call.args
-        ]
+        warning_events = [call.args[0] for call in mock_logger.warning.call_args_list if call.args]
         # Exactly one "running" drop warning (the first), then one summary.
         running_drops = [e for e in warning_events if e == "ingestion_progress_upsert_dropped"]
-        summaries = [
-            e for e in warning_events if e == "ingestion_progress_upsert_dropped_summary"
-        ]
-        assert len(running_drops) == 1, (
-            f"Expected 1 mid-run drop warning, got {len(running_drops)}"
-        )
+        summaries = [e for e in warning_events if e == "ingestion_progress_upsert_dropped_summary"]
+        assert len(running_drops) == 1, f"Expected 1 mid-run drop warning, got {len(running_drops)}"
         assert len(summaries) == 1
         summary_call = [
-            c for c in mock_logger.warning.call_args_list
+            c
+            for c in mock_logger.warning.call_args_list
             if c.args and c.args[0] == "ingestion_progress_upsert_dropped_summary"
         ][0]
         assert summary_call.kwargs["dropped"] == 5
@@ -550,9 +512,7 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task", MagicMock()
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
             # Must NOT raise — the ingest already committed.
             returned_id = ingestion_task.call_local(
                 CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-comp-fault"
@@ -607,9 +567,7 @@ class TestIngestionTaskFailedShadowGuard:
         from backend.tasks.ingestion_tasks import ingestion_task
 
         with pytest.raises(RuntimeError, match="real ingestion boom"):
-            ingestion_task.call_local(
-                CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-shadow"
-            )
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-shadow")
 
 
 class TestProgressDropErrorsCoverage:
@@ -629,9 +587,7 @@ class TestProgressDropErrorsCoverage:
             psycopg.errors.CannotConnectNow,
         ],
     )
-    def test_transient_subclass_is_caught(
-        self, exc_cls: type[psycopg.Error]
-    ) -> None:
+    def test_transient_subclass_is_caught(self, exc_cls: type[psycopg.Error]) -> None:
         from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
 
         assert issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (
@@ -650,9 +606,7 @@ class TestProgressDropErrorsCoverage:
             psycopg.NotSupportedError,
         ],
     )
-    def test_non_transient_subclass_is_not_caught(
-        self, exc_cls: type[psycopg.Error]
-    ) -> None:
+    def test_non_transient_subclass_is_not_caught(self, exc_cls: type[psycopg.Error]) -> None:
         from backend.tasks.ingestion_tasks import _PROGRESS_DROP_ERRORS
 
         assert not issubclass(exc_cls, _PROGRESS_DROP_ERRORS), (

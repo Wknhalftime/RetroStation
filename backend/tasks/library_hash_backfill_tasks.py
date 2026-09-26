@@ -146,7 +146,9 @@ def run_hash_backfill(
         # every 5 minutes for as long as that row stays unhashable.
         logger.info(
             "hash_backfill_complete",
-            hashed=progress.hashed, changed=progress.changed, unreadable=progress.unreadable,
+            hashed=progress.hashed,
+            changed=progress.changed,
+            unreadable=progress.unreadable,
         )
     commit()
     return progress
@@ -161,7 +163,9 @@ def library_hash_backfill_task() -> None:
     ):
         repos = RepositoryFactory(conn)
         run_hash_backfill(
-            repos.library_files, repos.task_progress, conn.commit,
+            repos.library_files,
+            repos.task_progress,
+            conn.commit,
             BackfillRunConfig(run_id=run_id),
         )
 

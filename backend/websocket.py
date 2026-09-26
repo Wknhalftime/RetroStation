@@ -94,9 +94,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "started_at": row["started_at"].isoformat(),
                         "updated_at": row["updated_at"].isoformat(),
                         "completed_at": (
-                            row["completed_at"].isoformat()
-                            if row.get("completed_at")
-                            else None
+                            row["completed_at"].isoformat() if row.get("completed_at") else None
                         ),
                     }
                 )

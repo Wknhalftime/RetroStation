@@ -27,4 +27,3 @@ class FakeBroadcastStationRepository(BroadcastStationRepository):
 
     def delete(self, station_id: UUID) -> None:
         self._data.pop(station_id, None)
-

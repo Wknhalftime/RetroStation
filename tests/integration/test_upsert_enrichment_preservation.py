@@ -1,4 +1,5 @@
 """Test that upsert preserves enrichment_status when file_hash is unchanged."""
+
 from __future__ import annotations
 
 from uuid import uuid4

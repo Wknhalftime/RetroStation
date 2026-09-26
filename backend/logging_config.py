@@ -13,11 +13,11 @@ import structlog
 # Kept as plain strings to avoid importing domain enums (which pull in psycopg etc.)
 # into every process that calls configure_logging.
 _LEVEL_MAP: dict[str, str] = {
-    "debug":    "DEBUG",
-    "info":     "INFO",
-    "warning":  "WARNING",
-    "warn":     "WARNING",
-    "error":    "ERROR",
+    "debug": "DEBUG",
+    "info": "INFO",
+    "warning": "WARNING",
+    "warn": "WARNING",
+    "error": "ERROR",
     "critical": "ERROR",
 }
 
@@ -92,9 +92,9 @@ class DbLogProcessor:
             conn = self._get_conn()
 
             level_str = _LEVEL_MAP.get(str(event_dict.get("level", "info")).lower(), "INFO")
-            category  = str(event_dict.get("category", "system"))
-            message   = str(event_dict.get("event", ""))
-            details   = {k: v for k, v in event_dict.items() if k not in _RESERVED_KEYS} or None
+            category = str(event_dict.get("category", "system"))
+            message = str(event_dict.get("event", ""))
+            details = {k: v for k, v in event_dict.items() if k not in _RESERVED_KEYS} or None
 
             conn.execute(
                 """INSERT INTO system_logs
@@ -147,7 +147,8 @@ def configure_logging(log_level: str = "INFO", database_url: str | None = None) 
         processors.append(DbLogProcessor(database_url))
 
     processors.append(
-        structlog.dev.ConsoleRenderer() if log_level == "DEBUG"
+        structlog.dev.ConsoleRenderer()
+        if log_level == "DEBUG"
         else structlog.processors.JSONRenderer()
     )
 

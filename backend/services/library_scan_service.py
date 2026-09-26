@@ -38,9 +38,7 @@ logger = structlog.get_logger()
 # Constants
 # ---------------------------------------------------------------------------
 
-SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
-    {".flac", ".mp3", ".m4a", ".ogg", ".wav"}
-)
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".flac", ".mp3", ".m4a", ".ogg", ".wav"})
 
 _EXT_TO_FORMAT: dict[str, str] = {
     ".flac": "flac",
@@ -209,12 +207,8 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
             bitrate=bitrate,
             raw_metadata=_raw_metadata(audio),
             artist_name=artist_name,
-            normalized_artist_name=(
-                normalize_artist(artist_name) if artist_name else None
-            ),
-            normalized_title=(
-                normalize_title(track_title) if track_title else None
-            ),
+            normalized_artist_name=(normalize_artist(artist_name) if artist_name else None),
+            normalized_title=(normalize_title(track_title) if track_title else None),
         ),
     )
 
@@ -263,12 +257,8 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
             bitrate=bitrate,
             raw_metadata=_raw_metadata(audio),
             artist_name=artist_name,
-            normalized_artist_name=(
-                normalize_artist(artist_name) if artist_name else None
-            ),
-            normalized_title=(
-                normalize_title(track_title) if track_title else None
-            ),
+            normalized_artist_name=(normalize_artist(artist_name) if artist_name else None),
+            normalized_title=(normalize_title(track_title) if track_title else None),
         ),
     )
 
@@ -297,6 +287,7 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 # Dispatch table: file extension → extractor function with signature
 # (audio, path, fmt) -> LibraryFile.  Extensions not listed here fall through
@@ -421,8 +412,7 @@ def scan_directory(
         None (a first scan; library_hash_backfill_task hashes later).
     """
     candidates = sorted(
-        p for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     )
     total = len(candidates)
 
@@ -459,9 +449,7 @@ def scan_directory(
             if on_quarantine is not None:
                 on_quarantine(entry)
 
-        if on_progress is not None and (
-            processed_idx % 50 == 0 or processed_idx == total
-        ):
+        if on_progress is not None and (processed_idx % 50 == 0 or processed_idx == total):
             on_progress(processed_idx, total, str(path))
 
     return files, quarantine
@@ -496,7 +484,9 @@ class FolderScanResult:
 
 
 def quarantine_once(
-    quarantine_repo: LibraryQuarantineRepository, file_path_str: str, error: str,
+    quarantine_repo: LibraryQuarantineRepository,
+    file_path_str: str,
+    error: str,
 ) -> None:
     """Quarantine a file unless it already is; every scan that reaches it retries it."""
     if quarantine_repo.get_by_path(file_path_str) is not None:
@@ -615,7 +605,8 @@ def _respelled_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> Librar
     """
     for candidate in file_repo.get_by_path_ignoring_case(lf.file_path):
         if candidate.file_path != lf.file_path and _is_same_file(
-            Path(candidate.file_path), Path(lf.file_path),
+            Path(candidate.file_path),
+            Path(lf.file_path),
         ):
             return candidate
     return None
@@ -632,7 +623,8 @@ def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFil
         return respelled
     for candidate in _move_candidates(lf, file_repo):
         if candidate.file_path != lf.file_path and _is_gone_or_same_file(
-            Path(candidate.file_path), Path(lf.file_path),
+            Path(candidate.file_path),
+            Path(lf.file_path),
         ):
             return candidate
     return None
@@ -653,7 +645,9 @@ def adopt_moved_row(lf: LibraryFile, file_repo: LibraryFileRepository) -> str | 
 
 
 def mark_unseen_missing(
-    root: Path, seen_paths: set[str], file_repo: LibraryFileRepository,
+    root: Path,
+    seen_paths: set[str],
+    file_repo: LibraryFileRepository,
 ) -> int:
     """Mark PRESENT files under *root* that a complete walk did not see as MISSING.
 
@@ -844,8 +838,7 @@ def scan_folder_incrementally(
     result = FolderScanResult()
 
     existing_by_path: dict[str, LibraryFile] = {
-        f.file_path: f
-        for f in file_repo.get_by_folder_path(str(folder_path))
+        f.file_path: f for f in file_repo.get_by_folder_path(str(folder_path))
     }
 
     disk_files = _list_audio_files(folder_path)
@@ -871,11 +864,14 @@ def scan_folder_incrementally(
     # Non-recursive, like the rest of the visit: a child folder's entries
     # are judged when that folder is visited.
     in_folder = {
-        p for p in quarantine_repo.get_paths_under(str(folder_path))
+        p
+        for p in quarantine_repo.get_paths_under(str(folder_path))
         if Path(p).parent == folder_path
     }
     result.quarantine_cleared = clear_resolved_quarantine(
-        in_folder, result.failing_paths, quarantine_repo,
+        in_folder,
+        result.failing_paths,
+        quarantine_repo,
     )
 
     return result

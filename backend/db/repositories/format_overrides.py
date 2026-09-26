@@ -92,6 +92,4 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
         Args:
             override_id: The UUID of the override to remove.
         """
-        self._conn.execute(
-            "DELETE FROM format_overrides WHERE id = %s", (override_id,)
-        )
+        self._conn.execute("DELETE FROM format_overrides WHERE id = %s", (override_id,))

@@ -39,4 +39,3 @@ class FakeUserSettingRepository(UserSettingRepository):
 
     def list_all(self) -> list[UserSetting]:
         return sorted(self._data.values(), key=lambda s: s.key)
-
