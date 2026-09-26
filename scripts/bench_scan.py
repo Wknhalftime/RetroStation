@@ -177,6 +177,25 @@ def instrument(timers: Timers) -> list[str]:
     # The service calls mutagen.File through the module, so patch it there.
     patch(mutagen, "File", "file.mutagen_parse", inner_within)
 
+    # The backfill (absent before the two-phase split; skipped silently then).
+    if importlib.util.find_spec("backend.services.hash_backfill_service") is not None:
+        from backend.services import hash_backfill_service as hbs
+
+        patch(hbs, "_backfill_one", "backfill.file", "phase.backfill")
+        # hash_file is a keyword-only default bound to compute_file_hash at
+        # def time, and cmd_run's import chain (_run_scan -> huey_app ->
+        # library_hash_backfill_tasks -> hash_backfill_service) pulls this
+        # module in before instrument() runs, so it is already holding that
+        # reference: patching library_scan_service.compute_file_hash afterwards
+        # cannot reach it. Only overwriting the default itself does.
+        kwdefaults = hbs.backfill_hash_batch.__kwdefaults__
+        if kwdefaults is not None and "hash_file" in kwdefaults:
+            kwdefaults["hash_file"] = timers.wrap(
+                "backfill.sha256", kwdefaults["hash_file"], "backfill.file"
+            )
+        else:
+            missing.append("hash_backfill_service.backfill_hash_batch.hash_file")
+
     # Folder tree.
     patch(fhs, "compute_folder_hash", "tree.compute_folder_hash", "phase.diff_tree")
     patch(fhs, "_walk_folder_paths", "tree.walk", "phase.diff_tree")
@@ -500,6 +519,11 @@ def cmd_run(args: argparse.Namespace) -> None:
             library_conn.commit()
             phase1 = time.perf_counter() - start
             backfill = None if args.no_drain else _drain_backfill(library_conn)
+            if backfill is not None:
+                # _drain_backfill is timed by hand, not via timers.wrap(), so
+                # record it explicitly — this is what backfill.file/
+                # backfill.sha256 (patched in instrument()) nest within.
+                timers.add("phase.backfill", backfill)
         elapsed = time.perf_counter() - start
     finally:
         library_conn.close()
