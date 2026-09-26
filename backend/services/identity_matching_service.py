@@ -28,7 +28,11 @@ from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
 )
-from backend.services.matching_utils import normalize_title_for_scoring, rule_matches
+from backend.services.matching_utils import (
+    broadcast_title_variants,
+    normalize_title_for_scoring,
+    rule_matches,
+)
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.normalization import normalize_title
 
@@ -97,16 +101,17 @@ def _candidate_canonical_title(f: LibraryFile) -> str:
 
 
 def _score_candidates(
-    broadcast_title: str,
+    broadcast_titles: tuple[str, ...],
     candidates: list[LibraryFile],
     tier: MatchTier,
     strong_match_threshold: int,
 ) -> IdentityMatchResult:
-    """Score candidates against broadcast_title; return best-match result.
+    """Score candidates against the broadcast title; return best-match result.
 
-    Both sides arrive canonical-normalized (broadcast_title is the caller's
-    identity.normalized_title; the candidate side comes from
-    _candidate_canonical_title). The scoring helper only layers
+    broadcast_titles are the identity's broadcast_title_variants (the title
+    with guest credits stripped); each candidate keeps its best score
+    across them. Both sides arrive canonical-normalized (the candidate side
+    comes from _candidate_canonical_title). The scoring helper only layers
     normalize_title_for_scoring on top — that strip is intentionally NOT part
     of normalize_title() (see its docstring), because version-bearing
     parentheticals like "(Live)" are signal in some contexts and noise in
@@ -127,18 +132,19 @@ def _score_candidates(
         # `assert` is stripped under `python -O`; use a real guard so an
         # upstream bug surfaces as a ValueError, not a later IndexError.
         raise ValueError("_score_candidates requires at least one candidate")
-    norm_bc = normalize_title_for_scoring(broadcast_title)
+    norm_bcs = [normalize_title_for_scoring(t) for t in broadcast_titles]
     # Sort by score DESC, then by library_file id ASC so duplicate-score ties
     # are resolved deterministically. Without the tie-breaker, input order
     # (often non-deterministic from SQL) would decide the match.
     scored: list[tuple[float, LibraryFile]] = sorted(
         (
             (
-                float(
-                    token_sort_ratio(
+                max(
+                    float(token_sort_ratio(
                         norm_bc,
                         normalize_title_for_scoring(_candidate_canonical_title(f)),
-                    )
+                    ))
+                    for norm_bc in norm_bcs
                 ),
                 f,
             )
@@ -346,7 +352,7 @@ class ResolvedArtistMbidStrategy:
             )
             if candidate_files:
                 local_result = _score_candidates(
-                    identity.normalized_title,
+                    broadcast_title_variants(identity.original_title),
                     candidate_files,
                     tier=MatchTier.MUSICBRAINZ_ID_EXACT,
                     strong_match_threshold=self._strong_match_threshold,
@@ -389,7 +395,7 @@ class ResolvedArtistMbidStrategy:
         )
         if name_candidates:
             return _score_candidates(
-                identity.normalized_title,
+                broadcast_title_variants(identity.original_title),
                 name_candidates,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 strong_match_threshold=self._strong_match_threshold,
@@ -420,9 +426,8 @@ class ResolvedArtistMbidStrategy:
         no MB recording maps to any local file (or all candidates are filtered
         out by the locked-artist guard).
         """
-        recordings = self._mb_client.search_recording(
-            artist_mbid=mbid, title=identity.normalized_title
-        )
+        titles = broadcast_title_variants(identity.original_title)
+        recordings = self._mb_client.search_recording(artist_mbid=mbid, title=titles[0])
         # Collect ALL local files across recordings before scoring.
         # Deduplicate by library-file id since the same file can legitimately
         # appear under multiple recording MBIDs (e.g., merged recordings).
@@ -444,7 +449,7 @@ class ResolvedArtistMbidStrategy:
         if not filtered:
             return None
         return _score_candidates(
-            identity.normalized_title,
+            titles,
             filtered,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             strong_match_threshold=self._strong_match_threshold,
@@ -500,7 +505,7 @@ class BroadcastToLocalStrategy:
                 ),
             )
         return _score_candidates(
-            identity.normalized_title,
+            broadcast_title_variants(identity.original_title),
             candidate_files,
             tier=MatchTier.LOCAL_FILE_FUZZY,
             strong_match_threshold=self._strong_match_threshold,

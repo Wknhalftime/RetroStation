@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from backend.services.normalization import normalize_title
+
 
 def rule_matches(source_pattern: str, normalized_value: str) -> bool:
     """Check if a global mapping rule's source_pattern matches the normalized value.
@@ -35,6 +37,37 @@ _STRIP_FEAT = re.compile(
     r"\s*[\(\[]?(?:feat(?:uring)?|ft)\.?\s+[^\)\]]+[\)\]]?",
     re.IGNORECASE,
 )
+
+
+# Broadcast logs credit guests in shorthand after the title: "Smooth f/Rob
+# Thomas", "The First Noel w/Faith Hill". normalize_title turns the slash
+# into a space, after which "f rob thomas" can't be told from title words,
+# so the credit comes off the raw title. f/ always means featuring.
+_F_CREDIT = re.compile(
+    r"\s*[\(\[]?\s*(?<![a-z0-9])f/\s*[^\)\]]+[\)\]]?\s*$", re.IGNORECASE,
+)
+# w/ is also "with" inside a title ("Killing Me Softly W/His Song"), and
+# w/o and w/out mean "without".
+_W_CREDIT = re.compile(
+    r"\s*[\(\[]?\s*(?<![a-z0-9])w/(?!o\b|out\b)\s*[^\)\]]+[\)\]]?\s*$", re.IGNORECASE,
+)
+
+
+def broadcast_title_variants(original_title: str) -> tuple[str, ...]:
+    """Normalized forms of a raw broadcast title to score library titles against.
+
+    The first has any f/ credit stripped; it is also the form to search
+    MusicBrainz with. When the title ends in a w/ credit, a second form
+    strips that too. w/ is as often part of the title itself, so callers
+    keep whichever form scores better. A title that is nothing but a
+    credit is kept whole.
+    """
+    primary = _F_CREDIT.sub("", original_title) or original_title
+    forms = [normalize_title(primary)]
+    without_with = _W_CREDIT.sub("", primary)
+    if without_with and without_with != primary:
+        forms.append(normalize_title(without_with))
+    return tuple(forms)
 
 
 def normalize_title_for_scoring(title: str) -> str:
