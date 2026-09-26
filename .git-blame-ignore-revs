@@ -4,3 +4,6 @@
 
 # style: apply ruff format to the whole repo
 ffdefef6b048352004901db1900da1d38b6826dd
+
+# style: apply ruff format to code merged from master (#83)
+5284ea0ba3f98420d2f942098c9b0e52b4133ec9
