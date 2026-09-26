@@ -205,3 +205,33 @@ def test_lookup_malformed_mbid_raises_bad_request(
         _LOOKUPS[entity](client, "not-a-uuid")
 
     assert exc_info.value.response.status_code == 400
+
+
+# --- search_recordings_by_mbids ------------------------------------------------
+
+# "Late Bloom" (Amy Ray) — on the 2001 release "Stag".
+LATE_BLOOM_RECORDING_MBID = "001f323a-7361-4b74-a3df-8cc0f87551e7"
+STAG_RELEASE_MBID = "a8718a01-aacd-44f7-aaf8-68e04d0b2eb7"
+# A recording MBID MusicBrainz has merged away: a direct lookup answers 301.
+MERGED_RECORDING_MBID = "01ec25c7-5684-44e5-8fed-5c48217c3baf"
+
+
+def test_search_recordings_by_mbids_carries_enrichment_fields(
+    client: MusicBrainzApiClient,
+) -> None:
+    found = client.search_recordings_by_mbids([
+        ENTER_SANDMAN_RECORDING_MBID, LATE_BLOOM_RECORDING_MBID, MERGED_RECORDING_MBID,
+    ])
+
+    # Merged MBIDs are not in the search index; the caller falls back for them.
+    assert set(found) == {ENTER_SANDMAN_RECORDING_MBID, LATE_BLOOM_RECORDING_MBID}
+    late_bloom = found[LATE_BLOOM_RECORDING_MBID]
+    assert late_bloom["title"] == "Late Bloom"
+    assert isinstance(late_bloom["length"], int)
+    assert _extract_artist_from_credits(late_bloom["artist-credit"]) == (
+        "511c533d-d5f5-4b00-8bc8-b45344fca524", "Amy Ray", "Ray, Amy",
+    )
+    assert STAG_RELEASE_MBID in {r["id"] for r in late_bloom["releases"]}
+    # Search results carry no relations: works still need lookup_recording.
+    assert "relations" not in late_bloom
+    assert client.live_fetches == 1
