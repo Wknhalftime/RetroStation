@@ -12,12 +12,22 @@ good ones, are left alone.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import PureWindowsPath
 from uuid import UUID
 
 from backend.domain.enums import FileStatus
-from backend.domain.library import LibraryFile, MissingFileMove, MissingFilePlan
+from backend.domain.library import (
+    LibraryFile,
+    MissingFileMove,
+    MissingFilePlan,
+    MissingFileReconciliation,
+)
 from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.matches import MatchRepository
+from backend.repositories.song_masters import SongMasterRepository
+from backend.repositories.works import WorkRepository
+from backend.services.master_selection_service import reselect_master_from_files
 
 # A remaster or an edit on the same release differs by more than this.
 MAX_DURATION_DIFF_MS = 2_000
@@ -148,3 +158,50 @@ def plan_missing_file_moves(
             )
         )
     return MissingFilePlan(tuple(moves), tuple(ambiguous), tuple(unmatched))
+
+
+@dataclass(frozen=True)
+class ReconciliationRepos:
+    """The repositories a fold writes through."""
+
+    files: LibraryFileRepository
+    matches: MatchRepository
+    works: WorkRepository
+    song_masters: SongMasterRepository
+
+
+def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> None:
+    """Move every reference to the missing row onto its successor, then delete it.
+
+    When the successor sits in another work, the moved matches take that
+    work, and the work the missing row left re-picks its master from its
+    own present files and is deleted once nothing references it.
+    """
+    repos.files.merge_into(move.missing_id, move.successor_id)
+    if not move.crosses_work:
+        return
+    repos.matches.move_to_work(move.successor_id, move.successor_work_id)
+    if move.missing_work_id is None:
+        return
+    reselect_master_from_files(move.missing_work_id, repos.song_masters, repos.files)
+    repos.works.delete_if_empty(move.missing_work_id)
+
+
+def plan_for_library(file_repo: LibraryFileRepository) -> MissingFilePlan:
+    """Plan reconciliation for every missing row in the library."""
+    return plan_missing_file_moves(
+        file_repo.get_missing(),
+        lambda m: successor_candidates(m, file_repo),
+    )
+
+
+def reconcile_missing_files(repos: ReconciliationRepos) -> MissingFileReconciliation:
+    """Fold every missing row that has a successor into it. The caller commits."""
+    plan = plan_for_library(repos.files)
+    for move in plan.moves:
+        apply_missing_file_move(move, repos)
+    return MissingFileReconciliation(
+        reconciled=len(plan.moves),
+        ambiguous=len(plan.ambiguous),
+        unmatched=len(plan.unmatched),
+    )
