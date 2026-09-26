@@ -81,3 +81,40 @@ def test_get_unhashed_by_stat_matches_only_unhashed_rows_with_equal_stat(
         got = [f.file_path for f in repo.get_unhashed_by_stat(10, 5)]
 
     assert got == ["/m/a.flac", "/m/c.flac"]
+
+
+def test_get_unhashed_after_pages_present_unhashed_rows_in_path_order(
+    migrated_db: str,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        for name in ("c", "a", "b", "d"):
+            repo.upsert(_unhashed(f"/m/{name}.flac"))
+        repo.mark_missing("/m/d.flac")
+        hashed = _unhashed("/m/e.flac")
+        hashed.file_hash = "h" * 64
+        repo.upsert(hashed)
+
+        first = [f.file_path for f in repo.get_unhashed_after(None, 2)]
+        rest = [f.file_path for f in repo.get_unhashed_after("/m/b.flac", 2)]
+        count = repo.count_unhashed()
+
+    assert first == ["/m/a.flac", "/m/b.flac"]
+    assert rest == ["/m/c.flac"]
+    assert count == 3
+
+
+def test_set_file_hash_writes_only_over_an_unchanged_unhashed_row(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+        row = _unhashed("/m/a.flac", size=100, mtime_ns=1_000)
+        repo.upsert(row)
+
+        stale_stat = repo.set_file_hash(row.id, "x" * 64, 100, 2_000)
+        written = repo.set_file_hash(row.id, "h" * 64, 100, 1_000)
+        again = repo.set_file_hash(row.id, "y" * 64, 100, 1_000)
+        got = repo.get_by_path("/m/a.flac")
+
+    assert (stale_stat, written, again) == (False, True, False)
+    assert got is not None
+    assert got.file_hash == "h" * 64

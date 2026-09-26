@@ -68,7 +68,8 @@ _VORBIS_RELEASE_MBID = "musicbrainz_albumid"
 # ---------------------------------------------------------------------------
 
 
-def _compute_file_hash(path: Path) -> str:
+def compute_file_hash(path: Path) -> str:
+    """SHA-256 of *path*'s whole content, as lowercase hex."""
     h = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(65536), b""):
@@ -188,7 +189,7 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=compute_file_hash(path),
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -242,7 +243,7 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=compute_file_hash(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -281,7 +282,7 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=compute_file_hash(path),
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -361,7 +362,7 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=_compute_file_hash(path),
+        file_hash=compute_file_hash(path),
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -651,7 +652,7 @@ def _content_unchanged(existing: LibraryFile, path: Path) -> bool:
     """
     if existing.file_hash is None:
         return _stat_matches(existing, _disk_stat(path)) is True
-    return _compute_file_hash(path) == existing.file_hash
+    return compute_file_hash(path) == existing.file_hash
 
 
 def _restore_reappeared_file(
@@ -731,7 +732,7 @@ def _reconcile_present_file(
     # Legacy row. Only a file touched after we last read it can differ.
     if _modified_since_indexed(existing, disk):
         try:
-            current_hash = _compute_file_hash(path)
+            current_hash = compute_file_hash(path)
         except OSError as exc:
             logger.warning("hash_failed", path=str(path), error=str(exc))
             result.record_failure(str(path))

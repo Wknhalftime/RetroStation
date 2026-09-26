@@ -59,7 +59,7 @@ def _fresh_extract(path: Path, file_hash: str = "new_hash") -> LibraryFile:
     )
 
 
-_HASH = "backend.services.library_scan_service._compute_file_hash"
+_HASH = "backend.services.library_scan_service.compute_file_hash"
 _EXTRACT = "backend.services.library_scan_service.extract_tags"
 
 

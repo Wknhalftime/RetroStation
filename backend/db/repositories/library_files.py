@@ -359,6 +359,44 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
+    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        if after_path is None:
+            rows = self._conn.execute(
+                """SELECT * FROM library_files
+                   WHERE file_hash IS NULL AND file_status = %s
+                   ORDER BY file_path
+                   LIMIT %s""",
+                (FileStatus.PRESENT, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT * FROM library_files
+                   WHERE file_hash IS NULL AND file_status = %s AND file_path > %s
+                   ORDER BY file_path
+                   LIMIT %s""",
+                (FileStatus.PRESENT, after_path, limit),
+            ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def set_file_hash(
+        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+    ) -> bool:
+        result = self._conn.execute(
+            """UPDATE library_files SET file_hash = %s
+               WHERE id = %s AND file_hash IS NULL
+                 AND file_size = %s AND file_mtime_ns = %s""",
+            (file_hash, str(file_id), file_size, file_mtime_ns),
+        )
+        return result.rowcount == 1
+
+    def count_unhashed(self) -> int:
+        row = self._conn.execute(
+            """SELECT COUNT(*) AS n FROM library_files
+               WHERE file_hash IS NULL AND file_status = %s""",
+            (FileStatus.PRESENT,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.
 

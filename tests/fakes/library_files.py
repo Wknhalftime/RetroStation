@@ -185,6 +185,37 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             key=lambda f: f.file_path,
         )
 
+    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        rows = sorted(
+            (
+                f for f in self._data.values()
+                if f.file_hash is None
+                and f.file_status == FileStatus.PRESENT
+                and (after_path is None or f.file_path > after_path)
+            ),
+            key=lambda f: f.file_path,
+        )
+        return rows[:limit]
+
+    def set_file_hash(
+        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+    ) -> bool:
+        f = self._data.get(file_id)
+        if (
+            f is None
+            or f.file_hash is not None
+            or (f.file_size, f.file_mtime_ns) != (file_size, file_mtime_ns)
+        ):
+            return False
+        self._data[file_id] = dataclasses.replace(f, file_hash=file_hash)
+        return True
+
+    def count_unhashed(self) -> int:
+        return sum(
+            1 for f in self._data.values()
+            if f.file_hash is None and f.file_status == FileStatus.PRESENT
+        )
+
     def reset_failed_enrichments(self) -> int:
         count = 0
         for f in self._data.values():

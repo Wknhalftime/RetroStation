@@ -110,3 +110,25 @@ class LibraryFileRepository(ABC):
         """
         ...
 
+    @abstractmethod
+    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        """PRESENT rows with no content hash, in file_path order, after *after_path*."""
+        ...
+
+    @abstractmethod
+    def set_file_hash(
+        self, file_id: UUID, file_hash: str, file_size: int, file_mtime_ns: int,
+    ) -> bool:
+        """Record a deferred content hash; True if it was recorded.
+
+        Writes only while the row is still unhashed and its stored size and
+        mtime equal the ones the hash was read under, so a row rescanned or
+        changed in the meantime keeps its own data.
+        """
+        ...
+
+    @abstractmethod
+    def count_unhashed(self) -> int:
+        """PRESENT rows still waiting for a content hash."""
+        ...
+
