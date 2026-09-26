@@ -448,9 +448,10 @@ describe("TitlePanel sectioning + sorting", () => {
   it("sorts Needs Review by triage_bucket priority then confidence DESC", () => {
     const identities = [
       makeIdentityWithId("01", {
-        original_title: "Blocked-low",
+        original_title: "Blocked-unmatched",
         triage_bucket: "blocked",
-        confidence_score: 30,
+        reason_code: "USER_UNMATCHED",
+        confidence_score: null,
       }),
       makeIdentityWithId("02", {
         original_title: "Quick-92",
@@ -480,7 +481,7 @@ describe("TitlePanel sectioning + sorting", () => {
     );
     // jsdom doesn't lay out, so we assert DOM source order via
     // compareDocumentPosition: each subsequent title must follow the previous.
-    const expectedOrder = ["Quick-92", "Quick-70", "Attention-60", "Blocked-low", "Pending-row"];
+    const expectedOrder = ["Quick-92", "Quick-70", "Attention-60", "Blocked-unmatched", "Pending-row"];
     const nodes = expectedOrder.map((t) => screen.getByText(t));
     for (let i = 1; i < nodes.length; i++) {
       const rel = nodes[i - 1].compareDocumentPosition(nodes[i]);
@@ -597,5 +598,102 @@ describe("TitlePanel Unmatch action", () => {
 
     const button = screen.getByRole("button", { name: /Unmatch While pending/i });
     expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("TitlePanel unlikely matches", () => {
+  function kittie(): QueueIdentity[] {
+    return [
+      makeIdentityWithId("01", {
+        original_title: "Charlotte",
+        triage_bucket: "quick_review",
+        confidence_score: 70,
+      }),
+      makeIdentityWithId("02", {
+        original_title: "We Are Shadows",
+        triage_bucket: "blocked",
+        confidence_score: 27.27,
+        reason_code: "LOW_CONFIDENCE",
+      }),
+      makeIdentityWithId("03", {
+        original_title: "Run Like Hell",
+        triage_bucket: "blocked",
+        confidence_score: 11.8,
+        reason_code: "LOW_CONFIDENCE",
+      }),
+      makeIdentityWithId("04", { original_title: "Brackish", match_status: "auto_matched" }),
+    ];
+  }
+
+  it("collapses needs_review items with no likely match below the review list", () => {
+    render(
+      <TitlePanel artist={makeArtist(kittie())} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByRole("heading", { name: /Needs Review \(1\)/i })).toBeDefined();
+    const toggle = screen.getByRole("button", { name: /No likely match \(2\)/i });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("We Are Shadows")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("We Are Shadows")).toBeDefined();
+    expect(screen.getByText("Run Like Hell")).toBeDefined();
+  });
+
+  it("opens the section when the artist has nothing likely to review", () => {
+    const onlyUnlikely = kittie().filter((i) => i.triage_bucket === "blocked");
+    render(
+      <TitlePanel artist={makeArtist(onlyUnlikely)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByText(/No likely matches for this artist/i)).toBeDefined();
+    expect(screen.queryByText(/Nothing left to review/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /No likely match \(2\)/i }).getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(screen.getByText("We Are Shadows")).toBeDefined();
+  });
+
+  it("labels a sub-floor guess as likely not in the library, with its score", () => {
+    const onlyUnlikely = kittie().filter((i) => i.original_title === "We Are Shadows");
+    render(
+      <TitlePanel artist={makeArtist(onlyUnlikely)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByText("Likely not in library · 27%")).toBeDefined();
+  });
+
+  it("labels an artist-level miss as not in the library", () => {
+    const identities = [
+      makeIdentity({
+        original_title: "Spit",
+        triage_bucket: "blocked",
+        confidence_score: null,
+        reason_code: "NO_CANDIDATES",
+      }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByText("Not in library")).toBeDefined();
+  });
+
+  it("keeps a curator-unmatched title in Needs Review", () => {
+    const identities = [
+      makeIdentity({
+        original_title: "Paperdoll",
+        triage_bucket: "blocked",
+        confidence_score: null,
+        reason_code: "USER_UNMATCHED",
+      }),
+    ];
+    render(
+      <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    expect(screen.getByRole("heading", { name: /Needs Review \(1\)/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /No likely match/i })).toBeNull();
   });
 });

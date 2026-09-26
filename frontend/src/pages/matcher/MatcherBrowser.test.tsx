@@ -416,3 +416,60 @@ describe("MatcherBrowser — pagination", () => {
     expect(screen.getByText(/Page 2 of 2/)).toBeDefined();
   });
 });
+
+describe("MatcherBrowser — artists with no likely match", () => {
+  function queueUrls(): string[] {
+    return mockedApiFetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((u) => u.includes("/api/v1/matching/queue"));
+  }
+
+  it("asks the queue to leave unlikely artists out by default", async () => {
+    mockedApiFetch.mockResolvedValue({ items: [], total: 0, unlikely_total: 0 });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await waitFor(() => expect(queueUrls().length).toBeGreaterThan(0));
+    expect(queueUrls()[0]).toContain("include_unlikely=false");
+  });
+
+  it("says how many artists it is hiding and shows them when ticked", async () => {
+    mockedApiFetch.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("include_unlikely=true")) {
+        return {
+          items: [
+            makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha"),
+            makeArtist("00000000-0000-0000-0000-00000000000b", "Kittie"),
+          ],
+          total: 2,
+          unlikely_total: 1,
+        };
+      }
+      return {
+        items: [makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha")],
+        total: 1,
+        unlikely_total: 1,
+      };
+    });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: /Show 1 artist with no likely match/i,
+    });
+    expect((checkbox as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByText("Kittie")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
+    await waitFor(() => expect(screen.getByText("Kittie")).toBeDefined());
+    expect(queueUrls().some((u) => u.includes("include_unlikely=true"))).toBe(true);
+  });
+
+  it("keeps the toggle reachable when every remaining artist is unlikely", async () => {
+    mockedApiFetch.mockResolvedValue({ items: [], total: 0, unlikely_total: 4264 });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await screen.findByRole("checkbox", { name: /Show 4,264 artists with no likely match/i });
+    expect(screen.queryByText(/Queue is empty/i)).toBeNull();
+    expect(screen.getByText(/No likely matches left to review/i)).toBeDefined();
+  });
+});

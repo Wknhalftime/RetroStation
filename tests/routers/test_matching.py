@@ -2307,6 +2307,142 @@ class TestProposedMatch:
         assert rows[0]["match_tier"] == "manual"
         assert rows[0]["confidence_score"] == pytest.approx(1.0, abs=1e-6)
 
+    def test_none_below_presentation_score(self, client, db_conn):
+        """A best guess under MIN_PRESENTATION_SCORE is not a proposal: an
+        artist with two files gets one of them offered for every unknown
+        title ("We Are Shadows" → Brackish at 27%). The score still shows."""
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        lib_file = _insert_library_file(db_conn, track_title="Brackish")
+        _insert_match_row(
+            db_conn,
+            identity,
+            confidence_score=MIN_PRESENTATION_SCORE - 23,
+            library_file_id=lib_file.id,
+        )
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        qi = resp.json()["items"][0]["identities"][0]
+        assert qi["proposed_match"] is None
+        assert qi["confidence_score"] == pytest.approx(MIN_PRESENTATION_SCORE - 23, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# TestUnlikelyArtists — include_unlikely hides artists with no likely match
+# ---------------------------------------------------------------------------
+
+
+def _set_reason_code(
+    conn: psycopg.Connection, table: str, row_id: UUID, reason_code: str,
+) -> None:
+    # table is a test-controlled literal, never user input.
+    conn.execute(
+        f"UPDATE {table} SET match_status = 'needs_review', reason_code = %s WHERE id = %s",
+        (reason_code, row_id),
+    )
+    conn.commit()
+
+
+class TestUnlikelyArtists:
+    """An artist is "unlikely" when none of its review items has a guess at
+    MIN_PRESENTATION_SCORE or above and nothing was unmatched by the curator.
+    include_unlikely=false leaves them out; unlikely_total always counts them
+    so the UI can say how many are hidden."""
+
+    def _seed_scored(
+        self, db_conn: psycopg.Connection, name: str, score: float | None,
+    ) -> tuple[BroadcastArtist, BroadcastTrackIdentity]:
+        artist = _insert_artist(db_conn, original_name=name)
+        identity = _insert_identity(db_conn, artist, match_status=MatchStatus.NEEDS_REVIEW)
+        if score is not None:
+            _insert_match_row(db_conn, identity, confidence_score=score)
+        return artist, identity
+
+    def test_default_includes_unlikely_and_counts_them(self, client, db_conn):
+        self._seed_scored(db_conn, "Likely", 55.0)
+        self._seed_scored(db_conn, "Low Guess", 30.0)
+        self._seed_scored(db_conn, "No Guess", None)
+
+        resp = client.get("/api/v1/matching/queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert data["unlikely_total"] == 2
+
+    def test_exclude_hides_artists_without_a_likely_match(self, client, db_conn):
+        likely, _ = self._seed_scored(db_conn, "Likely", 55.0)
+        self._seed_scored(db_conn, "Low Guess", 30.0)
+        self._seed_scored(db_conn, "No Guess", None)
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [i["id"] for i in data["items"]] == [str(likely.id)]
+        assert data["total"] == 1
+        assert data["unlikely_total"] == 2
+
+    def test_score_at_presentation_floor_is_likely(self, client, db_conn):
+        artist, _ = self._seed_scored(db_conn, "Edge", float(MIN_PRESENTATION_SCORE))
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
+        assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
+
+    def test_resolved_sibling_does_not_make_artist_likely(self, client, db_conn):
+        """The Kittie case: Brackish auto-matched at 87, every other title is
+        a sub-50 guess at Brackish. Only review items decide visibility."""
+        artist = _insert_artist(
+            db_conn, original_name="Kittie", match_status=MatchStatus.AUTO_MATCHED,
+        )
+        matched = _insert_identity(
+            db_conn, artist, "Brackish", match_status=MatchStatus.AUTO_MATCHED,
+        )
+        _insert_match_row(db_conn, matched, confidence_score=87.5)
+        review = _insert_identity(
+            db_conn, artist, "We Are Shadows", match_status=MatchStatus.NEEDS_REVIEW,
+        )
+        _insert_match_row(db_conn, review, confidence_score=27.0)
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+        assert data["unlikely_total"] == 1
+
+    def test_user_unmatched_identity_stays_visible(self, client, db_conn):
+        """Unmatch deletes the match rows, so the score is gone; the artist
+        must not vanish from under the curator who just clicked Unmatch."""
+        artist, identity = self._seed_scored(db_conn, "Unmatched Song", None)
+        _set_reason_code(db_conn, "track_identities", identity.id, "USER_UNMATCHED")
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
+        assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
+
+    def test_user_unmatched_artist_stays_visible(self, client, db_conn):
+        artist, _ = self._seed_scored(db_conn, "Unmatched Artist", None)
+        _set_reason_code(db_conn, "broadcast_artists", artist.id, "USER_UNMATCHED")
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
+        assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
+
+    def test_empty_page_still_reports_counts(self, client, db_conn):
+        self._seed_scored(db_conn, "Likely", 55.0)
+        self._seed_scored(db_conn, "Low Guess", 30.0)
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false&offset=10")
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 1
+        assert data["unlikely_total"] == 1
+
+    def test_search_narrows_unlikely_total(self, client, db_conn):
+        self._seed_scored(db_conn, "Kittie", 20.0)
+        self._seed_scored(db_conn, "Dave Navarro", 15.0)
+
+        resp = client.get("/api/v1/matching/queue?include_unlikely=false&search=kitt")
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["unlikely_total"] == 1
+
 
 # ---------------------------------------------------------------------------
 # TestSearchMbArtists  (unit — FakeMbClient injected via dependency_overrides)
