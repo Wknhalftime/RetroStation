@@ -31,7 +31,10 @@ def library(tmp_path: Path) -> Path:
     root = tmp_path / "lib"
     for i in range(130):
         src = _SOURCES[4] if i % 10 == 3 else _SOURCES[i % 4]
-        folder = root / f"artist{i % 7}" / f"album{i % 3}"
+        # One capitalised artist: str order puts "Artist1" before "artist0",
+        # Path order on Windows does not, so the test pins the real ordering.
+        artist = f"Artist{i % 7}" if i % 7 == 1 else f"artist{i % 7}"
+        folder = root / artist / f"album{i % 3}"
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copy(AUDIO_DIR / src, folder / f"{i:03d}{Path(src).suffix}")
     (root / "artist0" / "cover.jpg").write_bytes(b"\xff\xd8\xff")
@@ -48,23 +51,23 @@ def _file_event(lf: LibraryFile) -> Event:
     )
 
 
-def _record(root: Path, **kwargs: object) -> tuple[list[Event], list[LibraryFile],
-                                                   list[LibraryQuarantine]]:
+def _record(root: Path) -> tuple[list[Event], list[LibraryFile], list[LibraryQuarantine]]:
     events: list[Event] = []
     files, quarantine = scan_directory(
         root,
         on_file=lambda lf: events.append(_file_event(lf)),
         on_quarantine=lambda q: events.append(("quarantine", q.file_path, q.error_message)),
         on_progress=lambda done, total, path: events.append(("progress", done, total, path)),
-        **kwargs,  # type: ignore[arg-type]
     )
     return events, files, quarantine
 
 
 class TestScanDirectoryOrder:
-    def test_callbacks_follow_sorted_path_order(self, library: Path) -> None:
+    def test_callbacks_follow_path_sort_order(self, library: Path) -> None:
+        # scan_directory sorts Path objects, whose ordering is per component
+        # and (on Windows) case-folded, so pin that rather than str order.
         events, _, _ = _record(library)
-        paths = [e[1] for e in events if e[0] in ("file", "quarantine")]
+        paths = [Path(str(e[1])) for e in events if e[0] in ("file", "quarantine")]
         assert paths == sorted(paths)
         assert len(paths) == 130
 

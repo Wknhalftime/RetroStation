@@ -46,9 +46,10 @@ from psycopg import sql as pg_sql
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-DEFAULT_ADMIN_DSN = "postgresql://retrostation:retrostation-dev@localhost:5432/postgres"
+from backend.config import get_settings  # noqa: E402
+from backend.services.library_scan_service import SUPPORTED_EXTENSIONS  # noqa: E402
+
 DEFAULT_BENCH_DB = "retrostation_bench"
-AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".wav"}
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,11 @@ AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".wav"}
 class Timers:
     """Thread-safe accumulating wall-clock timers keyed by name.
 
+    Timers nest: a row's ``within`` names the enclosing timer whose time
+    already includes it (``file.sha256`` runs inside ``file.extract_tags``,
+    which runs inside ``phase.scan_directory``). Only rows with the same
+    ``within`` are disjoint, so sum siblings, never the whole report.
+
     Time in a worker thread is summed per call, so a timer wrapped around
     parallel work can exceed the elapsed wall time; that is reported as-is.
     """
@@ -67,13 +73,18 @@ class Timers:
         self._lock = threading.Lock()
         self.seconds: dict[str, float] = defaultdict(float)
         self.calls: dict[str, int] = defaultdict(int)
+        self.within: dict[str, str | None] = {}
 
     def add(self, name: str, elapsed: float) -> None:
         with self._lock:
             self.seconds[name] += elapsed
             self.calls[name] += 1
 
-    def wrap(self, name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+    def wrap(
+        self, name: str, fn: Callable[..., Any], within: str | None = None,
+    ) -> Callable[..., Any]:
+        self.within[name] = within
+
         @functools.wraps(fn)
         def timed(*args: Any, **kwargs: Any) -> Any:
             start = time.perf_counter()
@@ -84,81 +95,82 @@ class Timers:
 
         return timed
 
-    def report(self) -> dict[str, dict[str, float]]:
+    def report(self) -> dict[str, dict[str, Any]]:
         return {
-            k: {"seconds": round(v, 3), "calls": self.calls[k]}
+            k: {"seconds": round(v, 3), "calls": self.calls[k], "within": self.within.get(k)}
             for k, v in sorted(self.seconds.items(), key=lambda kv: -kv[1])
         }
 
 
-def _patch(timers: Timers, owner: Any, attr: str, name: str) -> None:
-    """Wrap ``owner.attr`` in a timer if it exists (scanner versions differ)."""
+def _patch(
+    timers: Timers, owner: Any, attr: str, name: str, within: str | None = None,
+) -> bool:
+    """Wrap ``owner.attr`` in a timer. Returns False if the name is missing.
+
+    Scanner versions differ, so a missing hot spot is tolerated here; the
+    caller reports it so a renamed function does not silently vanish from
+    the timings and get read as "now costs nothing".
+    """
     fn = getattr(owner, attr, None)
-    if fn is not None and callable(fn):
-        setattr(owner, attr, timers.wrap(name, fn))
+    if fn is None or not callable(fn):
+        return False
+    setattr(owner, attr, timers.wrap(name, fn, within))
+    return True
 
 
-def instrument(timers: Timers) -> None:
-    """Wrap the scan's phases and hot spots. Tolerates missing names."""
+def instrument(timers: Timers) -> list[str]:
+    """Wrap the scan's phases and hot spots. Returns the names it could not find."""
     import mutagen
 
+    from backend.db.repositories import artists as pg_artists
     from backend.db.repositories import library_files as pg_files
     from backend.db.repositories import library_folders as pg_folders
     from backend.db.repositories import library_quarantine as pg_quar
+    from backend.db.repositories import recordings as pg_recordings
+    from backend.db.repositories import song_masters as pg_masters
+    from backend.db.repositories import works as pg_works
     from backend.services import folder_hash_service as fhs
     from backend.services import grouping_service as gs
     from backend.services import library_scan_service as lss
     from backend.tasks import library_scan_tasks as lst
 
-    # Top-level phases, as seen from the task module.
+    missing: list[str] = []
+
+    def patch(owner: Any, attr: str, name: str, within: str | None = None) -> None:
+        if not _patch(timers, owner, attr, name, within):
+            missing.append(f"{owner.__name__}.{attr}")
+
+    # Top-level phases, as seen from the task module. Disjoint with each other.
     for attr in (
         "scan_directory", "mark_unseen_missing", "clear_resolved_quarantine",
         "diff_tree", "assign_work",
     ):
-        _patch(timers, lst, attr, f"phase.{attr}")
+        patch(lst, attr, f"phase.{attr}")
 
     # Per-file extraction work (summed over worker threads if parallel).
-    _patch(timers, lss, "extract_tags", "file.extract_tags")
-    _patch(timers, lss, "_compute_file_hash", "file.sha256")
-    _patch(timers, lss, "_disk_stat", "file.stat")
+    patch(lss, "extract_tags", "file.extract_tags", "phase.scan_directory")
+    patch(lss, "_compute_file_hash", "file.sha256", "file.extract_tags")
+    patch(lss, "_disk_stat", "file.stat", "file.extract_tags")
     # The service calls mutagen.File through the module, so patch it there.
-    _patch(timers, mutagen, "File", "file.mutagen_parse")
+    patch(mutagen, "File", "file.mutagen_parse", "file.extract_tags")
 
     # Folder tree.
-    _patch(timers, fhs, "compute_folder_hash", "tree.compute_folder_hash")
-    _patch(timers, fhs, "_walk_folder_paths", "tree.walk")
+    patch(fhs, "compute_folder_hash", "tree.compute_folder_hash", "phase.diff_tree")
+    patch(fhs, "_walk_folder_paths", "tree.walk", "phase.diff_tree")
 
     # Grouping internals.
     for attr in (
         "_try_hash_shortcut", "_try_mbid_shortcut", "_fuzzy_match_work",
         "_create_local_work",
     ):
-        _patch(timers, gs, attr, f"group.{attr}")
+        patch(gs, attr, f"group.{attr}", "phase.assign_work")
 
-    # Database round trips, by repository method.
+    # Database round trips, by repository method. Each runs inside whichever
+    # phase (or grouping step) called it, so they are not disjoint with those.
     for cls, prefix in (
         (pg_files.PgLibraryFileRepository, "db.files"),
         (pg_folders.PgLibraryFolderRepository, "db.folders"),
         (pg_quar.PgLibraryQuarantineRepository, "db.quarantine"),
-    ):
-        for attr, value in list(vars(cls).items()):
-            if callable(value) and not attr.startswith("_"):
-                setattr(cls, attr, timers.wrap(f"{prefix}.{attr}", value))
-
-    from backend.db.repositories import (
-        artists as pg_artists,
-    )
-    from backend.db.repositories import (
-        recordings as pg_recordings,
-    )
-    from backend.db.repositories import (
-        song_masters as pg_masters,
-    )
-    from backend.db.repositories import (
-        works as pg_works,
-    )
-
-    for cls, prefix in (
         (pg_artists.PgArtistRepository, "db.artists"),
         (pg_works.PgWorkRepository, "db.works"),
         (pg_recordings.PgRecordingRepository, "db.recordings"),
@@ -166,7 +178,9 @@ def instrument(timers: Timers) -> None:
     ):
         for attr, value in list(vars(cls).items()):
             if callable(value) and not attr.startswith("_"):
-                setattr(cls, attr, timers.wrap(f"{prefix}.{attr}", value))
+                setattr(cls, attr, timers.wrap(f"{prefix}.{attr}", value, "phase.*"))
+
+    return missing
 
 
 # ---------------------------------------------------------------------------
@@ -174,10 +188,16 @@ def instrument(timers: Timers) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _bench_dsn(admin_dsn: str, dbname: str) -> str:
-    params = psycopg.conninfo.conninfo_to_dict(admin_dsn)
+def _with_dbname(dsn: str, dbname: str) -> str:
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
     params["dbname"] = dbname
     return psycopg.conninfo.make_conninfo(**params)
+
+
+def _default_admin_dsn() -> str:
+    """The app's DATABASE_URL pointed at the maintenance DB, so the harness
+    reaches the same server and credentials the app and tests use."""
+    return _with_dbname(get_settings().database_url, "postgres")
 
 
 def reset_bench_db(admin_dsn: str, dbname: str) -> str:
@@ -190,7 +210,7 @@ def reset_bench_db(admin_dsn: str, dbname: str) -> str:
         ).fetchone()
         if not exists:
             admin.execute(pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname)))
-    dsn = _bench_dsn(admin_dsn, dbname)
+    dsn = _with_dbname(admin_dsn, dbname)
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
         conn.execute("CREATE SCHEMA public")
@@ -288,11 +308,12 @@ def _maybe_profile(path: str | None) -> Iterator[None]:
 
 
 def _audio_files(root: Path) -> list[str]:
+    """Every file under *root* the scanner would pick up, in path order."""
     return sorted(
         os.path.join(dirpath, name)
         for dirpath, _dirs, names in os.walk(root)
         for name in names
-        if os.path.splitext(name)[1].lower() in AUDIO_EXTS
+        if os.path.splitext(name)[1].lower() in SUPPORTED_EXTENSIONS
     )
 
 
@@ -300,14 +321,32 @@ def _corpus_stats(files: list[str]) -> dict[str, int]:
     return {"files": len(files), "bytes": sum(os.stat(f).st_size for f in files)}
 
 
-def evict_from_cache(files: list[str]) -> int:
+def _require_windows(feature: str) -> None:
+    if sys.platform != "win32":
+        raise SystemExit(f"{feature} needs Windows (NTFS and the Win32 file API)")
+
+
+def _extended_path(path: str) -> str:
+    r"""Absolute path with the ``\\?\`` prefix so Win32 accepts it past MAX_PATH."""
+    path = os.path.abspath(path)
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def evict_from_cache(files: list[str]) -> list[str]:
     """Drop *files* from the Windows file cache so the next read hits the disk.
 
     NTFS purges a file's cached pages when it is opened without buffering
     and no cached handle is open. User-mode only; changes no system setting.
     Lets two scanner versions read the *same* files cold, which matters:
     on some drives cold read speed varies several-fold between folders.
+
+    Returns the files that could not be opened, and so are still cached.
     """
+    _require_windows("--evict")
     import ctypes
     from ctypes import wintypes
 
@@ -319,15 +358,17 @@ def evict_from_cache(files: list[str]) -> int:
     ]
     generic_read, share_rw, open_existing, no_buffering = 0x80000000, 3, 3, 0x20000000
     invalid = wintypes.HANDLE(-1).value
-    evicted = 0
+    still_cached: list[str] = []
     for path in files:
         handle = k32.CreateFileW(
-            path, generic_read, share_rw, None, open_existing, no_buffering, None,
+            _extended_path(path), generic_read, share_rw, None,
+            open_existing, no_buffering, None,
         )
-        if handle != invalid:
+        if handle == invalid:
+            still_cached.append(path)
+        else:
             k32.CloseHandle(handle)
-            evicted += 1
-    return evicted
+    return still_cached
 
 
 def preload_into_cache(files: list[str]) -> None:
@@ -378,14 +419,24 @@ def cmd_run(args: argparse.Namespace) -> None:
     audio = _audio_files(root)
     corpus = _corpus_stats(audio)
     if args.evict:
-        print(f"evicted {evict_from_cache(audio)}/{len(audio)} files from cache", flush=True)
+        still_cached = evict_from_cache(audio)
+        print(f"evicted {len(audio) - len(still_cached)}/{len(audio)} files", flush=True)
+        if still_cached:
+            # A partly warm "cold" run would silently flatter the candidate.
+            listed = "\n  ".join(still_cached[:10])
+            raise SystemExit(
+                f"{len(still_cached)} files could not be evicted, e.g.:\n  {listed}"
+            )
     elif args.preload:
         preload_into_cache(audio)
-    dsn = reset_bench_db(args.admin_dsn, args.db)
+    dsn = reset_bench_db(args.admin_dsn or _default_admin_dsn(), args.db)
 
     timers = Timers()
+    missing_patches: list[str] = []
     if not args.no_instrument:
-        instrument(timers)
+        missing_patches = instrument(timers)
+        if missing_patches:
+            print(f"not instrumented (missing): {', '.join(missing_patches)}", flush=True)
 
     progress_conn = connect_sync(dsn, autocommit=True)
     library_conn = connect_sync(dsn, autocommit=False)
@@ -419,6 +470,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             round(corpus["bytes"] / elapsed / 1e6, 1) if corpus and elapsed else None
         ),
         "timers": timers.report(),
+        "missing_patches": missing_patches,
     }
     if not args.no_fingerprint:
         result["fingerprint"] = fingerprint(dsn)
@@ -465,19 +517,10 @@ def cmd_compare(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _count_audio(folder: Path) -> tuple[int, int]:
-    files = size = 0
-    for dirpath, _dirs, names in os.walk(folder):
-        for name in names:
-            if os.path.splitext(name)[1].lower() in AUDIO_EXTS:
-                files += 1
-                size += os.stat(os.path.join(dirpath, name)).st_size
-    return files, size
-
-
 def cmd_corpus(args: argparse.Namespace) -> None:
     """Draw disjoint random sets of artist folders and link each set's folders
     into its own directory with NTFS junctions (``mklink /J``)."""
+    _require_windows("corpus")
     source = Path(args.source)
     artists = sorted(p for p in source.iterdir() if p.is_dir())
     random.Random(args.seed).shuffle(artists)
@@ -495,7 +538,8 @@ def cmd_corpus(args: argparse.Namespace) -> None:
         while files < target and cursor < len(artists):
             artist = artists[cursor]
             cursor += 1
-            n, s = _count_audio(artist)
+            stats = _corpus_stats(_audio_files(artist))
+            n, s = stats["files"], stats["bytes"]
             if n == 0 or n > target // 3:  # keep sets made of many artists
                 continue
             link = set_dir / artist.name
@@ -531,7 +575,10 @@ def main() -> None:
     p_run.add_argument("--label", required=True)
     p_run.add_argument("--out")
     p_run.add_argument("--db", default=DEFAULT_BENCH_DB)
-    p_run.add_argument("--admin-dsn", default=DEFAULT_ADMIN_DSN)
+    p_run.add_argument(
+        "--admin-dsn",
+        help="maintenance-DB DSN (default: DATABASE_URL with dbname 'postgres')",
+    )
     p_run.add_argument("--profile", help="write cProfile stats to this path")
     p_run.add_argument("--no-instrument", action="store_true")
     p_run.add_argument("--no-fingerprint", action="store_true")
