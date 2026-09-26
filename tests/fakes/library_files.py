@@ -8,6 +8,18 @@ from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRe
 from backend.repositories.library_files import LibraryFileRepository
 
 
+def _content_unchanged(existing: LibraryFile, incoming: LibraryFile) -> bool:
+    """Mirrors the PG upsert's enrichment_status CASE, including its NULL semantics."""
+    if existing.file_hash is not None:
+        return existing.file_hash == incoming.file_hash
+    return (
+        existing.file_size is not None
+        and existing.file_mtime_ns is not None
+        and (existing.file_size, existing.file_mtime_ns)
+        == (incoming.file_size, incoming.file_mtime_ns)
+    )
+
+
 class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, LibraryFile] = {}
@@ -15,7 +27,7 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def upsert(self, file: LibraryFile) -> LibraryFile:
         existing = self.get_by_path(file.file_path)
         if existing:
-            if existing.file_hash == file.file_hash:
+            if _content_unchanged(existing, file):
                 file.enrichment_status = existing.enrichment_status
             # Mirrors the PG COALESCE: a fresh extraction carries no links,
             # and must not erase the ones grouping/enrichment already built.

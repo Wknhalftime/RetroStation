@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from backend.domain.enums import FileStatus
+import pytest
+
+from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import AudioMetadata, LibraryFile
 from tests.fakes.library_files import FakeLibraryFileRepository
 
@@ -167,3 +169,64 @@ def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:
         repo.upsert(f)
 
     assert repo.get_pending_enrichment_with_release() == [both]
+
+
+@pytest.mark.parametrize(
+    ("new_size", "new_mtime_ns", "expected"),
+    [
+        (100, 1_000, EnrichmentStatus.ENRICHED),
+        (101, 1_000, EnrichmentStatus.PENDING),
+        (100, 2_000, EnrichmentStatus.PENDING),
+    ],
+)
+def test_upsert_over_unhashed_row_mirrors_pg(
+    new_size: int, new_mtime_ns: int, expected: EnrichmentStatus,
+) -> None:
+    repo = FakeLibraryFileRepository()
+    stored = LibraryFile(
+        id=uuid4(),
+        file_path="/music/a.flac",
+        file_hash=None,
+        format="flac",
+        enrichment_status=EnrichmentStatus.ENRICHED,
+        file_size=100,
+        file_mtime_ns=1_000,
+    )
+    repo.upsert(stored)
+    got = repo.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path="/music/a.flac",
+            file_hash="h" * 64,
+            format="flac",
+            enrichment_status=EnrichmentStatus.PENDING,
+            file_size=new_size,
+            file_mtime_ns=new_mtime_ns,
+        )
+    )
+    assert got.enrichment_status == expected
+
+
+def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg(
+) -> None:
+    # PG: NULL = NULL is not true, so nothing shows the content is unchanged.
+    repo = FakeLibraryFileRepository()
+    repo.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path="/music/a.flac",
+            file_hash=None,
+            format="flac",
+            enrichment_status=EnrichmentStatus.ENRICHED,
+        )
+    )
+    got = repo.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path="/music/a.flac",
+            file_hash=None,
+            format="flac",
+            enrichment_status=EnrichmentStatus.PENDING,
+        )
+    )
+    assert got.enrichment_status == EnrichmentStatus.PENDING

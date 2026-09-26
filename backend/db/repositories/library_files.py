@@ -39,6 +39,9 @@ _UPSERT_SQL = """
         format                 = EXCLUDED.format,
         enrichment_status      = CASE
             WHEN library_files.file_hash = EXCLUDED.file_hash
+              OR (library_files.file_hash IS NULL
+                  AND library_files.file_size = EXCLUDED.file_size
+                  AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns)
             THEN library_files.enrichment_status
             ELSE EXCLUDED.enrichment_status
         END,
