@@ -371,12 +371,17 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     (re.compile(r"extended"), VersionType.EXTENDED),
     (re.compile(r"instrumental"), VersionType.INSTRUMENTAL),
     (re.compile(r"original"), VersionType.ORIGINAL),
-    (re.compile(r"explicit|lyrical"), VersionType.EXPLICIT),
+    # "[Language]" and "(Lyrics!)" are radio-pool flags for explicit lyrics.
+    (re.compile(r"explicit|lyrical|\blanguage\b|\blyrics\b"), VersionType.EXPLICIT),
     (re.compile(r"\bclean\b"), VersionType.CLEAN),
     (re.compile(r"\bcover\b"), VersionType.COVER),
     (re.compile(r"deluxe|bonus|anniversary|\bspecial\b|\blimited\b"), VersionType.EDITION),
     (re.compile(r"\balt\b|alternate|alternative"), VersionType.ALTERNATE),
     (re.compile(r"\bmono\b|\bstereo\b"), VersionType.FORMAT),
+    # A year followed by a date or place, "(1998/West Palm Beach, FL)",
+    # "(2003-06-21, Wembley)": a bootleg-style live tag. A bare "(1998)" is a
+    # release year and is not matched (it needs text after the separator).
+    (re.compile(r"^\d{4}\s*[/,\-\u2013]\s*\S"), VersionType.LIVE),
     # Broad catch-alls for common bracketed version indicators not covered above.
     # Order here matters: placed AFTER every specific rule so existing
     # classifications (ORIGINAL, LIVE, ACOUSTIC, …) still win.
@@ -496,7 +501,11 @@ def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
     # Strict paired-bracket pattern: \( matched only with \), \[ only with \].
     # The previous r"(\s*[\(\[])([^\)\]]+)([\)\]])" had an independent closing
     # charset [\)\]] that allowed mismatched pairs like "(Live]" to match.
-    group_re = re.compile(r"\s*(?:\(([^\)]+)\)|\[([^\]]+)\])")
+    # One level of nesting is allowed inside a group, so "(Live Version (Edit))"
+    # is one group; stopping at the first ")" left titles like "Last Child)".
+    group_re = re.compile(
+        r"\s*(?:\(((?:[^()]|\([^()]*\))+)\)|\[((?:[^\[\]]|\[[^\[\]]*\])+)\])"
+    )
     matches = list(group_re.finditer(raw_title))
 
     base = raw_title
@@ -516,7 +525,9 @@ def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
         # Only extract known version types
         if classify_version_descriptor(content) != VersionType.UNKNOWN:
             start, end = match.span()
-            base = base[:start] + base[end:]
+            # A space where the group was, so "Love [Mix](Lyrics!)" does not
+            # collapse to "Love(Lyrics!)"; runs of spaces are squeezed below.
+            base = base[:start] + " " + base[end:]
             tags.insert(0, content)
 
     return re.sub(r"\s+", " ", base).strip(), tags
