@@ -379,7 +379,11 @@ class MusicBrainzApiClient:
         return found
 
     def lookup_release(self, mbid: str) -> MbRelease | None:
-        """Fetch a release by MBID, including recordings, artist-credits, and release-groups.
+        """Fetch a release by MBID with its recordings, artist-credits and release-groups.
+
+        ``recording-level-rels+work-rels`` makes each track's recording carry its
+        ``relations`` (the ``performance`` work link) — without both, a release
+        lookup returns recordings with no relations at all.
 
         Results are cached in the local MusicBrainz cache as a transparent
         read-through side-effect. This is intentional (cache-aside pattern).
@@ -396,7 +400,11 @@ class MusicBrainzApiClient:
         try:
             response = self._fetch(
                 f"{_MUSICBRAINZ_API}/release/{mbid}",
-                {"fmt": "json", "inc": "recordings+artist-credits+release-groups"},
+                {
+                    "fmt": "json",
+                    "inc": "recordings+artist-credits+release-groups"
+                    "+recording-level-rels+work-rels",
+                },
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:

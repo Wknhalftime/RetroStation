@@ -16,7 +16,68 @@ interactions:
     uri: https://musicbrainz.org/ws/2/recording/?query=rid%3A%283edac058-cf57-4175-8650-a74ca61652a4+OR+001f323a-7361-4b74-a3df-8cc0f87551e7+OR+01ec25c7-5684-44e5-8fed-5c48217c3baf%29&fmt=json&limit=100
   response:
     body:
-      string: "{\"created\":\"2026-09-26T12:42:10.434Z\",\"count\":2,\"offset\":0,\"recordings\":[{\"id\":\"3edac058-cf57-4175-8650-a74ca61652a4\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
+      string: '{"error": "The MusicBrainz web server is currently busy. Please try
+        again later."}
+
+        '
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-type:
+      - application/json
+      date:
+      - Sat, 26 Sep 2026 16:27:32 GMT
+      keep-alive:
+      - timeout=15
+      retry-after:
+      - '0'
+      server:
+      - openresty
+      transfer-encoding:
+      - chunked
+      x-mb-gateway:
+      - rudi
+      x-mb-rate-limiter:
+      - lua
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '446'
+      x-ratelimit-reset:
+      - '1790440053'
+      x-ratelimit-who:
+      - search-shed
+      x-ratelimit-zone:
+      - search
+    status:
+      code: 503
+      message: Service Temporarily Unavailable
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/?query=rid%3A%283edac058-cf57-4175-8650-a74ca61652a4+OR+001f323a-7361-4b74-a3df-8cc0f87551e7+OR+01ec25c7-5684-44e5-8fed-5c48217c3baf%29&fmt=json&limit=100
+  response:
+    body:
+      string: "{\"created\":\"2026-09-26T16:27:34.874Z\",\"count\":2,\"offset\":0,\"recordings\":[{\"id\":\"001f323a-7361-4b74-a3df-8cc0f87551e7\",\"score\":100,\"artist-credit-id\":\"b962595a-9430-3ef9-aceb-020a5a5a6b18\",\"title\":\"Late
+        Bloom\",\"length\":144973,\"video\":null,\"artist-credit\":[{\"name\":\"Amy
+        Ray\",\"artist\":{\"id\":\"511c533d-d5f5-4b00-8bc8-b45344fca524\",\"name\":\"Amy
+        Ray\",\"sort-name\":\"Ray, Amy\"}}],\"first-release-date\":\"2001-03-06\",\"releases\":[{\"id\":\"a8718a01-aacd-44f7-aaf8-68e04d0b2eb7\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"count\":1,\"title\":\"Stag\",\"status\":\"Official\",\"release-group\":{\"id\":\"5f1e91fd-ba24-30c0-9001-f4635ebb6c77\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Stag\",\"primary-type\":\"Album\"},\"date\":\"2001-03-06\",\"country\":\"US\",\"release-events\":[{\"date\":\"2001-03-06\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":10,\"media\":[{\"id\":\"ed3af68b-f0b8-3a28-b79e-c1dcfcecdc5e\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"3817f4c3-e91b-39c3-804d-dd51a95b9ed4\",\"number\":\"5\",\"title\":\"Late
+        Bloom\",\"length\":144973}],\"track-count\":10,\"track-offset\":4}]}],\"tags\":[{\"count\":1,\"name\":\"rock\"},{\"count\":1,\"name\":\"pop\"},{\"count\":1,\"name\":\"punk\"},{\"count\":1,\"name\":\"rock
+        and roll\"}]},{\"id\":\"3edac058-cf57-4175-8650-a74ca61652a4\",\"score\":100,\"artist-credit-id\":\"7403167d-416b-3dee-96c6-4725d8c3eed3\",\"title\":\"Enter
         Sandman\",\"length\":397649,\"disambiguation\":\"live, 2014-03-27: Estadio
         Monumental, Santiago, Chile\",\"video\":null,\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
         name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
@@ -25,13 +86,7 @@ interactions:
         in Chile (1993 \u2013 2017)\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Metallica\",\"artist\":{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"name\":\"Metallica\",\"sort-name\":\"Metallica\"}}],\"release-group\":{\"id\":\"79dc0daa-a3b7-4231-bf1a-368ee84c3409\",\"type-id\":\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Live
         in Chile (1993 \u2013 2017)\",\"primary-type\":\"Album\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2020-04-15\",\"country\":\"CL\",\"release-events\":[{\"date\":\"2020-04-15\",\"area\":{\"id\":\"82d5f4d6-aed4-3ff5-81d1-5363ac6e97a7\",\"name\":\"Chile\",\"sort-name\":\"Chile\",\"iso-3166-1-codes\":[\"CL\"]}}],\"track-count\":18,\"media\":[{\"id\":\"42ab0269-dd59-3d45-8d89-9e3ad8c25676\",\"position\":1,\"format\":\"Digital
         Media\",\"track\":[{\"id\":\"ff999cfe-6af2-4b54-afb3-03265cccdf4b\",\"number\":\"18\",\"title\":\"Enter
-        Sandman (live In Santiago, Chile - April 1st, 2017)\",\"length\":397649}],\"track-count\":18,\"track-offset\":17}]}],\"isrcs\":[\"QMKHM1900416\"]},{\"id\":\"001f323a-7361-4b74-a3df-8cc0f87551e7\",\"score\":100,\"artist-credit-id\":\"b962595a-9430-3ef9-aceb-020a5a5a6b18\",\"title\":\"Late
-        Bloom\",\"length\":144973,\"video\":null,\"artist-credit\":[{\"name\":\"Amy
-        Ray\",\"artist\":{\"id\":\"511c533d-d5f5-4b00-8bc8-b45344fca524\",\"name\":\"Amy
-        Ray\",\"sort-name\":\"Ray, Amy\"}}],\"first-release-date\":\"2001-03-06\",\"releases\":[{\"id\":\"a8718a01-aacd-44f7-aaf8-68e04d0b2eb7\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"count\":1,\"title\":\"Stag\",\"status\":\"Official\",\"release-group\":{\"id\":\"5f1e91fd-ba24-30c0-9001-f4635ebb6c77\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Stag\",\"primary-type\":\"Album\"},\"date\":\"2001-03-06\",\"country\":\"US\",\"release-events\":[{\"date\":\"2001-03-06\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
-        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":10,\"media\":[{\"id\":\"ed3af68b-f0b8-3a28-b79e-c1dcfcecdc5e\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"3817f4c3-e91b-39c3-804d-dd51a95b9ed4\",\"number\":\"5\",\"title\":\"Late
-        Bloom\",\"length\":144973}],\"track-count\":10,\"track-offset\":4}]}],\"tags\":[{\"count\":1,\"name\":\"rock\"},{\"count\":1,\"name\":\"pop\"},{\"count\":1,\"name\":\"punk\"},{\"count\":1,\"name\":\"rock
-        and roll\"}]}]}"
+        Sandman (live In Santiago, Chile - April 1st, 2017)\",\"length\":397649}],\"track-count\":18,\"track-offset\":17}]}],\"isrcs\":[\"QMKHM1900416\"]}]}"
     headers:
       access-control-allow-origin:
       - '*'
@@ -46,13 +101,13 @@ interactions:
       content-type:
       - application/json
       date:
-      - Sat, 26 Sep 2026 12:42:10 GMT
+      - Sat, 26 Sep 2026 16:27:34 GMT
       etag:
-      - '"OWNiMzRlMDAwMDAwMDAwMFNvbHI=--gzip"'
+      - '"MmE1ZmVlMDAwMDAwMDAwMFNvbHI=--gzip"'
       keep-alive:
       - timeout=15
       last-modified:
-      - Sat, 26 Sep 2026 12:41:16 GMT
+      - Sat, 26 Sep 2026 16:26:14 GMT
       vary:
       - Accept-Encoding
       x-cache-status:
@@ -66,9 +121,9 @@ interactions:
       x-ratelimit-limit:
       - '400'
       x-ratelimit-remaining:
-      - '28'
+      - '330'
       x-ratelimit-reset:
-      - '1790426530'
+      - '1790440055'
       x-xss-protection:
       - 1; mode=block
     status:

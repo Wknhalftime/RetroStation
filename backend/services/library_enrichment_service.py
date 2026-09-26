@@ -119,8 +119,9 @@ def enrich_by_release(
 ) -> int:
     """Enrich all pending library files that belong to the given release.
 
-    Looks up the release once, extracts artist/recordings/works, then links
-    each pending file to its Recording row. Returns the count of files enriched.
+    Looks up the release once (recordings with their work relations), upserts
+    the artist, each recording and its performed work, then links each
+    pending file to its Recording row. Returns the count of files enriched.
     A malformed release_mbid (e.g. a corrupt tag) fails its files without a
     lookup — MusicBrainz would answer 400, a permanent failure.
     """
@@ -296,8 +297,8 @@ def enrich_by_recording_batch(
     knows under that MBID, a recording no longer on that release, a file
     with no recording MBID, is returned as unresolved and left pending,
     untouched, for the per-release path to handle as it does today. Search
-    results carry no work relations, so no work is linked here, the same as
-    the release path.
+    results carry no work relations, so no work is linked here; only the
+    per-release and per-recording lookups link works.
     """
     searchable = [f for f in pending_files if f.audio.recording_mbid]
     found = mb_client.search_recordings_by_mbids(
