@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from rapidfuzz.fuzz import token_sort_ratio
+
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
 from backend.domain.enums import (
@@ -865,3 +867,99 @@ def test_tier2_lone_candidate_above_auto_link_still_auto_matches() -> None:
 
     assert result is not None
     assert result.status == MatchStatus.AUTO_MATCHED
+
+
+# ---------------------------------------------------------------------------
+# Guest credits written as f/ and w/ shorthand in broadcast titles
+# ---------------------------------------------------------------------------
+
+
+def _logged_identity(artist_id: UUID, raw_title: str) -> BroadcastTrackIdentity:
+    """An identity as ingestion stores it: the raw title and its normalized form."""
+    return BroadcastTrackIdentity(
+        id=uuid4(),
+        broadcast_artist_id=artist_id,
+        original_title=raw_title,
+        normalized_title=normalize_title(raw_title),
+        normalized_signature=f"sig|{raw_title}",
+    )
+
+
+def test_f_slash_credit_does_not_sink_an_exact_title() -> None:
+    """KSTZ logged "Smooth f/Rob Thomas"; the library has it as
+    "Smooth (Feat. Rob Thomas)". Scored 48% before the credit was stripped."""
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    mb = FakeMbClient()
+    artist = _artist("santana")
+    _seed_artist_match(match_repo, artist.id, "mbid-santana")
+    smooth = _lib_file(
+        "/s/smooth.flac", track_title="Smooth (Feat. Rob Thomas)",
+        artist_mbid="mbid-santana", artist_name="santana",
+    )
+    lib_repo.upsert(smooth)
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    result = strategy.apply(_logged_identity(artist.id, "Smooth f/Rob Thomas"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.confidence_score == 100.0
+    assert result.library_file_id == smooth.id
+
+
+def test_w_slash_credit_is_stripped_when_that_scores_better() -> None:
+    artist = _artist("josh groban", status=MatchStatus.PENDING)
+    lib_repo = FakeLibraryFileRepository()
+    noel = _lib_file("/g/noel.flac", track_title="The First Noel", artist_name="josh groban")
+    lib_repo.upsert(noel)
+
+    strat = BroadcastToLocalStrategy(lib_repo, strong_match_threshold=80)
+    result = strat.apply(_logged_identity(artist.id, "The First Noel w/Faith Hill"), artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.AUTO_MATCHED
+    assert result.library_file_id == noel.id
+
+
+def test_w_slash_that_is_part_of_the_title_keeps_its_score() -> None:
+    """Stripping "W/His Song" would leave "killing me softly"; the unstripped
+    form scores higher against the real title, so it is the one kept."""
+    artist = _artist("roberta flack", status=MatchStatus.PENDING)
+    lib_repo = FakeLibraryFileRepository()
+    lib_repo.upsert(_lib_file(
+        "/r/kmsw.flac", track_title="Killing Me Softly With His Song",
+        artist_name="roberta flack",
+    ))
+    unstripped = token_sort_ratio(
+        "killing me softly w his song", "killing me softly with his song",
+    )
+
+    strat = BroadcastToLocalStrategy(lib_repo, strong_match_threshold=80)
+    result = strat.apply(
+        _logged_identity(artist.id, "Killing Me Softly W/His Song"), artist,
+    )
+
+    assert result is not None
+    assert result.confidence_score == unstripped
+
+
+def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
+    lib_repo = FakeLibraryFileRepository()
+    match_repo = FakeMatchRepository()
+    artist = _artist("santana")
+    _seed_artist_match(match_repo, artist.id, "mbid-santana")
+    hit = _lib_file(
+        "/s/smooth.flac", track_title="Smooth", recording_mbid="rec-smooth",
+        artist_name="santana",
+    )
+    lib_repo.upsert(hit)
+    mb = FakeMbClient(recording_searches={("mbid-santana", "smooth"): [{"id": "rec-smooth"}]})
+
+    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    result = strategy.apply(_logged_identity(artist.id, "Smooth f/Rob Thomas"), artist)
+
+    assert mb.calls == ["search_recording:mbid-santana:smooth"]
+    assert result is not None
+    assert result.library_file_id == hit.id
+

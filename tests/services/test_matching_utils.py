@@ -4,6 +4,7 @@ from backend.domain.enums import ReasonCode
 from backend.services.matching_reasons import format_deferred_retry
 from backend.services.matching_utils import (
     TRUNCATION_TOLERANCE_CHARS,
+    broadcast_title_variants,
     is_likely_truncated,
     normalize_title_for_scoring,
     rule_matches,
@@ -104,3 +105,44 @@ class TestDeferredRetryReason:
         assert "deferred" in msg.lower()
         assert "retry" in msg.lower()
         assert "next playlist" in msg.lower()
+
+
+class TestBroadcastTitleVariants:
+    """Broadcast logs credit guests as "f/Name" or "w/Name" after the title."""
+
+    def test_title_without_a_credit_is_its_normalized_form(self) -> None:
+        assert broadcast_title_variants("Enter Sandman") == ("enter sandman",)
+
+    def test_f_slash_credit_is_stripped(self) -> None:
+        assert broadcast_title_variants("Smooth f/Rob Thomas") == ("smooth",)
+
+    def test_f_slash_credit_after_ellipsis_or_in_parens_is_stripped(self) -> None:
+        assert broadcast_title_variants("Livin' My Life Like..f/C.Marks") == (
+            "livin my life like",
+        )
+        assert broadcast_title_variants("Smooth (f/Rob Thomas)") == ("smooth",)
+
+    def test_slash_inside_a_word_is_not_a_credit(self) -> None:
+        assert broadcast_title_variants("Rif/Raf") == ("rif raf",)
+
+    def test_w_slash_offers_the_title_with_and_without_the_credit(self) -> None:
+        """w/ is a credit in "The First Noel w/Faith Hill" but part of the
+        title in "Killing Me Softly W/His Song", so both forms are scored."""
+        assert broadcast_title_variants("The First Noel w/Faith Hill") == (
+            "the first noel w faith hill", "the first noel",
+        )
+        assert broadcast_title_variants("Killing Me Softly W/His Song") == (
+            "killing me softly w his song", "killing me softly",
+        )
+
+    def test_w_slash_o_and_w_slash_out_mean_without(self) -> None:
+        assert broadcast_title_variants("I Don't Want To Live W/o You") == (
+            "i dont want to live w o you",
+        )
+        assert broadcast_title_variants("I Don't Wanna Live W/out Your") == (
+            "i dont wanna live w out your",
+        )
+
+    def test_title_that_is_only_a_credit_is_kept(self) -> None:
+        assert broadcast_title_variants("f/Nobody") == ("f nobody",)
+
