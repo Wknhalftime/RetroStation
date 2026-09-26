@@ -371,7 +371,8 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     (re.compile(r"extended"), VersionType.EXTENDED),
     (re.compile(r"instrumental"), VersionType.INSTRUMENTAL),
     (re.compile(r"original"), VersionType.ORIGINAL),
-    (re.compile(r"explicit|lyrical"), VersionType.EXPLICIT),
+    # "[Language]" is the radio-pool marker for a version with explicit language.
+    (re.compile(r"explicit|lyrical|\blanguage\b"), VersionType.EXPLICIT),
     (re.compile(r"\bclean\b"), VersionType.CLEAN),
     (re.compile(r"\bcover\b"), VersionType.COVER),
     (re.compile(r"deluxe|bonus|anniversary|\bspecial\b|\blimited\b"), VersionType.EDITION),
@@ -496,7 +497,11 @@ def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
     # Strict paired-bracket pattern: \( matched only with \), \[ only with \].
     # The previous r"(\s*[\(\[])([^\)\]]+)([\)\]])" had an independent closing
     # charset [\)\]] that allowed mismatched pairs like "(Live]" to match.
-    group_re = re.compile(r"\s*(?:\(([^\)]+)\)|\[([^\]]+)\])")
+    # One level of nesting is allowed inside a group, so "(Live Version (Edit))"
+    # is one group; stopping at the first ")" left titles like "Last Child)".
+    group_re = re.compile(
+        r"\s*(?:\(((?:[^()]|\([^()]*\))+)\)|\[((?:[^\[\]]|\[[^\[\]]*\])+)\])"
+    )
     matches = list(group_re.finditer(raw_title))
 
     base = raw_title
@@ -516,7 +521,9 @@ def extract_version_tags(raw_title: str) -> tuple[str, list[str]]:
         # Only extract known version types
         if classify_version_descriptor(content) != VersionType.UNKNOWN:
             start, end = match.span()
-            base = base[:start] + base[end:]
+            # A space where the group was, so "Love [Mix](Lyrics!)" does not
+            # collapse to "Love(Lyrics!)"; runs of spaces are squeezed below.
+            base = base[:start] + " " + base[end:]
             tags.insert(0, content)
 
     return re.sub(r"\s+", " ", base).strip(), tags
