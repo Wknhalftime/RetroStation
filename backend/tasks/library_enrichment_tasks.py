@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -284,7 +285,7 @@ def library_enrichment_task() -> dict[str, int]:
                     level=LogLevel.ERROR,
                     message="enrichment_failed",
                     trace_id=task_id,
-                    details={"error": str(exc)},
+                    details={"error": str(exc), "traceback": traceback.format_exc()},
                 ))
         raise
 
