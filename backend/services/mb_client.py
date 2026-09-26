@@ -140,13 +140,22 @@ class MusicBrainzApiClient:
     """
 
     def __init__(
-        self, cache_repo: MusicBrainzCacheRepository, ttl_days: int = _CACHE_TTL_DAYS,
+        self,
+        cache_repo: MusicBrainzCacheRepository,
+        ttl_days: int = _CACHE_TTL_DAYS,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._cache = cache_repo
         self._ttl_days = ttl_days
+        # ``transport`` is a test seam (httpx.MockTransport); production leaves
+        # it None so the client's own settings, redirects included, apply.
         self._http = httpx.Client(
             headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
             timeout=30.0,
+            transport=transport,
+            # A merged MBID answers 301 to the surviving entity; follow it so
+            # the lookup returns that entity instead of failing every run.
+            follow_redirects=True,
         )
         # Per-instance request counters; callers may snapshot these around a
         # phase to emit summary metrics (cache hit ratio, live-API volume).

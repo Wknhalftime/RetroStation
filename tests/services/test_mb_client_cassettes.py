@@ -235,3 +235,18 @@ def test_search_recordings_by_mbids_carries_enrichment_fields(
     # Search results carry no relations: works still need lookup_recording.
     assert "relations" not in late_bloom
     assert client.live_fetches == 1
+
+
+# --- merged MBIDs ---------------------------------------------------------------
+
+# A release MBID that MusicBrainz merged into another; the API answers 301.
+MERGED_RELEASE_MBID = "b07b4d2f-bd70-46c7-b208-2d9438fc1511"
+SURVIVING_RELEASE_MBID = "e572bae7-fb00-4863-87fc-78dfd0ab091c"
+
+
+def test_lookup_merged_release_returns_the_survivor(client: MusicBrainzApiClient) -> None:
+    release = client.lookup_release(MERGED_RELEASE_MBID)
+
+    assert release is not None
+    assert release["id"] == SURVIVING_RELEASE_MBID
+    assert release["media"][0]["tracks"][0]["recording"]["id"]
