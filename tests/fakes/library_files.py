@@ -289,13 +289,12 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             key=lambda f: f.file_path,
         )
 
-    def get_audio_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+    def get_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         return sorted(
             (
                 f
                 for f in self._data.values()
-                if f.audio_hash is None
-                and (f.file_size, f.file_mtime_ns) == (file_size, file_mtime_ns)
+                if (f.file_size, f.file_mtime_ns) == (file_size, file_mtime_ns)
             ),
             key=lambda f: f.file_path,
         )

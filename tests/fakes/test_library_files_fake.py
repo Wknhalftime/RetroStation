@@ -310,8 +310,9 @@ def test_fake_audio_hash_lookups_mirror_pg() -> None:
     repo.upsert(_stat_row("/m/c.ogg", fmt="ogg"))
 
     assert repo.get_by_audio_hash(_H1) == [hashed]
-    assert [f.file_path for f in repo.get_audio_unhashed_by_stat(100, 1_000)] == [
+    assert [f.file_path for f in repo.get_by_stat(100, 1_000)] == [
         "/m/a.mp3",
+        "/m/b.flac",
         "/m/c.ogg",
     ]
     assert repo.get_audio_unhashed_after(None, 10) == [pending]

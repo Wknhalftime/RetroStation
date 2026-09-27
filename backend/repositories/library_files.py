@@ -189,11 +189,11 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
-    def get_audio_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
-        """Rows with no audio hash yet whose recorded size and mtime equal these.
+    def get_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        """Rows whose recorded size and mtime equal these, any audio hash state.
 
-        Move detection's fallback while a row's fingerprint is pending: a move
-        or rename on one volume keeps both. Any status, file_path order.
+        A move or rename on one volume keeps both size and mtime, whatever
+        the row's fingerprint state. Any status, file_path order.
         """
         ...
 

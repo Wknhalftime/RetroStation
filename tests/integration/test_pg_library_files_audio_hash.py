@@ -64,7 +64,6 @@ def test_audio_hash_indexes_exist(migrated_db: str) -> None:
     assert {
         "idx_library_files_audio_hash",
         "idx_library_files_audio_unhashed",
-        "idx_library_files_audio_unhashed_stat",
     } <= names
 
 
@@ -109,7 +108,7 @@ def test_upsert_keeps_the_audio_hash_only_while_the_file_is_unchanged(
     assert got.enrichment_status == expected_enrichment
 
 
-def test_get_audio_unhashed_by_stat_matches_only_rows_without_an_audio_hash(
+def test_get_by_stat_matches_rows_with_equal_stat_whatever_their_audio_hash_state(
     migrated_db: str,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -120,9 +119,9 @@ def test_get_audio_unhashed_by_stat_matches_only_rows_without_an_audio_hash(
         repo.mark_missing("/m/c.flac")
         repo.upsert(_row("/m/d.flac", size=10, mtime_ns=5, audio_hash=H1))
 
-        got = [f.file_path for f in repo.get_audio_unhashed_by_stat(10, 5)]
+        got = [f.file_path for f in repo.get_by_stat(10, 5)]
 
-    assert got == ["/m/a.flac", "/m/c.flac"]
+    assert got == ["/m/a.flac", "/m/c.flac", "/m/d.flac"]
 
 
 def test_audio_backlog_is_present_flac_and_mp3_rows_in_path_order(migrated_db: str) -> None:

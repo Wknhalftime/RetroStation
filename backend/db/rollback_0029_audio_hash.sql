@@ -2,7 +2,6 @@
 -- Code from before PR B reads file_hash, which PR B stopped writing: after
 -- rolling back, run library_hash_backfill_task so rows indexed meanwhile get
 -- a content hash again (move detection falls back to size + mtime until then).
-DROP INDEX IF EXISTS idx_library_files_audio_unhashed_stat;
 DROP INDEX IF EXISTS idx_library_files_audio_unhashed;
 DROP INDEX IF EXISTS idx_library_files_audio_hash;
 ALTER TABLE library_files DROP COLUMN IF EXISTS audio_hash;

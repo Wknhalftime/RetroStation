@@ -19,7 +19,7 @@ import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import mutagen
 import mutagen.flac
@@ -611,13 +611,25 @@ def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[
     """Rows *lf* may have been moved from.
 
     Rows with the same audio fingerprint, which survives a retag, plus rows
-    still waiting for one that have the same size and mtime (a move or
-    rename on one volume keeps both).
+    with the same size and mtime whatever their fingerprint state (a move or
+    rename on one volume keeps both). Audio matches come first; a row found
+    both ways is kept once.
     """
     candidates = file_repo.get_by_audio_hash(lf.audio_hash) if lf.audio_hash is not None else []
     if lf.file_size is not None and lf.file_mtime_ns is not None:
-        candidates += file_repo.get_audio_unhashed_by_stat(lf.file_size, lf.file_mtime_ns)
-    return candidates
+        candidates += file_repo.get_by_stat(lf.file_size, lf.file_mtime_ns)
+    return _deduplicated_by_id(candidates)
+
+
+def _deduplicated_by_id(rows: list[LibraryFile]) -> list[LibraryFile]:
+    """*rows* with later duplicates (by id) dropped, keeping first-seen order."""
+    seen_ids: set[UUID] = set()
+    unique: list[LibraryFile] = []
+    for row in rows:
+        if row.id not in seen_ids:
+            seen_ids.add(row.id)
+            unique.append(row)
+    return unique
 
 
 def _respelled_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:

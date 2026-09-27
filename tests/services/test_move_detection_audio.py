@@ -79,7 +79,9 @@ def test_a_row_not_yet_marked_missing_is_adopted_once_its_file_is_gone(tmp_path:
     stored = repo.upsert(_row(old, audio_hash=H1))
 
     assert adopt_moved_row(_seen(new, H1), repo) == str(old)
-    assert repo.get_by_id(stored.id) is not None
+
+    moved = repo.get_by_id(stored.id)
+    assert moved is not None and moved.file_path == str(new)
 
 
 def test_audio_twin_whose_file_still_exists_is_not_adopted(tmp_path: Path) -> None:
@@ -113,7 +115,9 @@ def test_pending_row_with_the_same_stat_is_adopted(tmp_path: Path) -> None:
     repo.mark_missing(str(old))
 
     assert adopt_moved_row(_seen(new, None), repo) == str(old)
-    assert repo.get_by_id(stored.id) is not None
+
+    moved = repo.get_by_id(stored.id)
+    assert moved is not None and moved.file_path == str(new)
 
 
 def test_pending_row_is_not_adopted_by_a_copy_while_its_file_exists(tmp_path: Path) -> None:
@@ -125,3 +129,45 @@ def test_pending_row_is_not_adopted_by_a_copy_while_its_file_exists(tmp_path: Pa
     repo.upsert(_row(old, audio_hash=None, stat=(st.st_size, st.st_mtime_ns)))
 
     assert adopt_moved_row(_seen(new, None), repo) is None
+
+
+def test_a_hashed_missing_row_is_adopted_by_stat_when_the_new_file_has_no_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """After the backfill, a plain move of an MP3 or a no-MD5 FLAC still matches by stat.
+
+    The backfill gives the old row an audio-sha256; the newly seen file at
+    its new path has not been fingerprinted yet (``read_tags`` only computes
+    ``flac-md5`` inline). Move detection's stat fallback must still adopt it.
+    """
+    old = tmp_path / "unsorted" / "kiss.mp3"
+    new = _write(tmp_path / "Prince" / "kiss.mp3")
+    st = new.stat()
+    backfilled = AudioHash(AudioHashKind.AUDIO_SHA256, "3" * 64)
+    repo = FakeLibraryFileRepository()
+    stored = repo.upsert(_row(old, audio_hash=backfilled, stat=(st.st_size, st.st_mtime_ns)))
+    repo.mark_missing(str(old))
+
+    assert adopt_moved_row(_seen(new, None), repo) == str(old)
+
+    moved = repo.get_by_id(stored.id)
+    assert moved is not None and moved.file_path == str(new)
+
+
+def test_the_gone_twin_is_adopted_when_a_present_twin_sorts_first_by_path(
+    tmp_path: Path,
+) -> None:
+    """Among several same-hash candidates, only the one whose own file is gone is adopted."""
+    present = _write(tmp_path / "Best Of" / "kiss.flac")  # sorts before "Parade"
+    gone = tmp_path / "Parade" / "kiss.flac"
+    new = _write(tmp_path / "Prince" / "Parade" / "03 Kiss.flac", b"\x01" * 300)
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_row(present, audio_hash=H1))
+    stored_gone = repo.upsert(_row(gone, audio_hash=H1))
+    repo.mark_missing(str(gone))
+
+    assert adopt_moved_row(_seen(new, H1), repo) == str(gone)
+
+    moved = repo.get_by_id(stored_gone.id)
+    assert moved is not None and moved.file_path == str(new)
+    assert repo.get_by_path(str(present)) is not None
