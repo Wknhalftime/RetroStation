@@ -61,6 +61,32 @@ def _mp3(tmp_path: Path, name: str = "a.mp3", *, payload: int = 0) -> Path:
     return path
 
 
+def _truncate_to_metadata(path: Path, levels: list[tuple[int, int]]) -> None:
+    """Cut a FLAC right where its frames start, leaving only metadata."""
+    data = path.read_bytes()
+    path.write_bytes(data[: len(data) - len(flac_frames(levels))])
+
+
+# marker (4) + block header (4) + min/max block size, min/max frame size, sample
+# info (18) = where STREAMINFO's 16-byte MD5 begins in a freshly written FLAC.
+_STREAMINFO_MD5_OFFSET = 4 + 4 + 18
+
+
+def _truncate_inside_streaminfo_md5(path: Path) -> None:
+    """Cut a FLAC 5 bytes into its STREAMINFO MD5, mid-field."""
+    data = path.read_bytes()
+    path.write_bytes(data[: _STREAMINFO_MD5_OFFSET + 5])
+
+
+def _id3v2_tag(body_size: int = 0, *, footer: bool = False) -> bytes:
+    """A minimal ID3v2 tag: header, a zero body of *body_size*, and an optional footer."""
+    size = bytes((body_size >> shift) & 0x7F for shift in (21, 14, 7, 0))
+    flags = 0x10 if footer else 0x00
+    header = b"ID3" + bytes([4 if footer else 3, 0, flags]) + size
+    trailer = b"3DI" + header[3:] if footer else b""
+    return header + b"\x00" * body_size + trailer
+
+
 @pytest.mark.parametrize("store_md5", [True, False], ids=["stored-md5", "md5-zero"])
 @pytest.mark.parametrize("edit", FLAC_EDITS.values(), ids=FLAC_EDITS.keys())
 def test_flac_tag_cover_and_padding_edits_keep_the_hash(
@@ -163,6 +189,48 @@ def test_a_truncated_flac_has_no_fingerprint(tmp_path: Path) -> None:
     path.write_bytes(path.read_bytes()[:20])
 
     assert compute_audio_hash(path) is None
+
+
+@pytest.mark.parametrize("store_md5", [True, False], ids=["stored-md5", "md5-zero"])
+def test_a_flac_with_no_frames_has_no_fingerprint(tmp_path: Path, store_md5: bool) -> None:
+    """A stored STREAMINFO MD5 must not stand in for audio that was never written."""
+    path = write_flac(tmp_path / "cut.flac", LEVELS, store_md5=store_md5)
+    _truncate_to_metadata(path, LEVELS)
+
+    assert compute_audio_hash(path) is None
+
+
+def test_a_flac_truncated_inside_the_streaminfo_md5_has_no_fingerprint(tmp_path: Path) -> None:
+    path = write_flac(tmp_path / "cut.flac", LEVELS, store_md5=True)
+    _truncate_inside_streaminfo_md5(path)
+
+    assert compute_audio_hash(path) is None
+
+
+@pytest.mark.parametrize("store_md5", [True, False], ids=["stored-md5", "md5-zero"])
+def test_a_flac_with_a_leading_id3v2_tag_hashes_the_same(tmp_path: Path, store_md5: bool) -> None:
+    plain = _flac(tmp_path, "plain.flac", store_md5=store_md5)
+    tagged = tmp_path / "tagged.flac"
+    tagged.write_bytes(_id3v2_tag(4) + plain.read_bytes())
+
+    assert compute_audio_hash(tagged) == compute_audio_hash(plain)
+
+
+def test_an_mp3_with_an_id3v2_footer_hashes_the_same(tmp_path: Path) -> None:
+    plain = write_mp3(tmp_path / "plain.mp3")
+    tagged = tmp_path / "tagged.mp3"
+    tagged.write_bytes(_id3v2_tag(4, footer=True) + plain.read_bytes())
+
+    assert compute_audio_hash(tagged) == compute_audio_hash(plain)
+
+
+def test_a_file_larger_than_one_read_chunk_hashes_its_exact_audio_range(tmp_path: Path) -> None:
+    frames = 3_000  # 3_000 * 417 bytes > 1 MiB: crosses the _sha256_of_range read chunk
+    path = write_mp3(tmp_path / "big.mp3", frames=frames)
+    tag_mp3(path, "Big")
+
+    expected = hashlib.sha256(mp3_frames(frames=frames)).hexdigest()
+    assert compute_audio_hash(path) == AudioHash(AudioHashKind.AUDIO_SHA256, expected)
 
 
 def test_a_missing_file_raises_oserror(tmp_path: Path) -> None:

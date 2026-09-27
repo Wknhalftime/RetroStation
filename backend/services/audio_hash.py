@@ -78,7 +78,10 @@ def _flac_layout(fh: BinaryIO) -> _FlacLayout | None:
         length = int.from_bytes(header[1:], "big")
         body_start = fh.tell()
         if header[0] & _FLAC_BLOCK_TYPE == _STREAMINFO:
-            md5 = int.from_bytes(fh.read(length)[_STREAMINFO_MD5], "big")
+            body = fh.read(length)
+            if len(body) < length:
+                return None
+            md5 = int.from_bytes(body[_STREAMINFO_MD5], "big")
         fh.seek(body_start + length)
     return _FlacLayout(frames_offset=fh.tell(), stored_md5=md5)
 
@@ -101,7 +104,7 @@ def _sha256_of_range(fh: BinaryIO, start: int, end: int) -> AudioHash | None:
 
 def _flac_hash(fh: BinaryIO, size: int) -> AudioHash | None:
     layout = _flac_layout(fh)
-    if layout is None:
+    if layout is None or layout.frames_offset >= size:
         return None
     stored = stored_flac_md5(layout.stored_md5)
     if stored is not None:
