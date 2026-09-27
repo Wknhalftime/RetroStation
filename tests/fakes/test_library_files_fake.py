@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.enums import AudioHashKind, EnrichmentStatus, FileStatus
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from tests.fakes.library_files import FakeLibraryFileRepository
 
 _UNSET: Any = object()
@@ -268,3 +268,54 @@ def test_fake_missing_lookups_mirror_pg() -> None:
     assert [f.id for f in repo.get_by_recording_mbid("rec-1")] == [present.id]
     assert [f.id for f in repo.get_by_normalized_artist_name("artist")] == [present.id]
     assert gone.file_status == FileStatus.MISSING
+
+
+_H1 = AudioHash(AudioHashKind.FLAC_MD5, "1" * 32)
+_H2 = AudioHash(AudioHashKind.AUDIO_SHA256, "2" * 64)
+
+
+def _stat_row(path: str, *, fmt: str = "flac", audio_hash: AudioHash | None = None) -> LibraryFile:
+    return LibraryFile(
+        id=uuid4(),
+        file_path=path,
+        file_hash=None,
+        format=fmt,
+        enrichment_status=EnrichmentStatus.ENRICHED,
+        file_size=100,
+        file_mtime_ns=1_000,
+        audio_hash=audio_hash,
+    )
+
+
+@pytest.mark.parametrize(
+    ("size", "incoming", "expected"),
+    [(100, None, _H1), (101, None, None), (101, _H2, _H2)],
+    ids=["unchanged", "changed", "fresh"],
+)
+def test_fake_upsert_audio_hash_rule_mirrors_pg(
+    size: int, incoming: AudioHash | None, expected: AudioHash | None
+) -> None:
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_stat_row("/m/a.flac", audio_hash=_H1))
+    fresh = _stat_row("/m/a.flac", audio_hash=incoming)
+    fresh.file_size = size
+
+    assert repo.upsert(fresh).audio_hash == expected
+
+
+def test_fake_audio_hash_lookups_mirror_pg() -> None:
+    repo = FakeLibraryFileRepository()
+    hashed = repo.upsert(_stat_row("/m/b.flac", audio_hash=_H1))
+    pending = repo.upsert(_stat_row("/m/a.mp3", fmt="mp3"))
+    repo.upsert(_stat_row("/m/c.ogg", fmt="ogg"))
+
+    assert repo.get_by_audio_hash(_H1) == [hashed]
+    assert [f.file_path for f in repo.get_audio_unhashed_by_stat(100, 1_000)] == [
+        "/m/a.mp3",
+        "/m/c.ogg",
+    ]
+    assert repo.get_audio_unhashed_after(None, 10) == [pending]
+    assert repo.count_audio_unhashed() == 1
+    assert repo.set_audio_hash(pending.id, _H2, 100, 2_000) is False
+    assert repo.set_audio_hash(pending.id, _H2, 100, 1_000) is True
+    assert repo.count_audio_unhashed() == 0

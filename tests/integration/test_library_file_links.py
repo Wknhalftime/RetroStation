@@ -77,7 +77,7 @@ def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
         assert got.file_mtime_ns == 6
 
 
-def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Path) -> None:
+def test_reupsert_with_same_stat_keeps_everything(migrated_db: str, tmp_path: Path) -> None:
     path = str(tmp_path / "kiss.flac")
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
@@ -90,6 +90,8 @@ def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Pa
             file_path=path,
             file_hash="original-hash",
             format="flac",
+            file_size=100,
+            file_mtime_ns=5,
         )
         repos.library_files.upsert_write_only(same)
         conn.commit()

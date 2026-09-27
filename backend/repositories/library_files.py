@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import LibraryFile
+from backend.domain.library import AudioHash, LibraryFile
 
 
 class LibraryFileRepository(ABC):
@@ -181,6 +181,46 @@ class LibraryFileRepository(ABC):
     @abstractmethod
     def count_unhashed(self) -> int:
         """PRESENT rows still waiting for a content hash."""
+        ...
+
+    @abstractmethod
+    def get_by_audio_hash(self, audio_hash: AudioHash) -> list[LibraryFile]:
+        """Rows of any status with this audio fingerprint, in file_path order."""
+        ...
+
+    @abstractmethod
+    def get_audio_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        """Rows with no audio hash yet whose recorded size and mtime equal these.
+
+        Move detection's fallback while a row's fingerprint is pending: a move
+        or rename on one volume keeps both. Any status, file_path order.
+        """
+        ...
+
+    @abstractmethod
+    def get_audio_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        """PRESENT FLAC and MP3 rows with no audio hash, in file_path order, after *after_path*."""
+        ...
+
+    @abstractmethod
+    def set_audio_hash(
+        self,
+        file_id: UUID,
+        audio_hash: AudioHash,
+        file_size: int,
+        file_mtime_ns: int,
+    ) -> bool:
+        """Record a backfilled audio hash; True if it was recorded.
+
+        Writes only while the row has none and its stored size and mtime equal
+        the ones the hash was read under, so a row rescanned or changed in the
+        meantime keeps its own data.
+        """
+        ...
+
+    @abstractmethod
+    def count_audio_unhashed(self) -> int:
+        """PRESENT FLAC and MP3 rows still waiting for an audio hash."""
         ...
 
     @abstractmethod
