@@ -33,7 +33,7 @@ class FileInfo(BaseModel):
     track_title: str | None
     release_title: str | None
     enrichment_status: str
-    file_status: str
+    file_status: FileStatus
 
 
 class RecordingDetail(BaseModel):

@@ -58,7 +58,7 @@ export function WorkFilesTable({
           {/* File rows */}
           {recording.files.map((file, fileIdx) => {
             const isMaster = file.id === masterFileId;
-            const isMissing = file.file_status === "missing";
+            const isMissing = file.file_status !== "present";
             return (
               <div
                 key={file.id}

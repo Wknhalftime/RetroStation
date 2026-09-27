@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WorkFilesTable } from "./WorkFilesTable";
-import type { RecordingDetail } from "@/lib/schemas/works";
+import type { FileInfo, RecordingDetail } from "@/lib/schemas/works";
 
-const file = (id: string, name: string, file_status: "present" | "missing") => ({
+const file = (id: string, name: string, file_status: FileInfo["file_status"]) => ({
   id,
   file_path: `D:\\Music\\${name}`,
   format: "flac",
@@ -34,6 +34,29 @@ describe("WorkFilesTable", () => {
     render(
       <WorkFilesTable
         recordings={recordings}
+        masterFileId={null}
+        masterMethod={null}
+        onSetMaster={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText("Missing")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Set as master file" })).toHaveLength(1);
+  });
+
+  it("treats a deleted file as not on disk", () => {
+    const withDeleted: RecordingDetail[] = [
+      {
+        ...recordings[0],
+        files: [
+          file("33333333-3333-4333-8333-333333333333", "gone.flac", "deleted"),
+          file("22222222-2222-4222-8222-222222222222", "new.flac", "present"),
+        ],
+      },
+    ];
+    render(
+      <WorkFilesTable
+        recordings={withDeleted}
         masterFileId={null}
         masterMethod={null}
         onSetMaster={vi.fn()}

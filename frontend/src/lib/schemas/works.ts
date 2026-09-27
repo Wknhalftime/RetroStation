@@ -13,7 +13,7 @@ export const FileInfoSchema = z.object({
   track_title: z.string().nullable(),
   release_title: z.string().nullable(),
   enrichment_status: z.string(),
-  file_status: z.enum(["present", "missing"]),
+  file_status: z.enum(["present", "missing", "deleted"]),
 });
 
 export type FileInfo = z.infer<typeof FileInfoSchema>;
