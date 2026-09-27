@@ -64,6 +64,23 @@ def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
     return ent
 
 
+def _mbid_entity(mbid: str, name_field: str = "name") -> MagicMock:
+    """Build an MBID-known artist stub (Tier 2/3 path — mbid is set).
+
+    Unlike `_make_entity` (mbid=None, forces the bare-artist path), this
+    stub always carries an MBID so `_enhance_artist` goes straight to the
+    lookup branch regardless of the AUD-R008 Tier 1 removal.
+    """
+    ent = MagicMock()
+    ent.id = mbid
+    ent.mbid = mbid
+    ent.disambiguation = None
+    ent.sort_name = f"Name-{mbid}"
+    setattr(ent, name_field, f"Name-{mbid}")
+    ent.duration_ms = None
+    return ent
+
+
 def _progress_calls(mock_repo: MagicMock) -> list[Any]:
     return [call.args[0] for call in mock_repo.upsert.call_args_list]
 
@@ -403,3 +420,111 @@ class TestMbEnrichmentSummary:
         # pre-pass. The per-item loop sees `None` in the map and does NOT
         # re-query (distinct from key-absent which WOULD re-query).
         assert mock_mb_cls.return_value.lookup_recording.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Artist phase outcome counting (AUD-R008 gate 2 mutation-kill tests) — the
+# per-item loop in `_run_artist_phase` distinguishes ENHANCED (ctx.done)
+# from FAILED (ctx.failed) and isolates a per-item retriable exception to
+# just that row. These use MBID-known (Tier 2/3) artists so the assertions
+# hold unchanged before and after the AUD-R008 Tier 1 removal.
+# ---------------------------------------------------------------------------
+
+
+class TestArtistPhaseOutcomeCounting:
+    @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
+    @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
+    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    def test_enhanced_and_404_failed_artists_are_counted_separately(
+        self,
+        mock_connect: MagicMock,
+        _mock_progress_cls: MagicMock,
+        _sys_log_cls: MagicMock,
+        mock_factory_cls: MagicMock,
+        _cache_cls: MagicMock,
+        mock_mb_cls: MagicMock,
+    ) -> None:
+        good = _mbid_entity("mbid-good")
+        bad = _mbid_entity("mbid-404")
+        artists = [good, bad]
+
+        mock_connect.side_effect = _fake_connect
+        mock_factory_cls.side_effect = _stub_repo_factory(artists, [], [])
+        mock_mb_cls.return_value.lookup_artist.side_effect = lambda mbid: (
+            {"id": mbid, "name": "X", "sort-name": "X, Sorted"} if mbid == "mbid-good" else None
+        )
+        mock_mb_cls.return_value.live_fetches = 0
+        mock_mb_cls.return_value.cache_hits = 0
+        mock_mb_cls.return_value.__enter__ = lambda self: self
+        mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
+
+        from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+        mb_enrichment_task.call_local()
+
+        last = _progress_calls(_mock_progress_cls.return_value)[-1]
+        assert last.progress_data["artists_done"] == 1
+        assert last.progress_data["artists_failed"] == 1
+
+    @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
+    @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
+    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    def test_retriable_exception_is_isolated_to_one_artist(
+        self,
+        mock_connect: MagicMock,
+        _mock_progress_cls: MagicMock,
+        _sys_log_cls: MagicMock,
+        mock_factory_cls: MagicMock,
+        _cache_cls: MagicMock,
+        mock_mb_cls: MagicMock,
+    ) -> None:
+        """A transient httpx failure on one artist rolls back only that row.
+
+        `lookup_artist("mbid-flaky")` always raises: once from the pre-pass
+        coalesce (swallowed, MBID omitted from the map) and once from the
+        per-item fallback lookup inside `_enhance_artist` (NOT swallowed —
+        propagates to `_run_artist_phase`'s `_PER_ITEM_RETRIABLE_ERRORS`
+        handler). The other artist must still succeed.
+        """
+        import httpx
+
+        good = _mbid_entity("mbid-ok")
+        flaky = _mbid_entity("mbid-flaky")
+        artists = [good, flaky]
+
+        def _lookup_artist(mbid: str) -> dict[str, Any] | None:
+            if mbid == "mbid-flaky":
+                raise httpx.ConnectError("simulated transient failure")
+            return {"id": mbid, "name": "X", "sort-name": "X, Sorted"}
+
+        mock_connect.side_effect = _fake_connect
+        mock_factory_cls.side_effect = _stub_repo_factory(artists, [], [])
+        mock_mb_cls.return_value.lookup_artist.side_effect = _lookup_artist
+        mock_mb_cls.return_value.live_fetches = 0
+        mock_mb_cls.return_value.cache_hits = 0
+        mock_mb_cls.return_value.__enter__ = lambda self: self
+        mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
+
+        from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+        with capture_logs() as events:
+            mb_enrichment_task.call_local()
+
+        last = _progress_calls(_mock_progress_cls.return_value)[-1]
+        assert last.progress_data["artists_done"] == 1
+        assert last.progress_data["artists_failed"] == 1
+
+        failure_events = [
+            e
+            for e in events
+            if e.get("event") == "mb_artist_enhancement_failed"
+            and e.get("reason") == "per_item_exception"
+        ]
+        assert len(failure_events) == 1
+        assert failure_events[0]["artist_id"] == "mbid-flaky"
