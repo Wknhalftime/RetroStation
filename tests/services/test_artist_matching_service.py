@@ -1096,3 +1096,97 @@ def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
     assert did_after is not None
     assert did_after.match_status == MatchStatus.NEEDS_REVIEW
     assert did_after.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+# ---------------------------------------------------------------------------
+# Threshold-default boundary regressions (AUD-040 gate 2)
+# ---------------------------------------------------------------------------
+#
+# Mutation baseline for artist_matching_service.py surfaced surviving
+# NumberReplacer mutants on two of match_artists_for_playlist's defaults:
+# strong_match_threshold=80 -> 79, and broadcast_name_max_len=30 -> 29. Both
+# defaults move into ArtistMatchThresholds during the AUD-040 refactor, so
+# pin them here before touching the signature.
+
+
+def test_match_artists_default_strong_threshold_boundary_stays_needs_review() -> None:
+    """A canonical scoring ~79.25 (gap >> MB_SCORE_GAP) against a distant
+    runner-up must stay NEEDS_REVIEW/LOW_CONFIDENCE at the real
+    strong_match_threshold default (80), and would wrongly AUTO_MATCH if the
+    default silently drifted to 79.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    artist_repo = FakeArtistRepository()
+
+    artist_repo.upsert(
+        Artist(
+            id="mbid-boundary-fuzzy",
+            name="boundary artist   mv  xampie",
+            sort_name="boundary artist   mv  xampie",
+            mbid="mbid-boundary-fuzzy",
+            normalized_name=normalize_artist("boundary artist   mv  xampie"),
+        )
+    )
+    artist_repo.upsert(
+        Artist(
+            id="mbid-unrelated",
+            name="Totally Unrelated Combo Words",
+            sort_name="Totally Unrelated Combo Words",
+            mbid="mbid-unrelated",
+            normalized_name=normalize_artist("Totally Unrelated Combo Words"),
+        )
+    )
+
+    artist = _pending_artist("Boundary Artist Name Example", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=artist_repo,
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=FakeMbClient(),
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:
+    """A 27-character name is NOT truncated at the real broadcast_name_max_len
+    default (30) — it must park in NEEDS_REVIEW/DEFERRED_RETRY without ever
+    calling MusicBrainz. At a mutated default of 29 this same name crosses
+    the truncation heuristic (len >= max_len - 2) and triggers a live MB
+    search instead.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    name = "Not Truncated Combo Names77"
+    assert len(name) == 27
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=FakeArtistRepository(),
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    assert mb_client.calls == []
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY
