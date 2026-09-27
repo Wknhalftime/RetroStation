@@ -72,10 +72,12 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
     ) -> list[BroadcastPlayEvent]:
+        # played_at holds station wall-clock labelled UTC; a bare ::date would
+        # convert to the session TimeZone first and shift plays across midnight.
         rows = self._conn.execute(
             """SELECT le.* FROM play_events le
                JOIN playlists p ON p.id = le.playlist_id
-               WHERE p.station_id = %s AND le.played_at::date = %s
+               WHERE p.station_id = %s AND (le.played_at AT TIME ZONE 'UTC')::date = %s
                ORDER BY le.played_at""",
             (station_id, broadcast_date),
         ).fetchall()

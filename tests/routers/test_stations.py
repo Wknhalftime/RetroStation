@@ -498,6 +498,37 @@ class TestStationEventsByDate:
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
+    def test_date_is_stored_wall_clock_date(self, client, db_conn):
+        """played_at is station wall-clock labelled UTC, so a play just after
+        midnight belongs to that day even when the pool session TimeZone is
+        behind UTC (the dev and test servers default to America/Chicago)."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event_full(
+            db_conn,
+            playlist,
+            "The Clash",
+            "London Calling",
+            played_at=datetime(2001, 3, 15, 23, 30, 0, tzinfo=UTC),
+        )
+        _insert_event_full(
+            db_conn,
+            playlist,
+            "Nirvana",
+            "In Bloom",
+            played_at=datetime(2001, 3, 16, 0, 30, 0, tzinfo=UTC),
+        )
+
+        resp_15 = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-15")
+        resp_16 = client.get(f"/api/v1/stations/{station.id}/events?date=2001-03-16")
+
+        assert resp_15.status_code == 200
+        assert resp_16.status_code == 200
+        assert resp_15.json()["total"] == 1
+        assert [i["title"] for i in resp_15.json()["items"]] == ["London Calling"]
+        assert resp_16.json()["total"] == 1
+        assert [i["title"] for i in resp_16.json()["items"]] == ["In Bloom"]
+
     def test_pagination(self, client, db_conn):
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
