@@ -1,8 +1,9 @@
 """Integration: PgWorkRepository.delete_if_empty only removes an unreferenced work.
 
 Enrichment calls it on the local work a file just left for a MusicBrainz work.
-``matches`` (work_id and target_id) and ``format_overrides`` also point at
-works, so a work they still reference must survive rather than trip the FK.
+``matches`` (work_id and target_id), ``format_overrides`` and ``recordings``
+also point at works, so a work they still reference must survive rather than
+trip the FK.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import pytest
 from psycopg.rows import DictRow, dict_row
 
 from backend.domain.broadcast import BroadcastArtist
+from backend.domain.catalog import Recording
 from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
@@ -115,6 +117,15 @@ def test_keeps_work_with_a_format_override(migrated_db: str, tmp_path: Path) -> 
                VALUES (%s, %s, %s)""",
             (work, "classic", moved.id),
         )
+
+        assert repos.works.delete_if_empty(work) is False
+        assert repos.works.get_by_id(work) is not None
+
+
+def test_keeps_work_with_a_recording(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos, work, _ = _setup(conn)
+        repos.recordings.upsert(Recording(id=str(uuid4()), title="Battery", work_id=work))
 
         assert repos.works.delete_if_empty(work) is False
         assert repos.works.get_by_id(work) is not None

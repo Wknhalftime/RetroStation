@@ -10,6 +10,7 @@ import pytest
 from psycopg.rows import DictRow, dict_row
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
+from backend.domain.catalog import Recording
 from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
@@ -224,3 +225,26 @@ def test_cross_work_fold_keeps_the_new_works_own_override_for_the_same_format(
         kept = repos.format_overrides.get(new_work, "hot_ac")
         assert kept is not None
         assert (kept.id, kept.preferred_file_id) == (kept_id, new.id)
+
+
+def test_cross_work_fold_keeps_an_old_work_that_still_has_a_recording(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
+        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
+        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        repos.recordings.upsert(Recording(id=str(uuid4()), title="Ezekiel", work_id=old_work))
+        old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
+        new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
+        identity = _identity(repos)
+        _match(conn, identity, old.id, old_work)
+
+        result = reconcile_missing_files(_repos(repos))
+
+        assert result.reconciled == 1
+        assert _matches_of(conn, new.id) == [(str(identity), new_work)]
+        assert repos.library_files.get_by_id(old.id) is None
+        assert repos.works.get_by_id(old_work) is not None
