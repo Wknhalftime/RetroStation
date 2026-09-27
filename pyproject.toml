@@ -202,11 +202,15 @@ audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "
 audit.ignore_fail = "return_non_zero"
 
 # ---- refactor gate (four-step gate before hotspot refactors) ----
-# Gate 1: snapshot tests (syrupy, part of `tests`) lock current behaviour.
-# Gate 2: mutation testing (cosmic-ray, `poe mutate`) confirms tests catch regressions.
-# Gate 3: import/type/format checks (fmt-check, layers, types) ensure code quality.
-# Gate 4: diff-cover verifies every changed line is tested.
-# Run `poe refactor-gate` to verify all four gates pass.
-mutate      = { cmd = "python scripts/run_cosmic_ray.py", help = "Run mutation tests on a module: `poe mutate MODULE TEST_PATHS...`\nExample: poe mutate backend/services/matching_utils.py tests/services/test_matching_utils.py" }
+# Gate 1: snapshot tests (syrupy)
+#   - commit syrupy snapshot tests first
+#   - verify they pass on unchanged code before refactoring
+# Gate 2: mutation testing (cosmic-ray)
+#   - record baseline: `poe mutate MODULE TESTS...` before refactor
+#   - record after: `poe mutate MODULE TESTS...` after refactor
+#   - ensure survivors did not increase
+# Gates 3-4: code quality and coverage
+#   - run `poe refactor-gate` to check fmt-check, layers, types, tests, diff-cover (100%)
+mutate      = { cmd = "python scripts/run_cosmic_ray.py", help = "Run mutation tests: `poe mutate [--timeout N] [--max-survivors N] MODULE TEST_PATHS...`\nExample: poe mutate backend/services/matching_utils.py tests/services/test_matching_utils.py" }
 refactor-gate.sequence = ["fmt-check", "layers", "types", "tests",
                           { cmd = "diff-cover audit/coverage.xml --compare-branch master --fail-under 100" }]
