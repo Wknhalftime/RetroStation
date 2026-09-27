@@ -185,3 +185,12 @@ class TestLibraryTitleVariants:
     def test_missing_tag_falls_back_to_the_stored_form(self) -> None:
         assert library_title_variants(None, "halo") == ("halo",)
         assert library_title_variants(None, None) == ("",)
+
+    def test_core_form_added_even_when_lexicographically_greater_than_full(self) -> None:
+        """A leading bracketed group can sort before the remaining title text,
+        so the stripped "core" form can sort AFTER the full form ("zzz" >
+        "aaa zzz"). Locks that the core form is still added on `!=`, not on
+        `<` — a mutant that replaces the inequality check with `<` would drop
+        this case (AUD-014 mutation gate: kills a survived `!=`->`<` mutant
+        on library_title_variants's `core != full` check)."""
+        assert library_title_variants("(Aaa) Zzz", None) == ("aaa zzz", "zzz")
