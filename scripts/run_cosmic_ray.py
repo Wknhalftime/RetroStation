@@ -52,36 +52,60 @@ def run_baseline_test(test_command: list[str]) -> bool:
     return True
 
 
-def parse_session_stats_from_report(report_output: str) -> dict[str, int]:
-    """Parse mutation results from cr-report text output.
+def parse_session_stats(session_file: Path) -> dict[str, int]:
+    """Parse mutation results from cosmic-ray's WorkDB.
 
-    Returns dict with keys: mutants, killed, survived, timeout, incompetent, pending
-    Only includes counts for actually measured outcomes.
+    Returns dict with measured counts only (no zeros).
+    Counts only NORMAL worker_outcome for killed/survived/incompetent.
+    Separately reports abnormal (timeouts), exceptions, and skipped/no-test.
     """
+    try:
+        from cosmic_ray.work_db import WorkDB, use_db
+        from cosmic_ray.work_item import TestOutcome, WorkerOutcome
+    except ImportError:
+        print("Error: cosmic_ray not installed", file=sys.stderr)
+        return {}
+
     counts = {
         "mutants": 0,
+        "pending": 0,
         "killed": 0,
         "survived": 0,
-        "timeout": 0,
         "incompetent": 0,
-        "pending": 0,
+        "abnormal": 0,
+        "exception": 0,
+        "no_test": 0,
     }
 
-    # Parse cr-report summary lines
-    for line in report_output.split("\n"):
-        line = line.strip()
-        if line.startswith("total jobs:"):
-            parts = line.split(":")
-            if len(parts) > 1:
-                counts["mutants"] = int(parts[1].strip())
-        elif line.startswith("surviving mutants:"):
-            parts = line.split(":")
-            if len(parts) > 1:
-                num_str = parts[1].strip().split()[0]
-                counts["survived"] = int(num_str)
+    try:
+        with use_db(str(session_file), WorkDB.Mode.open) as db:
+            counts["mutants"] = db.num_work_items
+            counts["pending"] = sum(1 for _ in db.pending_work_items)
 
-    # Calculate killed
-    counts["killed"] = counts["mutants"] - counts["survived"]
+            # Iterate results: (job_id, result)
+            for _job_id, result in db.results:
+                worker_outcome = result.worker_outcome
+                test_outcome = result.test_outcome
+
+                # Count by worker outcome
+                if worker_outcome == WorkerOutcome.NORMAL:
+                    # Count test outcome only for normal worker outcome
+                    if test_outcome == TestOutcome.KILLED:
+                        counts["killed"] += 1
+                    elif test_outcome == TestOutcome.SURVIVED:
+                        counts["survived"] += 1
+                    elif test_outcome == TestOutcome.INCOMPETENT:
+                        counts["incompetent"] += 1
+                elif worker_outcome == WorkerOutcome.ABNORMAL:
+                    counts["abnormal"] += 1
+                elif worker_outcome == WorkerOutcome.EXCEPTION:
+                    counts["exception"] += 1
+                elif worker_outcome in (WorkerOutcome.NO_TEST, WorkerOutcome.SKIPPED):
+                    counts["no_test"] += 1
+
+    except Exception as e:
+        print(f"Error reading session database: {e}", file=sys.stderr)
+        return {}
 
     return counts
 
@@ -248,25 +272,29 @@ name = "local"
         report_result = subprocess.run(report_cmd, capture_output=True, text=True)
         print(report_result.stdout)
 
-        # Parse session stats from cr-report output
-        stats = parse_session_stats_from_report(report_result.stdout)
+        # Parse session stats from WorkDB
+        stats = parse_session_stats(session_file)
 
         if not stats:
             print("Error: Could not parse mutation results", file=sys.stderr)
             return 1
 
-        # Build summary line - only report what we measured
+        # Build summary line - only report measured counts (no zeros)
         summary_parts = [f"mutants={stats['mutants']}"]
+        if stats["pending"] > 0:
+            summary_parts.append(f"pending={stats['pending']}")
         if stats["killed"] > 0:
             summary_parts.append(f"killed={stats['killed']}")
         if stats["survived"] > 0:
             summary_parts.append(f"survived={stats['survived']}")
-        if stats["timeout"] > 0:
-            summary_parts.append(f"timeout={stats['timeout']}")
         if stats["incompetent"] > 0:
             summary_parts.append(f"incompetent={stats['incompetent']}")
-        if stats["pending"] > 0:
-            summary_parts.append(f"pending={stats['pending']}")
+        if stats["abnormal"] > 0:
+            summary_parts.append(f"abnormal={stats['abnormal']}")
+        if stats["exception"] > 0:
+            summary_parts.append(f"exception={stats['exception']}")
+        if stats["no_test"] > 0:
+            summary_parts.append(f"no_test={stats['no_test']}")
 
         summary_line = " ".join(summary_parts)
 
@@ -274,10 +302,17 @@ name = "local"
         print("=" * 70)
         print(summary_line)
 
-        # Check for pending mutations (incomplete runs)
+        # Check for incomplete or failed runs
         if stats["pending"] > 0:
             print(
                 f"FAIL: {stats['pending']} mutations did not complete",
+                file=sys.stderr,
+            )
+            return 1
+
+        if stats["exception"] > 0:
+            print(
+                f"FAIL: {stats['exception']} mutations caused exceptions",
                 file=sys.stderr,
             )
             return 1
