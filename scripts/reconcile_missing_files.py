@@ -6,8 +6,10 @@ Run: uv run python scripts/reconcile_missing_files.py            # dry run: repo
 A file moved and retagged in one go (MusicBrainz Picard) left its old row
 behind as MISSING, still holding its matches and song-master pick. Scans
 now fold such rows in as they happen; this clears the backlog left before.
-Each move runs in its own transaction, so an interrupted run can simply be
-run again. Take a backup first: folded rows cannot be restored without one.
+--apply runs the same reconciliation a scan does: each move in its own
+transaction, so an interrupted run can simply be run again, then a re-pick
+of masters left on missing files. Take a backup first: folded rows cannot be
+restored without one.
 
 Targets ``DATABASE_URL`` if set, else the app's configured database.
 """
@@ -24,12 +26,9 @@ from psycopg.rows import dict_row
 
 from backend.config import Settings
 from backend.domain.library import MissingFilePlan
-from backend.services.missing_file_reconciliation_service import (
-    ReconciliationRepos,
-    apply_missing_file_move,
-    plan_for_library,
-)
+from backend.services.missing_file_reconciliation_service import plan_for_library
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks.library_scan_tasks import reconcile_missing_after_scan
 
 
 def _use_utf8_console() -> None:
@@ -39,13 +38,14 @@ def _use_utf8_console() -> None:
     sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
 
-def format_report(plan: MissingFilePlan) -> list[str]:
+def format_report(plan: MissingFilePlan, masters_to_repick: int) -> list[str]:
     total = len(plan.moves) + len(plan.ambiguous) + len(plan.unmatched)
     lines = [
         f"missing rows:           {total}",
         f"  to fold in:           {len(plan.moves)}",
         f"  ambiguous:            {len(plan.ambiguous)}",
         f"  no present copy:      {len(plan.unmatched)}",
+        f"masters to re-pick:     {masters_to_repick}",
     ]
     crossing = [m for m in plan.moves if m.crosses_work]
     if crossing:
@@ -57,23 +57,17 @@ def format_report(plan: MissingFilePlan) -> list[str]:
     return lines
 
 
-def apply_plan(
-    plan: MissingFilePlan,
-    conn: psycopg.Connection[Any],
-    repos: ReconciliationRepos,
-) -> tuple[int, int]:
-    """Apply each move in its own transaction. Returns (folded, skipped)."""
-    folded = skipped = 0
-    for move in plan.moves:
-        try:
-            with conn.transaction():
-                apply_missing_file_move(move, repos)
-        except psycopg.errors.ForeignKeyViolation:
-            # The successor was deleted since planning; the next scan re-plans.
-            skipped += 1
-            continue
-        folded += 1
-    return folded, skipped
+def apply_and_summarise(conn: psycopg.Connection[Any], factory: RepositoryFactory) -> str:
+    """Run the scans' reconciliation and summarise what it did in one line."""
+    result = reconcile_missing_after_scan(conn, factory)
+    if result is None:
+        # Autocommit: the folds made before the failure are kept; a re-run continues.
+        return "reconciliation stopped early; see missing_reconciliation_failed in the log"
+    return (
+        f"folded {result.reconciled}, failed {result.failed}, "
+        f"masters re-picked {result.masters_repicked} "
+        "(failed folds are logged as missing_file_fold_failed)"
+    )
 
 
 def main() -> None:
@@ -85,20 +79,13 @@ def main() -> None:
     url = os.environ.get("DATABASE_URL") or Settings().database_url
     with psycopg.connect(url, row_factory=dict_row, autocommit=True) as conn:
         factory = RepositoryFactory(conn)
-        repos = ReconciliationRepos(
-            files=factory.library_files,
-            matches=factory.matches,
-            works=factory.works,
-            song_masters=factory.song_masters,
-            format_overrides=factory.format_overrides,
-        )
-        plan = plan_for_library(repos.files)
-        print("\n".join(format_report(plan)))
+        plan = plan_for_library(factory.library_files)
+        masters = len(factory.song_masters.list_work_ids_with_missing_master())
+        print("\n".join(format_report(plan, masters)))
         if not args.apply:
             print("\ndry run: nothing changed. Re-run with --apply to fold the rows in.")
             return
-        folded, skipped = apply_plan(plan, conn, repos)
-        print(f"\nfolded {folded} rows; skipped {skipped} whose successor vanished.")
+        print("\n" + apply_and_summarise(conn, factory))
 
 
 if __name__ == "__main__":
