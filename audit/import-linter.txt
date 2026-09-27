@@ -1,0 +1,23 @@
+
+╔══╗─────────▶╔╗ ╔╗      ╔╗◀───┐
+╚╣╠╝◀─────┐  ╔╝╚╗║║────▶╔╝╚╗   │
+ ║║   ╔══╦══╦╩╗╔╝║║  ╔╦═╩╗╔╝╔═╦══╗
+ ║║╔══╣╔╗║╔╗║╔╣║ ║║ ╔╬╣╔╗║║ ║│║╔═╝
+╔╣╠╣║║║╚╝║╚╝║║║╚╗║╚═╝║║║║║╚╗║═╣║
+╚══╩╩╩╣╔═╩══╩╝╚═╝╚═══╩╩╝╚╩═╩╩═╩╝
+  └──▶║║                    ▲ 
+      ╚╝────────────────────┘
+
+
+---------
+Contracts
+---------
+
+Analyzed 160 files, 884 dependencies.
+-------------------------------------
+
+Layers: entry points -> services -> adapters -> ports -> domain KEPT (7 ignored imports)
+Services depend on repository ports, not Pg adapters KEPT (24 ignored imports)
+Domain stays pure (stdlib only today) KEPT
+
+Contracts: 3 kept, 0 broken.

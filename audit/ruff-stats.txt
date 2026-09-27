@@ -1,0 +1,33 @@
+64	TRY003 	raise-vanilla-args
+31	PLR0913	too-many-arguments
+27	S608   	hardcoded-sql-expression
+14	PLR0915	too-many-statements
+12	C901   	complex-structure
+11	ERA001 	commented-out-code
+10	S108   	hardcoded-temp-file
+ 9	T201   	print
+ 8	S603   	subprocess-without-shell-equals-true
+ 6	S607   	start-process-with-partial-path
+ 5	FBT001 	boolean-type-hint-positional-argument
+ 5	S101   	assert
+ 5	TRY300 	try-consider-else
+ 4	ARG002 	unused-method-argument
+ 2	PTH122 	os-path-splitext
+ 2	S105   	hardcoded-password-string
+ 2	TRY400 	error-instead-of-exception
+ 1	ARG001 	unused-function-argument
+ 1	FBT002 	boolean-default-value-positional-argument
+ 1	PLR0912	too-many-branches
+ 1	PTH100 	os-path-abspath
+ 1	PTH110 	os-path-exists
+ 1	PTH113 	os-path-isfile
+ 1	PTH116 	os-stat
+ 1	PTH118 	os-path-join
+ 1	PTH121 	os-path-samefile
+ 1	PTH123 	builtin-open
+ 1	PTH207 	glob
+ 1	S112   	try-except-continue
+ 1	S311   	suspicious-non-cryptographic-random-usage
+ 1	S324   	hashlib-insecure-hash-function
+Found 231 errors.
+No fixes available (11 hidden fixes can be enabled with the `--unsafe-fixes` option).
