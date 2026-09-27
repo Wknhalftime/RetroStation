@@ -14,6 +14,15 @@ from backend.domain.curation import FormatOverride
 from backend.domain.library import LibraryFile
 
 # ---------------------------------------------------------------------------
+# move_to_work helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_second_work(mbid: str, artist_id: str) -> Work:
+    return Work(id=mbid, title="Test Work 2", artist_id=artist_id)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -230,3 +239,100 @@ class TestDelete:
             remaining = repo.list_by_work(work_id)
             assert len(remaining) == 1
             assert remaining[0].format_name == "mp3"
+
+
+class TestMoveToWork:
+    def test_moves_the_override_when_the_target_has_none_for_that_format(
+        self, migrated_db: str
+    ) -> None:
+        with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+            artist_id, from_work, lf = _seed_chain(conn)
+            to_work = "work-fo-002"
+            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            conn.commit()
+
+            repo = PgFormatOverrideRepository(conn)
+            override_id = uuid4()
+            repo.create(
+                FormatOverride(
+                    id=override_id,
+                    work_id=from_work,
+                    format_name="hot_ac",
+                    preferred_file_id=lf.id,
+                )
+            )
+            conn.commit()
+
+            repo.move_to_work(lf.id, from_work, to_work)
+            conn.commit()
+
+            assert repo.get(from_work, "hot_ac") is None
+            moved = repo.get(to_work, "hot_ac")
+            assert moved is not None
+            assert (moved.id, moved.preferred_file_id) == (override_id, lf.id)
+
+    def test_drops_the_moved_override_when_the_target_already_has_one_for_that_format(
+        self, migrated_db: str
+    ) -> None:
+        with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+            artist_id, from_work, lf = _seed_chain(conn)
+            to_work = "work-fo-002"
+            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/other.flac"))
+            conn.commit()
+
+            repo = PgFormatOverrideRepository(conn)
+            moving_id = uuid4()
+            repo.create(
+                FormatOverride(
+                    id=moving_id,
+                    work_id=from_work,
+                    format_name="hot_ac",
+                    preferred_file_id=lf.id,
+                )
+            )
+            kept_id = uuid4()
+            repo.create(
+                FormatOverride(
+                    id=kept_id,
+                    work_id=to_work,
+                    format_name="hot_ac",
+                    preferred_file_id=lf2.id,
+                )
+            )
+            conn.commit()
+
+            repo.move_to_work(lf.id, from_work, to_work)
+            conn.commit()
+
+            assert repo.get(from_work, "hot_ac") is None
+            kept = repo.get(to_work, "hot_ac")
+            assert kept is not None
+            assert (kept.id, kept.preferred_file_id) == (kept_id, lf2.id)
+
+    def test_only_moves_overrides_naming_the_given_file(self, migrated_db: str) -> None:
+        with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+            artist_id, from_work, lf = _seed_chain(conn)
+            to_work = "work-fo-002"
+            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/other.mp3", format="mp3"))
+            conn.commit()
+
+            repo = PgFormatOverrideRepository(conn)
+            other_id = uuid4()
+            repo.create(
+                FormatOverride(
+                    id=other_id,
+                    work_id=from_work,
+                    format_name="mp3",
+                    preferred_file_id=lf2.id,
+                )
+            )
+            conn.commit()
+
+            repo.move_to_work(lf.id, from_work, to_work)
+            conn.commit()
+
+            untouched = repo.get(from_work, "mp3")
+            assert untouched is not None
+            assert untouched.id == other_id

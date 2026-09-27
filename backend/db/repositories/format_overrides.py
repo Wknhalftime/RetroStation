@@ -93,3 +93,23 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
             override_id: The UUID of the override to remove.
         """
         self._conn.execute("DELETE FROM format_overrides WHERE id = %s", (override_id,))
+
+    def move_to_work(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        """Re-key *from_work_id*'s overrides of *file_id* onto *to_work_id*.
+
+        format_overrides has UNIQUE (work_id, format_name), so an override
+        the target work already has for the same format wins and the moved
+        one is dropped rather than colliding.
+        """
+        self._conn.execute(
+            """DELETE FROM format_overrides s
+               WHERE s.work_id = %s AND s.preferred_file_id = %s
+                 AND EXISTS (SELECT 1 FROM format_overrides t
+                             WHERE t.work_id = %s AND t.format_name = s.format_name)""",
+            (from_work_id, str(file_id), to_work_id),
+        )
+        self._conn.execute(
+            """UPDATE format_overrides SET work_id = %s
+               WHERE work_id = %s AND preferred_file_id = %s""",
+            (to_work_id, from_work_id, str(file_id)),
+        )

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.curation import FormatOverride
@@ -27,3 +28,13 @@ class FakeFormatOverrideRepository(FormatOverrideRepository):
 
     def delete(self, override_id: UUID) -> None:
         self._data.pop(override_id, None)
+
+    def move_to_work(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        to_work_formats = {o.format_name for o in self._data.values() if o.work_id == to_work_id}
+        for override_id, override in list(self._data.items()):
+            if override.work_id != from_work_id or override.preferred_file_id != file_id:
+                continue
+            if override.format_name in to_work_formats:
+                del self._data[override_id]
+            else:
+                self._data[override_id] = replace(override, work_id=to_work_id)

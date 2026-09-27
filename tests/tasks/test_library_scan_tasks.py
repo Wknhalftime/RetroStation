@@ -31,10 +31,11 @@ def _make_q(idx: int) -> LibraryQuarantine:
 class TestRunScanChunkedCommits:
     """Test that _run_scan commits at COMMIT_CHUNK_SIZE boundaries."""
 
+    @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_scan_tasks.diff_tree")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_commit_fires_at_chunk_boundary(
-        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock, mock_reconcile: MagicMock
     ) -> None:
         """With chunk_size=3 and 5 files, commit should fire at file 3 and at end."""
         from backend.tasks.library_scan_tasks import _run_scan
@@ -66,11 +67,13 @@ class TestRunScanChunkedCommits:
         # 2) trailing commit for remaining 2 files (pending_writes > 0)
         # 3) folder commit (diff_tree always writes folder rows)
         assert mock_conn.commit.call_count == 3
+        mock_reconcile.assert_called_once_with(mock_conn, mock_repos)
 
+    @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_scan_tasks.diff_tree")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_commit_fires_twice_when_exact_chunk(
-        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock, mock_reconcile: MagicMock
     ) -> None:
         """With chunk_size=3 and exactly 3 files, expect 2 commits:
         one at the chunk boundary and one unconditional commit after diff_tree."""
@@ -168,10 +171,11 @@ class TestRunScanChunkedCommits:
         assert mock_repos.library_quarantine.create_write_only.call_count == 2
         mock_repos.library_quarantine.create.assert_not_called()
 
+    @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_scan_tasks.diff_tree")
     @patch("backend.tasks.library_scan_tasks.scan_directory")
     def test_mixed_files_and_quarantine_share_chunk_counter(
-        self, mock_scan: MagicMock, mock_diff_tree: MagicMock
+        self, mock_scan: MagicMock, mock_diff_tree: MagicMock, mock_reconcile: MagicMock
     ) -> None:
         """Files and quarantine entries both count toward the chunk boundary."""
         from backend.tasks.library_scan_tasks import _run_scan

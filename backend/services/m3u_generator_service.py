@@ -14,7 +14,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastPlayEvent
-from backend.domain.enums import MatchStatus
+from backend.domain.enums import FileStatus, MatchStatus
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
@@ -97,7 +97,8 @@ def generate_m3u(
                         resolved_file_id = override.preferred_file_id
 
         resolved_file = library_file_repo.get_by_id(resolved_file_id)
-        if resolved_file is None:
+        # A missing file's path would be a dead entry in the player.
+        if resolved_file is None or resolved_file.file_status == FileStatus.MISSING:
             continue
 
         file_path = resolved_file.file_path

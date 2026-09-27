@@ -28,7 +28,9 @@ class LibraryFileRepository(ABC):
     def get_by_normalized_artist_name(
         self, normalized_name: str, limit: int = 100
     ) -> list[LibraryFile]:
-        """Return library files whose stored ``normalized_artist_name`` is
+        """PRESENT rows only: a missing file is never a match candidate.
+
+        Return library files whose stored ``normalized_artist_name`` is
         EXACTLY equal to the given normalized name. Callers pass the broadcast
         artist's ``normalized_name`` directly — both sides are produced by
         ``backend.services.normalization.normalize_artist`` so equality is
@@ -40,7 +42,9 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def get_by_recording_mbid(self, recording_mbid: str) -> list[LibraryFile]:
-        """Return all library files whose recording_mbid matches.
+        """PRESENT rows only: a missing file is never a match candidate.
+
+        Return all library files whose recording_mbid matches.
         Used by ResolvedArtistMbidStrategy Step B after MB recording search.
         Multiple rows are possible (e.g., different encodes of the same
         recording); caller scores and picks the best.
@@ -77,6 +81,26 @@ class LibraryFileRepository(ABC):
 
     @abstractmethod
     def get_by_work(self, work_id: str) -> list[LibraryFile]: ...
+
+    @abstractmethod
+    def get_missing(self) -> list[LibraryFile]:
+        """Every MISSING row, in file_path order."""
+        ...
+
+    @abstractmethod
+    def get_present_by_track(
+        self,
+        normalized_artist_name: str,
+        release_title: str,
+        track_number: int,
+        normalized_title: str,
+    ) -> list[LibraryFile]:
+        """PRESENT rows of this artist's track number on this release, in file_path order.
+
+        The release-track half of missing-file reconciliation: a retag that
+        drops or changes MBIDs still keeps these tags.
+        """
+        ...
 
     @abstractmethod
     def relocate(self, file_id: UUID, new_path: str) -> None:

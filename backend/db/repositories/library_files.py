@@ -214,7 +214,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             return []
         rows = self._conn.execute(
             """SELECT * FROM library_files
-               WHERE normalized_artist_name = %s
+               WHERE normalized_artist_name = %s AND file_status = 'present'
                ORDER BY id ASC
                LIMIT %s""",
             (normalized_name, limit),
@@ -227,7 +227,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         # disambiguate by title scoring instead of getting an arbitrary row.
         rows = self._conn.execute(
             """SELECT * FROM library_files
-               WHERE recording_mbid = %s
+               WHERE recording_mbid = %s AND file_status = 'present'
                ORDER BY id ASC""",
             (recording_mbid,),
         ).fetchall()
@@ -335,6 +335,29 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         rows = self._conn.execute(
             "SELECT * FROM library_files WHERE work_id = %s ORDER BY id ASC",
             (work_id,),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_missing(self) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE file_status = 'missing' ORDER BY file_path",
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_present_by_track(
+        self,
+        normalized_artist_name: str,
+        release_title: str,
+        track_number: int,
+        normalized_title: str,
+    ) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            """SELECT * FROM library_files
+               WHERE normalized_artist_name = %s AND release_title = %s
+                 AND track_number = %s AND normalized_title = %s
+                 AND file_status = 'present'
+               ORDER BY file_path""",
+            (normalized_artist_name, release_title, track_number, normalized_title),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 

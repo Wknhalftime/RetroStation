@@ -34,7 +34,10 @@ class WorkRepository(ABC):
 
     @abstractmethod
     def delete_if_empty(self, work_id: str) -> bool:
-        """Delete work if no library_files reference it. Returns True if deleted."""
+        """Delete the work unless files, recordings, matches or overrides reference it.
+
+        Its song master goes with it. Returns True if deleted.
+        """
         ...
 
     @abstractmethod

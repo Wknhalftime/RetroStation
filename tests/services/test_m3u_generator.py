@@ -484,3 +484,39 @@ class TestDurationHandling:
         )
 
         assert "#EXTINF:-1,No Duration" in result
+
+
+class TestMissingFiles:
+    def test_a_missing_file_is_not_written(self) -> None:
+        playlist_id = uuid4()
+        (
+            event_repo,
+            identity_repo,
+            match_repo,
+            file_repo,
+            recording_repo,
+            master_repo,
+            override_repo,
+            settings_repo,
+        ) = _build_repos()
+        identity = _make_identity(title="Ezekiel 25:17")
+        identity_repo.upsert(identity)
+        gone = _make_file(file_path="/music/gone.flac")
+        file_repo.upsert(gone)
+        file_repo.mark_missing(gone.file_path)
+        match_repo.create(_make_match(identity=identity, library_file=gone))
+        event_repo.create(_make_event(identity=identity, playlist_id=playlist_id))
+
+        result = _call_generate(
+            playlist_id,
+            event_repo=event_repo,
+            identity_repo=identity_repo,
+            match_repo=match_repo,
+            file_repo=file_repo,
+            recording_repo=recording_repo,
+            master_repo=master_repo,
+            override_repo=override_repo,
+            settings_repo=settings_repo,
+        )
+
+        assert result == "#EXTM3U\n"

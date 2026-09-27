@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 
 from backend.domain.curation import SongMaster
-from backend.domain.enums import SelectionMethod
+from backend.domain.enums import FileStatus, SelectionMethod
 from backend.repositories.song_masters import SongMasterRepository
 
 
@@ -64,3 +64,21 @@ class PgSongMasterRepository(SongMasterRepository):
             (work_ids,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def list_work_ids_with_missing_master(self) -> list[str]:
+        rows = self._conn.execute(
+            """SELECT sm.work_id
+               FROM song_masters sm
+               JOIN library_files master ON master.id = sm.preferred_file_id
+               WHERE sm.selection_method = %(auto)s
+                 AND master.file_status = %(missing)s
+                 AND EXISTS (SELECT 1 FROM library_files lf
+                             WHERE lf.work_id = sm.work_id AND lf.file_status = %(present)s)
+               ORDER BY sm.work_id""",
+            {
+                "auto": SelectionMethod.AUTO.value,
+                "missing": FileStatus.MISSING.value,
+                "present": FileStatus.PRESENT.value,
+            },
+        ).fetchall()
+        return [r["work_id"] for r in rows]

@@ -35,7 +35,9 @@ export function FormatOverridePanel({
 
   // Flatten all files across recordings for the dropdown
   const allFiles = recordings.flatMap((rec) =>
-    rec.files.map((f) => ({ ...f, recordingTitle: rec.title }))
+    rec.files
+      .filter((f) => f.file_status === "present")
+      .map((f) => ({ ...f, recordingTitle: rec.title }))
   );
 
   function handleSave() {

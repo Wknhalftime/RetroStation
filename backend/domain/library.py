@@ -85,3 +85,51 @@ class CaseDuplicateRepair:
     keeper_id: UUID
     keeper_path: str
     stale_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
+class MissingFileMove:
+    """A MISSING row and the PRESENT row holding the same track (its successor).
+
+    Applying it moves every reference to the missing row onto the successor
+    and deletes the missing row.
+    """
+
+    missing_id: UUID
+    missing_path: str
+    missing_work_id: str | None
+    successor_id: UUID
+    successor_path: str
+    successor_work_id: str | None
+
+    @property
+    def crosses_work(self) -> bool:
+        return self.missing_work_id != self.successor_work_id
+
+
+@dataclass(frozen=True)
+class MissingFilePlan:
+    """What reconciliation will do: moves, and the paths of rows it leaves alone.
+
+    ``ambiguous``: several present copies and no way to tell which one.
+    ``unmatched``: no present copy that is ready (grouped) to take over.
+    """
+
+    moves: tuple[MissingFileMove, ...]
+    ambiguous: tuple[str, ...]
+    unmatched: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MissingFileReconciliation:
+    """Counts from one reconciliation run.
+
+    ``failed``: folds refused by the database, each rolled back on its own.
+    ``masters_repicked``: works whose AUTO master sat on a missing file.
+    """
+
+    reconciled: int
+    failed: int
+    ambiguous: int
+    unmatched: int
+    masters_repicked: int

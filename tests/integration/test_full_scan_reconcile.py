@@ -224,3 +224,79 @@ def test_files_outside_root_are_untouched(migrated_db: str, tmp_path: Path) -> N
         row = repos.library_files.get_by_path(sibling)
         assert row is not None
         assert row.file_status == FileStatus.PRESENT
+
+
+def _seed_match(conn: psycopg.Connection[dict[str, object]], file_id: UUID) -> UUID:
+    from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
+
+    repos = RepositoryFactory(conn)
+    artist = repos.broadcast_artists.upsert(
+        BroadcastArtist(id=uuid4(), original_name="TEST ARTIST", normalized_name=str(uuid4()))
+    )
+    identity = repos.broadcast_identities.upsert(
+        BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Test Track One",
+            normalized_title="test track one",
+            normalized_signature=str(uuid4()),
+        )
+    )
+    conn.execute(
+        "INSERT INTO matches (identity_id, library_file_id) VALUES (%s, %s)",
+        (identity.id, file_id),
+    )
+    return identity.id
+
+
+def _retag(path: Path) -> None:
+    """What a tagger does: new tag content, so a new size and hash."""
+    from mutagen.id3 import COMM, ID3
+
+    tags = ID3(str(path))
+    tags.add(COMM(encoding=3, lang="eng", desc="", text="retagged by Picard"))
+    tags.save()
+
+
+def test_moved_and_retagged_file_keeps_its_matches(migrated_db: str, tmp_path: Path) -> None:
+    old = _put("well_tagged.mp3", tmp_path / "unsorted" / "track.mp3")
+    new = tmp_path / "Test Artist" / "Test Album" / "03 Test Track One.mp3"
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        _full_scan(conn, tmp_path)
+        identity = _seed_match(conn, _id_of(repos, old))
+        conn.commit()
+
+        new.parent.mkdir(parents=True)
+        shutil.move(old, new)
+        _retag(new)
+        _full_scan(conn, tmp_path)
+
+        assert repos.library_files.get_by_path(str(old)) is None
+        assert _status(repos, new) == FileStatus.PRESENT
+        row = conn.execute(
+            "SELECT library_file_id FROM matches WHERE identity_id = %s",
+            (identity,),
+        ).fetchone()
+        assert row is not None and row["library_file_id"] == _id_of(repos, new)
+
+
+def test_a_failed_reconciliation_keeps_the_scan(
+    migrated_db: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import backend.tasks.library_scan_tasks as scan_tasks
+
+    def _refuse(_file_repo: object) -> None:
+        raise psycopg.errors.SerializationFailure("simulated")
+
+    monkeypatch.setattr(scan_tasks, "plan_for_library", _refuse)
+    kept = _put("well_tagged.mp3", tmp_path / "album" / "a.mp3")
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        _full_scan(conn, tmp_path)
+
+        assert _status(repos, kept) == FileStatus.PRESENT

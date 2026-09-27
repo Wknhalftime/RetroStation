@@ -14,3 +14,11 @@ class SongMasterRepository(ABC):
     def list_auto_for_works(self, work_ids: list[str]) -> list[SongMaster]:
         """Return auto-selected masters for the given work IDs (skip manual selections)."""
         ...
+
+    @abstractmethod
+    def list_work_ids_with_missing_master(self) -> list[str]:
+        """Works whose AUTO master's file is missing but that have a present file, by id.
+
+        Manual masters are left for the user to change, even on a missing file.
+        """
+        ...

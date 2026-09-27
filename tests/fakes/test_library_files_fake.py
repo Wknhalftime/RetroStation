@@ -235,3 +235,36 @@ def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() ->
         )
     )
     assert got.enrichment_status == EnrichmentStatus.PENDING
+
+
+def _track_file(repo: FakeLibraryFileRepository, path: str, *, missing: bool) -> LibraryFile:
+    lf = repo.upsert(
+        LibraryFile(
+            id=uuid4(),
+            file_path=path,
+            file_hash=None,
+            format="flac",
+            audio=AudioMetadata(
+                recording_mbid="rec-1",
+                normalized_artist_name="artist",
+                release_title="Album",
+                track_number=1,
+                normalized_title="song",
+            ),
+        )
+    )
+    if missing:
+        repo.mark_missing(path)
+    return lf
+
+
+def test_fake_missing_lookups_mirror_pg() -> None:
+    repo = FakeLibraryFileRepository()
+    present = _track_file(repo, "/m/new.flac", missing=False)
+    gone = _track_file(repo, "/m/old.flac", missing=True)
+
+    assert [f.id for f in repo.get_missing()] == [gone.id]
+    assert [f.id for f in repo.get_present_by_track("artist", "Album", 1, "song")] == [present.id]
+    assert [f.id for f in repo.get_by_recording_mbid("rec-1")] == [present.id]
+    assert [f.id for f in repo.get_by_normalized_artist_name("artist")] == [present.id]
+    assert gone.file_status == FileStatus.MISSING

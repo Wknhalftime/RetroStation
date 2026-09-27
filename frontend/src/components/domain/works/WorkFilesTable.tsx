@@ -58,33 +58,39 @@ export function WorkFilesTable({
           {/* File rows */}
           {recording.files.map((file, fileIdx) => {
             const isMaster = file.id === masterFileId;
+            const isMissing = file.file_status !== "present";
             return (
               <div
                 key={file.id}
                 className={cn(
                   "flex items-center gap-3 px-4 py-2.5 transition-colors",
                   fileIdx < recording.files.length - 1 && "border-b border-gray-100",
-                  isMaster ? "bg-amber-50" : "hover:bg-gray-50"
+                  isMaster ? "bg-amber-50" : "hover:bg-gray-50",
+                  isMissing && "opacity-60"
                 )}
               >
                 {/* Crown button */}
-                <button
-                  type="button"
-                  onClick={() => onSetMaster(file.id)}
-                  aria-label={isMaster ? "Current master file" : "Set as master file"}
-                  className={cn(
-                    "shrink-0 rounded p-0.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-                    isMaster
-                      ? "text-amber-500 hover:text-amber-600"
-                      : "text-gray-300 hover:text-amber-400"
-                  )}
-                >
-                  <Crown
-                    className="h-4 w-4"
-                    fill={isMaster && isManual ? "currentColor" : "none"}
-                    strokeWidth={isMaster ? 2 : 1.5}
-                  />
-                </button>
+                {isMissing ? (
+                  <span className="h-5 w-5 shrink-0" aria-hidden="true" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onSetMaster(file.id)}
+                    aria-label={isMaster ? "Current master file" : "Set as master file"}
+                    className={cn(
+                      "shrink-0 rounded p-0.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+                      isMaster
+                        ? "text-amber-500 hover:text-amber-600"
+                        : "text-gray-300 hover:text-amber-400"
+                    )}
+                  >
+                    <Crown
+                      className="h-4 w-4"
+                      fill={isMaster && isManual ? "currentColor" : "none"}
+                      strokeWidth={isMaster ? 2 : 1.5}
+                    />
+                  </button>
+                )}
 
                 {/* File name */}
                 <span
@@ -96,6 +102,15 @@ export function WorkFilesTable({
                 >
                   {basename(file.file_path)}
                 </span>
+
+                {isMissing && (
+                  <span
+                    className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700"
+                    title="This file is no longer on disk"
+                  >
+                    Missing
+                  </span>
+                )}
 
                 {/* Metadata chips */}
                 <div className="flex shrink-0 items-center gap-2 text-xs text-gray-400">
