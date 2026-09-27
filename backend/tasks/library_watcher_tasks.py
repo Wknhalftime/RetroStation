@@ -244,6 +244,11 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                 unreadable=result.folder_unreadable,
             )
 
+        # A move seen as two folder events pairs up whichever folder came first.
+        from backend.tasks.library_scan_tasks import reconcile_missing_after_scan
+
+        reconcile_missing_after_scan(library_conn, repos)
+
         # Commit staged hashes on success
         repos.library_folders.commit_staged_hashes(task_id)
         library_conn.commit()

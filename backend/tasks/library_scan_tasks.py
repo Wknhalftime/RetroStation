@@ -4,6 +4,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import structlog
@@ -19,7 +20,7 @@ from backend.domain.enums import (
     TaskStatus,
     TaskType,
 )
-from backend.domain.library import LibraryFile, LibraryQuarantine
+from backend.domain.library import LibraryFile, LibraryQuarantine, MissingFileReconciliation
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
@@ -30,12 +31,49 @@ from backend.services.library_scan_service import (
     quarantine_once,
     scan_directory,
 )
+from backend.services.missing_file_reconciliation_service import (
+    ReconciliationRepos,
+    reconcile_missing_files,
+)
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
 
 COMMIT_CHUNK_SIZE = 100
+
+
+def reconcile_missing_after_scan(
+    library_conn: psycopg.Connection[Any],
+    repos: RepositoryFactory,
+) -> MissingFileReconciliation | None:
+    """Fold missing rows into their successors, in a transaction of its own.
+
+    Runs after the scan and grouping have committed, so a refusal here
+    rolls back only the reconciliation. Returns None when it was refused.
+    """
+    try:
+        result = reconcile_missing_files(
+            ReconciliationRepos(
+                files=repos.library_files,
+                matches=repos.matches,
+                works=repos.works,
+                song_masters=repos.song_masters,
+                format_overrides=repos.format_overrides,
+            )
+        )
+        library_conn.commit()
+    except psycopg.Error:
+        library_conn.rollback()
+        logger.warning("missing_reconciliation_failed", exc_info=True)
+        return None
+    logger.info(
+        "missing_files_reconciled",
+        reconciled=result.reconciled,
+        ambiguous=result.ambiguous,
+        unmatched=result.unmatched,
+    )
+    return result
 
 
 def _run_scan(
@@ -235,6 +273,9 @@ def _run_scan(
         library_conn.commit()
     if grouped > 0:
         logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
+
+    # Successors need their work (grouping above) before rows fold into them.
+    reconcile_missing_after_scan(library_conn, repos)
 
     return files_written, quarantine_written, last_progress
 
