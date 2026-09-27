@@ -15,15 +15,30 @@ export function formatDate(iso: string | null | undefined): string {
   });
 }
 
+const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+
+/** Format a real instant (created_at, ingested_at, ...) in the browser's time zone. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(iso).toLocaleString("en-US", DATE_TIME_OPTIONS);
+}
+
+/**
+ * Format a station wall-clock time (played_at) exactly as it was logged.
+ *
+ * played_at stores the station's local time labelled as UTC, so its UTC reading
+ * is the wall clock. Formatting in UTC makes the result independent of both the
+ * browser's zone and whatever offset the API serialized the value with.
+ */
+export function formatWallClock(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-US", { ...DATE_TIME_OPTIONS, timeZone: "UTC" });
 }
 
 export function formatConfidence(score: number | null | undefined): string {
