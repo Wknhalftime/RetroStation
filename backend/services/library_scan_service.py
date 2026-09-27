@@ -344,7 +344,10 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
         return extractor(audio, path, fmt)
 
     # Tag-type fallback for files with unexpected extensions
-    tag_type = type(audio.tags).__name__ if audio.tags is not None else ""
+    # Bind tags to a local variable so mypy understands type narrowing.
+    # mutagen.FileType.tags is declared as None, so direct checks don't narrow.
+    tags: object | None = audio.tags
+    tag_type = type(tags).__name__ if tags is not None else ""
     if "ID3" in tag_type:
         return _extract_id3(audio, path)
     if "VComment" in tag_type or "Vorbis" in tag_type:

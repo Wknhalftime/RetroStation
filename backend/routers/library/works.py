@@ -711,7 +711,8 @@ async def merge_works(
         f"UPDATE library_files SET work_id = %s WHERE work_id IN ({src_placeholders})",
         [target_id, *existing_source_ids],
     )
-    merged_file_count = files_cur.rowcount if files_cur.rowcount is not None else 0
+    # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
+    merged_file_count = max(0, files_cur.rowcount)
 
     # Drop source overrides that collide with an existing target override
     # (target wins) OR collide with another source override for the same

@@ -469,4 +469,5 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
                WHERE enrichment_status = %s""",
             (EnrichmentStatus.PENDING.value, EnrichmentStatus.FAILED.value),
         )
-        return result.rowcount if result.rowcount is not None else 0
+        # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
+        return max(0, result.rowcount)

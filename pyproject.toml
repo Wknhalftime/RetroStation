@@ -49,6 +49,8 @@ dev = [
     "pytest-socket",
     "diff-cover",
     "pre-commit",
+    # mutation testing (poe mutate-<module>, refactor gate step 2)
+    "cosmic-ray>=8.7",
 ]
 
 [tool.pytest.ini_options]
@@ -194,10 +196,21 @@ layers      = { cmd = "lint-imports", capture_stdout = "audit/import-linter.txt"
 deadcode    = { cmd = "vulture backend vulture_whitelist.py --min-confidence 60", capture_stdout = "audit/vulture.txt" }
 deps        = "deptry . --json-output audit/deptry.json"
 vulns       = "pip-audit -f json -o audit/pip-audit.json"
-tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json"
+tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json --cov-report=xml:audit/coverage.xml"
 hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
 audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
 audit.ignore_fail = "return_non_zero"
-mutate      = "mutmut run"   # WSL; scope with [tool.mutmut] paths_to_mutate = the hotspot module
+
+# ---- refactor gate (four-step gate before hotspot refactors) ----
+# Gate 1: snapshot tests (syrupy)
+#   - commit syrupy snapshot tests first
+#   - verify they pass on unchanged code before refactoring
+# Gate 2: mutation testing (cosmic-ray)
+#   - record baseline: `poe mutate MODULE TESTS...` before refactor
+#   - record after: `poe mutate MODULE TESTS...` after refactor
+#   - ensure survivors did not increase
+# Gates 3-4: code quality and coverage
+#   - run `poe refactor-gate` to check fmt-check, layers, types, tests, diff-cover (100%)
+mutate      = { cmd = "python scripts/run_cosmic_ray.py", help = "Run mutation tests: `poe mutate [--timeout N] [--max-survivors N] MODULE TEST_PATHS...`\nExample: poe mutate backend/services/matching_utils.py tests/services/test_matching_utils.py" }
 refactor-gate.sequence = ["fmt-check", "layers", "types", "tests",
                           { cmd = "diff-cover audit/coverage.xml --compare-branch master --fail-under 100" }]

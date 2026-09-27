@@ -959,12 +959,12 @@ def mb_enrichment_task() -> dict[str, int]:
         if progress_conn is not None:
             progress_conn.close()
 
-    artists_done = ctx.done.get("artists", 0) if ctx is not None else 0
-    artists_failed = ctx.failed.get("artists", 0) if ctx is not None else 0
-    works_done = ctx.done.get("works", 0) if ctx is not None else 0
-    works_failed = ctx.failed.get("works", 0) if ctx is not None else 0
-    recordings_done = ctx.done.get("recordings", 0) if ctx is not None else 0
-    recordings_failed = ctx.failed.get("recordings", 0) if ctx is not None else 0
+    artists_done = ctx.done.get("artists", 0)
+    artists_failed = ctx.failed.get("artists", 0)
+    works_done = ctx.done.get("works", 0)
+    works_failed = ctx.failed.get("works", 0)
+    recordings_done = ctx.done.get("recordings", 0)
+    recordings_failed = ctx.failed.get("recordings", 0)
 
     logger.info(
         "mb_enrichment_task_complete",
