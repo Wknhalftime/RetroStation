@@ -38,8 +38,14 @@ from backend.domain.catalog import Artist
 from backend.domain.enums import CatalogSource, MatchStatus, MatchTier, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import MappingRule, Match
-from backend.services.artist_matching_service import match_artists_for_playlist
-from backend.services.identity_matching_service import match_identities_for_playlist
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    match_artists_for_playlist,
+)
+from backend.services.identity_matching_service import (
+    IdentityMatchingRepos,
+    match_identities_for_playlist,
+)
 from backend.services.normalization import (
     compute_normalized_signature,
     normalize_artist,
@@ -220,11 +226,13 @@ def test_match_artists_for_playlist_full_scenario_snapshot(snapshot: SnapshotAss
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -499,13 +507,15 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=broadcast_artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=broadcast_artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=catalog_repo,
+        ),
         mb_client=mb_client,
-        catalog_repo=catalog_repo,
     )
 
     def _identity_state(identity_id: UUID) -> dict[str, object]:

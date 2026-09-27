@@ -19,7 +19,10 @@ from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, TaskType
 from backend.services import master_selection_service
-from backend.services.identity_matching_service import match_identities_for_playlist
+from backend.services.identity_matching_service import (
+    IdentityMatchingRepos,
+    match_identities_for_playlist,
+)
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.tasks._error_boundary import task_failure_telemetry
 from backend.tasks.huey_app import huey
@@ -43,15 +46,18 @@ def identity_matching_task(playlist_id: str) -> None:
                 PgMusicBrainzCacheRepository(conn),
                 ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client:
-                work_ids = match_identities_for_playlist(
-                    playlist_id=UUID(playlist_id),
+                repos = IdentityMatchingRepos(
                     track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
                     broadcast_artist_repo=PgBroadcastArtistRepository(conn),
                     match_repo=PgMatchRepository(conn),
                     library_file_repo=PgLibraryFileRepository(conn),
                     rules_repo=PgMappingRuleRepository(conn),
-                    mb_client=mb_client,
                     catalog_repo=PgArtistRepository(conn),
+                )
+                work_ids = match_identities_for_playlist(
+                    playlist_id=UUID(playlist_id),
+                    repos=repos,
+                    mb_client=mb_client,
                     strong_match_threshold=settings.strong_match_threshold,
                 )
             conn.commit()

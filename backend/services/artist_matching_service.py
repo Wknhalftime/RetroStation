@@ -451,14 +451,32 @@ def coalesce_artist_searches(
     return result, len(buckets)
 
 
+@dataclass(frozen=True)
+class ArtistMatchThresholds:
+    """Score thresholds and limits shared by every phase of artist matching.
+
+    Threaded through match_artists_for_playlist, _run_local_phase and
+    _run_mb_or_deferred_phase as one object instead of five loose ints — see
+    AUD-040. Defaults are identical to today's individual parameter defaults.
+    """
+
+    strong_match_threshold: int = 80
+    mb_score_gap: int = MB_SCORE_GAP
+    mb_auto_link_score: int = MB_AUTO_LINK_SCORE
+    min_presentation_score: int = MIN_PRESENTATION_SCORE
+    broadcast_name_max_len: int = 30
+
+
+# Frozen singleton so match_artists_for_playlist's default arg is not a
+# function call (ruff B008) — safe because ArtistMatchThresholds is immutable.
+_DEFAULT_ARTIST_MATCH_THRESHOLDS = ArtistMatchThresholds()
+
+
 def _run_local_phase(
     pending: list[BroadcastArtist],
     rules: list[MappingRule],
     all_canonical: list[Artist],
-    strong_match_threshold: int,
-    mb_score_gap: int,
-    mb_auto_link_score: int,
-    min_presentation_score: int,
+    thresholds: ArtistMatchThresholds,
 ) -> tuple[dict[UUID, ArtistMatchResult], list[BroadcastArtist]]:
     """Phase 1: local engine — runs for every artist.
 
@@ -470,10 +488,10 @@ def _run_local_phase(
             MappingRuleStrategy(rules),
             NormalizationStrategy(
                 all_canonical,
-                strong_match_threshold,
-                mb_score_gap,
-                mb_auto_link_score,
-                min_presentation_score=min_presentation_score,
+                thresholds.strong_match_threshold,
+                thresholds.mb_score_gap,
+                thresholds.mb_auto_link_score,
+                min_presentation_score=thresholds.min_presentation_score,
             ),
         ]
     )
@@ -526,10 +544,7 @@ def _run_mb_or_deferred_phase(
     unresolved: list[BroadcastArtist],
     mb_client: MusicBrainzClientProtocol,
     search_map: dict[str, list[MbArtistResult]],
-    strong_match_threshold: int,
-    mb_score_gap: int,
-    mb_auto_link_score: int,
-    broadcast_name_max_len: int,
+    thresholds: ArtistMatchThresholds,
 ) -> dict[UUID, ArtistMatchResult]:
     """Phase 2: TruncatedNameMbStrategy → DeferredRetryStrategy.
 
@@ -541,12 +556,12 @@ def _run_mb_or_deferred_phase(
             TruncatedNameMbStrategy(
                 inner=MusicBrainzApiStrategy(
                     mb_client,
-                    strong_match_threshold,
-                    mb_score_gap,
-                    mb_auto_link_score,
+                    thresholds.strong_match_threshold,
+                    thresholds.mb_score_gap,
+                    thresholds.mb_auto_link_score,
                     search_map=search_map,
                 ),
-                max_len=broadcast_name_max_len,
+                max_len=thresholds.broadcast_name_max_len,
             ),
             DeferredRetryStrategy(),
         ]
@@ -606,19 +621,28 @@ def _persist_artist_result(
         )
 
 
+@dataclass(frozen=True)
+class ArtistMatchingRepos:
+    """The repositories match_artists_for_playlist reads from and writes through.
+
+    Every new collaborator this function needs means editing this dataclass
+    and the one place that builds it (artist_matching_tasks.py), not the
+    function signature — see AUD-040 and the precedent EnrichmentRepos set in
+    library_enrichment_service.py.
+    """
+
+    broadcast_artist_repo: BroadcastArtistRepository
+    track_identity_repo: BroadcastTrackIdentityRepository
+    artist_repo: ArtistCatalogRepository
+    match_repo: MatchRepository
+    rules_repo: MappingRuleRepository
+
+
 def match_artists_for_playlist(
     playlist_id: UUID,
-    broadcast_artist_repo: BroadcastArtistRepository,
-    track_identity_repo: BroadcastTrackIdentityRepository,
-    artist_repo: ArtistCatalogRepository,
-    match_repo: MatchRepository,
-    rules_repo: MappingRuleRepository,
+    repos: ArtistMatchingRepos,
     mb_client: MusicBrainzClientProtocol,
-    strong_match_threshold: int = 80,
-    mb_score_gap: int = MB_SCORE_GAP,
-    mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
-    min_presentation_score: int = MIN_PRESENTATION_SCORE,
-    broadcast_name_max_len: int = 30,
+    thresholds: ArtistMatchThresholds = _DEFAULT_ARTIST_MATCH_THRESHOLDS,
 ) -> None:
     """Resolve PENDING artists. Tier order:
 
@@ -633,9 +657,9 @@ def match_artists_for_playlist(
     Persistence lives here, not in strategies. AUTO_REJECTED cascade
     preserved from legacy.
     """
-    pending = broadcast_artist_repo.get_pending_for_playlist(playlist_id)
-    rules = rules_repo.list_ordered()
-    all_canonical = artist_repo.list_all()
+    pending = repos.broadcast_artist_repo.get_pending_for_playlist(playlist_id)
+    rules = repos.rules_repo.list_ordered()
+    all_canonical = repos.artist_repo.list_all()
 
     live_start = mb_client.live_fetches
     hits_start = mb_client.cache_hits
@@ -646,25 +670,19 @@ def match_artists_for_playlist(
             pending,
             rules,
             all_canonical,
-            strong_match_threshold,
-            mb_score_gap,
-            mb_auto_link_score,
-            min_presentation_score=min_presentation_score,
+            thresholds,
         )
         search_map, distinct_search_keys = _build_truncated_search_map(
             unresolved,
             mb_client,
-            broadcast_name_max_len,
+            thresholds.broadcast_name_max_len,
         )
         resolved.update(
             _run_mb_or_deferred_phase(
                 unresolved,
                 mb_client,
                 search_map,
-                strong_match_threshold,
-                mb_score_gap,
-                mb_auto_link_score,
-                broadcast_name_max_len,
+                thresholds,
             )
         )
 
@@ -672,18 +690,18 @@ def match_artists_for_playlist(
             _persist_artist_result(
                 broadcast_artist,
                 resolved[broadcast_artist.id],
-                broadcast_artist_repo,
-                artist_repo,
-                match_repo,
+                repos.broadcast_artist_repo,
+                repos.artist_repo,
+                repos.match_repo,
             )
 
-        _cascade_auto_rejected(playlist_id, broadcast_artist_repo, track_identity_repo)
+        _cascade_auto_rejected(playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo)
         deferred_artist_ids = [
             artist_id
             for artist_id, result in resolved.items()
             if result.reason_code == ReasonCode.DEFERRED_RETRY
         ]
-        _cascade_deferred(deferred_artist_ids, track_identity_repo)
+        _cascade_deferred(deferred_artist_ids, repos.track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
         # the engine or the cascade. `distinct_search_keys` comes from the

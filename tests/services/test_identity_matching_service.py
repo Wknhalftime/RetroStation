@@ -15,13 +15,19 @@ work_id collection, and reason-code propagation.
 
 from __future__ import annotations
 
+import dataclasses
 from uuid import UUID, uuid4
+
+import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import MappingRule, Match
-from backend.services.identity_matching_service import match_identities_for_playlist
+from backend.services.identity_matching_service import (
+    IdentityMatchingRepos,
+    match_identities_for_playlist,
+)
 from backend.services.normalization import (
     compute_normalized_signature,
     normalize_artist,
@@ -181,13 +187,15 @@ def test_match_identities_for_playlist_tier0_rule_hit_collects_work_id() -> None
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == ["work-enter-sandman"]
@@ -201,6 +209,84 @@ def test_match_identities_for_playlist_tier0_rule_hit_collects_work_id() -> None
     assert created.work_id == "work-enter-sandman"
     assert created.confidence_score == 100.0
     assert created.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+
+
+def test_identity_matching_repos_is_frozen() -> None:
+    """`frozen=True` is load-bearing: AUD-015 exists precisely so this object
+    is built once per task and never mutated afterwards. Guards against the
+    `frozen=True` -> `frozen=False` mutant."""
+    repos = IdentityMatchingRepos(
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        broadcast_artist_repo=FakeBroadcastArtistRepository(),
+        match_repo=FakeMatchRepository(),
+        library_file_repo=FakeLibraryFileRepository(),
+        rules_repo=FakeMappingRuleRepository(),
+        catalog_repo=FakeArtistRepository(),
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        repos.match_repo = FakeMatchRepository()  # type: ignore[misc]
+
+
+def test_match_identities_marks_needs_review_when_engine_exhausts_all_strategies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defensive branch: engine.resolve() returning None still resolves the
+    identity instead of leaving it stuck PENDING.
+
+    ResolvedArtistMbidStrategy always returns non-None for resolved artists,
+    and BroadcastToLocalStrategy always returns non-None for unresolved
+    artists (see their docstrings) — between the two, engine.resolve() never
+    actually returns None through the real strategies. Force it here via
+    monkeypatch to exercise match_identities_for_playlist's handling of that
+    documented-but-unreachable case.
+    """
+    monkeypatch.setattr(
+        "backend.services.identity_matching_service.IdentityMatchingEngine.resolve",
+        lambda self, identity, artist: None,
+    )
+
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    artist = BroadcastArtist(
+        id=uuid4(),
+        original_name="Metallica",
+        normalized_name=normalize_artist("Metallica"),
+    )
+    artist_repo.upsert(artist)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Enter Sandman",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    work_ids = match_identities_for_playlist(
+        playlist_id=playlist_id,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
+        mb_client=mb_client,
+    )
+
+    assert work_ids == []
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.match_tier == MatchTier.UNCLASSIFIED
+    assert stored.reason_code == ReasonCode.NO_CANDIDATES
+    assert match_repo.get_by_identity(identity.id) is None
 
 
 def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
@@ -237,13 +323,15 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == ["work-enter-sandman"]
@@ -299,13 +387,15 @@ def test_match_identities_persists_work_id_when_lib_file_has_work_id() -> None:
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     persisted = match_repo.get_by_identity(identity.id)
@@ -353,13 +443,15 @@ def test_match_identities_persists_null_work_id_when_only_recording_id_set() -> 
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     persisted = match_repo.get_by_identity(identity.id)
@@ -400,13 +492,15 @@ def test_match_identities_persists_null_work_id_when_neither_present() -> None:
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     persisted = match_repo.get_by_identity(identity.id)
@@ -456,13 +550,15 @@ def test_match_identities_tier1_case_mismatched_track_title_auto_matches() -> No
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     stored = identity_repo.get_by_id(identity.id)
@@ -509,13 +605,15 @@ def test_match_identities_legacy_null_normalized_title_falls_back() -> None:
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     stored = identity_repo.get_by_id(identity.id)
@@ -559,13 +657,15 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     assert work_ids == []
@@ -624,13 +724,15 @@ def test_match_identities_default_strong_threshold_boundary_auto_matches() -> No
 
     match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
 
     stored = identity_repo.get_by_id(identity.id)
@@ -651,13 +753,15 @@ def test_match_identities_no_pending_returns_empty() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=uuid4(),
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
     assert work_ids == []
 
@@ -686,13 +790,15 @@ def test_match_identities_skips_orphaned_identity_without_artist() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=identity_repo,
-        broadcast_artist_repo=artist_repo,
-        match_repo=match_repo,
-        library_file_repo=lib_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=identity_repo,
+            broadcast_artist_repo=artist_repo,
+            match_repo=match_repo,
+            library_file_repo=lib_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=mb_client,
-        catalog_repo=FakeArtistRepository(),
     )
     assert work_ids == []
     stored = identity_repo.get_by_id(identity.id)
