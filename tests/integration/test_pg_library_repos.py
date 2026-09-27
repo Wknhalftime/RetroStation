@@ -443,3 +443,52 @@ def test_library_file_pending_enrichment_with_release(migrated_db: str) -> None:
 
         assert [f.file_path for f in pending] == ["/c/1.flac", "/c/2.flac"]
         conn.commit()
+
+
+def test_reset_failed_enrichments(migrated_db: str) -> None:
+    """reset_failed_enrichments resets all FAILED files back to PENDING."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repo = PgLibraryFileRepository(conn)
+
+        # Create files with different enrichment statuses
+        failed1 = _make_file(
+            file_path="/music/failed1.flac",
+            enrichment_status=EnrichmentStatus.FAILED,
+        )
+        failed2 = _make_file(
+            file_path="/music/failed2.flac",
+            enrichment_status=EnrichmentStatus.FAILED,
+        )
+        pending = _make_file(
+            file_path="/music/pending.flac",
+            enrichment_status=EnrichmentStatus.PENDING,
+        )
+        enriched = _make_file(
+            file_path="/music/enriched.flac",
+            enrichment_status=EnrichmentStatus.ENRICHED,
+        )
+
+        repo.upsert(failed1)
+        repo.upsert(failed2)
+        repo.upsert(pending)
+        repo.upsert(enriched)
+
+        # Reset failed files to pending
+        count = repo.reset_failed_enrichments()
+
+        assert count == 2
+        # Verify the status changed
+        updated_failed1 = repo.get_by_id(failed1.id)
+        assert updated_failed1 is not None
+        assert updated_failed1.enrichment_status == EnrichmentStatus.PENDING
+
+        # Other statuses should be unchanged
+        unchanged_pending = repo.get_by_id(pending.id)
+        assert unchanged_pending is not None
+        assert unchanged_pending.enrichment_status == EnrichmentStatus.PENDING
+
+        unchanged_enriched = repo.get_by_id(enriched.id)
+        assert unchanged_enriched is not None
+        assert unchanged_enriched.enrichment_status == EnrichmentStatus.ENRICHED
+
+        conn.commit()
