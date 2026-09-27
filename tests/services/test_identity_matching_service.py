@@ -578,6 +578,69 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     assert stored.reason_detail is not None
 
 
+def test_match_identities_default_strong_threshold_boundary_auto_matches() -> None:
+    """Regression pin for the strong_match_threshold=80 default (AUD-015).
+
+    Guards the exact default value threaded from match_identities_for_playlist
+    into ResolvedArtistMbidStrategy: a candidate scoring ~80.65 against a
+    distant runner-up (gap >> MB_SCORE_GAP) must AUTO_MATCH at the real
+    default (80) and would NOT auto-match if the default silently drifted to
+    81 — an off-by-one mutant on this exact default previously survived
+    mutation testing (see AUD-015 gate 2 baseline).
+    """
+    artist_repo = FakeBroadcastArtistRepository()
+    identity_repo = FakeBroadcastTrackIdentityRepository()
+    match_repo = FakeMatchRepository()
+    lib_repo = FakeLibraryFileRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    canonical_mbid = "mbid-boundary"
+    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+
+    # Scores ~80.6452 against "Boundary Case Song Title Example" via
+    # title_scoring's token_sort_ratio pipeline — deliberately just above the
+    # 80 default, to distinguish it from an 81 mutant.
+    winner = _lib_file(
+        "/music/boundary/winner.flac",
+        artist_mbid=canonical_mbid,
+        track_title="boundlry case son   itle example",
+    )
+    runner_up = _lib_file(
+        "/music/boundary/runner_up.flac",
+        artist_mbid=canonical_mbid,
+        track_title="Totally Different Unrelated Title Words",
+    )
+    lib_repo.upsert(winner)
+    lib_repo.upsert(runner_up)
+
+    identity = _pending_identity(
+        artist_id=artist.id,
+        title="Boundary Case Song Title Example",
+        artist_normalized_name=normalize_artist("Metallica"),
+    )
+    playlist_id = uuid4()
+    _register_pending_for_playlist(identity_repo, identity, playlist_id)
+
+    match_identities_for_playlist(
+        playlist_id=playlist_id,
+        track_identity_repo=identity_repo,
+        broadcast_artist_repo=artist_repo,
+        match_repo=match_repo,
+        library_file_repo=lib_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+        catalog_repo=FakeArtistRepository(),
+    )
+
+    stored = identity_repo.get_by_id(identity.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    persisted = match_repo.get_by_identity(identity.id)
+    assert persisted is not None
+    assert 80.0 < persisted.confidence_score < 81.0
+
+
 def test_match_identities_no_pending_returns_empty() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
