@@ -23,7 +23,6 @@ Exit code: 0 if survivors <= max_survivors, 1 otherwise.
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -36,37 +35,36 @@ def sanitize_name(path: str) -> str:
     return re.sub(r"[/\\.]", "_", path)
 
 
-def parse_session_stats(session_file: Path) -> dict[str, int]:
-    """Extract mutation counts from the cosmic-ray session database."""
-    try:
-        with open(session_file) as f:
-            session_data = json.load(f)
+def parse_session_stats(report_output: str) -> dict[str, int]:
+    """Extract mutation counts from cr-report output."""
+    counts = {
+        "mutants": 0,
+        "killed": 0,
+        "survived": 0,
+        "timeout": 0,
+        "incompetent": 0,
+    }
 
-        # Count outcomes from the work items
-        counts = {
-            "mutants": 0,
-            "killed": 0,
-            "survived": 0,
-            "timeout": 0,
-            "incompetent": 0,
-        }
+    # Parse cr-report summary lines: total jobs, complete, surviving mutants
+    for line in report_output.split("\n"):
+        line = line.strip()
+        if line.startswith("total jobs:"):
+            # Extract the number after "total jobs: "
+            parts = line.split(":")
+            if len(parts) > 1:
+                counts["mutants"] = int(parts[1].strip())
+        elif line.startswith("surviving mutants:"):
+            # Extract number before the percentage
+            parts = line.split(":")
+            if len(parts) > 1:
+                num_str = parts[1].strip().split()[0]
+                counts["survived"] = int(num_str)
 
-        if "work_items" in session_data:
-            for item in session_data["work_items"]:
-                counts["mutants"] += 1
-                outcome = item.get("outcome")
-                if outcome == "killed":
-                    counts["killed"] += 1
-                elif outcome == "survived":
-                    counts["survived"] += 1
-                elif outcome == "timeout":
-                    counts["timeout"] += 1
-                elif outcome == "incompetent":
-                    counts["incompetent"] += 1
+    # Calculate killed = mutants - survived - (timeout + incompetent)
+    # For now, assume timeout and incompetent are 0 (report doesn't show them)
+    counts["killed"] = counts["mutants"] - counts["survived"]
 
-        return counts
-    except (json.JSONDecodeError, KeyError, FileNotFoundError):
-        return {"mutants": 0, "killed": 0, "survived": 0, "timeout": 0, "incompetent": 0}
+    return counts
 
 
 def main() -> int:
@@ -210,7 +208,7 @@ name = "local"
         print(report_result.stdout)
 
         # Parse session stats and print summary line
-        stats = parse_session_stats(session_file)
+        stats = parse_session_stats(report_result.stdout)
         summary_line = (
             f"mutants={stats['mutants']} killed={stats['killed']} "
             f"survived={stats['survived']} timeout={stats['timeout']} "
