@@ -49,6 +49,8 @@ dev = [
     "pytest-socket",
     "diff-cover",
     "pre-commit",
+    # mutation testing (poe mutate-<module>, refactor gate step 2)
+    "cosmic-ray>=8.7",
 ]
 
 [tool.pytest.ini_options]
@@ -198,6 +200,6 @@ tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --co
 hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
 audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
 audit.ignore_fail = "return_non_zero"
-mutate      = "mutmut run"   # WSL; scope with [tool.mutmut] paths_to_mutate = the hotspot module
+mutate      = { cmd = "python scripts/run_cosmic_ray.py", help = "Run mutation tests on a module: `poe mutate MODULE TEST_PATHS...`\nExample: poe mutate backend/services/matching_utils.py tests/services/test_matching_utils.py" }
 refactor-gate.sequence = ["fmt-check", "layers", "types", "tests",
                           { cmd = "diff-cover audit/coverage.xml --compare-branch master --fail-under 100" }]
