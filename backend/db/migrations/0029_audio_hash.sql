@@ -20,6 +20,6 @@ CREATE INDEX idx_library_files_audio_unhashed
     ON library_files (file_path)
     WHERE audio_hash IS NULL AND file_status = 'present' AND format IN ('flac', 'mp3');
 
--- Move detection matches on size + mtime whatever the row's fingerprint
--- state (a move or rename on one volume keeps both); no dedicated index is
--- added here, since the lookup covers every row, not a filtered subset.
+-- Move detection looks rows up by size and mtime whatever their hash state.
+CREATE INDEX idx_library_files_stat
+    ON library_files (file_size, file_mtime_ns);

@@ -64,6 +64,7 @@ def test_audio_hash_indexes_exist(migrated_db: str) -> None:
     assert {
         "idx_library_files_audio_hash",
         "idx_library_files_audio_unhashed",
+        "idx_library_files_stat",
     } <= names
 
 
