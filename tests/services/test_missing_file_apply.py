@@ -111,6 +111,40 @@ def test_cross_work_move_repicks_the_old_works_master_from_what_is_left() -> Non
     assert master is not None and master.preferred_file_id == left.id
 
 
+def test_a_fold_reports_that_it_happened() -> None:
+    repos = _repos()
+    _work(repos, "w1")
+    old = _file(repos, "/m/old.flac", "w1", missing=True)
+    new = _file(repos, "/m/new.flac", "w1", missing=False)
+
+    assert apply_missing_file_move(_move(old, new), repos) is True
+
+
+def test_a_missing_row_restored_since_planning_is_left_alone() -> None:
+    repos = _repos()
+    _work(repos, "w1")
+    old = _file(repos, "/m/old.flac", "w1", missing=True)
+    new = _file(repos, "/m/new.flac", "w1", missing=False)
+    move = _move(old, new)
+    repos.files.relocate(old.id, old.file_path)
+
+    assert apply_missing_file_move(move, repos) is False
+    assert repos.files.get_by_id(old.id) is not None
+
+
+def test_a_successor_gone_missing_since_planning_is_left_alone() -> None:
+    repos = _repos()
+    _work(repos, "w1")
+    old = _file(repos, "/m/old.flac", "w1", missing=True)
+    new = _file(repos, "/m/new.flac", "w1", missing=False)
+    move = _move(old, new)
+    repos.files.mark_missing(new.file_path)
+
+    assert apply_missing_file_move(move, repos) is False
+    assert repos.files.get_by_id(old.id) is not None
+    assert repos.files.get_by_id(new.id) is not None
+
+
 def test_reconcile_counts_what_it_did_and_left() -> None:
     repos = _repos()
     _work(repos, "w1")

@@ -173,26 +173,41 @@ class ReconciliationRepos:
     format_overrides: FormatOverrideRepository
 
 
-def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> None:
+def _has_status(file_repo: LibraryFileRepository, file_id: UUID, status: FileStatus) -> bool:
+    row = file_repo.get_by_id(file_id)
+    return row is not None and row.file_status == status
+
+
+def _still_foldable(move: MissingFileMove, file_repo: LibraryFileRepository) -> bool:
+    """Whether the missing row is still missing and its successor still present."""
+    return _has_status(file_repo, move.missing_id, FileStatus.MISSING) and _has_status(
+        file_repo, move.successor_id, FileStatus.PRESENT
+    )
+
+
+def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> bool:
     """Move every reference to the missing row onto its successor, then delete it.
 
     When the successor sits in another work, the moved matches and format
     overrides take that work, and the work the missing row left re-picks its
     master from its own present files and is deleted once nothing references
-    it.
+    it. A move the library has overtaken since planning (the missing row came
+    back, or the successor went missing) is skipped. Returns whether it folded.
     """
+    if not _still_foldable(move, repos.files):
+        return False
     repos.files.merge_into(move.missing_id, move.successor_id)
     if not move.crosses_work:
-        return
+        return True
     repos.matches.move_to_work(move.successor_id, move.successor_work_id)
     if move.missing_work_id is not None and move.successor_work_id is not None:
         repos.format_overrides.move_to_work(
             move.successor_id, move.missing_work_id, move.successor_work_id
         )
-    if move.missing_work_id is None:
-        return
-    reselect_master_from_files(move.missing_work_id, repos.song_masters, repos.files)
-    repos.works.delete_if_empty(move.missing_work_id)
+    if move.missing_work_id is not None:
+        reselect_master_from_files(move.missing_work_id, repos.song_masters, repos.files)
+        repos.works.delete_if_empty(move.missing_work_id)
+    return True
 
 
 def plan_for_library(file_repo: LibraryFileRepository) -> MissingFilePlan:
