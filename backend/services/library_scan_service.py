@@ -3,7 +3,8 @@ Library scan service — tag extraction and directory walking.
 
 Public API:
   extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
-  read_tags(path)          -> LibraryFile  (tags and stat only, no content read)
+  read_tags(path)          -> LibraryFile  (tags, stat and a FLAC's stored MD5; no
+                                             content read)
   scan_directory(root, on_progress=None, on_file=None, on_quarantine=None,
                  hash_content=True)        -> (list[LibraryFile], list[LibraryQuarantine])
 
@@ -21,15 +22,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import mutagen
+import mutagen.flac
 import mutagen.id3
 import structlog
 from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
 
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, LibraryQuarantine
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
+from backend.services.audio_hash import compute_audio_hash
 from backend.services.normalization import normalize_artist, normalize_title
 
 logger = structlog.get_logger()
@@ -369,9 +372,24 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     )
 
 
+def _stored_audio_hash(audio: MutagenFileType, path: Path) -> AudioHash | None:
+    """The flac-md5 a FLAC's STREAMINFO carries, confirmed by re-walking its metadata.
+
+    None when the format is not FLAC, when the encoder stored no MD5, or (Task 4's
+    guard, applied by :func:`compute_audio_hash`) when the file has no audio frames
+    after its metadata — a stored MD5 alone must not stand in for audio that was
+    never written. Re-walking the headers only seeks; it never reads audio bytes.
+    """
+    info = audio.info
+    if not isinstance(info, mutagen.flac.StreamInfo) or info.md5_signature == 0:
+        return None
+    return compute_audio_hash(path)
+
+
 def read_tags(path: Path) -> LibraryFile:
     """
-    Tags, format and on-disk stat for *path*, reading only its tag blocks.
+    Tags, format, on-disk stat and — for a FLAC that stores one — the audio MD5,
+    reading only the file's header and tag blocks.
 
     ``file_hash`` is left None: the content is not read. Raises
     :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
@@ -379,7 +397,9 @@ def read_tags(path: Path) -> LibraryFile:
     audio: MutagenFileType | None = mutagen.File(str(path), easy=False)  # type: ignore[attr-defined]
     if audio is None:
         raise MutagenError(f"mutagen could not identify file: {path}")
-    return _with_disk_stat(_extract_by_format(audio, path), path)
+    lf = _with_disk_stat(_extract_by_format(audio, path), path)
+    lf.audio_hash = _stored_audio_hash(audio, path)
+    return lf
 
 
 def extract_tags(path: Path) -> LibraryFile:
