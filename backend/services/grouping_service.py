@@ -45,18 +45,18 @@ def _dynamic_threshold(title_length: int) -> float:
     return 80.0
 
 
-def _try_hash_shortcut(
+def _try_audio_hash_shortcut(
     file: LibraryFile,
     library_file_repo: LibraryFileRepository,
 ) -> GroupingResult | None:
-    """Return existing GroupingResult if a file with the same hash already has a work_id.
+    """The work of an already grouped row with the same audio fingerprint, if any.
 
-    A file not fingerprinted yet has no content identity to share; identical
-    bytes mean identical tags, so title matching reaches the same work.
+    Bit-identical audio is the same recording whatever its tags say (an album
+    track and its compilation copy). A file not fingerprinted yet shares nothing.
     """
-    if file.file_hash is None:
+    if file.audio_hash is None:
         return None
-    for existing in library_file_repo.get_by_hash(file.file_hash):
+    for existing in library_file_repo.get_by_audio_hash(file.audio_hash):
         if existing.work_id is not None and existing.id != file.id:
             return GroupingResult(
                 work_id=existing.work_id,
@@ -171,7 +171,7 @@ def assign_work(
     if not raw_artist.strip() or not raw_title.strip():
         return None
 
-    shortcut = _try_hash_shortcut(file, library_file_repo)
+    shortcut = _try_audio_hash_shortcut(file, library_file_repo)
     if shortcut is not None:
         return shortcut
 

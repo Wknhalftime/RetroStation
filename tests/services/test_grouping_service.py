@@ -6,10 +6,9 @@ import dataclasses
 from uuid import uuid4
 
 from backend.domain.catalog import Recording
-from backend.domain.enums import VersionType
-from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.enums import AudioHashKind, VersionType
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from backend.services.grouping_service import (
-    GroupingResult,
     _dynamic_threshold,
     assign_work,
 )
@@ -42,12 +41,14 @@ def _make_file(
     track_title: str = "Test Song",
     file_hash: str | None = None,
     recording_mbid: str | None = None,
+    audio_hash: AudioHash | None = None,
 ) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{track_title}.mp3",
         file_hash=file_hash or str(uuid4()),
         format="mp3",
+        audio_hash=audio_hash,
         audio=AudioMetadata(
             artist_name=artist_name,
             track_title=track_title,
@@ -62,12 +63,14 @@ def _seed_file_in_work(
     artist_name: str,
     track_title: str,
     file_hash: str | None = None,
+    audio_hash: AudioHash | None = None,
 ) -> tuple[LibraryFile, str]:
     """Helper: create a file in the repo that already has a work_id."""
     f = _make_file(
         artist_name=artist_name,
         track_title=track_title,
         file_hash=file_hash,
+        audio_hash=audio_hash,
     )
     norm_artist = normalize_artist(artist_name)
     artist_id = repos["artist_repo"].upsert_local_artist(artist_name, norm_artist)
@@ -88,19 +91,43 @@ def _seed_file_in_work(
 # --- Step 1: Hash shortcut ---
 
 
-def test_hash_shortcut_inherits_work_id() -> None:
+_KISS_AUDIO = AudioHash(AudioHashKind.FLAC_MD5, "a" * 32)
+
+
+def test_audio_hash_shortcut_inherits_work_id() -> None:
+    """Bit-identical audio is the same recording, whatever the tags say."""
     repos = _make_repos()
     _existing, existing_work = _seed_file_in_work(
         repos,
         artist_name="Test Artist",
         track_title="Test Song",
-        file_hash="samehash",
+        audio_hash=_KISS_AUDIO,
     )
-    incoming = _make_file(file_hash="samehash", track_title="New Copy")
+    incoming = _make_file(
+        artist_name="Various Artists",
+        track_title="Compilation Copy",
+        audio_hash=_KISS_AUDIO,
+    )
+
     result = assign_work(incoming, **repos)
+
     assert result is not None
-    assert isinstance(result, GroupingResult)
     assert result.work_id == existing_work
+
+
+def test_file_without_audio_hash_does_not_share_work_with_other_unfingerprinted_files() -> None:
+    repos = _make_repos()
+    _other, other_work = _seed_file_in_work(
+        repos,
+        artist_name="Someone Else",
+        track_title="Different Song",
+    )
+    incoming = _make_file()
+
+    result = assign_work(incoming, **repos)
+
+    assert result is not None
+    assert result.work_id != other_work
 
 
 def test_hash_shortcut_skips_self() -> None:
@@ -417,19 +444,3 @@ def test_album_version_collapses_to_base_work() -> None:
     )
     assert result is not None
     assert result.work_id == plain_work
-
-
-def test_unhashed_file_does_not_share_work_with_other_unhashed_files() -> None:
-    repos = _make_repos()
-    other, other_work = _seed_file_in_work(
-        repos,
-        artist_name="Someone Else",
-        track_title="Different Song",
-    )
-    repos["library_file_repo"].upsert(dataclasses.replace(other, file_hash=None))
-    incoming = dataclasses.replace(_make_file(), file_hash=None)
-
-    result = assign_work(incoming, **repos)
-
-    assert result is not None
-    assert result.work_id != other_work
