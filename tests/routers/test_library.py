@@ -1095,9 +1095,9 @@ class TestMergeWorks:
         assert row["target_id"] == "w-match-target"
         assert row["target_type"] == "work"
 
-    def test_merge_local_source_artist_referenced_by_a_match(self, client, db_conn) -> None:
-        """AUD-001 characterisation: the emptied LOCAL source artist is deleted
-        even though an artist match still targets it."""
+    def test_merge_keeps_local_source_artist_referenced_by_a_match(self, client, db_conn) -> None:
+        """AUD-001 / AUD-R004: an emptied LOCAL source artist that an artist
+        match still targets is kept, and the match is left pointing at it."""
         _seed_canonical_chain(
             db_conn,
             artist_mbid="a-ref-target",
@@ -1112,7 +1112,7 @@ class TestMergeWorks:
             recording_mbid="r-ref-source",
             file_path="/m/ref_s.flac",
         )
-        _seed_match_for_artist(db_conn, "a-ref-source")
+        match_id = _seed_match_for_artist(db_conn, "a-ref-source")
 
         resp = client.post(
             "/api/v1/library/works/w-ref-target/merge",
@@ -1120,7 +1120,67 @@ class TestMergeWorks:
         )
 
         assert resp.status_code == 200
-        assert _artist_exists(db_conn, "a-ref-source") is False
+        assert _artist_exists(db_conn, "a-ref-source") is True
+        row = db_conn.execute("SELECT target_id FROM matches WHERE id = %s", (match_id,)).fetchone()
+        assert row is not None
+        assert row["target_id"] == "a-ref-source"
+
+    def test_merge_deletes_unreferenced_local_source_artist(self, client, db_conn) -> None:
+        """An emptied LOCAL source artist with no match targeting it is deleted."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-unref-target",
+            work_mbid="w-unref-target",
+            recording_mbid="r-unref-target",
+            file_path="/m/unref_t.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-unref-source",
+            work_mbid="w-unref-source",
+            recording_mbid="r-unref-source",
+            file_path="/m/unref_s.flac",
+        )
+
+        resp = client.post(
+            "/api/v1/library/works/w-unref-target/merge",
+            json={"source_work_ids": ["w-unref-source"]},
+        )
+
+        assert resp.status_code == 200
+        assert _artist_exists(db_conn, "a-unref-source") is False
+
+    def test_merge_keeps_local_source_artist_that_still_has_works(self, client, db_conn) -> None:
+        """A LOCAL source artist with works left after the merge is kept."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-busy-target",
+            work_mbid="w-busy-target",
+            recording_mbid="r-busy-target",
+            file_path="/m/busy_t.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-busy-source",
+            work_mbid="w-busy-source",
+            recording_mbid="r-busy-source",
+            file_path="/m/busy_s.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-busy-source",
+            work_mbid="w-busy-other",
+            recording_mbid="r-busy-other",
+            file_path="/m/busy_o.flac",
+        )
+
+        resp = client.post(
+            "/api/v1/library/works/w-busy-target/merge",
+            json={"source_work_ids": ["w-busy-source"]},
+        )
+
+        assert resp.status_code == 200
+        assert _artist_exists(db_conn, "a-busy-source") is True
 
     def test_merge_validation_errors(self, client, db_conn) -> None:
         """Missing target returns 404; self-merge returns 422."""

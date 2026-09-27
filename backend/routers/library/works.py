@@ -795,7 +795,14 @@ async def merge_works(
         works_cur = await conn.execute(
             "SELECT id FROM works WHERE artist_id = %s LIMIT 1", (artist_id,)
         )
-        if await works_cur.fetchone() is None:
+        if await works_cur.fetchone() is not None:
+            continue
+        # matches.target_id has no FK: an artist match must not be left dangling.
+        match_cur = await conn.execute(
+            "SELECT id FROM matches WHERE target_type = %s AND target_id = %s LIMIT 1",
+            (TargetType.ARTIST.value, artist_id),
+        )
+        if await match_cur.fetchone() is None:
             await conn.execute("DELETE FROM artists WHERE id = %s", (artist_id,))
 
     return MergeResponse(
