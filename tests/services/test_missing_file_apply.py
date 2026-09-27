@@ -12,6 +12,7 @@ from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
     apply_missing_file_move,
     reconcile_missing_files,
+    repick_stranded_masters,
 )
 from tests.fakes.format_overrides import FakeFormatOverrideRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
@@ -22,12 +23,14 @@ from tests.fakes.works import FakeWorkRepository
 
 def _repos() -> ReconciliationRepos:
     files, works = FakeLibraryFileRepository(), FakeWorkRepository()
+    masters = FakeSongMasterRepository()
     works.set_library_file_repo(files)
+    masters.set_library_file_repo(files)
     return ReconciliationRepos(
         files=files,
         matches=FakeMatchRepository(),
         works=works,
-        song_masters=FakeSongMasterRepository(),
+        song_masters=masters,
         format_overrides=FakeFormatOverrideRepository(),
     )
 
@@ -166,3 +169,34 @@ def test_reconcile_counts_what_it_did_and_left() -> None:
 
     assert (result.reconciled, result.ambiguous, result.unmatched) == (1, 0, 1)
     assert [f.file_path for f in repos.files.get_missing()] == ["/m/z_lonely.flac"]
+
+
+def _auto_master(repos: ReconciliationRepos, work_id: str, file: LibraryFile) -> None:
+    repos.song_masters.upsert(
+        SongMaster(
+            id=uuid4(),
+            work_id=work_id,
+            preferred_file_id=file.id,
+            selection_method=SelectionMethod.AUTO,
+        )
+    )
+
+
+def test_repick_moves_masters_off_missing_files_where_a_present_file_exists() -> None:
+    repos = _repos()
+    stranded = _file(repos, "/m/stranded_old.flac", "w1", missing=True)
+    on_disk = _file(repos, "/m/stranded_new.flac", "w1", missing=False)
+    _auto_master(repos, "w1", stranded)
+    only_missing = _file(repos, "/m/gone.flac", "w2", missing=True)
+    _auto_master(repos, "w2", only_missing)
+    present = _file(repos, "/m/fine.flac", "w3", missing=False)
+    _auto_master(repos, "w3", present)
+
+    assert repick_stranded_masters(repos) == 1
+
+    masters = {w: repos.song_masters.get_by_work(w) for w in ("w1", "w2", "w3")}
+    assert {w: m.preferred_file_id for w, m in masters.items() if m is not None} == {
+        "w1": on_disk.id,
+        "w2": only_missing.id,
+        "w3": present.id,
+    }

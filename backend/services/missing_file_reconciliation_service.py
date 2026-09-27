@@ -210,6 +210,17 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     return True
 
 
+def repick_stranded_masters(repos: ReconciliationRepos) -> int:
+    """Re-pick every master left on a missing file whose work has a present one.
+
+    Returns how many works were re-picked.
+    """
+    work_ids = repos.song_masters.list_work_ids_with_missing_master()
+    for work_id in work_ids:
+        reselect_master_from_files(work_id, repos.song_masters, repos.files)
+    return len(work_ids)
+
+
 def plan_for_library(file_repo: LibraryFileRepository) -> MissingFilePlan:
     """Plan reconciliation for every missing row in the library."""
     return plan_missing_file_moves(
