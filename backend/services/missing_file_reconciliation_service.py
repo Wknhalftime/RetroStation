@@ -17,12 +17,7 @@ from pathlib import PureWindowsPath
 from uuid import UUID
 
 from backend.domain.enums import FileStatus
-from backend.domain.library import (
-    LibraryFile,
-    MissingFileMove,
-    MissingFilePlan,
-    MissingFileReconciliation,
-)
+from backend.domain.library import LibraryFile, MissingFileMove, MissingFilePlan
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
@@ -226,16 +221,4 @@ def plan_for_library(file_repo: LibraryFileRepository) -> MissingFilePlan:
     return plan_missing_file_moves(
         file_repo.get_missing(),
         lambda m: successor_candidates(m, file_repo),
-    )
-
-
-def reconcile_missing_files(repos: ReconciliationRepos) -> MissingFileReconciliation:
-    """Fold every missing row that has a successor into it. The caller commits."""
-    plan = plan_for_library(repos.files)
-    for move in plan.moves:
-        apply_missing_file_move(move, repos)
-    return MissingFileReconciliation(
-        reconciled=len(plan.moves),
-        ambiguous=len(plan.ambiguous),
-        unmatched=len(plan.unmatched),
     )

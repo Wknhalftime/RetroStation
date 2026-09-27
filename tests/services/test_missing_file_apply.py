@@ -11,7 +11,7 @@ from backend.domain.library import AudioMetadata, LibraryFile, MissingFileMove
 from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
     apply_missing_file_move,
-    reconcile_missing_files,
+    plan_for_library,
     repick_stranded_masters,
 )
 from tests.fakes.format_overrides import FakeFormatOverrideRepository
@@ -148,7 +148,7 @@ def test_a_successor_gone_missing_since_planning_is_left_alone() -> None:
     assert repos.files.get_by_id(new.id) is not None
 
 
-def test_reconcile_counts_what_it_did_and_left() -> None:
+def test_plan_for_library_counts_what_it_will_fold_and_leave() -> None:
     repos = _repos()
     _work(repos, "w1")
     _file(repos, "/m/a_old.flac", "w1", missing=True)
@@ -165,10 +165,10 @@ def test_reconcile_counts_what_it_did_and_left() -> None:
     )
     repos.files.mark_missing(lonely.file_path)
 
-    result = reconcile_missing_files(repos)
+    plan = plan_for_library(repos.files)
 
-    assert (result.reconciled, result.ambiguous, result.unmatched) == (1, 0, 1)
-    assert [f.file_path for f in repos.files.get_missing()] == ["/m/z_lonely.flac"]
+    assert (len(plan.moves), len(plan.ambiguous), len(plan.unmatched)) == (1, 0, 1)
+    assert plan.unmatched == ("/m/z_lonely.flac",)
 
 
 def _auto_master(repos: ReconciliationRepos, work_id: str, file: LibraryFile) -> None:

@@ -122,8 +122,14 @@ class MissingFilePlan:
 
 @dataclass(frozen=True)
 class MissingFileReconciliation:
-    """Counts from one reconciliation run."""
+    """Counts from one reconciliation run.
+
+    ``failed``: folds refused by the database, each rolled back on its own.
+    ``masters_repicked``: works whose master sat on a missing file.
+    """
 
     reconciled: int
+    failed: int
     ambiguous: int
     unmatched: int
+    masters_repicked: int

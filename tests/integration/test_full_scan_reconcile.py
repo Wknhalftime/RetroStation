@@ -289,10 +289,10 @@ def test_a_failed_reconciliation_keeps_the_scan(
 ) -> None:
     import backend.tasks.library_scan_tasks as scan_tasks
 
-    def _refuse(_repos: object) -> None:
+    def _refuse(_file_repo: object) -> None:
         raise psycopg.errors.SerializationFailure("simulated")
 
-    monkeypatch.setattr(scan_tasks, "reconcile_missing_files", _refuse)
+    monkeypatch.setattr(scan_tasks, "plan_for_library", _refuse)
     kept = _put("well_tagged.mp3", tmp_path / "album" / "a.mp3")
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:

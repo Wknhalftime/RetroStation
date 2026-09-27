@@ -20,7 +20,12 @@ from backend.domain.enums import (
     TaskStatus,
     TaskType,
 )
-from backend.domain.library import LibraryFile, LibraryQuarantine, MissingFileReconciliation
+from backend.domain.library import (
+    LibraryFile,
+    LibraryQuarantine,
+    MissingFilePlan,
+    MissingFileReconciliation,
+)
 from backend.domain.system import SystemLog, TaskProgress
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
@@ -33,7 +38,9 @@ from backend.services.library_scan_service import (
 )
 from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
-    reconcile_missing_files,
+    apply_missing_file_move,
+    plan_for_library,
+    repick_stranded_masters,
 )
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.huey_app import huey
@@ -43,35 +50,84 @@ logger = structlog.get_logger()
 COMMIT_CHUNK_SIZE = 100
 
 
+def apply_missing_file_moves(
+    plan: MissingFilePlan,
+    conn: psycopg.Connection[Any],
+    repos: ReconciliationRepos,
+) -> tuple[int, int, int]:
+    """Apply each move in a transaction of its own. Returns (folded, failed, stale).
+
+    On a connection already in a transaction each move is a savepoint, so a
+    move the database refuses rolls back alone and the rest still fold. A
+    move the library has overtaken since planning is stale, not failed.
+    """
+    folded = failed = stale = 0
+    for move in plan.moves:
+        try:
+            with conn.transaction():
+                did_fold = apply_missing_file_move(move, repos)
+        except psycopg.Error as exc:
+            logger.warning(
+                "missing_file_fold_failed",
+                missing_path=move.missing_path,
+                successor_path=move.successor_path,
+                error=str(exc),
+            )
+            failed += 1
+            continue
+        if did_fold:
+            folded += 1
+        else:
+            stale += 1
+    return folded, failed, stale
+
+
+def _reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
+    return ReconciliationRepos(
+        files=repos.library_files,
+        matches=repos.matches,
+        works=repos.works,
+        song_masters=repos.song_masters,
+        format_overrides=repos.format_overrides,
+    )
+
+
 def reconcile_missing_after_scan(
     library_conn: psycopg.Connection[Any],
     repos: RepositoryFactory,
 ) -> MissingFileReconciliation | None:
-    """Fold missing rows into their successors, in a transaction of its own.
+    """Fold missing rows into their successors, then re-pick stranded masters.
 
     Runs after the scan and grouping have committed, so a refusal here
-    rolls back only the reconciliation. Returns None when it was refused.
+    rolls back only the reconciliation. A fold the database refuses is
+    skipped on its own; a failure outside one fold (planning, the master
+    sweep, the commit) rolls back the whole run and returns None.
     """
+    recon_repos = _reconciliation_repos(repos)
     try:
-        result = reconcile_missing_files(
-            ReconciliationRepos(
-                files=repos.library_files,
-                matches=repos.matches,
-                works=repos.works,
-                song_masters=repos.song_masters,
-                format_overrides=repos.format_overrides,
-            )
-        )
+        plan = plan_for_library(recon_repos.files)
+        folded, failed, stale = apply_missing_file_moves(plan, library_conn, recon_repos)
+        repicked = repick_stranded_masters(recon_repos)
         library_conn.commit()
     except psycopg.Error:
         library_conn.rollback()
         logger.warning("missing_reconciliation_failed", exc_info=True)
         return None
+    result = MissingFileReconciliation(
+        reconciled=folded,
+        failed=failed,
+        ambiguous=len(plan.ambiguous),
+        unmatched=len(plan.unmatched),
+        masters_repicked=repicked,
+    )
     logger.info(
         "missing_files_reconciled",
         reconciled=result.reconciled,
+        failed=result.failed,
+        stale=stale,
         ambiguous=result.ambiguous,
         unmatched=result.unmatched,
+        masters_repicked=result.masters_repicked,
     )
     return result
 
