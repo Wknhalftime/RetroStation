@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -65,36 +66,43 @@ def test_no_changes_detected_when_unchanged(migrated_db: str, tmp_path: Path) ->
 
 
 def test_upsert_preserves_enrichment_in_full_cycle(migrated_db: str, tmp_path: Path) -> None:
-    """An already-enriched file should keep its status after re-upsert with same hash."""
+    """An already-enriched file keeps its status after re-upsert with the same size and mtime."""
     jazz = tmp_path / "jazz"
     jazz.mkdir()
-    (jazz / "track.flac").write_bytes(b"\x00" * 100)
+    track = jazz / "track.flac"
+    track.write_bytes(b"\x00" * 100)
+    st = os.stat(track)
 
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         file_repo = PgLibraryFileRepository(conn)
 
         lf = LibraryFile(
             id=uuid4(),
-            file_path=str(jazz / "track.flac"),
+            file_path=str(track),
             file_hash="abc123",
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
+            file_size=st.st_size,
+            file_mtime_ns=st.st_mtime_ns,
         )
         file_repo.upsert(lf)
         conn.commit()
 
-        # Re-upsert with same hash (as watcher scan would do)
+        # Re-upsert with the same size and mtime (as the watcher's rescan of
+        # an unchanged file would do): enrichment survives.
         lf2 = LibraryFile(
             id=uuid4(),
-            file_path=str(jazz / "track.flac"),
+            file_path=str(track),
             file_hash="abc123",
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
+            file_size=st.st_size,
+            file_mtime_ns=st.st_mtime_ns,
         )
         file_repo.upsert_write_only(lf2)
         conn.commit()
 
-        result = file_repo.get_by_path(str(jazz / "track.flac"))
+        result = file_repo.get_by_path(str(track))
         assert result is not None
         assert result.enrichment_status == EnrichmentStatus.ENRICHED
 
