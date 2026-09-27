@@ -194,7 +194,7 @@ layers      = { cmd = "lint-imports", capture_stdout = "audit/import-linter.txt"
 deadcode    = { cmd = "vulture backend vulture_whitelist.py --min-confidence 60", capture_stdout = "audit/vulture.txt" }
 deps        = "deptry . --json-output audit/deptry.json"
 vulns       = "pip-audit -f json -o audit/pip-audit.json"
-tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json"
+tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json --cov-report=xml:audit/coverage.xml"
 hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
 audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
 audit.ignore_fail = "return_non_zero"
