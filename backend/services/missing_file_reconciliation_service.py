@@ -125,7 +125,8 @@ def plan_missing_file_moves(
     """Pair each missing row with its successor. Reads only.
 
     A successor must be PRESENT and already grouped (have a work), and can
-    take over only one missing row per run: the first by path wins.
+    take over only one missing row per run: the first by path wins, and a
+    later row whose pick is already claimed is ambiguous.
     """
     moves: list[MissingFileMove] = []
     ambiguous: list[str] = []
@@ -143,8 +144,8 @@ def plan_missing_file_moves(
         if not ready:
             unmatched.append(missing.file_path)
             continue
-        successor = _pick(missing, [c for c in ready if c.id not in claimed])
-        if successor is None:
+        successor = _pick(missing, ready)
+        if successor is None or successor.id in claimed:
             ambiguous.append(missing.file_path)
             continue
         claimed.add(successor.id)

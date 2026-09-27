@@ -125,6 +125,18 @@ def test_a_present_row_succeeds_only_one_missing_row() -> None:
     assert plan.ambiguous == (second.file_path,)
 
 
+def test_a_claimed_pick_leaves_the_later_claimant_ambiguous() -> None:
+    first = _row(r"D:\a\16 Ezekiel.flac", missing=True)
+    second = _row(r"D:\b\16 Ezekiel.flac", missing=True)
+    same_name = _row(r"D:\new\16 Ezekiel.flac")
+    other = _row(r"D:\compilation\Ezekiel 25_17.flac")
+
+    plan = _plan([second, first], [other, same_name])
+
+    assert [(m.missing_id, m.successor_id) for m in plan.moves] == [(first.id, same_name.id)]
+    assert plan.ambiguous == (second.file_path,)
+
+
 def test_a_successor_without_a_work_waits_for_the_next_run() -> None:
     old, new = _row(OLD, missing=True), _row(NEW, work_id=None)
 
