@@ -52,3 +52,11 @@ def test_the_audio_sha256_hot_spot_exists() -> None:
     from backend.services import audio_hash
 
     assert callable(audio_hash._sha256_of_range)
+
+
+def test_the_backfill_hasher_is_configurable() -> None:
+    import dataclasses
+
+    from backend.tasks.library_hash_backfill_tasks import BackfillRunConfig
+
+    assert "hash_audio" in {f.name for f in dataclasses.fields(BackfillRunConfig)}

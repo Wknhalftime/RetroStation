@@ -1,4 +1,4 @@
-"""Library hash backfill — fill in the content hashes a first scan deferred.
+"""Library hash backfill — fill in the audio fingerprints a scan could not take.
 
 library_scan_task queues library_hash_backfill_task after a first scan, and
 library_hash_backfill_resume restarts a run cut short by a crash or a worker
@@ -21,6 +21,7 @@ from backend.domain.enums import LogCategory, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.task_progress import TaskProgressRepository
+from backend.services.audio_hash import AudioHasher, compute_audio_hash
 from backend.services.hash_backfill_service import HashBackfillBatch, backfill_hash_batch
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks._error_boundary import task_failure_telemetry
@@ -46,6 +47,8 @@ class BackfillRunConfig:
     run_id: str
     batch_size: int = BATCH_SIZE
     clock: Callable[[], datetime] = _utcnow
+    # The per-file fingerprinter; tests and the bench harness pass their own.
+    hash_audio: AudioHasher = compute_audio_hash
 
 
 @dataclass(frozen=True)
@@ -106,7 +109,8 @@ def run_hash_backfill(
     commit: Callable[[], None],
     config: BackfillRunConfig,
 ) -> BackfillProgress | None:
-    """Hash every PRESENT row that has no hash yet, one committed batch at a time.
+    """Fingerprint every PRESENT FLAC/MP3 row that has no audio hash yet, one committed
+    batch at a time.
 
     Returns the run's totals, or None when there was nothing to hash or
     another run is live.
@@ -115,14 +119,16 @@ def run_hash_backfill(
     if backfill_is_live(progress_repo, now):
         logger.info("hash_backfill_already_running")
         return None
-    total = file_repo.count_unhashed()
+    total = file_repo.count_audio_unhashed()
     if total == 0:
         return None
 
     progress = BackfillProgress(run_id=config.run_id, total=total, started_at=now)
     cursor: str | None = None
     while True:
-        batch = backfill_hash_batch(file_repo, after_path=cursor, limit=config.batch_size)
+        batch = backfill_hash_batch(
+            file_repo, after_path=cursor, limit=config.batch_size, hash_audio=config.hash_audio
+        )
         if batch.exhausted:
             break
         cursor = batch.last_path
@@ -156,7 +162,7 @@ def run_hash_backfill(
 
 @huey.task()  # type: ignore[untyped-decorator]
 def library_hash_backfill_task() -> None:
-    """Fill in deferred content hashes. Does nothing when none are missing."""
+    """Fill in missing audio fingerprints. Does nothing when none are missing."""
     with (
         task_failure_telemetry(TaskType.HASH_BACKFILL, LogCategory.SCAN) as run_id,
         connect_sync(get_settings().database_url, autocommit=False) as conn,
