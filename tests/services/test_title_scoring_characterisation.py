@@ -22,8 +22,9 @@ from syrupy.assertion import SnapshotAssertion
 
 from backend.domain.enums import MatchTier
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.services.identity_matching_service import _candidate_scores, _score_candidates
-from backend.services.matching_utils import (
+from backend.services.identity_matching_service import _score_candidates
+from backend.services.title_scoring import (
+    _candidate_scores,
     broadcast_title_core_variants,
     broadcast_title_variants,
     library_title_variants,

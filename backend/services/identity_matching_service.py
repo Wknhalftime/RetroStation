@@ -5,7 +5,6 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 import structlog
-from rapidfuzz.fuzz import token_sort_ratio
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
@@ -28,14 +27,14 @@ from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
 )
-from backend.services.matching_utils import (
+from backend.services.matching_utils import rule_matches
+from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.title_scoring import (
+    _candidate_scores,
     broadcast_title_core_variants,
     broadcast_title_variants,
-    library_title_variants,
     normalize_title_for_scoring,
-    rule_matches,
 )
-from backend.services.mb_client import MusicBrainzClientProtocol
 
 logger = structlog.get_logger()
 
@@ -84,42 +83,6 @@ def _filter_to_artist(
     # null-as-wildcard would silently re-open the cross-artist hole the
     # Resolution Center invariant exists to close.
     return [f for f in candidates if f.audio.normalized_artist_name == artist_normalized_name]
-
-
-def _candidate_titles(f: LibraryFile) -> tuple[str, ...]:
-    """The library file's normalized title forms for scoring; see
-    library_title_variants for why the stored normalized_title comes first."""
-    return library_title_variants(f.audio.track_title, f.audio.normalized_title)
-
-
-def _candidate_scores(
-    full_bcs: list[str],
-    core_bcs: list[str],
-    f: LibraryFile,
-    strong_match_threshold: int,
-) -> tuple[float, float]:
-    """(score that ranks the candidate, score of the two full forms).
-
-    The full broadcast forms (guest credits stripped) are scored against the
-    file's full title. That is the score unless a comparison with bracketed
-    groups stripped from either side is itself a strong match, in which case
-    that higher score is used: the bracket on one side was noise ("Train In
-    Vain (Stand By Me)" against a tag of "Train in Vain"). Below the
-    threshold a stripped comparison is ignored, because shortening both
-    titles inflates the score of the wrong file as well, and the mid-band
-    gap rule would then auto-match it ("Cry Baby Cry" against "Baby It's You
-    [Mono]" climbs from 48 to 58).
-
-    The full-form score breaks ties, so a file whose tag carries the same
-    bracketed text as the log line beats one that only matches once the
-    brackets are stripped ("Hello (Live)" picks the live file over "Hello"
-    when both reach 100).
-    """
-    libs = [normalize_title_for_scoring(t) for t in _candidate_titles(f)]
-    exact = float(token_sort_ratio(full_bcs[0], libs[0]))
-    full = max(float(token_sort_ratio(bc, libs[0])) for bc in full_bcs)
-    stripped = max(float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs)
-    return (stripped if stripped >= strong_match_threshold else full), exact
 
 
 def _score_candidates(
