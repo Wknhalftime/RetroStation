@@ -13,12 +13,8 @@ Example:
         backend/services/matching_utils.py \\
         tests/services/test_matching_utils.py
 
-    uv run python scripts/run_cosmic_ray.py --timeout 15 --max-survivors 0 \\
-        backend/services/matching_utils.py \\
-        tests/services/test_matching_utils.py
-
 Generates a session file in audit/cosmic-ray-{sanitized_module}.json.
-Exit code: 0 if survivors <= max_survivors, 1 otherwise.
+Exit code: 0 if all mutations complete and survivors <= max_survivors, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -35,33 +31,56 @@ def sanitize_name(path: str) -> str:
     return re.sub(r"[/\\.]", "_", path)
 
 
-def parse_session_stats(report_output: str) -> dict[str, int]:
-    """Extract mutation counts from cr-report output."""
+def run_baseline_test(test_command: list[str]) -> bool:
+    """Run test command on unmutated code to validate it works.
+
+    Returns True if tests pass (exit 0), False otherwise.
+    """
+    print("=" * 70)
+    print("Baseline check: running tests on unmutated code...")
+    print("=" * 70)
+    result = subprocess.run(test_command, capture_output=True, text=True)
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+
+    if result.returncode != 0:
+        print("ERROR: Baseline test command failed on unmutated code!", file=sys.stderr)
+        print("Fix the test command before running mutation testing.", file=sys.stderr)
+        return False
+    print("OK: Baseline check passed\n")
+    return True
+
+
+def parse_session_stats_from_report(report_output: str) -> dict[str, int]:
+    """Parse mutation results from cr-report text output.
+
+    Returns dict with keys: mutants, killed, survived, timeout, incompetent, pending
+    Only includes counts for actually measured outcomes.
+    """
     counts = {
         "mutants": 0,
         "killed": 0,
         "survived": 0,
         "timeout": 0,
         "incompetent": 0,
+        "pending": 0,
     }
 
-    # Parse cr-report summary lines: total jobs, complete, surviving mutants
+    # Parse cr-report summary lines
     for line in report_output.split("\n"):
         line = line.strip()
         if line.startswith("total jobs:"):
-            # Extract the number after "total jobs: "
             parts = line.split(":")
             if len(parts) > 1:
                 counts["mutants"] = int(parts[1].strip())
         elif line.startswith("surviving mutants:"):
-            # Extract number before the percentage
             parts = line.split(":")
             if len(parts) > 1:
                 num_str = parts[1].strip().split()[0]
                 counts["survived"] = int(num_str)
 
-    # Calculate killed = mutants - survived - (timeout + incompetent)
-    # For now, assume timeout and incompetent are 0 (report doesn't show them)
+    # Calculate killed
     counts["killed"] = counts["mutants"] - counts["survived"]
 
     return counts
@@ -86,7 +105,10 @@ def main() -> int:
             try:
                 timeout = int(sys.argv[i])
             except ValueError:
-                print(f"Error: --timeout must be an integer, got {sys.argv[i]}", file=sys.stderr)
+                print(
+                    f"Error: --timeout must be an integer, got {sys.argv[i]}",
+                    file=sys.stderr,
+                )
                 return 1
         elif arg == "--max-survivors":
             i += 1
@@ -97,7 +119,8 @@ def main() -> int:
                 max_survivors = int(sys.argv[i])
             except ValueError:
                 print(
-                    f"Error: --max-survivors must be an integer, got {sys.argv[i]}", file=sys.stderr
+                    f"Error: --max-survivors must be an integer, got {sys.argv[i]}",
+                    file=sys.stderr,
                 )
                 return 1
         elif not arg.startswith("-"):
@@ -118,9 +141,11 @@ def main() -> int:
         return 1
 
     for test_path in test_paths:
-        test_module = Path(test_path)
+        # Test path may include test selectors (::test_name), so check base path only
+        test_base = test_path.split("::")[0]
+        test_module = Path(test_base)
         if not test_module.exists():
-            print(f"Error: Test module not found: {test_path}", file=sys.stderr)
+            print(f"Error: Test module not found: {test_base}", file=sys.stderr)
             return 1
 
     # Generate session filename from sanitized module path
@@ -130,12 +155,28 @@ def main() -> int:
     # Delete old session to avoid stale results
     session_file.unlink(missing_ok=True)
 
+    # Build test command: keep xdist loaded, disable with -n 0
+    test_command = [
+        "pytest",
+        "-n",
+        "0",
+        "-p",
+        "no:randomly",
+        "-x",
+        "-q",
+        "--tb=no",
+    ] + test_paths
+
+    # Run baseline check first
+    if not run_baseline_test(test_command):
+        return 1
+
     # Create a temporary cosmic-ray config
-    test_command = f"pytest -p no:xdist -p no:randomly -n 0 -x --tb=short {' '.join(test_paths)}"
+    test_command_str = " ".join(test_command)
 
     config_content = f"""[cosmic-ray]
 module-path = "{module_path}"
-test-command = "{test_command}"
+test-command = "{test_command_str}"
 timeout = {timeout}
 
 [cosmic-ray.execution-engine]
@@ -207,16 +248,39 @@ name = "local"
         report_result = subprocess.run(report_cmd, capture_output=True, text=True)
         print(report_result.stdout)
 
-        # Parse session stats and print summary line
-        stats = parse_session_stats(report_result.stdout)
-        summary_line = (
-            f"mutants={stats['mutants']} killed={stats['killed']} "
-            f"survived={stats['survived']} timeout={stats['timeout']} "
-            f"incompetent={stats['incompetent']}"
-        )
+        # Parse session stats from cr-report output
+        stats = parse_session_stats_from_report(report_result.stdout)
+
+        if not stats:
+            print("Error: Could not parse mutation results", file=sys.stderr)
+            return 1
+
+        # Build summary line - only report what we measured
+        summary_parts = [f"mutants={stats['mutants']}"]
+        if stats["killed"] > 0:
+            summary_parts.append(f"killed={stats['killed']}")
+        if stats["survived"] > 0:
+            summary_parts.append(f"survived={stats['survived']}")
+        if stats["timeout"] > 0:
+            summary_parts.append(f"timeout={stats['timeout']}")
+        if stats["incompetent"] > 0:
+            summary_parts.append(f"incompetent={stats['incompetent']}")
+        if stats["pending"] > 0:
+            summary_parts.append(f"pending={stats['pending']}")
+
+        summary_line = " ".join(summary_parts)
+
         print()
         print("=" * 70)
         print(summary_line)
+
+        # Check for pending mutations (incomplete runs)
+        if stats["pending"] > 0:
+            print(
+                f"FAIL: {stats['pending']} mutations did not complete",
+                file=sys.stderr,
+            )
+            return 1
 
         # Check max survivors
         if max_survivors is not None and stats["survived"] > max_survivors:
