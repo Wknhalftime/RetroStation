@@ -487,9 +487,6 @@ class FolderScanResult:
     files_missing: int = 0
     files_reappeared: int = 0
     quarantined: int = 0
-    # Legacy rows (no stored stat) confirmed unchanged and stamped with
-    # their stat so the next scan can skip them on stat() alone.
-    files_stat_backfilled: int = 0
     # New paths whose content matched a row whose file had moved away; the
     # row was repointed, keeping its links, instead of a bare row inserted.
     files_relocated: int = 0
@@ -536,15 +533,15 @@ def clear_resolved_quarantine(
     return len(resolved)
 
 
-def _extract_tags_safe(
+def _read_tags_safe(
     path: Path,
     file_path_str: str,
     quarantine_repo: LibraryQuarantineRepository,
     result: FolderScanResult,
 ) -> LibraryFile | None:
-    """Extract tags from path; on any failure quarantine the file and return None."""
+    """Read *path*'s tags; on any failure quarantine the file and return None."""
     try:
-        return extract_tags(path)
+        return read_tags(path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("scan_smart_quarantine", path=file_path_str, error=str(exc))
         quarantine_once(quarantine_repo, file_path_str, str(exc))
@@ -564,13 +561,13 @@ def _mark_missing_files(
             result.files_missing += 1
 
 
-def _reextract_and_upsert(
+def _reread_and_upsert(
     path: Path,
     file_repo: LibraryFileRepository,
     quarantine_repo: LibraryQuarantineRepository,
     result: FolderScanResult,
 ) -> None:
-    lf = _extract_tags_safe(path, str(path), quarantine_repo, result)
+    lf = _read_tags_safe(path, str(path), quarantine_repo, result)
     if lf is not None:
         file_repo.upsert(lf)
         result.files_written += 1
@@ -714,7 +711,7 @@ def _index_new_file(
     A moved or renamed file adopts its old row so grouping and enrichment
     links survive. Returns the old path it was moved from, else None.
     """
-    lf = _extract_tags_safe(path, str(path), quarantine_repo, result)
+    lf = _read_tags_safe(path, str(path), quarantine_repo, result)
     if lf is None:
         return None
     moved_from = adopt_moved_row(lf, file_repo)
@@ -725,41 +722,6 @@ def _index_new_file(
     return moved_from
 
 
-def _content_unchanged(existing: LibraryFile, path: Path) -> bool:
-    """Whether *path* still holds the content *existing* was indexed from.
-
-    Compares hashes. A row a first scan has not hashed yet is judged by its
-    recorded size and mtime instead. Raises OSError if the file can't be read.
-    """
-    if existing.file_hash is None:
-        return _stat_matches(existing, disk_stat(path)) is True
-    return compute_file_hash(path) == existing.file_hash
-
-
-def _restore_reappeared_file(
-    existing: LibraryFile,
-    path: Path,
-    file_repo: LibraryFileRepository,
-    quarantine_repo: LibraryQuarantineRepository,
-    result: FolderScanResult,
-) -> None:
-    """Scenario 4: a MISSING row is back on disk. Same content → restore
-    PRESENT and keep enrichment; otherwise re-extract."""
-    try:
-        unchanged = _content_unchanged(existing, path)
-    except OSError as exc:
-        logger.warning("hash_failed", path=str(path), error=str(exc))
-        result.record_failure(str(path))
-        return
-
-    if unchanged:
-        existing.file_status = FileStatus.PRESENT
-        file_repo.upsert(existing)
-    else:
-        _reextract_and_upsert(path, file_repo, quarantine_repo, result)
-    result.files_reappeared += 1
-
-
 def _stat_matches(existing: LibraryFile, disk: DiskStat) -> bool | None:
     """Compare stored size+mtime with disk. None when the row predates stat tracking."""
     if existing.file_size is None or existing.file_mtime_ns is None:
@@ -767,64 +729,75 @@ def _stat_matches(existing: LibraryFile, disk: DiskStat) -> bool | None:
     return existing.file_size == disk.size and existing.file_mtime_ns == disk.mtime_ns
 
 
-def _modified_since_indexed(existing: LibraryFile, disk: DiskStat) -> bool:
-    indexed_ns = int(existing.indexed_at.timestamp() * 1_000_000_000)
-    return disk.mtime_ns > indexed_ns
+@dataclass(frozen=True)
+class FolderScanContext:
+    """What one folder visit writes through, and the counts it keeps."""
+
+    file_repo: LibraryFileRepository
+    quarantine_repo: LibraryQuarantineRepository
+    result: FolderScanResult
 
 
-def _reconcile_present_file(
-    existing: LibraryFile,
-    path: Path,
-    file_repo: LibraryFileRepository,
-    quarantine_repo: LibraryQuarantineRepository,
-    result: FolderScanResult,
-) -> None:
-    """Scenarios 1 and 2 for a row already PRESENT in the DB.
-
-    The content hash means reading every byte, so it is the last resort:
-
-    - stored stat matches disk           → unchanged, skip unread
-    - stored stat differs                → modified, re-extract
-    - no stored stat (legacy row):
-        - file older than its index row  → unchanged, backfill stat, skip unread
-        - file newer                     → hash; equal → backfill, else re-extract
-        - and no hash either              → re-extract
-    """
+def _unchanged_on_disk(existing: LibraryFile, path: Path, ctx: FolderScanContext) -> bool | None:
+    """Whether *path*'s size and mtime still equal the row's; None if it cannot be stat'ed."""
     try:
         disk = disk_stat(path)
     except OSError as exc:
         logger.warning("stat_failed", path=str(path), error=str(exc))
-        result.record_failure(str(path))
-        return
+        ctx.result.record_failure(str(path))
+        return None
+    return _stat_matches(existing, disk) is True
 
-    matches = _stat_matches(existing, disk)
-    if matches is True:
-        result.files_skipped += 1
-        return
-    if matches is False:
-        _reextract_and_upsert(path, file_repo, quarantine_repo, result)
-        return
 
-    if existing.file_hash is None:
-        # Neither a stored stat nor a hash to compare against: read it.
-        _reextract_and_upsert(path, file_repo, quarantine_repo, result)
+def _restore_reappeared_file(existing: LibraryFile, path: Path, ctx: FolderScanContext) -> None:
+    """Scenario 4: a MISSING row is back on disk.
+
+    Unchanged size and mtime: restore it PRESENT unread, keeping its
+    enrichment. Otherwise re-read its tags into the same row (same path, so
+    the upsert keeps its id and links).
+    """
+    unchanged = _unchanged_on_disk(existing, path, ctx)
+    if unchanged is None:
         return
+    if unchanged:
+        existing.file_status = FileStatus.PRESENT
+        ctx.file_repo.upsert(existing)
+    else:
+        _reread_and_upsert(path, ctx.file_repo, ctx.quarantine_repo, ctx.result)
+    ctx.result.files_reappeared += 1
 
-    # Legacy row. Only a file touched after we last read it can differ.
-    if _modified_since_indexed(existing, disk):
-        try:
-            current_hash = compute_file_hash(path)
-        except OSError as exc:
-            logger.warning("hash_failed", path=str(path), error=str(exc))
-            result.record_failure(str(path))
-            return
-        if current_hash != existing.file_hash:
-            _reextract_and_upsert(path, file_repo, quarantine_repo, result)
-            return
 
-    file_repo.update_file_stat(existing.id, disk.size, disk.mtime_ns)
-    result.files_skipped += 1
-    result.files_stat_backfilled += 1
+def _reconcile_present_file(existing: LibraryFile, path: Path, ctx: FolderScanContext) -> None:
+    """Scenarios 1 and 2 for a PRESENT row: size and mtime decide.
+
+    - stored stat matches disk              -> unchanged, skip unread
+    - stored stat differs, or none stored   -> re-read the tags
+    """
+    unchanged = _unchanged_on_disk(existing, path, ctx)
+    if unchanged is None:
+        return
+    if unchanged:
+        ctx.result.files_skipped += 1
+        return
+    _reread_and_upsert(path, ctx.file_repo, ctx.quarantine_repo, ctx.result)
+
+
+def _visit_disk_file(
+    path: Path,
+    existing: LibraryFile | None,
+    ctx: FolderScanContext,
+) -> str | None:
+    """Send one file found on disk to its scenario, by the row the DB holds for it.
+
+    Returns the old path a new file was moved or renamed from, else None.
+    """
+    if existing is None:
+        return _index_new_file(path, ctx.file_repo, ctx.quarantine_repo, ctx.result)
+    if existing.file_status == FileStatus.MISSING:
+        _restore_reappeared_file(existing, path, ctx)
+    else:
+        _reconcile_present_file(existing, path, ctx)
+    return None
 
 
 def _list_audio_files(folder_path: Path) -> dict[str, Path] | None:
@@ -859,18 +832,21 @@ def scan_folder_incrementally(
     Only processes files directly in this folder (not recursive).
 
     Scenarios:
-      1. Unchanged file (stat, else hash, matches) -> skip, no DB write
-      2. Modified file (stat or hash differs)      -> re-extract tags, upsert (resets enrichment)
-      3. New file (not in DB)                      -> extract tags, insert; if moved
-                                                      or renamed, adopt the old row
-      4. Re-appeared file (MISSING in DB)          -> restore PRESENT, keep enrichment if hash same
-      5. Missing file (in DB, not on disk)         -> mark MISSING
-      6. Parse failure (Mutagen error)             -> quarantine (once per path)
+      1. Unchanged file (size + mtime match)          -> skip: no read, no DB write
+      2. Modified file (size or mtime differ, or no   -> re-read tags, upsert
+         stat stored yet)                                (enrichment resets)
+      3. New file (not in DB)                         -> read tags, insert; if moved or
+                                                         renamed, adopt the old row
+      4. Re-appeared file (MISSING in DB)             -> restore PRESENT; re-read into the
+                                                         same row if size or mtime differ
+      5. Missing file (in DB, not on disk)            -> mark MISSING
+      6. Parse failure (Mutagen error)                -> quarantine (once per path)
 
     Afterwards, quarantine entries for this folder's files that did not fail
     this visit are dropped: the file now reads, or is gone.
     """
     result = FolderScanResult()
+    ctx = FolderScanContext(file_repo, quarantine_repo, result)
 
     existing_by_path: dict[str, LibraryFile] = {
         f.file_path: f for f in file_repo.get_by_folder_path(str(folder_path))
@@ -882,17 +858,11 @@ def scan_folder_incrementally(
         return result
 
     for file_path_str, path in disk_files.items():
-        existing = existing_by_path.pop(file_path_str, None)
-        if existing is None:
-            moved_from = _index_new_file(path, file_repo, quarantine_repo, result)
-            if moved_from is not None:
-                # A rename within this folder: the old spelling is no longer
-                # a row to mark missing.
-                existing_by_path.pop(moved_from, None)
-        elif existing.file_status == FileStatus.MISSING:
-            _restore_reappeared_file(existing, path, file_repo, quarantine_repo, result)
-        else:
-            _reconcile_present_file(existing, path, file_repo, quarantine_repo, result)
+        moved_from = _visit_disk_file(path, existing_by_path.pop(file_path_str, None), ctx)
+        if moved_from is not None:
+            # A rename within this folder: the old spelling is no longer
+            # a row to mark missing.
+            existing_by_path.pop(moved_from, None)
 
     _mark_missing_files(existing_by_path, file_repo, result)
 

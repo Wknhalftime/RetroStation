@@ -140,17 +140,19 @@ def test_upsert_explicit_links_replace_existing() -> None:
     assert got.work_id == "work-2"
 
 
-def test_update_file_stat_records_size_and_mtime() -> None:
+def test_upsert_over_an_existing_path_keeps_the_stored_id_like_pg() -> None:
+    """PG's ON CONFLICT (file_path) updates the row in place; its id stays."""
     repo = FakeLibraryFileRepository()
-    f = _file("Prince")
-    repo.upsert(f)
+    stored = repo.upsert(_file("Prince"))
+    reread = _file("Prince")
+    reread.file_path = stored.file_path
 
-    repo.update_file_stat(f.id, file_size=4096, file_mtime_ns=1_700_000_000_000_000_000)
+    returned = repo.upsert(reread)
 
-    got = repo.get_by_id(f.id)
+    got = repo.get_by_path(stored.file_path)
     assert got is not None
-    assert got.file_size == 4096
-    assert got.file_mtime_ns == 1_700_000_000_000_000_000
+    assert (returned.id, got.id) == (stored.id, stored.id)
+    assert repo.get_by_id(stored.id) is got
 
 
 def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:

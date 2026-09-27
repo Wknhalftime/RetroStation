@@ -37,6 +37,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             if file.recording_id is None:
                 file.recording_id = existing.recording_id
             file.file_status = FileStatus.PRESENT
+            # ON CONFLICT (file_path) updates the row in place: its id stays.
+            file.id = existing.id
             self._data[existing.id] = file
             return file
         self._data[file.id] = file
@@ -225,14 +227,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         # The fake holds no matches or masters; only the row itself goes.
         self._data.pop(source_id, None)
-
-    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
-        if file_id in self._data:
-            self._data[file_id] = dataclasses.replace(
-                self._data[file_id],
-                file_size=file_size,
-                file_mtime_ns=file_mtime_ns,
-            )
 
     def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         return sorted(

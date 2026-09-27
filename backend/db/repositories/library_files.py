@@ -376,12 +376,6 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
-        self._conn.execute(
-            "UPDATE library_files SET file_size = %s, file_mtime_ns = %s WHERE id = %s",
-            (file_size, file_mtime_ns, str(file_id)),
-        )
-
     def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
         rows = self._conn.execute(
             "SELECT * FROM library_files WHERE file_hash = %s",

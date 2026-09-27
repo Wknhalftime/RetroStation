@@ -101,25 +101,3 @@ def test_reupsert_with_same_stat_keeps_everything(migrated_db: str, tmp_path: Pa
         assert got.work_id == original.work_id
         assert got.recording_id == original.recording_id
         assert got.enrichment_status == EnrichmentStatus.ENRICHED
-
-
-def test_update_file_stat_round_trip(migrated_db: str, tmp_path: Path) -> None:
-    path = str(tmp_path / "kiss.flac")
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos = RepositoryFactory(conn)
-        legacy = LibraryFile(id=uuid4(), file_path=path, file_hash="h", format="flac")
-        repos.library_files.upsert(legacy)
-        conn.commit()
-
-        before = repos.library_files.get_by_path(path)
-        assert before is not None
-        assert before.file_size is None
-        assert before.file_mtime_ns is None
-
-        repos.library_files.update_file_stat(legacy.id, file_size=2048, file_mtime_ns=99)
-        conn.commit()
-
-        after = repos.library_files.get_by_path(path)
-        assert after is not None
-        assert after.file_size == 2048
-        assert after.file_mtime_ns == 99
