@@ -610,13 +610,13 @@ def _spelled_as_on_disk(folder: Path) -> bool:
 def _move_candidates(lf: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
     """Rows *lf* may have been moved from.
 
-    Rows with the same content hash, plus rows a first scan has not hashed
-    yet that have the same size and mtime (a move or rename on one volume
-    keeps both).
+    Rows with the same audio fingerprint, which survives a retag, plus rows
+    still waiting for one that have the same size and mtime (a move or
+    rename on one volume keeps both).
     """
-    candidates = file_repo.get_by_hash(lf.file_hash) if lf.file_hash is not None else []
+    candidates = file_repo.get_by_audio_hash(lf.audio_hash) if lf.audio_hash is not None else []
     if lf.file_size is not None and lf.file_mtime_ns is not None:
-        candidates += file_repo.get_unhashed_by_stat(lf.file_size, lf.file_mtime_ns)
+        candidates += file_repo.get_audio_unhashed_by_stat(lf.file_size, lf.file_mtime_ns)
     return candidates
 
 
@@ -638,7 +638,7 @@ def _respelled_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> Librar
 def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFile | None:
     """The row this newly seen file was moved or renamed from, if any.
 
-    A row with identical content whose own file is still on disk is a
+    A row with the same audio whose own file is still on disk is a
     duplicate copy, not the origin of a move, and is left alone.
     """
     respelled = _respelled_from(lf, file_repo)
