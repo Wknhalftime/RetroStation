@@ -1158,6 +1158,54 @@ def test_match_artists_default_strong_threshold_boundary_stays_needs_review() ->
     assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
 
 
+def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> None:
+    """An MB candidate scoring exactly 80 with a distant runner-up (gap >>
+    MB_SCORE_GAP) must AUTO_MATCH at the real strong_match_threshold default
+    (80), and would wrongly stay NEEDS_REVIEW if the default silently
+    drifted to 81 — a second off-by-one mutant on this exact default
+    (80 -> 81) previously survived mutation testing. Uses the MB tier (exact
+    integer scores) rather than fuzzy text so the boundary is unambiguous.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    # Truncated (len >= 28, alnum end) so Phase 2 reaches MusicBrainzApiStrategy;
+    # no canonicals/rules seeded so Phase 1 always falls through to Phase 2.
+    name = "Boundary Threshold Broadcastt"
+    assert len(name) == 29
+
+    mb_client = FakeMbClient(
+        responses={
+            name: [
+                {"id": "mb-80", "score": 80, "name": name},
+                {"id": "mb-60", "score": 60, "name": name},
+            ]
+        }
+    )
+
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        broadcast_artist_repo=broadcast_artist_repo,
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=FakeArtistRepository(),
+        match_repo=match_repo,
+        rules_repo=rules_repo,
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    created = match_repo.get_by_artist(artist.id)
+    assert created is not None
+    assert created.target_id == "mb-80"
+    assert created.confidence_score == 80.0
+
+
 def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:
     """A 27-character name is NOT truncated at the real broadcast_name_max_len
     default (30) — it must park in NEEDS_REVIEW/DEFERRED_RETRY without ever
