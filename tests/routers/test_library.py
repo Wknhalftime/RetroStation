@@ -993,6 +993,32 @@ def _seed_match_for_file(
     return str(match_id)
 
 
+def _seed_match_for_artist(conn: psycopg.Connection, artist_id: str) -> str:
+    """Insert an artist-tier matches row whose target is ``artist_id``.
+
+    This is the shape ArtistMatchingService writes for a local-only canonical
+    (mbid None): ``target_id`` is the local artists.id, and it has no FK.
+    """
+    suffix = uuid4().hex[:8]
+    ba_id = uuid4()
+    conn.execute(
+        "INSERT INTO broadcast_artists (id, original_name, normalized_name) VALUES (%s, %s, %s)",
+        (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
+    )
+    match_id = uuid4()
+    conn.execute(
+        "INSERT INTO matches (id, artist_id, target_id, target_type) VALUES (%s, %s, %s, 'artist')",
+        (match_id, ba_id, artist_id),
+    )
+    conn.commit()
+    return str(match_id)
+
+
+def _artist_exists(conn: psycopg.Connection, artist_id: str) -> bool:
+    row = conn.execute("SELECT id FROM artists WHERE id = %s", (artist_id,)).fetchone()
+    return row is not None
+
+
 def _match_work_id(conn: psycopg.Connection, match_id: str) -> str | None:
     row = conn.execute(
         "SELECT work_id FROM matches WHERE id = %s",
@@ -1068,6 +1094,33 @@ class TestMergeWorks:
         assert row is not None
         assert row["target_id"] == "w-match-target"
         assert row["target_type"] == "work"
+
+    def test_merge_local_source_artist_referenced_by_a_match(self, client, db_conn) -> None:
+        """AUD-001 characterisation: the emptied LOCAL source artist is deleted
+        even though an artist match still targets it."""
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-ref-target",
+            work_mbid="w-ref-target",
+            recording_mbid="r-ref-target",
+            file_path="/m/ref_t.flac",
+        )
+        _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-ref-source",
+            work_mbid="w-ref-source",
+            recording_mbid="r-ref-source",
+            file_path="/m/ref_s.flac",
+        )
+        _seed_match_for_artist(db_conn, "a-ref-source")
+
+        resp = client.post(
+            "/api/v1/library/works/w-ref-target/merge",
+            json={"source_work_ids": ["w-ref-source"]},
+        )
+
+        assert resp.status_code == 200
+        assert _artist_exists(db_conn, "a-ref-source") is False
 
     def test_merge_validation_errors(self, client, db_conn) -> None:
         """Missing target returns 404; self-merge returns 422."""
