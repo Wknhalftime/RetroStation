@@ -46,3 +46,9 @@ def test_hash_coverage_counts_rows_carrying_a_fingerprint(
         )
 
     assert bench_scan.hash_coverage(migrated_db)["file_hash"] == 1
+
+
+def test_the_audio_sha256_hot_spot_exists() -> None:
+    from backend.services import audio_hash
+
+    assert callable(audio_hash._sha256_of_range)
