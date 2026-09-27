@@ -1,11 +1,64 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
+from backend.domain.enums import (
+    AudioHashKind,
+    EnrichmentStatus,
+    FileStatus,
+    ReleaseStatus,
+    ReleaseType,
+)
+
+
+class LibraryError(Exception):
+    """Base class for library-subdomain errors."""
+
+
+class InvalidAudioHashError(LibraryError):
+    """A value that is not a well-formed audio fingerprint."""
+
+
+# Formats an audio fingerprint is defined for (spec B1). Other formats get none.
+AUDIO_HASHABLE_FORMATS: frozenset[str] = frozenset({"flac", "mp3"})
+
+_DIGEST_LENGTH: dict[str, int] = {
+    AudioHashKind.FLAC_MD5: 32,
+    AudioHashKind.AUDIO_SHA256: 64,
+}
+_LOWER_HEX = re.compile(r"[0-9a-f]+")
+
+
+@dataclass(frozen=True)
+class AudioHash:
+    """A fingerprint of a file's audio alone: tags, cover art and padding do not change it.
+
+    Stored as ``<kind>:<lowercase hex digest>``, e.g. ``flac-md5:0123…``.
+    """
+
+    kind: AudioHashKind
+    digest: str
+
+    def __post_init__(self) -> None:
+        expected = _DIGEST_LENGTH.get(self.kind)
+        well_formed = expected is not None and len(self.digest) == expected
+        if not well_formed or _LOWER_HEX.fullmatch(self.digest) is None:
+            raise InvalidAudioHashError(f"{self.kind}:{self.digest}")
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.digest}"
+
+    @classmethod
+    def parse(cls, text: str) -> AudioHash:
+        """The fingerprint stored as *text*; raises InvalidAudioHashError when malformed."""
+        kind, sep, digest = text.partition(":")
+        if not sep or kind not in _DIGEST_LENGTH:
+            raise InvalidAudioHashError(text)
+        return cls(AudioHashKind(kind), digest)
 
 
 @dataclass
@@ -51,6 +104,10 @@ class LibraryFile:
     # recorded; the scanner backfills them on its next visit.
     file_size: int | None = None
     file_mtime_ns: int | None = None
+    # Fingerprint of the audio alone (see AudioHash). The scan fills a FLAC's
+    # stored MD5; library_hash_backfill_task fills the rest. None until then,
+    # and for formats that have none.
+    audio_hash: AudioHash | None = None
     audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 
