@@ -125,7 +125,7 @@ class MissingFileReconciliation:
     """Counts from one reconciliation run.
 
     ``failed``: folds refused by the database, each rolled back on its own.
-    ``masters_repicked``: works whose master sat on a missing file.
+    ``masters_repicked``: works whose AUTO master sat on a missing file.
     """
 
     reconciled: int

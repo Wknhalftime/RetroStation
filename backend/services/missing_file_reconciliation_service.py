@@ -206,9 +206,10 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
 
 
 def repick_stranded_masters(repos: ReconciliationRepos) -> int:
-    """Re-pick every master left on a missing file whose work has a present one.
+    """Re-pick every AUTO master left on a missing file whose work has a present one.
 
-    Returns how many works were re-picked.
+    Manual masters are the user's and are left alone. Returns how many works
+    were re-picked.
     """
     work_ids = repos.song_masters.list_work_ids_with_missing_master()
     for work_id in work_ids:

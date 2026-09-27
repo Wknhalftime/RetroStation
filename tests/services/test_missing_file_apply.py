@@ -200,3 +200,22 @@ def test_repick_moves_masters_off_missing_files_where_a_present_file_exists() ->
         "w2": only_missing.id,
         "w3": present.id,
     }
+
+
+def test_repick_leaves_a_manual_master_on_a_missing_file_to_the_user() -> None:
+    repos = _repos()
+    gone = _file(repos, "/m/manual_old.flac", "w1", missing=True)
+    _file(repos, "/m/manual_new.flac", "w1", missing=False)
+    repos.song_masters.upsert(
+        SongMaster(
+            id=uuid4(),
+            work_id="w1",
+            preferred_file_id=gone.id,
+            selection_method=SelectionMethod.MANUAL,
+        )
+    )
+
+    assert repos.song_masters.list_work_ids_with_missing_master() == []
+    assert repick_stranded_masters(repos) == 0
+    master = repos.song_masters.get_by_work("w1")
+    assert master is not None and master.preferred_file_id == gone.id

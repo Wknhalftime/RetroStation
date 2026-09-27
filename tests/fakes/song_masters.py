@@ -26,13 +26,15 @@ class FakeSongMasterRepository(SongMasterRepository):
         ]
 
     def list_work_ids_with_missing_master(self) -> list[str]:
-        # Mirrors PgSongMasterRepository: the master's file is MISSING and the
-        # work has a PRESENT file. Without a library file repo nothing is known.
+        # Mirrors PgSongMasterRepository: an AUTO master whose file is MISSING in
+        # a work with a PRESENT file. Without a library file repo nothing is known.
         files = self._library_file_repo
         if files is None:
             return []
         stranded = []
         for work_id, master in self._data.items():
+            if master.selection_method != SelectionMethod.AUTO:
+                continue
             chosen = files.get_by_id(master.preferred_file_id)
             if chosen is None or chosen.file_status != FileStatus.MISSING:
                 continue

@@ -33,13 +33,18 @@ def _file(repos: RepositoryFactory, path: Path, work_id: str, *, missing: bool) 
     return lf
 
 
-def _master(repos: RepositoryFactory, work_id: str, file: LibraryFile) -> None:
+def _master(
+    repos: RepositoryFactory,
+    work_id: str,
+    file: LibraryFile,
+    method: SelectionMethod = SelectionMethod.AUTO,
+) -> None:
     repos.song_masters.upsert(
         SongMaster(
             id=uuid4(),
             work_id=work_id,
             preferred_file_id=file.id,
-            selection_method=SelectionMethod.AUTO,
+            selection_method=method,
         )
     )
 
@@ -74,3 +79,18 @@ def test_lists_in_work_id_order(migrated_db: str, tmp_path: Path) -> None:
             _file(repos, tmp_path / f"{i}-new.flac", work, missing=False)
 
         assert repos.song_masters.list_work_ids_with_missing_master() == sorted(works)
+
+
+def test_leaves_a_manual_master_on_a_missing_file_to_the_user(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
+        work = repos.works.create_local("Battery", artist_id)
+        gone = _file(repos, tmp_path / "a.flac", work, missing=True)
+        _file(repos, tmp_path / "b.flac", work, missing=False)
+        _master(repos, work, gone, SelectionMethod.MANUAL)
+
+        assert repos.song_masters.list_work_ids_with_missing_master() == []

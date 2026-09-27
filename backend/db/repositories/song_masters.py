@@ -70,10 +70,15 @@ class PgSongMasterRepository(SongMasterRepository):
             """SELECT sm.work_id
                FROM song_masters sm
                JOIN library_files master ON master.id = sm.preferred_file_id
-               WHERE master.file_status = %(missing)s
+               WHERE sm.selection_method = %(auto)s
+                 AND master.file_status = %(missing)s
                  AND EXISTS (SELECT 1 FROM library_files lf
                              WHERE lf.work_id = sm.work_id AND lf.file_status = %(present)s)
                ORDER BY sm.work_id""",
-            {"missing": FileStatus.MISSING.value, "present": FileStatus.PRESENT.value},
+            {
+                "auto": SelectionMethod.AUTO.value,
+                "missing": FileStatus.MISSING.value,
+                "present": FileStatus.PRESENT.value,
+            },
         ).fetchall()
         return [r["work_id"] for r in rows]
