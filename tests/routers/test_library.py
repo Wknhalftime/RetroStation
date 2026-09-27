@@ -2072,3 +2072,74 @@ class TestLibraryFiles:
         data = resp.json()
         assert data["total"] == 0
         assert data["items"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests — missing files
+# ---------------------------------------------------------------------------
+
+
+class TestMissingFiles:
+    def _seed_missing(self, db_conn) -> tuple[Work, LibraryFile, LibraryFile]:
+        _, work, _, present = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-m",
+            work_mbid="w-m",
+            recording_mbid="r-m",
+            file_path="/m/here.mp3",
+            format="mp3",
+        )
+        repo = PgLibraryFileRepository(db_conn)
+        gone = repo.upsert(_make_file("/m/gone.flac", recording_id="r-m", work_id=work.id))
+        repo.mark_missing(gone.file_path)
+        db_conn.commit()
+        return work, present, gone
+
+    def test_work_detail_reports_file_status(self, client, db_conn) -> None:
+        work, present, gone = self._seed_missing(db_conn)
+
+        files = client.get(f"/api/v1/library/works/{work.id}").json()["recordings"][0]["files"]
+
+        status_by_id = {f["id"]: f["file_status"] for f in files}
+        assert status_by_id == {str(present.id): "present", str(gone.id): "missing"}
+
+    def test_missing_file_cannot_be_set_as_master(self, client, db_conn) -> None:
+        work, _, gone = self._seed_missing(db_conn)
+
+        resp = client.put(
+            f"/api/v1/library/works/{work.id}/master",
+            json={"preferred_file_id": str(gone.id)},
+        )
+
+        assert resp.status_code == 422
+        assert "missing from disk" in resp.json()["detail"]
+
+    def test_missing_file_cannot_be_a_format_override(self, client, db_conn) -> None:
+        work, _, gone = self._seed_missing(db_conn)
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/format-overrides",
+            json={"format_name": "hot_ac", "preferred_file_id": str(gone.id)},
+        )
+
+        assert resp.status_code == 422
+        assert "missing from disk" in resp.json()["detail"]
+
+    def test_reassigning_a_file_in_never_picks_the_missing_one(self, client, db_conn) -> None:
+        # gone.flac would outscore both MP3s (FLAC bonus) if it were considered.
+        work, present, gone = self._seed_missing(db_conn)
+        _, _, _, extra = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-x",
+            work_mbid="w-x",
+            recording_mbid="r-x",
+            file_path="/m/extra.mp3",
+            format="mp3",
+        )
+
+        resp = client.patch(f"/api/v1/library/files/{extra.id}/work", json={"work_id": work.id})
+
+        assert resp.status_code == 200
+        master = client.get(f"/api/v1/library/works/{work.id}").json()["song_master"]
+        assert master["preferred_file_id"] in {str(present.id), str(extra.id)}
+        assert master["preferred_file_id"] != str(gone.id)

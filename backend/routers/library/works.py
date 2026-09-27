@@ -9,7 +9,7 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel
 
 from backend.dependencies import get_current_token, get_db_connection
-from backend.domain.enums import CatalogSource, TargetType
+from backend.domain.enums import CatalogSource, FileStatus, TargetType
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
 from backend.services.master_selection_service import score_file_row
 
@@ -33,6 +33,7 @@ class FileInfo(BaseModel):
     track_title: str | None
     release_title: str | None
     enrichment_status: str
+    file_status: str
 
 
 class RecordingDetail(BaseModel):
@@ -161,7 +162,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
             """
             SELECT 1
             FROM library_files lf
-            WHERE lf.id = %s AND lf.work_id = %s
+            WHERE lf.id = %s AND lf.work_id = %s AND lf.file_status = 'present'
             """,
             (sm_row["preferred_file_id"], work_id),
         )
@@ -178,7 +179,7 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
             lf.bitrate,
             lf.duration_ms
         FROM library_files lf
-        WHERE lf.work_id = %s
+        WHERE lf.work_id = %s AND lf.file_status = 'present'
         """,
         (work_id,),
     )
@@ -326,7 +327,8 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
                 lf.duration_ms  AS file_duration_ms,
                 lf.track_title,
                 lf.release_title,
-                lf.enrichment_status
+                lf.enrichment_status,
+                lf.file_status
             FROM recordings r
             LEFT JOIN library_files lf ON lf.recording_id = r.id
             WHERE r.id IN (
@@ -363,6 +365,7 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
                         track_title=row.get("track_title"),
                         release_title=row.get("release_title"),
                         enrichment_status=row["enrichment_status"],
+                        file_status=row["file_status"],
                     )
                 )
 
@@ -387,7 +390,8 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
                 lf.duration_ms,
                 lf.track_title,
                 lf.release_title,
-                lf.enrichment_status
+                lf.enrichment_status,
+                lf.file_status
             FROM library_files lf
             WHERE lf.work_id = %s AND lf.recording_id IS NULL
             ORDER BY lf.file_path
@@ -406,6 +410,7 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
                     track_title=row.get("track_title"),
                     release_title=row.get("release_title"),
                     enrichment_status=row["enrichment_status"],
+                    file_status=row["file_status"],
                 )
                 for row in orphan_rows
             ]
@@ -457,7 +462,7 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
             SELECT
                 lf.id AS file_id, lf.file_path, lf.format, lf.bitrate,
                 lf.duration_ms, lf.track_title, lf.release_title,
-                lf.enrichment_status, lf.recording_id
+                lf.enrichment_status, lf.file_status, lf.recording_id
             FROM library_files lf
             WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
               AND lf.track_title = %s
@@ -483,6 +488,7 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
                 track_title=row.get("track_title"),
                 release_title=row.get("release_title"),
                 enrichment_status=row["enrichment_status"],
+                file_status=row["file_status"],
             )
             for row in file_rows
         ]
@@ -531,13 +537,19 @@ async def set_work_master(
         )
 
     file_cur = await conn.execute(
-        "SELECT 1 FROM library_files WHERE id = %s AND work_id = %s",
+        "SELECT file_status FROM library_files WHERE id = %s AND work_id = %s",
         (body.preferred_file_id, work_id),
     )
-    if await file_cur.fetchone() is None:
+    file_row = await file_cur.fetchone()
+    if file_row is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
+        )
+    if file_row["file_status"] != FileStatus.PRESENT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"File {body.preferred_file_id} is missing from disk",
         )
 
     master_id = uuid4()
@@ -603,13 +615,19 @@ async def create_format_override(
         )
 
     file_cur = await conn.execute(
-        "SELECT 1 FROM library_files WHERE id = %s AND work_id = %s",
+        "SELECT file_status FROM library_files WHERE id = %s AND work_id = %s",
         (body.preferred_file_id, work_id),
     )
-    if await file_cur.fetchone() is None:
+    file_row = await file_cur.fetchone()
+    if file_row is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
+        )
+    if file_row["file_status"] != FileStatus.PRESENT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"File {body.preferred_file_id} is missing from disk",
         )
 
     override_id = uuid4()
