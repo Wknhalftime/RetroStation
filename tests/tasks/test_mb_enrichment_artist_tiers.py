@@ -31,7 +31,15 @@ def _bare_artist(**overrides) -> Artist:
     return Artist(**base)
 
 
-def test_tier1_high_confidence_writes_mbid_and_marks_enhanced():
+def test_bare_artist_without_mbid_is_quarantined_as_logic_bug():
+    """AUD-R008: artists gain an MBID only via release/recording enrichment.
+
+    An MBID-less artist reaching `_enhance_artist` is a logic bug (it should
+    never have been queued — `upsert_local_artist` inserts
+    `needs_enhancement=FALSE`). It is quarantined via
+    `mark_enhancement_failed` instead of being retried (no name search, no
+    auto-link) or crashing the phase.
+    """
     artist = _bare_artist()
     fake_client = FakeMbClient(
         responses={
@@ -48,40 +56,17 @@ def test_tier1_high_confidence_writes_mbid_and_marks_enhanced():
     conn = MagicMock()
     repos = MagicMock()
 
-    _enhance_artist(artist, fake_client, conn, repos, mbid_map=None)
+    outcome = _enhance_artist(artist, fake_client, conn, repos, mbid_map=None)
 
-    repos.artists.mark_enhanced.assert_called_once_with("local-uuid-1")
-    # Verify the UPDATE actually carried the resolved MBID + sort-name +
-    # disambiguation — a weak `called` assertion would miss a dropped key.
-    conn.execute.assert_called_once()
-    params = conn.execute.call_args.args[1]
-    assert "mb-uuid-123" in params
-    assert "Band, Unknown" in params
-    assert "British rock band" in params
-    assert "local-uuid-1" in params
-
-
-def test_tier1_low_confidence_marks_enhanced_without_mbid():
-    artist = _bare_artist()
-    fake_client = FakeMbClient(responses={"Unknown Band": [{"id": "mb-uuid-X", "score": 40}]})
-    conn = MagicMock()
-    repos = MagicMock()
-
-    _enhance_artist(artist, fake_client, conn, repos, mbid_map=None)
-
-    repos.artists.mark_enhanced.assert_called_once_with("local-uuid-1")
-    conn.execute.assert_not_called()
-
-
-def test_tier1_no_results_marks_enhanced():
-    artist = _bare_artist()
-    fake_client = FakeMbClient(responses={})
-    conn = MagicMock()
-    repos = MagicMock()
-
-    _enhance_artist(artist, fake_client, conn, repos, mbid_map=None)
-
-    repos.artists.mark_enhanced.assert_called_once_with("local-uuid-1")
+    assert outcome is ArtistEnhanceOutcome.FAILED
+    repos.artists.mark_enhancement_failed.assert_called_once_with(
+        "local-uuid-1",
+        "no MBID: artists gain MBIDs only via release enrichment",
+    )
+    repos.artists.mark_enhanced.assert_not_called()
+    # No name search and no DB write: the bare artist is quarantined
+    # immediately, never looked up or auto-linked.
+    assert fake_client.calls == []
     conn.execute.assert_not_called()
 
 
