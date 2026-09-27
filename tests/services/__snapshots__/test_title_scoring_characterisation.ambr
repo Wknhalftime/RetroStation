@@ -1,0 +1,886 @@
+# serializer version: 1
+# name: test_candidate_scores[bracket_alt_title_broadcast_side]
+  tuple(
+    100.0,
+    68.42105263157895,
+  )
+# ---
+# name: test_candidate_scores[bracket_alt_title_library_side]
+  tuple(
+    100.0,
+    73.17073170731707,
+  )
+# ---
+# name: test_candidate_scores[exact_match]
+  tuple(
+    100.0,
+    100.0,
+  )
+# ---
+# name: test_candidate_scores[f_credit_lib_has_feat_clause]
+  tuple(
+    100.0,
+    100.0,
+  )
+# ---
+# name: test_candidate_scores[f_credit_stripped_exact]
+  tuple(
+    100.0,
+    100.0,
+  )
+# ---
+# name: test_candidate_scores[hero_vs_metro_mix]
+  tuple(
+    100.0,
+    27.586206896551722,
+  )
+# ---
+# name: test_candidate_scores[high_threshold_falls_back_to_full_score]
+  tuple(
+    27.586206896551722,
+    27.586206896551722,
+  )
+# ---
+# name: test_candidate_scores[la_song_vs_bracketed]
+  tuple(
+    100.0,
+    45.16129032258065,
+  )
+# ---
+# name: test_candidate_scores[live_suffix_full_match]
+  tuple(
+    100.0,
+    100.0,
+  )
+# ---
+# name: test_candidate_scores[live_suffix_vs_studio]
+  tuple(
+    100.0,
+    81.4814814814815,
+  )
+# ---
+# name: test_candidate_scores[low_threshold_lets_stripped_score_through]
+  tuple(
+    100.0,
+    56.00000000000001,
+  )
+# ---
+# name: test_candidate_scores[missing_in_action_mid_band]
+  tuple(
+    58.33333333333333,
+    58.33333333333333,
+  )
+# ---
+# name: test_candidate_scores[missing_persons_mid_band]
+  tuple(
+    63.63636363636363,
+    63.63636363636363,
+  )
+# ---
+# name: test_candidate_scores[missing_vs_lp_version]
+  tuple(
+    100.0,
+    56.00000000000001,
+  )
+# ---
+# name: test_candidate_scores[my_girl_vs_hey_girl]
+  tuple(
+    80.0,
+    36.36363636363637,
+  )
+# ---
+# name: test_candidate_scores[part_number_i]
+  tuple(
+    100.0,
+    100.0,
+  )
+# ---
+# name: test_candidate_scores[part_number_mismatch]
+  tuple(
+    97.14285714285714,
+    97.14285714285714,
+  )
+# ---
+# name: test_candidate_scores[stripped_below_threshold_ignored]
+  tuple(
+    48.275862068965516,
+    48.275862068965516,
+  )
+# ---
+# name: test_candidate_scores[totally_unrelated]
+  tuple(
+    29.78723404255319,
+    29.78723404255319,
+  )
+# ---
+# name: test_candidate_scores[typo_close_match]
+  tuple(
+    92.3076923076923,
+    92.3076923076923,
+  )
+# ---
+# name: test_candidate_scores[w_credit_is_part_of_title]
+  tuple(
+    94.91525423728814,
+    94.91525423728814,
+  )
+# ---
+# name: test_candidate_scores[w_credit_scores_better_stripped]
+  tuple(
+    100.0,
+    68.29268292682926,
+  )
+# ---
+# name: test_score_candidates_ambiguous_gap_three_candidates
+  dict({
+    'confidence_score': 92.3076923076923,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': 'AMBIGUOUS_GAP',
+    'reason_detail': 'Top candidates within 3 points (gap < 10 required)',
+    'status': 'needs_review',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_ambiguous_gap_two_close_candidates
+  dict({
+    'confidence_score': 92.3076923076923,
+    'library_file_id': '00000000-0000-0000-0000-000000000003',
+    'reason_code': 'AMBIGUOUS_GAP',
+    'reason_detail': 'Top candidates within 3 points (gap < 10 required)',
+    'status': 'needs_review',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_exact_bracket_wins_tie_over_stripped
+  dict({
+    'confidence_score': 100.0,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': None,
+    'reason_detail': None,
+    'status': 'auto_matched',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_lone_below_threshold_needs_review
+  dict({
+    'confidence_score': 78.57142857142857,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': 'LOW_CONFIDENCE',
+    'reason_detail': 'Score 79% — below confidence threshold',
+    'status': 'needs_review',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_lone_high_band_needs_review
+  dict({
+    'confidence_score': 92.3076923076923,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': 'LOW_CONFIDENCE',
+    'reason_detail': 'Score 92% — below confidence threshold',
+    'status': 'needs_review',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_mid_band_gap_auto_matches
+  dict({
+    'confidence_score': 63.63636363636363,
+    'library_file_id': '00000000-0000-0000-0000-000000000002',
+    'reason_code': None,
+    'reason_detail': None,
+    'status': 'auto_matched',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_part_numbers_still_tell_songs_apart
+  dict({
+    'confidence_score': 100.0,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': None,
+    'reason_detail': None,
+    'status': 'auto_matched',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_single_candidate_exact_auto_matches
+  dict({
+    'confidence_score': 100.0,
+    'library_file_id': '00000000-0000-0000-0000-000000000001',
+    'reason_code': None,
+    'reason_detail': None,
+    'status': 'auto_matched',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_tie_break_by_lowest_id
+  dict({
+    'confidence_score': 100.0,
+    'library_file_id': '00000000-0000-0000-0000-000000000002',
+    'reason_code': None,
+    'reason_detail': None,
+    'status': 'auto_matched',
+    'tier': 'local_file_fuzzy',
+    'work_id': '',
+  })
+# ---
+# name: test_score_candidates_tier_is_passed_through_verbatim
+  dict({
+    'confidence_score': 33.333333333333336,
+    'library_file_id': '00000000-0000-0000-0000-000000000009',
+    'reason_code': 'LOW_CONFIDENCE',
+    'reason_detail': 'Score 33% — below confidence threshold',
+    'status': 'needs_review',
+    'tier': 'musicbrainz_id_search',
+    'work_id': '',
+  })
+# ---
+# name: test_variant_functions[bracketed_alt_title_leading]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'fascination',
+    ),
+    'broadcast_title_variants': tuple(
+      'keep feeling fascination',
+    ),
+    'library_title_variants': tuple(
+      'fascination',
+    ),
+    'normalize_title_for_scoring_broadcast': '(Keep Feeling) Fascination',
+    'normalize_title_for_scoring_track_title': 'Fascination',
+  })
+# ---
+# name: test_variant_functions[bracketed_alt_title_stand_by_me]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'train in vain',
+    ),
+    'broadcast_title_variants': tuple(
+      'train in vain stand by me',
+    ),
+    'library_title_variants': tuple(
+      'train in vain',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Train In Vain (Stand By Me)',
+    'normalize_title_for_scoring_track_title': 'Train in Vain',
+  })
+# ---
+# name: test_variant_functions[brackets_instead_of_parens]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'song',
+    ),
+    'broadcast_title_variants': tuple(
+      'song live',
+    ),
+    'library_title_variants': tuple(
+      'song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Song',
+    'normalize_title_for_scoring_track_title': 'Song',
+  })
+# ---
+# name: test_variant_functions[brass_in_pocket_stored_normalized_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'brass in pocket',
+    ),
+    'broadcast_title_variants': tuple(
+      'brass in pocket im special',
+    ),
+    'library_title_variants': tuple(
+      'brass in pocket im special',
+      'brass in pocket',
+    ),
+    'normalize_title_for_scoring_broadcast': "Brass In Pocket (I'm Special)",
+    'normalize_title_for_scoring_track_title': "Brass in Pocket (I'm Special)",
+  })
+# ---
+# name: test_variant_functions[case_insensitive_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'jump',
+    ),
+    'library_title_variants': tuple(
+      'jump',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Jump',
+    'normalize_title_for_scoring_track_title': 'jump',
+  })
+# ---
+# name: test_variant_functions[credit_and_bracket_combine]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'smooth',
+    ),
+    'broadcast_title_variants': tuple(
+      'smooth radio edit',
+    ),
+    'library_title_variants': tuple(
+      'smooth',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Smooth f/Rob Thomas',
+    'normalize_title_for_scoring_track_title': 'Smooth',
+  })
+# ---
+# name: test_variant_functions[cry_baby_cry_vs_baby_its_you_mono]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'cry baby cry',
+    ),
+    'library_title_variants': tuple(
+      'baby its you mono',
+      'baby its you',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Cry Baby Cry',
+    'normalize_title_for_scoring_track_title': "Baby It's You [Mono]",
+  })
+# ---
+# name: test_variant_functions[disco_duck_mismatched_parts]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'disco duck part i',
+    ),
+    'library_title_variants': tuple(
+      'disco duck part ii',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Disco Duck (Part I)',
+    'normalize_title_for_scoring_track_title': 'Disco Duck (Part II)',
+  })
+# ---
+# name: test_variant_functions[enter_sandman_vs_one_letter_typo]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'enter sandman',
+    ),
+    'library_title_variants': tuple(
+      'enter sandmen',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Enter Sandman',
+    'normalize_title_for_scoring_track_title': 'Enter Sandmen',
+  })
+# ---
+# name: test_variant_functions[enter_sandman_vs_partial_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'enter sandman',
+    ),
+    'library_title_variants': tuple(
+      'sandman returns',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Enter Sandman',
+    'normalize_title_for_scoring_track_title': 'Sandman Returns',
+  })
+# ---
+# name: test_variant_functions[enter_sandman_vs_unrelated]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'enter sandman',
+    ),
+    'library_title_variants': tuple(
+      'complete unrelated junk words here',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Enter Sandman',
+    'normalize_title_for_scoring_track_title': 'Complete Unrelated Junk Words Here',
+  })
+# ---
+# name: test_variant_functions[f_slash_after_ellipsis]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'livin my life like',
+    ),
+    'library_title_variants': tuple(
+      'livin my life like',
+    ),
+    'normalize_title_for_scoring_broadcast': "Livin' My Life Like..f/C.Marks",
+    'normalize_title_for_scoring_track_title': 'Livin My Life Like',
+  })
+# ---
+# name: test_variant_functions[f_slash_credit]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'smooth',
+    ),
+    'library_title_variants': tuple(
+      'smooth',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Smooth f/Rob Thomas',
+    'normalize_title_for_scoring_track_title': 'Smooth',
+  })
+# ---
+# name: test_variant_functions[f_slash_credit_lib_has_feat_clause]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'smooth',
+    ),
+    'library_title_variants': tuple(
+      'smooth feat rob thomas',
+      'smooth',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Smooth f/Rob Thomas',
+    'normalize_title_for_scoring_track_title': 'Smooth',
+  })
+# ---
+# name: test_variant_functions[f_slash_in_parens]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'smooth',
+    ),
+    'library_title_variants': tuple(
+      'smooth',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Smooth (f/Rob Thomas)',
+    'normalize_title_for_scoring_track_title': 'Smooth',
+  })
+# ---
+# name: test_variant_functions[feat_clause_bare]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'song feat artist',
+    ),
+    'library_title_variants': tuple(
+      'song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Song',
+    'normalize_title_for_scoring_track_title': 'Song',
+  })
+# ---
+# name: test_variant_functions[feat_clause_parenthesised]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'song',
+    ),
+    'broadcast_title_variants': tuple(
+      'song feat artist',
+    ),
+    'library_title_variants': tuple(
+      'song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Song',
+    'normalize_title_for_scoring_track_title': 'Song',
+  })
+# ---
+# name: test_variant_functions[halo_broadcast_live_lib_plain]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'halo',
+    ),
+    'broadcast_title_variants': tuple(
+      'halo live',
+    ),
+    'library_title_variants': tuple(
+      'halo',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Halo',
+    'normalize_title_for_scoring_track_title': 'Halo',
+  })
+# ---
+# name: test_variant_functions[halo_broadcast_plain_lib_has_live_tag]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'halo',
+    ),
+    'library_title_variants': tuple(
+      'halo live',
+      'halo',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Halo',
+    'normalize_title_for_scoring_track_title': 'Halo',
+  })
+# ---
+# name: test_variant_functions[hello_live_both_sides]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'hello',
+    ),
+    'broadcast_title_variants': tuple(
+      'hello live',
+    ),
+    'library_title_variants': tuple(
+      'hello live',
+      'hello',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Hello',
+    'normalize_title_for_scoring_track_title': 'Hello',
+  })
+# ---
+# name: test_variant_functions[hello_live_broadcast_plain_lib]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'hello',
+    ),
+    'broadcast_title_variants': tuple(
+      'hello live',
+    ),
+    'library_title_variants': tuple(
+      'hello',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Hello',
+    'normalize_title_for_scoring_track_title': 'Hello',
+  })
+# ---
+# name: test_variant_functions[hero_metro_mix_radio_edit]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'hero',
+    ),
+    'library_title_variants': tuple(
+      'hero metro mix radio edit',
+      'hero',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Hero',
+    'normalize_title_for_scoring_track_title': 'Hero (Metro Mix Radio Edit)',
+  })
+# ---
+# name: test_variant_functions[la_song_bracketed_subtitle]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'la song',
+    ),
+    'library_title_variants': tuple(
+      'la song out of this town',
+      'la song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'L.A. Song',
+    'normalize_title_for_scoring_track_title': 'L.A. Song (Out of This Town)',
+  })
+# ---
+# name: test_variant_functions[missing_lp_version]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'missing',
+    ),
+    'library_title_variants': tuple(
+      'missing lp version',
+      'missing',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Missing',
+    'normalize_title_for_scoring_track_title': 'Missing [LP Version]',
+  })
+# ---
+# name: test_variant_functions[missing_plain_both_sides]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'missing',
+    ),
+    'library_title_variants': tuple(
+      'missing',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Missing',
+    'normalize_title_for_scoring_track_title': 'Missing',
+  })
+# ---
+# name: test_variant_functions[missing_track_title_and_normalized_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'enter sandman',
+    ),
+    'library_title_variants': tuple(
+      '',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Enter Sandman',
+    'normalize_title_for_scoring_track_title': None,
+  })
+# ---
+# name: test_variant_functions[missing_track_title_falls_back_to_stored_form]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'missing',
+    ),
+    'library_title_variants': tuple(
+      'missing',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Missing',
+    'normalize_title_for_scoring_track_title': None,
+  })
+# ---
+# name: test_variant_functions[my_girl_vs_hey_girl]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'my girl',
+    ),
+    'library_title_variants': tuple(
+      'hey girl i like your style',
+      'hey girl',
+    ),
+    'normalize_title_for_scoring_broadcast': 'My Girl',
+    'normalize_title_for_scoring_track_title': 'Hey Girl (I Like Your Style)',
+  })
+# ---
+# name: test_variant_functions[part_number_i_not_stripped]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'disco duck part i',
+    ),
+    'library_title_variants': tuple(
+      'disco duck part i',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Disco Duck (Part I)',
+    'normalize_title_for_scoring_track_title': 'Disco Duck (Part I)',
+  })
+# ---
+# name: test_variant_functions[part_number_ii_not_stripped]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'disco duck part ii',
+    ),
+    'library_title_variants': tuple(
+      'disco duck part ii',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Disco Duck (Part II)',
+    'normalize_title_for_scoring_track_title': 'Disco Duck (Part II)',
+  })
+# ---
+# name: test_variant_functions[plain_no_credit]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'enter sandman',
+    ),
+    'library_title_variants': tuple(
+      'enter sandman',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Enter Sandman',
+    'normalize_title_for_scoring_track_title': 'Enter Sandman',
+  })
+# ---
+# name: test_variant_functions[purple_rain_live_both_sides]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'purple rain',
+    ),
+    'broadcast_title_variants': tuple(
+      'purple rain live',
+    ),
+    'library_title_variants': tuple(
+      'purple rain live',
+      'purple rain',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Purple Rain',
+    'normalize_title_for_scoring_track_title': 'Purple Rain',
+  })
+# ---
+# name: test_variant_functions[purple_rain_live_broadcast_plain_lib]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'purple rain',
+    ),
+    'broadcast_title_variants': tuple(
+      'purple rain live',
+    ),
+    'library_title_variants': tuple(
+      'purple rain',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Purple Rain',
+    'normalize_title_for_scoring_track_title': 'Purple Rain',
+  })
+# ---
+# name: test_variant_functions[radio_edit_suffix]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'song',
+    ),
+    'broadcast_title_variants': tuple(
+      'song radio edit',
+    ),
+    'library_title_variants': tuple(
+      'song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Song',
+    'normalize_title_for_scoring_track_title': 'Song',
+  })
+# ---
+# name: test_variant_functions[remastered_suffix]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'song',
+    ),
+    'library_title_variants': tuple(
+      'song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Song',
+    'normalize_title_for_scoring_track_title': 'Song',
+  })
+# ---
+# name: test_variant_functions[slash_inside_word_not_a_credit]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'rif raf',
+    ),
+    'library_title_variants': tuple(
+      'rif raf',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Rif/Raf',
+    'normalize_title_for_scoring_track_title': 'Rif Raf',
+  })
+# ---
+# name: test_variant_functions[star_spangled_banner_leading_the]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'the star spangled banner',
+    ),
+    'library_title_variants': tuple(
+      'star spangled banner',
+    ),
+    'normalize_title_for_scoring_broadcast': 'The Star Spangled Banner',
+    'normalize_title_for_scoring_track_title': 'Star Spangled Banner',
+  })
+# ---
+# name: test_variant_functions[sweet_dreams_no_space_before_paren]
+  dict({
+    'broadcast_title_core_variants': tuple(
+      'sweet dreams',
+    ),
+    'broadcast_title_variants': tuple(
+      'sweet dreamsare made of this',
+    ),
+    'library_title_variants': tuple(
+      'sweet dreams are made of this',
+      'sweet dreams',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Sweet Dreams(Are Made Of This)',
+    'normalize_title_for_scoring_track_title': 'Sweet Dreams (Are Made of This)',
+  })
+# ---
+# name: test_variant_functions[title_that_is_only_a_credit]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'f nobody',
+    ),
+    'library_title_variants': tuple(
+      'nobody',
+    ),
+    'normalize_title_for_scoring_broadcast': 'f/Nobody',
+    'normalize_title_for_scoring_track_title': 'Nobody',
+  })
+# ---
+# name: test_variant_functions[w_slash_credit_after_apostrophe_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'killing me softly w his song',
+      'killing me softly',
+    ),
+    'library_title_variants': tuple(
+      'killing me softly',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Killing Me Softly W/His Song',
+    'normalize_title_for_scoring_track_title': 'Killing Me Softly',
+  })
+# ---
+# name: test_variant_functions[w_slash_is_part_of_the_title]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'killing me softly w his song',
+      'killing me softly',
+    ),
+    'library_title_variants': tuple(
+      'killing me softly with his song',
+    ),
+    'normalize_title_for_scoring_broadcast': 'Killing Me Softly W/His Song',
+    'normalize_title_for_scoring_track_title': 'Killing Me Softly With His Song',
+  })
+# ---
+# name: test_variant_functions[w_slash_o_means_without]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'i dont want to live w o you',
+    ),
+    'library_title_variants': tuple(
+      'i dont want to live without you',
+    ),
+    'normalize_title_for_scoring_broadcast': "I Don't Want To Live W/o You",
+    'normalize_title_for_scoring_track_title': "I Don't Want To Live Without You",
+  })
+# ---
+# name: test_variant_functions[w_slash_offers_both_forms]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'the first noel w faith hill',
+      'the first noel',
+    ),
+    'library_title_variants': tuple(
+      'the first noel',
+    ),
+    'normalize_title_for_scoring_broadcast': 'The First Noel w/Faith Hill',
+    'normalize_title_for_scoring_track_title': 'The First Noel',
+  })
+# ---
+# name: test_variant_functions[w_slash_out_means_without]
+  dict({
+    'broadcast_title_core_variants': tuple(
+    ),
+    'broadcast_title_variants': tuple(
+      'i dont wanna live w out your',
+    ),
+    'library_title_variants': tuple(
+      'i dont wanna live without your',
+    ),
+    'normalize_title_for_scoring_broadcast': "I Don't Wanna Live W/out Your",
+    'normalize_title_for_scoring_track_title': 'I Dont Wanna Live Without Your',
+  })
+# ---
