@@ -200,6 +200,13 @@ tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --co
 hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
 audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
 audit.ignore_fail = "return_non_zero"
+
+# ---- refactor gate (four-step gate before hotspot refactors) ----
+# Gate 1: snapshot tests (syrupy, part of `tests`) lock current behaviour.
+# Gate 2: mutation testing (cosmic-ray, `poe mutate`) confirms tests catch regressions.
+# Gate 3: import/type/format checks (fmt-check, layers, types) ensure code quality.
+# Gate 4: diff-cover verifies every changed line is tested.
+# Run `poe refactor-gate` to verify all four gates pass.
 mutate      = { cmd = "python scripts/run_cosmic_ray.py", help = "Run mutation tests on a module: `poe mutate MODULE TEST_PATHS...`\nExample: poe mutate backend/services/matching_utils.py tests/services/test_matching_utils.py" }
 refactor-gate.sequence = ["fmt-check", "layers", "types", "tests",
                           { cmd = "diff-cover audit/coverage.xml --compare-branch master --fail-under 100" }]
