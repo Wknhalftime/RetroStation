@@ -63,7 +63,10 @@ def test_get_present_by_track_skips_missing_rows_and_other_tracks(migrated_db: s
         _file(repos, r"D:\m\other.flac", track_number=3)
 
         found = repos.library_files.get_present_by_track(
-            "samuel l jackson", "Pulp Fiction", 16, "ezekiel 25 17",
+            "samuel l jackson",
+            "Pulp Fiction",
+            16,
+            "ezekiel 25 17",
         )
 
         assert [f.id for f in found] == [present.id]
