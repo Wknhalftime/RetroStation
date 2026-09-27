@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from typing import Any
 
 import psycopg
@@ -29,6 +30,13 @@ from backend.services.missing_file_reconciliation_service import (
     plan_for_library,
 )
 from backend.services.repository_factory import RepositoryFactory
+
+
+def _use_utf8_console() -> None:
+    """Reconfigure stdout/stderr to UTF-8 so non-ASCII paths print on a cp1252 console."""
+    # Must reconfigure before any other printing to prevent cp1252 Unicode crashes on Windows
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
 
 def format_report(plan: MissingFilePlan) -> list[str]:
@@ -69,6 +77,7 @@ def apply_plan(
 
 
 def main() -> None:
+    _use_utf8_console()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true", help="fold the rows in")
     args = parser.parse_args()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -77,3 +78,20 @@ def test_a_move_whose_successor_vanished_is_skipped(
 
     assert (folded, skipped) == (1, 1)
     assert calls == ["/o/a", "/o/b"]
+
+
+def test_use_utf8_console_lets_a_cp1252_console_print_non_ascii_paths(
+    script: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    buffer = io.BytesIO()
+    console = io.TextIOWrapper(buffer, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", console)
+    monkeypatch.setattr(sys, "stderr", console)
+
+    script._use_utf8_console()
+    report_line = "  Ol’ Dirty Bastard - Is This Real¿.flac"
+    print(report_line)
+    sys.stdout.flush()
+
+    assert buffer.getvalue().decode("utf-8").rstrip("\r\n") == report_line
