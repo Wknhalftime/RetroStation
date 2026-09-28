@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 
 from backend.domain.streaming import (
     DayLoader,
+    EndOfScheduleError,
     InvalidStreamValueError,
     ItemRef,
     Landing,
@@ -146,3 +147,12 @@ def tune_in(load_day: DayLoader, year: int, now: datetime, timing: StreamTiming)
             f"{timing.window} after {wall.isoformat()}"
         )
     return TuneIn(landing, wall - now)
+
+
+def next_item(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> ItemRef:
+    """The next playable item after ``after``, looking at most one day ahead (spec D1)."""
+    _item_at(load_day, after)
+    ref = _next_playable(load_day, after, 1, timing)
+    if ref is None:
+        raise EndOfScheduleError(f"no playable item after {after.day} #{after.index}")
+    return ref
