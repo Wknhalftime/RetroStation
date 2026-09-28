@@ -90,7 +90,6 @@ def _lib_file(
     return LibraryFile(
         id=file_id,
         file_path=path,
-        file_hash="hash-" + path,
         format="flac",
         recording_id=recording_id,
         work_id=work_id,

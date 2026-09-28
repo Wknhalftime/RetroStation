@@ -50,7 +50,6 @@ def _lib_file(
     return LibraryFile(
         id=UUID(int=seed),
         file_path=f"/music/{seed}.flac",
-        file_hash=f"hash-{seed}",
         format="flac",
         audio=AudioMetadata(track_title=track_title, normalized_title=normalized_title),
     )
