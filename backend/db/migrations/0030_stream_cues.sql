@@ -6,8 +6,9 @@
 -- Playback analysis per audio for tune-in streaming (spec: Data, D20). Keyed by the
 -- library's audio fingerprint: a row means "this audio has cues". No FK (a hash is not
 -- unique in the library, and a row for audio no longer there is harmless). No file stat and
--- no read-time version check: analyser_version is a record only; an analyser change purges
--- rows once. No CHECK on the cue columns themselves: the write model validates, and the
+-- no read-time version check: analyser_version is a record only. Policy (D20): an analyser
+-- change purges old rows once; that purge belongs to a later PR, not to this schema.
+-- No CHECK on the cue columns themselves: the write model validates, and the
 -- reader tolerates a bad row (cues=None, logged) rather than failing a whole day.
 CREATE TABLE stream_cues (
     audio_hash       TEXT        PRIMARY KEY

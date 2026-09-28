@@ -95,7 +95,11 @@ class CuePoints:
 
 
 CUE_ANALYSER_VERSION = 1
-"""Version of the cue analysis in force, recorded on each row; never checked on read (D20)."""
+"""Version of the cue analysis in force, recorded on each row; never checked on read (D20).
+
+Policy (D20): an analyser change purges the old rows once. That purge belongs to a later PR;
+nothing here enforces it.
+"""
 
 
 @dataclass(frozen=True)

@@ -30,7 +30,6 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.streaming import CUE_ANALYSER_VERSION
 from backend.services.identity_resolution_service import RecalcRepos
 
 
@@ -82,7 +81,8 @@ class SystemRepos:
 class StreamingRepos:
     """Tune-in streaming repositories: the cue cache and the playable schedule reader.
 
-    The reader judges cue freshness by ``CUE_ANALYSER_VERSION``, the analysis in force.
+    The reader checks no cue freshness (D20): a cue row for the final file's audio is used as
+    it is, whatever its ``analyser_version``.
     """
 
     cues: PgStreamCueRepository
@@ -128,7 +128,7 @@ class RepositoryFactory:
         )
         self.streaming = StreamingRepos(
             cues=PgStreamCueRepository(conn),
-            schedule=PgPlayableScheduleRepository(conn, CUE_ANALYSER_VERSION),
+            schedule=PgPlayableScheduleRepository(conn),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility
