@@ -358,3 +358,38 @@ def test_reconciliation_repicks_a_master_stranded_on_a_missing_file(
         assert (result.reconciled, result.unmatched, result.masters_repicked) == (0, 1, 1)
         master = repos.song_masters.get_by_work(work)
         assert master is not None and master.preferred_file_id == on_disk.id
+
+
+def test_plan_pairs_a_missing_row_with_its_audio_twin_despite_new_tags(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from backend.domain.enums import AudioHashKind
+    from backend.domain.library import AudioHash
+
+    audio = AudioHash(AudioHashKind.FLAC_MD5, "f" * 32)
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
+        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old = repos.library_files.upsert(
+            replace(_file(repos, str(tmp_path / "old.flac"), work, missing=False), audio_hash=audio)
+        )
+        repos.library_files.mark_missing(old.file_path)
+        new = repos.library_files.upsert(
+            LibraryFile(
+                id=uuid4(),
+                file_path=str(tmp_path / "[dialogue] - Ezekiel 25_17.flac"),
+                file_hash=None,
+                format="flac",
+                work_id=work,
+                audio_hash=audio,
+                audio=AudioMetadata(track_title="[dialogue]", duration_ms=1),
+            )
+        )
+
+        plan = plan_for_library(repos.library_files)
+
+    assert [(m.missing_id, m.successor_id) for m in plan.moves] == [(old.id, new.id)]

@@ -5,7 +5,8 @@ its content, so the scan cannot tell it was moved: it indexes the new path
 as a new row and marks the old one missing, which still holds the file's
 matches and song-master pick. For each missing row this finds the one
 present row holding the same track, its successor, the way Navidrome pairs
-missing tracks by persistent ID. Rows with no successor, or several equally
+missing tracks by persistent ID, with the audio fingerprint as the first,
+exact rule. Rows with no successor, or several equally
 good ones, are left alone.
 """
 
@@ -60,12 +61,19 @@ def _release_track(f: LibraryFile) -> tuple[object, ...] | None:
     )
 
 
+def _same_audio(a: LibraryFile, b: LibraryFile) -> bool:
+    return a.audio_hash is not None and a.audio_hash == b.audio_hash
+
+
 def is_same_track(missing: LibraryFile, candidate: LibraryFile) -> bool:
     """Whether *candidate* holds the track *missing* held.
 
-    Same recording on the same release, or the same artist's track number
-    and title on the same release; either way with durations within 2 s.
+    The same audio fingerprint, whatever the tags now say. Otherwise, with
+    durations within 2 s: the same recording on the same release, or the
+    same artist's track number and title on the same release.
     """
+    if _same_audio(missing, candidate):
+        return True
     if not _durations_agree(missing, candidate):
         return False
     if _same_recording(missing, candidate):
@@ -74,29 +82,44 @@ def is_same_track(missing: LibraryFile, candidate: LibraryFile) -> bool:
     return key is not None and key == _release_track(candidate)
 
 
+def _audio_twins(missing: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
+    if missing.audio_hash is None:
+        return []
+    return file_repo.get_by_audio_hash(missing.audio_hash)
+
+
+def _recording_twins(missing: LibraryFile, file_repo: LibraryFileRepository) -> list[LibraryFile]:
+    mbid = missing.audio.recording_mbid
+    return file_repo.get_by_recording_mbid(mbid) if mbid is not None else []
+
+
+def _release_track_twins(
+    missing: LibraryFile,
+    file_repo: LibraryFileRepository,
+) -> list[LibraryFile]:
+    a = missing.audio
+    if (
+        a.normalized_artist_name is None
+        or a.release_title is None
+        or a.track_number is None
+        or a.normalized_title is None
+    ):
+        return []
+    return file_repo.get_present_by_track(
+        a.normalized_artist_name, a.release_title, a.track_number, a.normalized_title
+    )
+
+
 def successor_candidates(
     missing: LibraryFile,
     file_repo: LibraryFileRepository,
 ) -> list[LibraryFile]:
-    """PRESENT rows that may hold *missing*'s track; is_same_track decides."""
-    found: dict[UUID, LibraryFile] = {}
-    a = missing.audio
-    if a.recording_mbid is not None:
-        for f in file_repo.get_by_recording_mbid(a.recording_mbid):
-            found[f.id] = f
-    if (
-        a.normalized_artist_name is not None
-        and a.release_title is not None
-        and a.track_number is not None
-        and a.normalized_title is not None
-    ):
-        for f in file_repo.get_present_by_track(
-            a.normalized_artist_name,
-            a.release_title,
-            a.track_number,
-            a.normalized_title,
-        ):
-            found[f.id] = f
+    """Rows that may hold *missing*'s track; ready_successors decides."""
+    found = {
+        f.id: f
+        for twins in (_audio_twins, _recording_twins, _release_track_twins)
+        for f in twins(missing, file_repo)
+    }
     return list(found.values())
 
 
@@ -113,47 +136,58 @@ def _pick(missing: LibraryFile, candidates: list[LibraryFile]) -> LibraryFile | 
     return same_name[0] if len(same_name) == 1 else None
 
 
+def ready_successors(missing: LibraryFile, candidates: list[LibraryFile]) -> list[LibraryFile]:
+    """Candidates that can take over *missing* now: PRESENT, grouped, the same track."""
+    return [
+        c
+        for c in candidates
+        if c.id != missing.id
+        and c.file_status == FileStatus.PRESENT
+        and c.work_id is not None
+        and is_same_track(missing, c)
+    ]
+
+
+def choose_successor(missing: LibraryFile, ready: list[LibraryFile]) -> LibraryFile | None:
+    """An audio match wins outright; ties, and the other rules, settle by file name."""
+    audio = [c for c in ready if _same_audio(missing, c)]
+    return _pick(missing, audio or ready)
+
+
+def _move(missing: LibraryFile, successor: LibraryFile) -> MissingFileMove:
+    return MissingFileMove(
+        missing_id=missing.id,
+        missing_path=missing.file_path,
+        missing_work_id=missing.work_id,
+        successor_id=successor.id,
+        successor_path=successor.file_path,
+        successor_work_id=successor.work_id,
+    )
+
+
 def plan_missing_file_moves(
     missing_rows: list[LibraryFile],
     candidates_for: Callable[[LibraryFile], list[LibraryFile]],
 ) -> MissingFilePlan:
     """Pair each missing row with its successor. Reads only.
 
-    A successor must be PRESENT and already grouped (have a work), and can
-    take over only one missing row per run: the first by path wins, and a
-    later row whose pick is already claimed is ambiguous.
+    A successor can take over only one missing row per run: the first by
+    path wins, and a later row whose pick is already claimed is ambiguous.
     """
     moves: list[MissingFileMove] = []
     ambiguous: list[str] = []
     unmatched: list[str] = []
     claimed: set[UUID] = set()
     for missing in sorted(missing_rows, key=lambda f: f.file_path):
-        ready = [
-            c
-            for c in candidates_for(missing)
-            if c.id != missing.id
-            and c.file_status == FileStatus.PRESENT
-            and c.work_id is not None
-            and is_same_track(missing, c)
-        ]
+        ready = ready_successors(missing, candidates_for(missing))
+        successor = choose_successor(missing, ready) if ready else None
         if not ready:
             unmatched.append(missing.file_path)
-            continue
-        successor = _pick(missing, ready)
-        if successor is None or successor.id in claimed:
+        elif successor is None or successor.id in claimed:
             ambiguous.append(missing.file_path)
-            continue
-        claimed.add(successor.id)
-        moves.append(
-            MissingFileMove(
-                missing_id=missing.id,
-                missing_path=missing.file_path,
-                missing_work_id=missing.work_id,
-                successor_id=successor.id,
-                successor_path=successor.file_path,
-                successor_work_id=successor.work_id,
-            )
-        )
+        else:
+            claimed.add(successor.id)
+            moves.append(_move(missing, successor))
     return MissingFilePlan(tuple(moves), tuple(ambiguous), tuple(unmatched))
 
 

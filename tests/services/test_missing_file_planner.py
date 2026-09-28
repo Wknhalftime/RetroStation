@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 from uuid import uuid4
 
-from backend.domain.enums import FileStatus
-from backend.domain.library import AudioMetadata, LibraryFile, MissingFilePlan
+from backend.domain.enums import AudioHashKind, FileStatus
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, MissingFilePlan
 from backend.services.missing_file_reconciliation_service import (
     is_same_track,
     plan_missing_file_moves,
+    successor_candidates,
 )
 from tests.fakes.library_files import FakeLibraryFileRepository
 
@@ -166,11 +168,78 @@ def test_a_move_between_works_is_flagged() -> None:
 
 
 def test_candidates_come_from_both_lookups_once_each() -> None:
-    from backend.services.missing_file_reconciliation_service import successor_candidates
-
     repo = FakeLibraryFileRepository()
     old = repo.upsert(_row(OLD))
     repo.mark_missing(OLD)
     new = repo.upsert(_row(NEW))
 
     assert [c.id for c in successor_candidates(old, repo)] == [new.id]
+
+
+_AUDIO = AudioHash(AudioHashKind.FLAC_MD5, "c" * 32)
+
+
+def _with_audio(row: LibraryFile, audio_hash: AudioHash | None = _AUDIO) -> LibraryFile:
+    return dataclasses.replace(row, audio_hash=audio_hash)
+
+
+def test_an_audio_match_needs_no_matching_tags_or_duration() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    retagged = _with_audio(
+        _row(
+            NEW,
+            recording_mbid=None,
+            release_mbid=None,
+            release_title="Pulp Fiction (Collector's Edition)",
+            normalized_title="ezekiel 25 17 dialogue",
+            duration_ms=60_000,
+        )
+    )
+
+    assert is_same_track(old, retagged)
+    assert _plan([old], [retagged]).moves[0].successor_id == retagged.id
+
+
+def test_an_audio_match_wins_over_a_tag_match() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    tag_twin = _row(r"D:\Music\Other\Samuel L. Jackson - Ezekiel 25;17.flac")
+    audio_twin = _with_audio(_row(NEW, recording_mbid=None, normalized_title="dialogue"))
+
+    plan = _plan([old], [tag_twin, audio_twin])
+
+    assert [m.successor_id for m in plan.moves] == [audio_twin.id]
+
+
+def test_several_audio_matches_settle_by_file_name() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    same_name = _with_audio(_row(r"D:\Music\Moved\Samuel L. Jackson - Ezekiel 25;17.flac"))
+    other_name = _with_audio(_row(NEW))
+
+    plan = _plan([old], [other_name, same_name])
+
+    assert [m.successor_id for m in plan.moves] == [same_name.id]
+
+
+def test_an_ungrouped_audio_match_is_not_used_yet() -> None:
+    old = _with_audio(_row(OLD, missing=True, recording_mbid=None, release_title=None))
+    ungrouped = _with_audio(_row(NEW, work_id=None))
+
+    plan = _plan([old], [ungrouped])
+
+    assert plan.moves == ()
+    assert plan.unmatched == (OLD,)
+
+
+def test_different_audio_falls_back_to_the_tag_rules() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    re_encoded = _with_audio(_row(NEW), AudioHash(AudioHashKind.FLAC_MD5, "d" * 32))
+
+    assert is_same_track(old, re_encoded)  # same recording, same release, duration within 2 s
+
+
+def test_successor_candidates_include_rows_with_the_same_audio() -> None:
+    repo = FakeLibraryFileRepository()
+    old = repo.upsert(_with_audio(_row(OLD, missing=True, recording_mbid=None, release_title=None)))
+    twin = repo.upsert(_with_audio(_row(NEW, recording_mbid=None, release_title=None)))
+
+    assert twin.id in {c.id for c in successor_candidates(old, repo)}
