@@ -16,7 +16,7 @@ import contextlib
 import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from uuid import UUID, uuid4
 
 import mutagen
@@ -625,13 +625,43 @@ def _moved_from(lf: LibraryFile, file_repo: LibraryFileRepository) -> LibraryFil
     respelled = _respelled_from(lf, file_repo)
     if respelled is not None:
         return respelled
-    for candidate in _move_candidates(lf, file_repo):
-        if candidate.file_path != lf.file_path and _is_gone_or_same_file(
-            Path(candidate.file_path),
-            Path(lf.file_path),
-        ):
-            return candidate
-    return None
+    gone = [
+        candidate
+        for candidate in _move_candidates(lf, file_repo)
+        if candidate.file_path != lf.file_path
+        and _is_gone_or_same_file(Path(candidate.file_path), Path(lf.file_path))
+    ]
+    return _choose_move_origin(lf, gone)
+
+
+def _file_name(path: str) -> str:
+    return PureWindowsPath(path).name
+
+
+def _same_track_position(a: LibraryFile, b: LibraryFile) -> bool:
+    return (a.audio.release_title, a.audio.disc_number, a.audio.track_number) == (
+        b.audio.release_title,
+        b.audio.disc_number,
+        b.audio.track_number,
+    )
+
+
+def _choose_move_origin(lf: LibraryFile, gone: list[LibraryFile]) -> LibraryFile | None:
+    """The row among *gone* that *lf* was moved from, or None when that is not clear.
+
+    The only candidate; else the only one on the same release, disc and
+    track; else the only one with the same file name. Bit-identical twins
+    moved together otherwise match each other's rows, and adopting the
+    wrong one would swap their ids, so an undecided choice adopts nothing.
+    """
+    if len(gone) == 1:
+        return gone[0]
+    same_track = [c for c in gone if _same_track_position(c, lf)]
+    if len(same_track) == 1:
+        return same_track[0]
+    name = _file_name(lf.file_path)
+    same_name = [c for c in gone if _file_name(c.file_path) == name]
+    return same_name[0] if len(same_name) == 1 else None
 
 
 def adopt_moved_row(lf: LibraryFile, file_repo: LibraryFileRepository) -> str | None:

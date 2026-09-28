@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from backend.domain.enums import AudioHashKind, FileStatus
-from backend.domain.library import AudioHash, LibraryFile
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from backend.services.library_scan_service import adopt_moved_row  # ⚠ AUD-009
 from tests.fakes.library_files import FakeLibraryFileRepository
 
@@ -36,6 +36,19 @@ def _row(
         file_mtime_ns=stat[1],
         audio_hash=audio_hash,
     )
+
+
+def _twin(path: Path, position: tuple[str, int, int] | None = None) -> LibraryFile:
+    """A stored row sharing H1, gone from disk; *position* is (release, disc, track)."""
+    row = _row(path, audio_hash=H1)
+    if position is not None:
+        row.audio = _at(position)
+    return row
+
+
+def _at(position: tuple[str, int, int]) -> AudioMetadata:
+    release, disc, track = position
+    return AudioMetadata(release_title=release, disc_number=disc, track_number=track)
 
 
 def _seen(path: Path, audio_hash: AudioHash | None) -> LibraryFile:
@@ -169,3 +182,53 @@ def test_the_gone_twin_is_adopted_when_a_present_twin_sorts_first_by_path(
     moved = repo.get_by_id(stored_gone.id)
     assert moved is not None and moved.file_path == str(new)
     assert repo.get_by_path(str(present)) is not None
+
+
+def test_twins_moved_together_adopt_the_row_with_the_same_release_disc_and_track(
+    tmp_path: Path,
+) -> None:
+    """An album track and its compilation copy, both moved and retagged in one go."""
+    best_of = tmp_path / "Best Of" / "kiss.flac"  # sorts first
+    parade = tmp_path / "Parade" / "kiss.flac"
+    new = _write(tmp_path / "Prince" / "Parade" / "03 - Kiss.flac")
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_twin(best_of, ("Best Of", 1, 7)))
+    stored_parade = repo.upsert(_twin(parade, ("Parade", 1, 3)))
+    seen = _seen(new, H1)
+    seen.audio = _at(("Parade", 1, 3))
+
+    assert adopt_moved_row(seen, repo) == str(parade)
+
+    moved = repo.get_by_id(stored_parade.id)
+    assert moved is not None and moved.file_path == str(new)
+    assert repo.get_by_path(str(best_of)) is not None
+
+
+def test_twins_moved_together_adopt_the_row_with_the_same_file_name(tmp_path: Path) -> None:
+    best_of = tmp_path / "Best Of" / "07 Kiss.flac"  # sorts first
+    parade = tmp_path / "Parade" / "03 Kiss.flac"
+    new = _write(tmp_path / "Prince" / "Parade" / "03 Kiss.flac")
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_twin(best_of))
+    stored_parade = repo.upsert(_twin(parade))
+
+    assert adopt_moved_row(_seen(new, H1), repo) == str(parade)
+
+    moved = repo.get_by_id(stored_parade.id)
+    assert moved is not None and moved.file_path == str(new)
+
+
+def test_twins_moved_together_with_nothing_to_tell_them_apart_adopt_neither(
+    tmp_path: Path,
+) -> None:
+    """Adopting either could swap their ids; reconciliation reports them instead."""
+    best_of = tmp_path / "Best Of" / "07 Kiss.flac"
+    parade = tmp_path / "Parade" / "03 Kiss.flac"
+    new = _write(tmp_path / "Prince" / "Kiss.flac")
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_twin(best_of))
+    repo.upsert(_twin(parade))
+
+    assert adopt_moved_row(_seen(new, H1), repo) is None
+    assert repo.get_by_path(str(best_of)) is not None
+    assert repo.get_by_path(str(parade)) is not None
