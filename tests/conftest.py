@@ -19,7 +19,8 @@ _TRUNCATE_SQL = """
              song_masters, format_overrides,
              mb_cache, progress_tracking, user_settings,
              system_logs,
-             library_folder_staged_hashes, library_folders
+             library_folder_staged_hashes, library_folders,
+             stream_cues
     CASCADE
 """
 

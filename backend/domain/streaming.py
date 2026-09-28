@@ -32,6 +32,14 @@ class EndOfScheduleError(StreamingError):
     """The schedule has no further playable item."""
 
 
+class CueFileNotFoundError(StreamingError):
+    """Cues were stored for a library file that no longer exists."""
+
+    def __init__(self, file_id: UUID) -> None:
+        super().__init__(f"no library file with file_id={file_id} to store cues for")
+        self.file_id = file_id
+
+
 class StaleScheduleError(StreamingError):
     """A position points past the end of its day: the day's log changed under the session."""
 
@@ -90,6 +98,40 @@ class CuePoints:
             )
         if not math.isfinite(self.gain_db):
             raise InvalidStreamValueError(f"CuePoints.gain_db must be finite, got {self.gain_db}")
+
+
+CUE_ANALYSER_VERSION = 1
+"""Version of the cue analysis in force. Stored rows of any other version are stale."""
+
+
+@dataclass(frozen=True)
+class CueAnalysis:
+    """The result of analysing one library file, as stored for playback.
+
+    ``file_size`` and ``file_mtime_ns`` are the file's stat when it was analysed; a
+    later mismatch with the library makes the stored cues stale. ``analysis_failed``
+    records that ``cues`` are fallback values; it is data and changes nothing on read.
+    """
+
+    file_id: UUID
+    cues: CuePoints
+    loudness_lufs: float | None
+    analysis_failed: bool
+    analyser_version: int
+    file_size: int | None
+    file_mtime_ns: int | None
+
+    def __post_init__(self) -> None:
+        if self.analyser_version < 1:
+            raise InvalidStreamValueError(
+                f"CueAnalysis.analyser_version must be >= 1, got {self.analyser_version}"
+            )
+        if self.file_size is not None:
+            _require_non_negative("CueAnalysis", file_size=self.file_size)
+        if self.loudness_lufs is not None and not math.isfinite(self.loudness_lufs):
+            raise InvalidStreamValueError(
+                f"CueAnalysis.loudness_lufs must be finite, got {self.loudness_lufs}"
+            )
 
 
 @dataclass(frozen=True)
