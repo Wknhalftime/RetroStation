@@ -16,7 +16,7 @@ from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
 from backend.services.mb_client import MusicBrainzClientProtocol
-from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation
+from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation, MbRelease
 from backend.services.normalization import extract_version_info, normalize_artist
 
 logger = structlog.get_logger()
@@ -53,6 +53,29 @@ def _extract_artist_from_credits(
             sort_name: str = artist.get("sort-name") or name
             return (mbid, name, sort_name)
     return None
+
+
+def _upsert_artist_from_credits(
+    credits: list[MbArtistCredit],
+    artist_repo: ArtistCatalogRepository,
+) -> str | None:
+    """Upsert the artist named by the first usable artist-credit entry; return its id.
+
+    Shared by `enrich_by_release`, `enrich_by_recording` and
+    `enrich_by_recording_batch` — the block always changed identically across
+    every commit that touched it (see the PR description for the git-log
+    evidence), so it is one function, not three copies.
+    """
+    artist_info = _extract_artist_from_credits(credits)
+    if artist_info is None:
+        return None
+    artist_mbid, artist_name, artist_sort_name = artist_info
+    return artist_repo.upsert_musicbrainz_artist(
+        mbid=artist_mbid,
+        name=artist_name,
+        sort_name=artist_sort_name,
+        normalized_name=normalize_artist(artist_name),
+    )
 
 
 def _extract_work_from_relations(
@@ -180,6 +203,67 @@ def _resolve_track_recording(
     return None
 
 
+def _build_recording_map(release_data: MbRelease) -> dict[str, MbRecording]:
+    """Map recording_mbid -> recording dict from every track on the release.
+
+    A track with no recording, or a recording with no id (an enhanced-CD
+    data track, say), contributes nothing to the map.
+    """
+    recording_map: dict[str, MbRecording] = {}
+    for medium in release_data.get("media", []):
+        for track in medium.get("tracks", []):
+            rec = track.get("recording")
+            if rec and rec.get("id"):
+                recording_map[rec["id"]] = rec
+    return recording_map
+
+
+@dataclass(frozen=True)
+class _ReleaseLookup:
+    """What one release lookup resolved: its recordings and (if found) artist."""
+
+    recording_map: dict[str, MbRecording]
+    artist_id: str | None
+    release_mbid: str
+
+
+def _enrich_one_file(
+    library_file: LibraryFile,
+    release: _ReleaseLookup,
+    repos: EnrichmentRepos,
+    mb_client: MusicBrainzClientProtocol,
+) -> bool:
+    """Enrich one pending file against a release's recording map.
+
+    Returns whether the file was enriched. A file with no recording_mbid
+    tag, or one that resolves to nothing on this release (see
+    `_resolve_track_recording`), fails instead.
+    """
+    rec_mbid = library_file.audio.recording_mbid
+    if not rec_mbid:
+        logger.debug("library_file_no_recording_mbid", file_id=str(library_file.id))
+        repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
+        return False
+
+    resolved_mbid = _resolve_track_recording(rec_mbid, release.recording_map, mb_client)
+    if resolved_mbid is None:
+        logger.warning(
+            "recording_not_found_in_release",
+            recording_mbid=rec_mbid,
+            release_mbid=release.release_mbid,
+        )
+        repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
+        return False
+
+    work_id = _upsert_recording_with_work(
+        resolved_mbid, release.recording_map[resolved_mbid], release.artist_id, repos
+    )
+    _link_file_to_recording(library_file, resolved_mbid, repos.files)
+    if work_id is not None:
+        _move_file_to_work(library_file, work_id, repos)
+    return True
+
+
 def enrich_by_release(
     release_mbid: str,
     repos: EnrichmentRepos,
@@ -209,49 +293,17 @@ def enrich_by_release(
         _mark_files_failed(pending_files, repos.files)
         return 0
 
-    artist_credits: list[MbArtistCredit] = release_data.get("artist-credit", [])
-    artist_info = _extract_artist_from_credits(artist_credits)
-    artist_id: str | None = None
-    if artist_info:
-        artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_id = repos.artists.upsert_musicbrainz_artist(
-            mbid=artist_mbid,
-            name=artist_name,
-            sort_name=artist_sort_name,
-            normalized_name=normalize_artist(artist_name),
-        )
-
-    # Build recording map: recording_mbid -> recording dict from media tracks
-    recording_map: dict[str, MbRecording] = {}
-    for medium in release_data.get("media", []):
-        for track in medium.get("tracks", []):
-            rec = track.get("recording")
-            if rec and rec.get("id"):
-                recording_map[rec["id"]] = rec
+    artist_id = _upsert_artist_from_credits(release_data.get("artist-credit", []), repos.artists)
+    release = _ReleaseLookup(
+        recording_map=_build_recording_map(release_data),
+        artist_id=artist_id,
+        release_mbid=release_mbid,
+    )
 
     enriched_count = 0
     for library_file in pending_files:
-        rec_mbid = library_file.audio.recording_mbid
-        if not rec_mbid:
-            logger.debug("library_file_no_recording_mbid", file_id=str(library_file.id))
-            repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
-            continue
-
-        rec_mbid = _resolve_track_recording(rec_mbid, recording_map, mb_client)
-        if rec_mbid is None:
-            logger.warning(
-                "recording_not_found_in_release",
-                recording_mbid=library_file.audio.recording_mbid,
-                release_mbid=release_mbid,
-            )
-            repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
-            continue
-
-        work_id = _upsert_recording_with_work(rec_mbid, recording_map[rec_mbid], artist_id, repos)
-        _link_file_to_recording(library_file, rec_mbid, repos.files)
-        if work_id is not None:
-            _move_file_to_work(library_file, work_id, repos)
-        enriched_count += 1
+        if _enrich_one_file(library_file, release, repos, mb_client):
+            enriched_count += 1
 
     logger.info(
         "enrich_by_release_complete",
@@ -289,18 +341,7 @@ def enrich_by_recording(
         _mark_files_failed(pending_files, repos.files)
         return 0
 
-    artist_credits: list[MbArtistCredit] = rec_data.get("artist-credit", [])
-    artist_info = _extract_artist_from_credits(artist_credits)
-    artist_id = None
-    if artist_info:
-        artist_mbid, artist_name, artist_sort_name = artist_info
-        artist_id = repos.artists.upsert_musicbrainz_artist(
-            mbid=artist_mbid,
-            name=artist_name,
-            sort_name=artist_sort_name,
-            normalized_name=normalize_artist(artist_name),
-        )
-
+    artist_id = _upsert_artist_from_credits(rec_data.get("artist-credit", []), repos.artists)
     work_id = _upsert_recording_with_work(recording_mbid, rec_data, artist_id, repos)
 
     enriched_count = 0
@@ -324,22 +365,6 @@ class BatchEnrichment:
 
     enriched: int
     unresolved: tuple[LibraryFile, ...]
-
-
-def _upsert_artist_from_credits(
-    credits: list[MbArtistCredit],
-    artist_repo: ArtistCatalogRepository,
-) -> str | None:
-    artist_info = _extract_artist_from_credits(credits)
-    if artist_info is None:
-        return None
-    artist_mbid, artist_name, artist_sort_name = artist_info
-    return artist_repo.upsert_musicbrainz_artist(
-        mbid=artist_mbid,
-        name=artist_name,
-        sort_name=artist_sort_name,
-        normalized_name=normalize_artist(artist_name),
-    )
 
 
 def enrich_by_recording_batch(
