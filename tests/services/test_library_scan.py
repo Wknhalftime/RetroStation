@@ -18,7 +18,11 @@ from mutagen._util import MutagenError
 
 from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.library_scan_service import (
+    _extract_audio_stream_metrics,
+    _parse_slash_int,
     _sanitise_tag_value,
+    _to_release_status,
+    _to_release_type,
     read_tags,
     scan_directory,
 )
@@ -386,6 +390,84 @@ class TestExtractTagsGenericFallback:
         assert result.audio.track_title is None
         assert result.audio.recording_mbid is None
 
+    @patch("backend.services.library_scan_service.mutagen.File")
+    def test_id3_tag_type_fallback_dispatches_to_the_id3_extractor(
+        self, mock_file: MagicMock, tmp_path: Path
+    ) -> None:
+        """An unlisted extension whose tag type names ID3 still gets ID3 fields."""
+
+        class ID3Tags(dict):  # a real class so its __name__ names "ID3"
+            pass
+
+        fake_audio = MagicMock()
+        fake_audio.tags = ID3Tags(TIT2=["Fallback Title"])
+        fake_audio.info.length = 10.0
+        fake_audio.info.bitrate = 96000
+        mock_file.return_value = fake_audio
+
+        path = tmp_path / "track.m4a"
+        path.write_bytes(b"\x00" * 100)
+
+        result = read_tags(path)
+
+        assert result.audio.track_title == "Fallback Title"
+
+    @patch("backend.services.library_scan_service.mutagen.File")
+    def test_vorbis_tag_type_fallback_dispatches_to_the_vorbis_extractor(
+        self, mock_file: MagicMock, tmp_path: Path
+    ) -> None:
+        """An unlisted extension whose tag type names VComment still gets Vorbis fields."""
+
+        class VCommentDict(dict):  # a real class so its __name__ names "VComment"
+            pass
+
+        fake_audio = MagicMock()
+        fake_audio.tags = VCommentDict(title=["Fallback Vorbis Title"])
+        fake_audio.info.length = 10.0
+        fake_audio.info.bitrate = 96000
+        mock_file.return_value = fake_audio
+
+        path = tmp_path / "track.m4a"
+        path.write_bytes(b"\x00" * 100)
+
+        result = read_tags(path)
+
+        assert result.audio.track_title == "Fallback Vorbis Title"
+
+    @patch("backend.services.library_scan_service.mutagen.File")
+    def test_an_unidentifiable_file_raises_mutagen_error(
+        self, mock_file: MagicMock, tmp_path: Path
+    ) -> None:
+        """mutagen.File returns None when it cannot determine the file's type."""
+        mock_file.return_value = None
+        path = tmp_path / "track.mp3"
+        path.write_bytes(b"\x00" * 100)
+
+        with pytest.raises(MutagenError):
+            read_tags(path)
+
+
+# ---------------------------------------------------------------------------
+# Small tag-parse fallbacks: malformed values are dropped, not raised
+# ---------------------------------------------------------------------------
+
+
+class TestTagParseFallbacks:
+    def test_parse_slash_int_returns_none_for_non_numeric_value(self) -> None:
+        assert _parse_slash_int("not-a-number") is None
+
+    def test_to_release_type_returns_none_for_an_unknown_value(self) -> None:
+        assert _to_release_type("not-a-release-type") is None
+
+    def test_to_release_status_returns_none_for_an_unknown_value(self) -> None:
+        assert _to_release_status("not-a-release-status") is None
+
+    def test_extract_audio_stream_metrics_returns_none_none_when_info_is_missing(self) -> None:
+        fake_audio = MagicMock()
+        fake_audio.info = None
+
+        assert _extract_audio_stream_metrics(fake_audio) == (None, None)
+
 
 # ---------------------------------------------------------------------------
 # Non-MutagenError exception path in scan_directory
@@ -447,13 +529,22 @@ class TestReadTags:
         assert len(quarantine) == 1
         assert all(lf.file_size is not None for lf in files)
 
-    def test_scan_directory_never_reads_a_whole_file(self) -> None:
+    def test_scan_directory_never_reads_audio_bytes(self) -> None:
+        """None of the fixture files carries a FLAC with a stored MD5, so a scan
+        that reads audio bytes at all (not just a whole file) is a regression.
+
+        The previous version of this guard patched ``extract_tags``, a name
+        removed by PR B (scans read tags only); with ``create=True`` it could
+        never fail. ``_sha256_of_range`` is the primitive every audio-byte read
+        goes through (see tests/services/test_read_tags_audio_hash.py and
+        tests/integration/test_scan_then_backfill.py::test_a_rescan_hashes_no_audio_bytes,
+        which guard the same call for FLACs and a real scanned library).
+        """
         if not AUDIO_DIR.exists():
             pytest.skip("Audio fixtures directory not found")
         with patch(
-            "backend.services.library_scan_service.extract_tags",
-            side_effect=AssertionError("whole-file read"),
-            create=True,
+            "backend.services.audio_hash._sha256_of_range",
+            side_effect=AssertionError("scan_directory hashed audio bytes"),
         ):
             files, quarantine = scan_directory(AUDIO_DIR)
 

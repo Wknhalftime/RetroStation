@@ -19,10 +19,11 @@ from backend.services.library_scan_service import (  # ⚠ AUD-009
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.library_quarantine import FakeLibraryQuarantineRepository
 
-# ⚠ AUD-009: patch the names where scan_folder_incrementally looks them up.
+# ⚠ AUD-009: patch the names where scan_folder_incrementally looks them up
+# (an import in library_scan_service, since read_tags/disk_stat now live in
+# audio_tags.py — see that module's docstring).
 _READ = "backend.services.library_scan_service.read_tags"
 _STAT = "backend.services.library_scan_service.disk_stat"
-_WHOLE_FILE = "backend.services.library_scan_service.extract_tags"
 _NO_READ = AssertionError("read a file whose size and mtime are unchanged")
 
 
@@ -226,17 +227,24 @@ def test_a_file_that_cannot_be_statted_is_recorded_as_failing(tmp_path: Path) ->
     assert str(path) in result.failing_paths
 
 
-def test_no_scenario_reads_a_whole_file(tmp_path: Path) -> None:
+def test_a_new_and_a_changed_file_in_one_folder_are_both_written(tmp_path: Path) -> None:
+    """Was named test_no_scenario_reads_a_whole_file and patched the removed
+    ``extract_tags`` name with ``create=True`` (⚠ AUD-009 risk 2): since this
+    test already mocks ``read_tags`` via ``_READ``, no call here can ever
+    reach real tag or audio-byte reading, so that guard could never fail.
+    The real whole-file/audio-byte guards are
+    tests/services/test_read_tags_audio_hash.py (unit, real read_tags calls)
+    and tests/integration/test_scan_then_backfill.py::test_a_rescan_hashes_no_audio_bytes
+    (integration, a real scanned library). What is left worth asserting here
+    — that scenarios 2 and 3 both write in the same folder visit — is kept.
+    """
     new = _track(tmp_path, "new.flac")
     changed = _track(tmp_path, "changed.flac")
     repo = FakeLibraryFileRepository()
     size, mtime_ns = _on_disk(changed)
     repo.upsert(_row(changed, stat=(size + 1, mtime_ns)))
 
-    with (
-        patch(_WHOLE_FILE, side_effect=AssertionError("whole-file read"), create=True),
-        patch(_READ, side_effect=lambda p: _fresh(p)),
-    ):
+    with patch(_READ, side_effect=lambda p: _fresh(p)):
         result = _scan(new, repo)
 
     assert (result.files_written, result.quarantined) == (2, 0)
