@@ -1,0 +1,591 @@
+"""Acceptance tests: the playable schedule reader over PostgreSQL (spec: Data, D3, D4, D16).
+
+``PgPlayableScheduleRepository.get_day(station_id, day)`` returns one station-day of
+``ScheduleItem``s: every logged play, in ``(played_at, identity_id, event_id)`` order, each resolved
+to the file the station would play, with fresh cue points or none.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, MutableMapping, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from uuid import UUID
+
+import psycopg
+import pytest
+from psycopg.rows import dict_row
+from structlog.testing import capture_logs
+
+from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
+from backend.db.repositories.stream_cues import PgStreamCueRepository
+from backend.domain.streaming import CueAnalysis, CuePoints, PlayableFile, ScheduleItem
+from tests.integration import stream_seed as seed
+from tests.integration.stream_seed import (
+    CUE_POINTS,
+    DAY,
+    FILE_MTIME_NS,
+    FILE_SIZE,
+    VERSION,
+    Conn,
+    at,
+    wall,
+)
+
+PREV = DAY - timedelta(days=1)
+NEXT = DAY + timedelta(days=1)
+T0 = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture
+def conn(migrated_db: str) -> Iterator[Conn]:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as connection:
+        yield connection
+
+
+def get_day(conn: Conn, station_id: UUID) -> list[ScheduleItem]:
+    return PgPlayableScheduleRepository(conn, VERSION).get_day(station_id, DAY)
+
+
+def only_file(conn: Conn, station_id: UUID) -> PlayableFile | None:
+    items = get_day(conn, station_id)
+    assert len(items) == 1
+    return items[0].file
+
+
+def resolved_id(conn: Conn, station_id: UUID) -> UUID | None:
+    file = only_file(conn, station_id)
+    return None if file is None else file.file_id
+
+
+def warnings(logs: Sequence[MutableMapping[str, Any]], event: str) -> list[Any]:
+    return [e for e in logs if e["event"] == event and e["log_level"] == "warning"]
+
+
+# --- every logged play, in order -------------------------------------------------------------
+
+
+class TestPlays:
+    def test_resolved_play_maps_every_field(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        pl = seed.playlist(conn, st)
+        file_id = seed.library_file(conn, duration_ms=187_000)
+        ident = seed.identity(conn, title="Hold On", artist="Wilson Phillips")
+        seed.match(conn, ident, file_id)
+        event = seed.play(conn, pl, ident, at("07:15:42"))
+
+        assert get_day(conn, st) == [
+            ScheduleItem(
+                event_id=event,
+                logged_at=wall("07:15:42"),
+                title="Hold On",
+                artist="Wilson Phillips",
+                file=PlayableFile(
+                    file_id=file_id,
+                    path=seed.file_path(conn, file_id),
+                    duration_ms=187_000,
+                    cues=None,
+                ),
+            )
+        ]
+
+    def test_file_without_duration_keeps_none(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        seed.matched_play(
+            conn, seed.playlist(conn, st), at("07:00"), seed.library_file(conn, duration_ms=None)
+        )
+        file = only_file(conn, st)
+        assert file is not None
+        assert file.duration_ms is None
+
+    @pytest.mark.parametrize(
+        "status", ["pending", "needs_review", "auto_rejected", "manual_rejected"]
+    )
+    def test_play_of_an_unmatched_identity_is_kept_with_no_file(
+        self, conn: Conn, status: str
+    ) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn, title="Unknown", artist="Nobody", status=status)
+        seed.match(conn, ident, seed.library_file(conn))
+        event = seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert get_day(conn, st) == [
+            ScheduleItem(
+                event_id=event, logged_at=wall("08:00"), title="Unknown", artist="Nobody", file=None
+            )
+        ]
+
+    @pytest.mark.parametrize("status", ["auto_matched", "manual_matched"])
+    def test_play_of_a_matched_identity_resolves(self, conn: Conn, status: str) -> None:
+        st = seed.station(conn)
+        file_id = seed.library_file(conn)
+        ident = seed.identity(conn, status=status)
+        seed.match(conn, ident, file_id)
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == file_id
+
+    def test_matched_identity_without_a_match_row_has_no_file(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        seed.play(conn, seed.playlist(conn, st), seed.identity(conn), at("08:00"))
+
+        assert resolved_id(conn, st) is None
+
+    def test_every_playlist_of_the_station_is_merged_and_other_stations_excluded(
+        self, conn: Conn
+    ) -> None:
+        st, other = seed.station(conn), seed.station(conn)
+        first, second, foreign = (
+            seed.playlist(conn, st),
+            seed.playlist(conn, st),
+            seed.playlist(conn, other),
+        )
+        e1 = seed.play(conn, first, seed.identity(conn), at("06:00"))
+        e3 = seed.play(conn, first, seed.identity(conn), at("06:20"))
+        e2 = seed.play(conn, second, seed.identity(conn), at("06:10"))
+        seed.play(conn, foreign, seed.identity(conn), at("06:05"))
+
+        assert [item.event_id for item in get_day(conn, st)] == [e1, e2, e3]
+
+    def test_order_is_played_at_then_identity_id(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        pl = seed.playlist(conn, st)
+        low = seed.identity(conn, identity_id=UUID(int=0xA))
+        high = seed.identity(conn, identity_id=UUID(int=0xB))
+        late_high = seed.play(conn, pl, high, at("06:00:00"))
+        late_low = seed.play(conn, pl, low, at("06:00:00"))
+        early_high = seed.play(conn, pl, high, at("05:59:59"))
+
+        assert [item.event_id for item in get_day(conn, st)] == [early_high, late_low, late_high]
+
+    def test_same_play_logged_twice_is_kept_twice_in_event_id_order(self, conn: Conn) -> None:
+        """One identity at the same second on two playlists: both plays, a total order.
+
+        The domain indexes a day by position, so the order must never depend on the plan.
+        """
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        second = seed.play(
+            conn, seed.playlist(conn, st), ident, at("09:00"), event_id=UUID(int=0x2)
+        )
+        first = seed.play(conn, seed.playlist(conn, st), ident, at("09:00"), event_id=UUID(int=0x1))
+
+        assert [item.event_id for item in get_day(conn, st)] == [first, second]
+
+    def test_day_without_plays_and_unknown_station_are_empty(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        seed.play(conn, seed.playlist(conn, st), seed.identity(conn), at("08:00", NEXT))
+
+        assert get_day(conn, st) == []
+        assert get_day(conn, UUID(int=0xDEAD)) == []
+
+
+# --- the day window (D3) ---------------------------------------------------------------------
+
+
+class TestDayWindow:
+    @pytest.mark.parametrize("zone", ["Asia/Tokyo", "America/Chicago", "UTC"])
+    def test_day_is_the_utc_label_date_whatever_the_session_time_zone(
+        self, conn: Conn, zone: str
+    ) -> None:
+        st = seed.station(conn)
+        pl = seed.playlist(conn, st)
+        ident = seed.identity(conn)
+        for played_at in (
+            at("23:30", PREV),
+            at("00:00"),
+            at("00:30"),
+            at("23:30"),
+            at("23:59:59.999999"),
+            at("00:00", NEXT),
+            at("00:30", NEXT),
+        ):
+            seed.play(conn, pl, ident, played_at)
+        conn.execute("SELECT set_config('TimeZone', %s, false)", (zone,))
+        shown = conn.execute("SHOW TimeZone").fetchone()
+        assert shown is not None
+        assert shown["TimeZone"] == zone
+
+        assert [item.logged_at for item in get_day(conn, st)] == [
+            wall("00:00"),
+            wall("00:30"),
+            wall("23:30"),
+            wall("23:59:59.999999"),
+        ]
+
+
+# --- best match (D16) ------------------------------------------------------------------------
+
+
+class TestBestMatch:
+    def test_highest_confidence_wins_over_an_earlier_match(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        seed.match(conn, ident, seed.library_file(conn), confidence=0.7, created_at=T0)
+        best = seed.library_file(conn)
+        seed.match(conn, ident, best, confidence=0.95, created_at=T0 + timedelta(hours=1))
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == best
+
+    def test_confidence_tie_goes_to_the_earliest_match(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        seed.match(
+            conn, ident, seed.library_file(conn), confidence=0.9, created_at=T0 + timedelta(hours=1)
+        )
+        earliest = seed.library_file(conn)
+        seed.match(conn, ident, earliest, confidence=0.9, created_at=T0)
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == earliest
+
+    def test_full_tie_goes_to_the_lowest_match_id(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        seed.match(conn, ident, seed.library_file(conn), created_at=T0, match_id=UUID(int=0x2))
+        lowest = seed.library_file(conn)
+        seed.match(conn, ident, lowest, created_at=T0, match_id=UUID(int=0x1))
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == lowest
+
+    def test_match_row_without_a_file_is_never_the_best_match(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        seed.match(conn, ident, None, confidence=0.99)
+        real = seed.library_file(conn)
+        seed.match(conn, ident, real, confidence=0.5)
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == real
+
+    def test_only_the_best_match_decides_the_work(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        ident = seed.identity(conn)
+        other_work = seed.work(conn)
+        seed.song_master(conn, other_work, seed.work_file(conn, other_work))
+        seed.match(conn, ident, seed.work_file(conn, other_work), confidence=0.5)
+        best = seed.library_file(conn, recording_id=None)
+        seed.match(conn, ident, best, confidence=0.9)
+        seed.play(conn, seed.playlist(conn, st), ident, at("08:00"))
+
+        assert resolved_id(conn, st) == best
+
+
+# --- master and override (D16) ---------------------------------------------------------------
+
+
+class TestResolution:
+    def test_song_master_beats_the_direct_match(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        work = seed.work(conn)
+        direct, master = seed.work_file(conn, work), seed.work_file(conn, work)
+        seed.song_master(conn, work, master)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        file = only_file(conn, st)
+        assert file is not None
+        assert (file.file_id, file.path) == (master, seed.file_path(conn, master))
+
+    def test_override_for_the_station_format_beats_the_master(self, conn: Conn) -> None:
+        st = seed.station(conn, format_name="AC")
+        work = seed.work(conn)
+        direct, master, override = (seed.work_file(conn, work) for _ in range(3))
+        seed.song_master(conn, work, master)
+        seed.format_override(conn, work, "AC", override)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == override
+
+    def test_override_for_another_format_is_ignored(self, conn: Conn) -> None:
+        st = seed.station(conn, format_name="AC")
+        work = seed.work(conn)
+        direct, master, override = (seed.work_file(conn, work) for _ in range(3))
+        seed.song_master(conn, work, master)
+        seed.format_override(conn, work, "CHR", override)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == master
+
+    def test_override_applies_without_a_master(self, conn: Conn) -> None:
+        st = seed.station(conn, format_name="AC")
+        work = seed.work(conn)
+        direct, override = seed.work_file(conn, work), seed.work_file(conn, work)
+        seed.format_override(conn, work, "AC", override)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == override
+
+    def test_station_without_a_format_uses_no_override(self, conn: Conn) -> None:
+        st = seed.station(conn, format_name=None)
+        work = seed.work(conn)
+        direct, override = seed.work_file(conn, work), seed.work_file(conn, work)
+        seed.format_override(conn, work, "AC", override)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == direct
+
+    def test_direct_file_without_a_recording_is_played_as_is(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        other_work = seed.work(conn)
+        seed.song_master(conn, other_work, seed.work_file(conn, other_work))
+        direct = seed.library_file(conn, recording_id=None)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == direct
+
+    def test_recording_without_a_work_plays_the_direct_file(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        direct = seed.library_file(conn, recording_id=seed.recording(conn, None))
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == direct
+
+    def test_missing_direct_file_still_resolves_to_a_present_master(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        work = seed.work(conn)
+        direct = seed.work_file(conn, work, status="missing")
+        master = seed.work_file(conn, work)
+        seed.song_master(conn, work, master)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        assert resolved_id(conn, st) == master
+
+
+# --- missing and deleted files (D16) ---------------------------------------------------------
+
+
+def _chain_with_unavailable(conn: Conn, st: UUID, source: str, status: str) -> tuple[UUID, UUID]:
+    """A play whose final file (chosen by rule ``source``) has ``status``; the others are present.
+
+    Returns (event id, unavailable file id).
+    """
+    work = seed.work(conn)
+    direct = seed.work_file(conn, work, status=status if source == "direct" else "present")
+    final = direct
+    if source in ("master", "override"):
+        final = seed.work_file(conn, work, status=status if source == "master" else "present")
+        seed.song_master(conn, work, final)
+    if source == "override":
+        final = seed.work_file(conn, work, status=status)
+        seed.format_override(conn, work, "AC", final)
+    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+    return event, final
+
+
+class TestUnavailableFiles:
+    @pytest.mark.parametrize("status", ["missing", "deleted"])
+    @pytest.mark.parametrize("source", ["direct", "master", "override"])
+    def test_unavailable_final_file_gives_no_file_no_fallback_and_a_warning(
+        self, conn: Conn, source: str, status: str
+    ) -> None:
+        st = seed.station(conn, format_name="AC")
+        event, final = _chain_with_unavailable(conn, st, source, status)
+
+        with capture_logs() as logs:
+            items = get_day(conn, st)
+
+        assert [(item.event_id, item.file) for item in items] == [(event, None)]
+        [warning] = warnings(logs, "schedule_file_unavailable")
+        assert str(warning["event_id"]) == str(event)
+        assert str(warning["file_id"]) == str(final)
+        assert str(warning["file_status"]) == status
+        assert str(warning["source"]) == source
+
+    def test_one_warning_per_affected_play(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        pl = seed.playlist(conn, st)
+        work = seed.work(conn)
+        direct = seed.work_file(conn, work)
+        seed.song_master(conn, work, seed.work_file(conn, work, status="missing"))
+        ident = seed.identity(conn)
+        seed.match(conn, ident, direct)
+        morning = seed.play(conn, pl, ident, at("08:00"))
+        evening = seed.play(conn, pl, ident, at("20:00"))
+        seed.matched_play(conn, pl, at("12:00"), seed.library_file(conn))
+
+        with capture_logs() as logs:
+            get_day(conn, st)
+
+        logged = [str(w["event_id"]) for w in warnings(logs, "schedule_file_unavailable")]
+        assert sorted(logged) == sorted([str(morning), str(evening)])
+
+    def test_clean_day_logs_no_schedule_warning(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        pl = seed.playlist(conn, st)
+        file_id = seed.library_file(conn)
+        seed.cue_row(conn, file_id)
+        seed.matched_play(conn, pl, at("08:00"), file_id)
+        seed.play(conn, pl, seed.identity(conn, status="pending"), at("09:00"))
+
+        with capture_logs() as logs:
+            get_day(conn, st)
+
+        assert warnings(logs, "schedule_file_unavailable") == []
+        assert warnings(logs, "schedule_cues_invalid") == []
+
+
+# --- cue points ------------------------------------------------------------------------------
+
+
+def _file_with_cues(conn: Conn, **row: object) -> UUID:
+    """A station with one resolved play whose file has a cue row (``CUE_ROW`` + ``row``)."""
+    st = seed.station(conn)
+    file_id = seed.library_file(conn)
+    seed.cue_row(conn, file_id, **row)
+    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
+    return st
+
+
+class TestCues:
+    def test_fresh_cue_row_becomes_cue_points(self, conn: Conn) -> None:
+        file = only_file(conn, _file_with_cues(conn))
+        assert file is not None
+        assert file.cues == CUE_POINTS
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"file_size": FILE_SIZE + 1},
+            {"file_mtime_ns": FILE_MTIME_NS + 1},
+            {"analyser_version": VERSION - 1},
+            {"analyser_version": VERSION + 1},
+        ],
+        ids=["size", "mtime", "older-analyser", "newer-analyser"],
+    )
+    def test_stale_cue_row_gives_no_cues(self, conn: Conn, row: dict[str, object]) -> None:
+        file = only_file(conn, _file_with_cues(conn, **row))
+        assert file is not None
+        assert file.cues is None
+
+    @pytest.mark.parametrize(
+        ("file_stat", "row_stat", "fresh"),
+        [
+            ((None, None), (None, None), True),
+            ((FILE_SIZE, FILE_MTIME_NS), (None, None), False),
+            ((None, None), (FILE_SIZE, FILE_MTIME_NS), False),
+        ],
+        ids=["both-unknown", "row-unknown", "file-unknown"],
+    )
+    def test_unknown_stat_matches_only_unknown_stat(
+        self,
+        conn: Conn,
+        file_stat: tuple[int | None, int | None],
+        row_stat: tuple[int | None, int | None],
+        fresh: bool,
+    ) -> None:
+        st = seed.station(conn)
+        file_id = seed.library_file(conn, file_size=file_stat[0], file_mtime_ns=file_stat[1])
+        seed.cue_row(conn, file_id, file_size=row_stat[0], file_mtime_ns=row_stat[1])
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
+
+        file = only_file(conn, st)
+        assert file is not None
+        assert file.cues == (CUE_POINTS if fresh else None)
+
+    def test_failed_analysis_row_is_returned_as_normal_cues(self, conn: Conn) -> None:
+        file = only_file(
+            conn, _file_with_cues(conn, analysis_failed=True, loudness_lufs=None, gain_db=-8.0)
+        )
+        assert file is not None
+        assert file.cues == CuePoints(
+            cue_in_ms=1_000,
+            cue_out_ms=181_000,
+            fade_in_ms=2_000,
+            fade_out_ms=5_000,
+            start_next_ms=4_000,
+            gain_db=-8.0,
+        )
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"cue_out_ms": 1_000},
+            {"start_next_ms": 180_000},
+            {"fade_in_ms": -1},
+            {"gain_db": float("nan")},
+        ],
+        ids=["cue-out-not-after-cue-in", "start-next-past-span", "negative-fade", "nan-gain"],
+    )
+    def test_invalid_cue_row_gives_no_cues_and_a_warning(
+        self, conn: Conn, row: dict[str, object]
+    ) -> None:
+        st = _file_with_cues(conn, **row)
+
+        with capture_logs() as logs:
+            items = get_day(conn, st)
+
+        [item] = items
+        assert item.file is not None
+        assert item.file.cues is None
+        [warning] = warnings(logs, "schedule_cues_invalid")
+        assert str(warning["event_id"]) == str(item.event_id)
+        assert str(warning["file_id"]) == str(item.file.file_id)
+
+    def test_cues_are_those_of_the_resolved_file(self, conn: Conn) -> None:
+        st = seed.station(conn)
+        work = seed.work(conn)
+        direct, master = seed.work_file(conn, work), seed.work_file(conn, work)
+        seed.song_master(conn, work, master)
+        seed.cue_row(conn, direct, gain_db=-1.5)
+        seed.cue_row(conn, master, gain_db=-6.5)
+        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+
+        file = only_file(conn, st)
+        assert file is not None
+        assert file.cues is not None
+        assert file.cues.gain_db == -6.5
+
+
+def test_reader_rejects_an_analyser_version_below_one(conn: Conn) -> None:
+    with pytest.raises(ValueError, match="analyser_version"):
+        PgPlayableScheduleRepository(conn, 0)
+
+
+def test_upserted_cues_are_what_the_reader_returns(conn: Conn) -> None:
+    st = seed.station(conn)
+    file_id = seed.library_file(conn)
+    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
+    analysis = CueAnalysis(
+        file_id=file_id,
+        cues=CUE_POINTS,
+        loudness_lufs=-13.5,
+        analysis_failed=False,
+        analyser_version=VERSION,
+        file_size=FILE_SIZE,
+        file_mtime_ns=FILE_MTIME_NS,
+    )
+
+    PgStreamCueRepository(conn).upsert(analysis)
+
+    file = only_file(conn, st)
+    assert file is not None
+    assert file.cues == CUE_POINTS
+
+
+def test_a_day_is_read_with_one_statement(conn: Conn, monkeypatch: pytest.MonkeyPatch) -> None:
+    st = seed.station(conn, format_name="AC")
+    pl = seed.playlist(conn, st)
+    work = seed.work(conn)
+    direct, master = seed.work_file(conn, work), seed.work_file(conn, work)
+    seed.song_master(conn, work, master)
+    seed.cue_row(conn, master)
+    seed.matched_play(conn, pl, at("06:00"), direct)
+    seed.matched_play(conn, pl, at("06:04"), seed.library_file(conn, status="missing"))
+    seed.play(conn, pl, seed.identity(conn, status="pending"), at("06:08"))
+    calls: list[object] = []
+    original = psycopg.Cursor.execute
+
+    def counting(self: psycopg.Cursor[Any], *args: Any, **kwargs: Any) -> psycopg.Cursor[Any]:
+        # Only the reader's connection: a log sink may write on its own connection.
+        if self.connection is conn:
+            calls.append(args[0] if args else kwargs.get("query"))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(psycopg.Cursor, "execute", counting)
+
+    items = get_day(conn, st)
+
+    assert len(items) == 3
+    assert len(calls) == 1

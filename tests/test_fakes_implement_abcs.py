@@ -147,3 +147,17 @@ def test_library_folder_staging_fake_is_concrete() -> None:
     from tests.fakes.library_folders import FakeLibraryFolderRepository
 
     assert isinstance(FakeLibraryFolderRepository(), LibraryFolderHashStaging)
+
+
+def test_stream_cue_fake_is_concrete() -> None:
+    from backend.repositories.stream_cues import StreamCueRepository
+    from tests.fakes.stream_cues import FakeStreamCueRepository
+
+    assert isinstance(FakeStreamCueRepository(), StreamCueRepository)
+
+
+def test_playable_schedule_fake_is_concrete() -> None:
+    from backend.repositories.playable_schedule import PlayableScheduleRepository
+    from tests.fakes.playable_schedule import FakePlayableScheduleRepository
+
+    assert isinstance(FakePlayableScheduleRepository(), PlayableScheduleRepository)

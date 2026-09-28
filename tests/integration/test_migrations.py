@@ -85,6 +85,7 @@ def test_all_expected_tables_exist(migrated_db: str) -> None:
         "mb_cache",
         "library_folders",
         "library_folder_staged_hashes",
+        "stream_cues",
     }
     with psycopg.connect(migrated_db) as conn:
         rows = conn.execute("""
