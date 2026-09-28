@@ -17,7 +17,7 @@ from tests.fakes.library_files import FakeLibraryFileRepository
 
 
 def _row(path: str) -> LibraryFile:
-    return LibraryFile(id=uuid4(), file_path=path, file_hash=str(uuid4()), format="flac")
+    return LibraryFile(id=uuid4(), file_path=path, format="flac")
 
 
 def test_keeper_is_the_row_spelled_as_on_disk() -> None:

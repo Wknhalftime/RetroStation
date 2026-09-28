@@ -39,14 +39,12 @@ def _make_file(
     *,
     artist_name: str = "Test Artist",
     track_title: str = "Test Song",
-    file_hash: str | None = None,
     recording_mbid: str | None = None,
     audio_hash: AudioHash | None = None,
 ) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{track_title}.mp3",
-        file_hash=file_hash or str(uuid4()),
         format="mp3",
         audio_hash=audio_hash,
         audio=AudioMetadata(
@@ -62,14 +60,12 @@ def _seed_file_in_work(
     *,
     artist_name: str,
     track_title: str,
-    file_hash: str | None = None,
     audio_hash: AudioHash | None = None,
 ) -> tuple[LibraryFile, str]:
     """Helper: create a file in the repo that already has a work_id."""
     f = _make_file(
         artist_name=artist_name,
         track_title=track_title,
-        file_hash=file_hash,
         audio_hash=audio_hash,
     )
     norm_artist = normalize_artist(artist_name)

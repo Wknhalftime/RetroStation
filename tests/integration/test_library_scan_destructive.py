@@ -320,7 +320,6 @@ def test_drive_root_folder_lookup_finds_its_files(migrated_db: str) -> None:
             LibraryFile(
                 id=uuid4(),
                 file_path="X:\\song.mp3",
-                file_hash="h",
                 format="mp3",
             )
         )

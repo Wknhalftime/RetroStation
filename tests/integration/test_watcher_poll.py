@@ -79,7 +79,6 @@ def test_upsert_preserves_enrichment_in_full_cycle(migrated_db: str, tmp_path: P
         lf = LibraryFile(
             id=uuid4(),
             file_path=str(track),
-            file_hash="abc123",
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
             file_size=st.st_size,
@@ -93,7 +92,6 @@ def test_upsert_preserves_enrichment_in_full_cycle(migrated_db: str, tmp_path: P
         lf2 = LibraryFile(
             id=uuid4(),
             file_path=str(track),
-            file_hash="abc123",
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
             file_size=st.st_size,

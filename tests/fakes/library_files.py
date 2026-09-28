@@ -209,9 +209,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             key=lambda f: f.file_path,
         )
 
-    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
-        return [f for f in self._data.values() if f.file_hash == file_hash]
-
     def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
         return sorted(
             (f for f in self._data.values() if f.file_path.lower() == file_path.lower()),
@@ -227,55 +224,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         # The fake holds no matches or masters; only the row itself goes.
         self._data.pop(source_id, None)
-
-    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
-        return sorted(
-            (
-                f
-                for f in self._data.values()
-                if f.file_hash is None
-                and f.file_size == file_size
-                and f.file_mtime_ns == file_mtime_ns
-            ),
-            key=lambda f: f.file_path,
-        )
-
-    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
-        rows = sorted(
-            (
-                f
-                for f in self._data.values()
-                if f.file_hash is None
-                and f.file_status == FileStatus.PRESENT
-                and (after_path is None or f.file_path > after_path)
-            ),
-            key=lambda f: f.file_path,
-        )
-        return rows[:limit]
-
-    def set_file_hash(
-        self,
-        file_id: UUID,
-        file_hash: str,
-        file_size: int,
-        file_mtime_ns: int,
-    ) -> bool:
-        f = self._data.get(file_id)
-        if (
-            f is None
-            or f.file_hash is not None
-            or (f.file_size, f.file_mtime_ns) != (file_size, file_mtime_ns)
-        ):
-            return False
-        self._data[file_id] = dataclasses.replace(f, file_hash=file_hash)
-        return True
-
-    def count_unhashed(self) -> int:
-        return sum(
-            1
-            for f in self._data.values()
-            if f.file_hash is None and f.file_status == FileStatus.PRESENT
-        )
 
     def get_by_audio_hash(self, audio_hash: AudioHash) -> list[LibraryFile]:
         return sorted(

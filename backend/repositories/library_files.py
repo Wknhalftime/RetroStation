@@ -112,11 +112,6 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
-        """Return all files with the given content hash."""
-        ...
-
-    @abstractmethod
     def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
         """Rows whose path equals *file_path* when case is ignored, itself included.
 
@@ -137,41 +132,6 @@ class LibraryFileRepository(ABC):
         For two rows that name the same file. A match the target already
         has for the same broadcast identity is dropped rather than doubled.
         """
-        ...
-
-    @abstractmethod
-    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
-        """Rows with no content hash yet whose recorded size and mtime equal these.
-
-        Move detection's fallback while a first scan's hashes are being
-        filled in: a move or rename on one volume keeps size and mtime.
-        """
-        ...
-
-    @abstractmethod
-    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
-        """PRESENT rows with no content hash, in file_path order, after *after_path*."""
-        ...
-
-    @abstractmethod
-    def set_file_hash(
-        self,
-        file_id: UUID,
-        file_hash: str,
-        file_size: int,
-        file_mtime_ns: int,
-    ) -> bool:
-        """Record a deferred content hash; True if it was recorded.
-
-        Writes only while the row is still unhashed and its stored size and
-        mtime equal the ones the hash was read under, so a row rescanned or
-        changed in the meantime keeps its own data.
-        """
-        ...
-
-    @abstractmethod
-    def count_unhashed(self) -> int:
-        """PRESENT rows still waiting for a content hash."""
         ...
 
     @abstractmethod

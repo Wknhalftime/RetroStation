@@ -33,7 +33,6 @@ def _row(
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash=None,
         format="flac",
         file_status=FileStatus.MISSING if missing else FileStatus.PRESENT,
         work_id=work_id,

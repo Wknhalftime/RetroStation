@@ -22,7 +22,6 @@ def _file(
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{artist_name.replace(' ', '_')}-{uuid4()}.mp3",
-        file_hash=f"hash-{uuid4()}",
         format="mp3",
         file_status=FileStatus.PRESENT,
         audio=AudioMetadata(
@@ -109,7 +108,6 @@ def test_upsert_keeps_links_when_incoming_row_has_none() -> None:
     fresh = LibraryFile(
         id=uuid4(),
         file_path=original.file_path,
-        file_hash="retagged",
         format="mp3",
     )
     repo.upsert(fresh)
@@ -129,7 +127,6 @@ def test_upsert_explicit_links_replace_existing() -> None:
     relinked = LibraryFile(
         id=uuid4(),
         file_path=original.file_path,
-        file_hash=original.file_hash,
         format="mp3",
         work_id="work-2",
     )
@@ -194,7 +191,6 @@ def test_upsert_over_unhashed_row_mirrors_pg(
     stored = LibraryFile(
         id=uuid4(),
         file_path="/music/a.flac",
-        file_hash=None,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         file_size=100,
@@ -205,7 +201,6 @@ def test_upsert_over_unhashed_row_mirrors_pg(
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash="h" * 64,
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
             file_size=new_size,
@@ -222,7 +217,6 @@ def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() ->
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash=None,
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
         )
@@ -231,7 +225,6 @@ def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() ->
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash=None,
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
         )
@@ -244,7 +237,6 @@ def _track_file(repo: FakeLibraryFileRepository, path: str, *, missing: bool) ->
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format="flac",
             audio=AudioMetadata(
                 recording_mbid="rec-1",
@@ -280,7 +272,6 @@ def _stat_row(path: str, *, fmt: str = "flac", audio_hash: AudioHash | None = No
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.ENRICHED,
         file_size=100,

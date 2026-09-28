@@ -23,7 +23,6 @@ def _indexed(path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format=path.suffix.lstrip("."),
         file_size=st.st_size,
         file_mtime_ns=st.st_mtime_ns,

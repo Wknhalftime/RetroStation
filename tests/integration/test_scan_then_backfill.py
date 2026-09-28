@@ -140,7 +140,6 @@ def test_empty_and_non_empty_libraries_scan_to_the_same_rows(
             LibraryFile(
                 id=uuid4(),
                 file_path=str(library.parent / "elsewhere" / "x.flac"),
-                file_hash=None,
                 format="flac",
             )
         )

@@ -148,7 +148,6 @@ def _insert_library_file(
     lf = LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4().hex}.flac",
-        file_hash=uuid4().hex,
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
         recording_id=recording_id,

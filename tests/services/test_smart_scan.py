@@ -47,7 +47,6 @@ def _row(
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         file_status=status,
@@ -63,7 +62,6 @@ def _fresh(path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="flac",
         file_size=size,
         file_mtime_ns=mtime_ns,

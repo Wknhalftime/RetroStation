@@ -26,7 +26,6 @@ def _file(
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format="flac",
             audio=AudioMetadata(
                 recording_mbid="rec-1",

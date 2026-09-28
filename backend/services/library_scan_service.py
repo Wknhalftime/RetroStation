@@ -181,7 +181,6 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -231,7 +230,6 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -266,7 +264,6 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="wav",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -351,7 +348,6 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format=fmt,
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -380,8 +376,9 @@ def read_tags(path: Path) -> LibraryFile:
     Tags, format, on-disk stat and — for a FLAC that stores one — the audio MD5,
     reading only the file's header and tag blocks.
 
-    ``file_hash`` is left None: the content is not read. Raises
-    :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
+    A file without a stored MD5 (every MP3, a FLAC with none) is left with no
+    audio hash: its audio is not read here. Raises :exc:`mutagen.MutagenError`
+    if the file cannot be read or parsed.
     """
     audio: MutagenFileType | None = mutagen.File(str(path), easy=False)  # type: ignore[attr-defined]
     if audio is None:

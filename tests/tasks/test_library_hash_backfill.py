@@ -40,7 +40,6 @@ def _library(tmp_path: Path, n: int) -> tuple[FakeLibraryFileRepository, list[Pa
             LibraryFile(
                 id=uuid4(),
                 file_path=str(path),
-                file_hash=None,
                 format="flac",
                 file_size=st.st_size,
                 file_mtime_ns=st.st_mtime_ns,

@@ -30,7 +30,6 @@ def _row(
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="flac",
         work_id="w-kiss",
         file_size=stat[0],
@@ -45,7 +44,6 @@ def _seen(path: Path, audio_hash: AudioHash | None) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=str(path),
-        file_hash=None,
         format="flac",
         file_size=st.st_size,
         file_mtime_ns=st.st_mtime_ns,

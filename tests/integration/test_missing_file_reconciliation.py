@@ -41,7 +41,6 @@ def _file(repos: RepositoryFactory, path: str, work_id: str, *, missing: bool) -
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format="flac",
             work_id=work_id,
             audio=AudioMetadata(
@@ -261,7 +260,6 @@ def _foldable_pair(
             LibraryFile(
                 id=uuid4(),
                 file_path=str(path),
-                file_hash=None,
                 format="flac",
                 work_id=work,
                 audio=AudioMetadata(
@@ -337,7 +335,6 @@ def test_reconciliation_repicks_a_master_stranded_on_a_missing_file(
             LibraryFile(
                 id=uuid4(),
                 file_path=str(tmp_path / "other.flac"),
-                file_hash=None,
                 format="flac",
                 work_id=work,
                 audio=AudioMetadata(recording_mbid="rec-other", duration_ms=1_000),
@@ -382,7 +379,6 @@ def test_plan_pairs_a_missing_row_with_its_audio_twin_despite_new_tags(
             LibraryFile(
                 id=uuid4(),
                 file_path=str(tmp_path / "[dialogue] - Ezekiel 25_17.flac"),
-                file_hash=None,
                 format="flac",
                 work_id=work,
                 audio_hash=audio,

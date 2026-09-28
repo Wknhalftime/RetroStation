@@ -34,7 +34,6 @@ def _linked_file(repos: RepositoryFactory, path: str) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash="original-hash",
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id=recording_id,
@@ -59,7 +58,6 @@ def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
         retagged = LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash="retagged-hash",
             format="flac",
             file_size=101,
             file_mtime_ns=6,
@@ -88,7 +86,6 @@ def test_reupsert_with_same_stat_keeps_everything(migrated_db: str, tmp_path: Pa
         same = LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash="original-hash",
             format="flac",
             file_size=100,
             file_mtime_ns=5,

@@ -56,7 +56,6 @@ def _make_file(
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash="abc123",
         format=format,
         enrichment_status=enrichment_status,
         recording_id=recording_id,

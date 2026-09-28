@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 
 def _file(path: str) -> LibraryFile:
-    return LibraryFile(id=uuid4(), file_path=path, file_hash="h", format="flac")
+    return LibraryFile(id=uuid4(), file_path=path, format="flac")
 
 
 @pytest.mark.parametrize(

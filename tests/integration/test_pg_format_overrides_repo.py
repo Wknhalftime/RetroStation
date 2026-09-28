@@ -39,7 +39,6 @@ def _make_file(file_path: str = "/music/track.flac", format: str = "flac") -> Li
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash="abc123",
         format=format,
     )
 

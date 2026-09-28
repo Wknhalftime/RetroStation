@@ -24,7 +24,6 @@ def _make_file(
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash="abc123",
         format=format,
         enrichment_status=enrichment_status,
         audio=AudioMetadata(
@@ -76,7 +75,6 @@ def test_library_file_upsert_and_get(migrated_db: str) -> None:
         lf2 = LibraryFile(
             id=uuid4(),
             file_path="/music/song.flac",
-            file_hash="newhashabc",
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
             audio=AudioMetadata(
@@ -86,7 +84,6 @@ def test_library_file_upsert_and_get(migrated_db: str) -> None:
         )
         updated = repo.upsert(lf2)
         assert updated.id == created.id  # same row
-        assert updated.file_hash == "newhashabc"
         assert updated.audio.track_title == "Updated Title"
         assert updated.audio.bitrate == 256
 
@@ -259,7 +256,6 @@ def test_upsert_write_only_inserts_and_is_retrievable(migrated_db: str) -> None:
         result = repo.get_by_path("/music/write_only.flac")
         assert result is not None
         assert result.id == lf.id
-        assert result.file_hash == lf.file_hash
         assert result.format == "flac"
         assert result.audio.track_title == "Test Track"
 
@@ -274,7 +270,6 @@ def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
         conn.commit()
 
         lf2 = _make_file(file_path="/music/update_me.flac", format="mp3")
-        lf2.file_hash = "updated_hash"
         lf2.audio.track_title = "Updated Title"
         repo.upsert_write_only(lf2)
         conn.commit()
@@ -282,7 +277,6 @@ def test_upsert_write_only_updates_existing_row(migrated_db: str) -> None:
         result = repo.get_by_path("/music/update_me.flac")
         assert result is not None
         assert result.format == "mp3"
-        assert result.file_hash == "updated_hash"
         assert result.audio.track_title == "Updated Title"
 
 
@@ -315,7 +309,6 @@ def _make_file_named(
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash="hash-" + file_path,
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(

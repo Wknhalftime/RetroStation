@@ -59,6 +59,6 @@ def test_kind_values_are_lowercase() -> None:
 
 
 def test_a_library_file_has_no_audio_hash_until_one_is_computed() -> None:
-    lf = LibraryFile(id=uuid4(), file_path="/m/a.flac", file_hash=None, format="flac")
+    lf = LibraryFile(id=uuid4(), file_path="/m/a.flac", format="flac")
 
     assert lf.audio_hash is None

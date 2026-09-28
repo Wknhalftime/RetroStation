@@ -257,7 +257,6 @@ def _pending_file(n: int) -> Any:
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{n:05d}.flac",
-        file_hash=f"hash-{n}",
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(release_mbid=f"rel-{n // 10}", recording_mbid=f"rec-{n}"),

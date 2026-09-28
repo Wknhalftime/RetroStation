@@ -1,8 +1,8 @@
 """Library hash backfill — fill in the audio fingerprints a scan could not take.
 
-library_scan_task queues library_hash_backfill_task after a first scan, and
-library_hash_backfill_resume restarts a run cut short by a crash or a worker
-restart. It is one long task like the full scan: hashing is disk-bound and
+library_scan_task queues library_hash_backfill_task after a full scan that wrote
+files, and library_hash_backfill_resume restarts a run cut short by a crash or a
+worker restart. It is one long task like the full scan: hashing is disk-bound and
 Huey runs a single worker (-w 1).
 """
 
@@ -134,7 +134,7 @@ def run_hash_backfill(
         cursor = batch.last_path
         progress = progress.after(batch)
         # A row this run can never hash (unreadable past its tags, or its
-        # stat keeps moving with no watcher running) leaves count_unhashed()
+        # stat keeps moving with no watcher running) leaves count_audio_unhashed()
         # above zero forever, so the periodic resume starts a run every 5
         # minutes. Post progress only once the run has actually hashed
         # something, so a run that hashes nothing leaves no trace for the
@@ -146,7 +146,7 @@ def run_hash_backfill(
     if progress.hashed > 0:
         progress_repo.upsert(progress.as_task_progress(config.clock(), done=True))
         # Only log completion when the run actually did something. A row this
-        # run can never hash keeps count_unhashed() above zero forever, so
+        # run can never hash keeps count_audio_unhashed() above zero forever, so
         # the periodic resume starts a new run every 5 minutes; logging an
         # unconditional info here would spam system_logs with a no-op event
         # every 5 minutes for as long as that row stays unhashable.

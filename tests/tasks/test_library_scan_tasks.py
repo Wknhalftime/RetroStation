@@ -14,7 +14,6 @@ def _make_lf(idx: int) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=f"/tmp/test_{idx}.mp3",
-        file_hash="a" * 64,
         format="mp3",
         enrichment_status=EnrichmentStatus.PENDING,
     )

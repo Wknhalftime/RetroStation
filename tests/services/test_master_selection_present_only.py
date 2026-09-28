@@ -31,7 +31,6 @@ def _file(
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format=fmt,
             work_id=work_id,
             recording_id="rec-1",

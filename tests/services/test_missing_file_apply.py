@@ -52,7 +52,6 @@ def _file(repos: ReconciliationRepos, path: str, work_id: str, *, missing: bool)
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format="flac",
             work_id=work_id,
             audio=AudioMetadata(recording_mbid="rec-1", release_mbid="rel-1", duration_ms=54_040),
@@ -157,7 +156,6 @@ def test_plan_for_library_counts_what_it_will_fold_and_leave() -> None:
         LibraryFile(
             id=uuid4(),
             file_path="/m/z_lonely.flac",
-            file_hash=None,
             format="flac",
             work_id="w1",
             audio=AudioMetadata(recording_mbid="rec-2", duration_ms=1_000),

@@ -67,7 +67,6 @@ def _make_file(
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash=uuid4().hex,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         audio=AudioMetadata(duration_ms=duration_ms),

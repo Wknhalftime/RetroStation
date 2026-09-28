@@ -34,7 +34,6 @@ def _file(
     f = LibraryFile(
         id=uuid4(),
         file_path=str(tmp_path / f"{uuid4()}.mp3"),
-        file_hash=str(uuid4()),
         format="mp3",
         work_id=work_id,
         recording_id=recording_id,

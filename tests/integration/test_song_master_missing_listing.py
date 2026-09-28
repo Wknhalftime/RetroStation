@@ -22,7 +22,6 @@ def _file(repos: RepositoryFactory, path: Path, work_id: str, *, missing: bool) 
         LibraryFile(
             id=uuid4(),
             file_path=str(path),
-            file_hash=None,
             format="flac",
             work_id=work_id,
             audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),

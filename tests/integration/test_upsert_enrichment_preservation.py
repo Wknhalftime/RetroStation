@@ -15,7 +15,6 @@ from backend.domain.library import AudioMetadata, LibraryFile
 def _make_file(
     *,
     file_path: str = "/music/track.flac",
-    file_hash: str = "abc123",
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING,
     file_status: FileStatus = FileStatus.PRESENT,
     file_size: int | None = 100,
@@ -24,7 +23,6 @@ def _make_file(
     return LibraryFile(
         id=uuid4(),
         file_path=file_path,
-        file_hash=file_hash,
         format="flac",
         enrichment_status=enrichment_status,
         file_status=file_status,

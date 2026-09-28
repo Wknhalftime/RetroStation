@@ -88,9 +88,6 @@ class AudioMetadata:
 class LibraryFile:
     id: UUID
     file_path: str
-    # SHA-256 of the file's content. None while a first scan's hashes are
-    # still being filled in by library_hash_backfill_task.
-    file_hash: str | None
     format: str
     enrichment_status: EnrichmentStatus = EnrichmentStatus.PENDING
     file_status: FileStatus = FileStatus.PRESENT
