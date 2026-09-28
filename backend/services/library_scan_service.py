@@ -299,7 +299,7 @@ _FORMAT_EXTRACTORS: dict[str, Callable[[MutagenFileType, Path, str], LibraryFile
 
 @dataclass(frozen=True)
 class DiskStat:
-    """The two stat() fields an incremental scan compares before hashing."""
+    """The two stat() fields a scan compares to decide whether to re-read a file's tags."""
 
     size: int
     mtime_ns: int
@@ -313,9 +313,10 @@ def disk_stat(path: Path) -> DiskStat:
 def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
     """Stamp the on-disk stat onto a freshly extracted file.
 
-    Taken before the content is hashed, so a file that changes while it is
-    read keeps a stored stat that no longer matches, and the next scan
-    re-reads it rather than trusting it.
+    Taken after the tags are read and before a FLAC's stored MD5 is
+    confirmed, so a file rewritten after this point keeps a stored stat
+    that no longer matches, and the next scan re-reads it rather than
+    trusting it. A rewrite during the tag read itself is not caught.
     """
     stat = disk_stat(path)
     lf.file_size = stat.size
@@ -342,7 +343,7 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
     if "VComment" in tag_type or "Vorbis" in tag_type:
         return _extract_vorbis(audio, path, fmt)
 
-    # Generic fallback — no tags extracted beyond format/hash/duration
+    # Generic fallback — no tags extracted beyond format and duration
     duration_ms, _ = _extract_audio_stream_metrics(audio)
 
     return LibraryFile(
@@ -459,8 +460,9 @@ class FolderScanResult:
     files_missing: int = 0
     files_reappeared: int = 0
     quarantined: int = 0
-    # New paths whose content matched a row whose file had moved away; the
-    # row was repointed, keeping its links, instead of a bare row inserted.
+    # New paths whose audio fingerprint or size and mtime matched a row whose
+    # file had moved away; the row was repointed, keeping its links, instead
+    # of a bare row inserted.
     files_relocated: int = 0
     # The folder exists but could not be listed (permissions, a share
     # dropping mid-scan). Nothing was diffed and nothing marked missing.
