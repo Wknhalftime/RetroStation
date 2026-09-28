@@ -10,8 +10,8 @@ from uuid import uuid4
 
 from mutagen._util import MutagenError
 
-from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import LibraryFile
+from backend.domain.enums import AudioHashKind, EnrichmentStatus, FileStatus
+from backend.domain.library import AudioHash, LibraryFile
 from backend.services.library_scan_service import (  # ⚠ AUD-009
     FolderScanResult,
     scan_folder_incrementally,
@@ -104,16 +104,24 @@ def test_changed_size_rereads_tags_into_the_same_row(tmp_path: Path) -> None:
 
 
 def test_changed_mtime_alone_rereads_tags(tmp_path: Path) -> None:
-    """A retag that fits inside the file's padding keeps its size."""
+    """A retag that fits inside the file's padding keeps its size and its audio hash."""
     path = _track(tmp_path)
     size, mtime_ns = _on_disk(path)
+    audio_hash = AudioHash(AudioHashKind.FLAC_MD5, "1" * 32)
     repo = FakeLibraryFileRepository()
-    repo.upsert(_row(path, stat=(size, mtime_ns - 1_000_000_000)))
+    stored = _row(path, stat=(size, mtime_ns - 1_000_000_000))
+    stored.audio_hash = audio_hash
+    repo.upsert(stored)
+    fresh = _fresh(path)
+    fresh.audio_hash = audio_hash  # read_tags reads a FLAC's stored MD5 with its tags
 
-    with patch(_READ, return_value=_fresh(path)):
+    with patch(_READ, return_value=fresh):
         result = _scan(path, repo)
 
+    got = repo.get_by_path(str(path))
     assert result.files_written == 1
+    assert got is not None and got.file_mtime_ns == mtime_ns
+    assert got.audio_hash == audio_hash
 
 
 def test_row_without_a_stored_stat_is_reread_even_if_older_than_its_index_row(
