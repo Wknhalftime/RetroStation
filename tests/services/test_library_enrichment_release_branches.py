@@ -80,7 +80,6 @@ def _pending_file(
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4()}.flac",
-        file_hash="abc123",
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(release_mbid=release_mbid, recording_mbid=recording_mbid),

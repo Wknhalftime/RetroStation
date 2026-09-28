@@ -214,7 +214,6 @@ def test_files_outside_root_are_untouched(migrated_db: str, tmp_path: Path) -> N
             LibraryFile(
                 id=uuid4(),
                 file_path=sibling,
-                file_hash="elsewhere",
                 format="mp3",
             )
         )

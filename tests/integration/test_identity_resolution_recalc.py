@@ -50,7 +50,6 @@ def _seed_work_with_file(repos: RepositoryFactory, tmp_path: Path) -> str:
         LibraryFile(
             id=uuid4(),
             file_path=str(tmp_path / "battery.flac"),
-            file_hash=None,
             format="flac",
             recording_id=recording_id,
             work_id=work_id,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
@@ -13,7 +12,9 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.domain.library import LibraryFile
+from backend.services.audio_hash import compute_audio_hash
 from backend.tasks.library_hash_backfill_tasks import library_hash_backfill_task
+from tests.fixtures.audio_builders import write_flac
 
 pytestmark = pytest.mark.integration
 
@@ -38,13 +39,12 @@ def _seed(db_url: str, tmp_path: Path, n: int) -> list[Path]:
         repo = PgLibraryFileRepository(conn)
         for i in range(n):
             path = tmp_path / f"{i:02d}.flac"
-            path.write_bytes(bytes([i]) * 64)
+            write_flac(path, [(i, -i)], store_md5=False)
             st = path.stat()
             repo.upsert(
                 LibraryFile(
                     id=uuid4(),
                     file_path=str(path),
-                    file_hash=None,
                     format="flac",
                     file_size=st.st_size,
                     file_mtime_ns=st.st_mtime_ns,
@@ -55,7 +55,7 @@ def _seed(db_url: str, tmp_path: Path, n: int) -> list[Path]:
     return paths
 
 
-def test_task_hashes_backlog_and_completes_progress(
+def test_task_fingerprints_backlog_and_completes_progress(
     settings_db_url: str,
     tmp_path: Path,
 ) -> None:
@@ -65,15 +65,15 @@ def test_task_hashes_backlog_and_completes_progress(
 
     with psycopg.connect(settings_db_url, row_factory=dict_row) as conn:
         hashes = {
-            r["file_path"]: r["file_hash"]
-            for r in conn.execute("SELECT file_path, file_hash FROM library_files").fetchall()
+            r["file_path"]: r["audio_hash"]
+            for r in conn.execute("SELECT file_path, audio_hash FROM library_files").fetchall()
         }
         runs = conn.execute(
             "SELECT status, progress_data FROM progress_tracking WHERE task_type = %s",
             ("hash_backfill",),
         ).fetchall()
     for path in paths:
-        assert hashes[str(path)] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert hashes[str(path)] == str(compute_audio_hash(path))
     assert [r["status"] for r in runs] == ["completed"]
     assert runs[0]["progress_data"]["hashed"] == 3
 

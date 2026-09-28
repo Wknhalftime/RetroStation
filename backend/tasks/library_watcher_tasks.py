@@ -235,7 +235,6 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                 folder=folder_path,
                 written=result.files_written,
                 skipped=result.files_skipped,
-                stat_backfilled=result.files_stat_backfilled,
                 missing=result.files_missing,
                 reappeared=result.files_reappeared,
                 relocated=result.files_relocated,

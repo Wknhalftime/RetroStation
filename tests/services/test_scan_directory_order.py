@@ -47,7 +47,7 @@ def _file_event(lf: LibraryFile) -> Event:
     return (
         "file",
         lf.file_path,
-        lf.file_hash,
+        lf.audio_hash,
         lf.format,
         lf.file_size,
         lf.file_mtime_ns,

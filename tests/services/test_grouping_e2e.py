@@ -23,7 +23,6 @@ from tests.helpers import assert_grouping_invariants
 
 def _make_file(
     path: str,
-    file_hash: str,
     artist: str,
     title: str,
 ) -> LibraryFile:
@@ -31,7 +30,6 @@ def _make_file(
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash=file_hash,
         format="mp3",
         audio=AudioMetadata(
             artist_name=artist,
@@ -55,19 +53,16 @@ class TestGroupingE2E:
 
             f1 = _make_file(
                 "/music/hey_jude.mp3",
-                "hash1",
                 "Beatles",
                 "Hey Jude",
             )
             f2 = _make_file(
                 "/music/hey_jude_remastered.mp3",
-                "hash2",
                 "Beatles",
                 "Hey Jude (Remastered)",
             )
             f3 = _make_file(
                 "/music/let_it_be.mp3",
-                "hash3",
                 "Beatles",
                 "Let It Be",
             )
@@ -130,7 +125,6 @@ class TestGroupingE2E:
 
             f1 = _make_file(
                 "/music/original.mp3",
-                "same_hash",
                 "Beatles",
                 "Come Together",
             )
@@ -151,7 +145,6 @@ class TestGroupingE2E:
             # Second file with identical hash but different path
             f2 = _make_file(
                 "/music/copy.mp3",
-                "same_hash",
                 "Beatles",
                 "Come Together",
             )
@@ -182,7 +175,6 @@ class TestGroupingE2E:
 
             f1 = _make_file(
                 "/music/stable.mp3",
-                "stable_hash",
                 "Beatles",
                 "Yesterday",
             )
@@ -203,7 +195,6 @@ class TestGroupingE2E:
             # Simulate rescan: upsert same path/hash again
             f1_rescan = _make_file(
                 "/music/stable.mp3",
-                "stable_hash",
                 "Beatles",
                 "Yesterday",
             )
@@ -226,13 +217,11 @@ class TestGroupingE2E:
             # Create two separate works via grouping
             f_a = _make_file(
                 "/music/song_a.mp3",
-                "hash_a",
                 "Stones",
                 "Paint It Black",
             )
             f_b = _make_file(
                 "/music/song_b.mp3",
-                "hash_b",
                 "Stones",
                 "Paint It Blk",
             )
@@ -334,13 +323,11 @@ class TestGroupingE2E:
             # Create two files that group into the same work
             f1 = _make_file(
                 "/music/eleanor_rigby.mp3",
-                "hash_er1",
                 "Beatles",
                 "Eleanor Rigby",
             )
             f2 = _make_file(
                 "/music/eleanor_rigby_live.mp3",
-                "hash_er2",
                 "Beatles",
                 "Eleanor Rigby",
             )

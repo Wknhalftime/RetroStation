@@ -23,6 +23,7 @@ from backend.tasks.library_hash_backfill_tasks import (
 )
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.task_progress import FakeTaskProgressRepository
+from tests.fixtures.audio_builders import write_flac
 
 T0 = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -33,13 +34,12 @@ def _library(tmp_path: Path, n: int) -> tuple[FakeLibraryFileRepository, list[Pa
     paths = []
     for i in range(n):
         path = tmp_path / f"{i:02d}.flac"
-        path.write_bytes(bytes([i]) * (100 + i))
+        write_flac(path, [(i, -i)], store_md5=False)
         st = path.stat()
         repo.upsert(
             LibraryFile(
                 id=uuid4(),
                 file_path=str(path),
-                file_hash=None,
                 format="flac",
                 file_size=st.st_size,
                 file_mtime_ns=st.st_mtime_ns,
@@ -74,7 +74,7 @@ def test_hashes_every_row_across_batches_and_reports_completion(tmp_path: Path) 
 
     assert result is not None
     assert result.hashed == 5
-    assert files.count_unhashed() == 0
+    assert files.count_audio_unhashed() == 0
     final = progress.get_by_id("run-1")
     assert final is not None
     assert final.status == TaskStatus.COMPLETED
@@ -114,7 +114,7 @@ def test_does_not_start_while_another_run_is_live(tmp_path: Path) -> None:
     )
 
     assert result is None
-    assert files.count_unhashed() == 2
+    assert files.count_audio_unhashed() == 2
 
 
 def test_takes_over_from_a_run_that_stopped_updating(tmp_path: Path) -> None:
@@ -147,7 +147,7 @@ def test_ends_even_when_rows_cannot_be_hashed(tmp_path: Path) -> None:
 
     assert result is not None
     assert (result.hashed, result.changed, result.unreadable) == (1, 1, 1)
-    assert files.count_unhashed() == 2
+    assert files.count_audio_unhashed() == 2
 
 
 def test_run_that_hashes_nothing_posts_no_progress(tmp_path: Path) -> None:

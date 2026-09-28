@@ -25,7 +25,6 @@ class TestLibraryFileStatus:
         lf = LibraryFile(
             id=uuid4(),
             file_path="/test.flac",
-            file_hash="abc123",
             format="flac",
         )
         assert lf.file_status == FileStatus.PRESENT
@@ -34,7 +33,6 @@ class TestLibraryFileStatus:
         lf = LibraryFile(
             id=uuid4(),
             file_path="/test.flac",
-            file_hash="abc123",
             format="flac",
             file_status=FileStatus.MISSING,
         )

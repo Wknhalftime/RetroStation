@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.enums import AudioHashKind, EnrichmentStatus, FileStatus
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from tests.fakes.library_files import FakeLibraryFileRepository
 
 _UNSET: Any = object()
@@ -22,7 +22,6 @@ def _file(
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{artist_name.replace(' ', '_')}-{uuid4()}.mp3",
-        file_hash=f"hash-{uuid4()}",
         format="mp3",
         file_status=FileStatus.PRESENT,
         audio=AudioMetadata(
@@ -109,7 +108,6 @@ def test_upsert_keeps_links_when_incoming_row_has_none() -> None:
     fresh = LibraryFile(
         id=uuid4(),
         file_path=original.file_path,
-        file_hash="retagged",
         format="mp3",
     )
     repo.upsert(fresh)
@@ -129,7 +127,6 @@ def test_upsert_explicit_links_replace_existing() -> None:
     relinked = LibraryFile(
         id=uuid4(),
         file_path=original.file_path,
-        file_hash=original.file_hash,
         format="mp3",
         work_id="work-2",
     )
@@ -140,17 +137,19 @@ def test_upsert_explicit_links_replace_existing() -> None:
     assert got.work_id == "work-2"
 
 
-def test_update_file_stat_records_size_and_mtime() -> None:
+def test_upsert_over_an_existing_path_keeps_the_stored_id_like_pg() -> None:
+    """PG's ON CONFLICT (file_path) updates the row in place; its id stays."""
     repo = FakeLibraryFileRepository()
-    f = _file("Prince")
-    repo.upsert(f)
+    stored = repo.upsert(_file("Prince"))
+    reread = _file("Prince")
+    reread.file_path = stored.file_path
 
-    repo.update_file_stat(f.id, file_size=4096, file_mtime_ns=1_700_000_000_000_000_000)
+    returned = repo.upsert(reread)
 
-    got = repo.get_by_id(f.id)
+    got = repo.get_by_path(stored.file_path)
     assert got is not None
-    assert got.file_size == 4096
-    assert got.file_mtime_ns == 1_700_000_000_000_000_000
+    assert (returned.id, got.id) == (stored.id, stored.id)
+    assert repo.get_by_id(stored.id) is got
 
 
 def test_get_pending_enrichment_with_release_needs_both_mbids() -> None:
@@ -192,7 +191,6 @@ def test_upsert_over_unhashed_row_mirrors_pg(
     stored = LibraryFile(
         id=uuid4(),
         file_path="/music/a.flac",
-        file_hash=None,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         file_size=100,
@@ -203,7 +201,6 @@ def test_upsert_over_unhashed_row_mirrors_pg(
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash="h" * 64,
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
             file_size=new_size,
@@ -220,7 +217,6 @@ def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() ->
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash=None,
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
         )
@@ -229,7 +225,6 @@ def test_upsert_of_two_unhashed_rows_without_stat_resets_enrichment_like_pg() ->
         LibraryFile(
             id=uuid4(),
             file_path="/music/a.flac",
-            file_hash=None,
             format="flac",
             enrichment_status=EnrichmentStatus.PENDING,
         )
@@ -242,7 +237,6 @@ def _track_file(repo: FakeLibraryFileRepository, path: str, *, missing: bool) ->
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=None,
             format="flac",
             audio=AudioMetadata(
                 recording_mbid="rec-1",
@@ -264,7 +258,74 @@ def test_fake_missing_lookups_mirror_pg() -> None:
     gone = _track_file(repo, "/m/old.flac", missing=True)
 
     assert [f.id for f in repo.get_missing()] == [gone.id]
-    assert [f.id for f in repo.get_present_by_track("artist", "Album", 1, "song")] == [present.id]
+    assert [f.id for f in repo.get_present_by_track("artist", 1, "song")] == [present.id]
     assert [f.id for f in repo.get_by_recording_mbid("rec-1")] == [present.id]
     assert [f.id for f in repo.get_by_normalized_artist_name("artist")] == [present.id]
     assert gone.file_status == FileStatus.MISSING
+
+
+_H1 = AudioHash(AudioHashKind.FLAC_MD5, "1" * 32)
+_H2 = AudioHash(AudioHashKind.AUDIO_SHA256, "2" * 64)
+
+
+def _stat_row(path: str, *, fmt: str = "flac", audio_hash: AudioHash | None = None) -> LibraryFile:
+    return LibraryFile(
+        id=uuid4(),
+        file_path=path,
+        format=fmt,
+        enrichment_status=EnrichmentStatus.ENRICHED,
+        file_size=100,
+        file_mtime_ns=1_000,
+        audio_hash=audio_hash,
+    )
+
+
+@pytest.mark.parametrize(
+    ("size", "incoming", "expected"),
+    [(100, None, _H1), (101, None, None), (101, _H2, _H2)],
+    ids=["unchanged", "changed", "fresh"],
+)
+def test_fake_upsert_audio_hash_rule_mirrors_pg(
+    size: int, incoming: AudioHash | None, expected: AudioHash | None
+) -> None:
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_stat_row("/m/a.flac", audio_hash=_H1))
+    fresh = _stat_row("/m/a.flac", audio_hash=incoming)
+    fresh.file_size = size
+
+    assert repo.upsert(fresh).audio_hash == expected
+
+
+def test_fake_audio_hash_lookups_mirror_pg() -> None:
+    repo = FakeLibraryFileRepository()
+    hashed = repo.upsert(_stat_row("/m/b.flac", audio_hash=_H1))
+    pending = repo.upsert(_stat_row("/m/a.mp3", fmt="mp3"))
+    repo.upsert(_stat_row("/m/c.ogg", fmt="ogg"))
+
+    assert repo.get_by_audio_hash(_H1) == [hashed]
+    assert [f.file_path for f in repo.get_by_stat(100, 1_000)] == [
+        "/m/a.mp3",
+        "/m/b.flac",
+        "/m/c.ogg",
+    ]
+    assert repo.get_audio_unhashed_after(None, 10) == [pending]
+    assert repo.count_audio_unhashed() == 1
+    assert repo.set_audio_hash(pending.id, _H2, 100, 2_000) is False
+    assert repo.set_audio_hash(pending.id, _H2, 100, 1_000) is True
+    assert repo.count_audio_unhashed() == 0
+
+
+def test_upsert_of_an_indexed_path_leaves_the_callers_object_alone() -> None:
+    """Like Pg, the stored row keeps its id and work; the fresh read is not rewritten."""
+    repo = FakeLibraryFileRepository()
+    stored = repo.upsert(_stat_row("/m/kiss.flac"))
+    repo.update_work_id(stored.id, "w-kiss")
+    fresh = _stat_row("/m/kiss.flac")
+    fresh_id = fresh.id
+
+    returned = repo.upsert(fresh)
+
+    assert (fresh.id, fresh.work_id) == (fresh_id, None)
+    assert (returned.id, returned.work_id) == (stored.id, "w-kiss")
+    row = repo.get_by_path("/m/kiss.flac")
+    assert row is not None and (row.id, row.work_id) == (stored.id, "w-kiss")

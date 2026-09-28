@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import dataclasses
 import functools
 import hashlib
 import importlib.util
@@ -176,16 +177,22 @@ def instrument(timers: Timers) -> list[str]:
         patch(lst, attr, f"phase.{attr}")
 
     # Per-file extraction work (summed over worker threads if parallel).
-    patch(lss, "extract_tags", "file.extract_tags", "phase.scan_directory")
-    # A tags-only first scan calls read_tags directly, never extract_tags, so
-    # this is what makes its per-file cost visible. Missing on scanner
-    # versions before the two-phase split — that is fine and gets reported.
+    # extract_tags (tags + whole-file SHA-256) exists only before PR B, where
+    # scans read tags only; its absence there is expected, so it is not reported.
+    _patch(timers, lss, "extract_tags", "file.extract_tags", "phase.scan_directory")
+    # A tags-only scan calls read_tags directly, never extract_tags, so this is
+    # what makes its per-file cost visible.
     has_read_tags = patch(lss, "read_tags", "file.read_tags", "phase.scan_directory")
-    # disk_stat (and, before extract_tags/read_tags split, mutagen.File) runs
-    # inside read_tags on versions that have it, inside extract_tags on those
-    # that don't; sha256 always runs in extract_tags, after read_tags returns.
     inner_within = "file.read_tags" if has_read_tags else "file.extract_tags"
-    patch_any(lss, ("compute_file_hash", "_compute_file_hash"), "file.sha256", "file.extract_tags")
+    # Whole-file SHA-256: before PR B only (also under its older private name).
+    if not _patch(timers, lss, "compute_file_hash", "file.sha256", "file.extract_tags"):
+        _patch(timers, lss, "_compute_file_hash", "file.sha256", "file.extract_tags")
+    # SHA-256 of audio bytes: from PR B on. A call during a scan (rather than
+    # during the backfill) means the scan reads whole files again.
+    if importlib.util.find_spec("backend.services.audio_hash") is not None:
+        from backend.services import audio_hash as ah
+
+        patch(ah, "_sha256_of_range", "file.audio_sha256", "phase.*")
     patch_any(lss, ("disk_stat", "_disk_stat"), "file.stat", inner_within)
     # The service calls mutagen.File through the module, so patch it there.
     patch(mutagen, "File", "file.mutagen_parse", inner_within)
@@ -195,31 +202,28 @@ def instrument(timers: Timers) -> list[str]:
         from backend.services import hash_backfill_service as hbs
 
         patch(hbs, "_backfill_one", "backfill.file", "phase.backfill")
-        # hash_file is a keyword-only default bound to compute_file_hash at
-        # def time, and cmd_run's import chain (_run_scan -> huey_app ->
-        # library_hash_backfill_tasks -> hash_backfill_service) pulls this
-        # module in before instrument() runs, so it is already holding that
-        # reference: patching library_scan_service.compute_file_hash afterwards
-        # cannot reach it. Only overwriting the default itself does.
-        kwdefaults = hbs.backfill_hash_batch.__kwdefaults__
-        if kwdefaults is not None and "hash_file" in kwdefaults:
+        # Before PR B the per-file hasher is backfill_hash_batch's keyword
+        # default hash_file, bound at def time, so only overwriting the default
+        # reaches it. From PR B on, _drain_backfill passes a timed hash_audio
+        # through BackfillRunConfig instead.
+        kwdefaults = hbs.backfill_hash_batch.__kwdefaults__ or {}
+        if "hash_file" in kwdefaults:
             kwdefaults["hash_file"] = timers.wrap(
-                "backfill.sha256", kwdefaults["hash_file"], "backfill.file"
+                "backfill.hash", kwdefaults["hash_file"], "backfill.file"
             )
-        else:
-            missing.append("hash_backfill_service.backfill_hash_batch.hash_file")
 
     # Folder tree.
     patch(fhs, "compute_folder_hash", "tree.compute_folder_hash", "phase.diff_tree")
     patch(fhs, "_walk_folder_paths", "tree.walk", "phase.diff_tree")
 
-    # Grouping internals.
-    for attr in (
-        "_try_hash_shortcut",
-        "_try_mbid_shortcut",
-        "_fuzzy_match_work",
-        "_create_local_work",
-    ):
+    # Grouping internals. PR B renames the content shortcut.
+    patch_any(
+        gs,
+        ("_try_hash_shortcut", "_try_audio_hash_shortcut"),
+        "group.hash_shortcut",
+        "phase.assign_work",
+    )
+    for attr in ("_try_mbid_shortcut", "_fuzzy_match_work", "_create_local_work"):
         patch(gs, attr, f"group.{attr}", "phase.assign_work")
 
     # Database round trips, by repository method. Each runs inside whichever
@@ -283,7 +287,7 @@ def reset_bench_db(admin_dsn: str, dbname: str) -> str:
 _FINGERPRINT_QUERIES: dict[str, str] = {
     # Every tag, stat and hash we extracted, per path.
     "library_files": """
-        SELECT f.file_path, f.file_hash, f.format, f.enrichment_status, f.file_status,
+        SELECT f.file_path, f.format, f.enrichment_status, f.file_status,
                f.recording_mbid, f.artist_mbid, f.album_artist_mbid, f.release_mbid,
                f.release_title, f.release_type, f.release_status, f.track_title,
                f.track_number, f.disc_number, f.duration_ms, f.bitrate,
@@ -338,6 +342,41 @@ def fingerprint(dsn: str) -> dict[str, Any]:
             digest = hashlib.sha256(json.dumps(rows).encode("utf-8")).hexdigest()
             out[table] = {"count": len(rows), "sha256": digest, "rows": rows}
     return out
+
+
+def hash_coverage(dsn: str) -> dict[str, int]:
+    """How many rows carry each fingerprint this schema has.
+
+    ``file_hash`` before PR B; the audio_hash kinds (``flac-md5``,
+    ``audio-sha256``) after. Reported, not fingerprinted: they differ by design.
+    """
+    out: dict[str, int] = {}
+    with psycopg.connect(dsn) as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                """SELECT column_name FROM information_schema.columns
+                   WHERE table_name = 'library_files'
+                     AND column_name IN ('file_hash', 'audio_hash')"""
+            ).fetchall()
+        }
+        if "file_hash" in columns:
+            row = conn.execute(
+                "SELECT count(*) FROM library_files WHERE file_hash IS NOT NULL"
+            ).fetchone()
+            out["file_hash"] = int(row[0]) if row else 0
+        if "audio_hash" in columns:
+            for kind, n in conn.execute(
+                """SELECT split_part(audio_hash, ':', 1), count(*) FROM library_files
+                   WHERE audio_hash IS NOT NULL GROUP BY 1"""
+            ).fetchall():
+                out[kind] = int(n)
+    return out
+
+
+def calls_since(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """Timer call counts added between two snapshots, for the timers that ran."""
+    return {k: n - before.get(k, 0) for k, n in after.items() if n != before.get(k, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +515,8 @@ def _quiet_logging() -> None:
     )
 
 
-def _drain_backfill(conn: psycopg.Connection[Any]) -> float | None:
-    """Run the deferred-hash backfill to completion; seconds taken.
+def _drain_backfill(conn: psycopg.Connection[Any], timers: Timers) -> float | None:
+    """Run the fingerprint backfill to completion; seconds taken.
 
     None on scanner versions without one, so old and new versions share
     this harness and their fingerprints stay comparable.
@@ -490,15 +529,41 @@ def _drain_backfill(conn: psycopg.Connection[Any]) -> float | None:
         run_hash_backfill,
     )
 
+    config = BackfillRunConfig(run_id="bench")
+    if "hash_audio" in {f.name for f in dataclasses.fields(BackfillRunConfig)}:
+        config = dataclasses.replace(
+            config,
+            hash_audio=timers.wrap("backfill.hash", config.hash_audio, "backfill.file"),
+        )
     start = time.perf_counter()
     repos = RepositoryFactory(conn)
-    run_hash_backfill(
-        repos.library_files,
-        repos.task_progress,
-        conn.commit,
-        BackfillRunConfig(run_id="bench"),
-    )
+    run_hash_backfill(repos.library_files, repos.task_progress, conn.commit, config)
     return time.perf_counter() - start
+
+
+def _timed_rescan(
+    root: Path,
+    library_conn: psycopg.Connection[Any],
+    progress_conn: psycopg.Connection[Any],
+    timers: Timers,
+) -> dict[str, Any]:
+    """Scan the now-indexed library again: what every later full scan costs."""
+    from backend.db.repositories.task_progress import PgTaskProgressRepository
+    from backend.services.repository_factory import RepositoryFactory
+    from backend.tasks.library_scan_tasks import _run_scan
+
+    before = dict(timers.calls)
+    start = time.perf_counter()
+    _run_scan(
+        root_path=str(root),
+        library_conn=library_conn,
+        repos=RepositoryFactory(library_conn),
+        progress_repo=PgTaskProgressRepository(progress_conn),
+        task_id="bench-rescan",
+    )
+    library_conn.commit()
+    seconds = time.perf_counter() - start
+    return {"seconds": round(seconds, 3), "calls": calls_since(before, dict(timers.calls))}
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -545,13 +610,18 @@ def cmd_run(args: argparse.Namespace) -> None:
             )
             library_conn.commit()
             phase1 = time.perf_counter() - start
-            backfill = None if args.no_drain else _drain_backfill(library_conn)
+            backfill = None if args.no_drain else _drain_backfill(library_conn, timers)
             if backfill is not None:
                 # _drain_backfill is timed by hand, not via timers.wrap(), so
                 # record it explicitly — this is what backfill.file/
-                # backfill.sha256 (patched in instrument()) nest within.
+                # backfill.hash (patched in instrument()) nest within.
                 timers.add("phase.backfill", backfill)
         elapsed = time.perf_counter() - start
+        rescan: dict[str, Any] | None = None
+        if args.rescan:
+            if args.evict and evict_from_cache(audio):
+                raise SystemExit("files could not be evicted before the rescan")
+            rescan = _timed_rescan(root, library_conn, progress_conn, timers)
     finally:
         library_conn.close()
         progress_conn.close()
@@ -571,9 +641,11 @@ def cmd_run(args: argparse.Namespace) -> None:
         "mb_per_s": (round(corpus["bytes"] / elapsed / 1e6, 1) if corpus and elapsed else None),
         "timers": timers.report(),
         "missing_patches": missing_patches,
+        "rescan": rescan,
     }
     if not args.no_fingerprint:
         result["fingerprint"] = fingerprint(dsn)
+    result["hash_coverage"] = hash_coverage(dsn)
 
     summary = {k: v for k, v in result.items() if k not in ("fingerprint", "timers")}
     print(json.dumps(summary, indent=2))
@@ -610,6 +682,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
         f"time to usable (phase 1): {a['label']}: {a.get('phase1_s')}s   "
         f"{b['label']}: {b.get('phase1_s')}s"
     )
+    if a.get("rescan") and b.get("rescan"):
+        print(
+            f"rescan: {a['label']}: {a['rescan']['seconds']}s   "
+            f"{b['label']}: {b['rescan']['seconds']}s"
+        )
+    print(f"hash coverage: {a.get('hash_coverage')}  vs  {b.get('hash_coverage')}")
     print(
         f"\n{a['label']}: {a['elapsed_s']}s   {b['label']}: {b['elapsed_s']}s   "
         f"speed-up x{a['elapsed_s'] / b['elapsed_s']:.2f}"
@@ -691,6 +769,11 @@ def main() -> None:
         "--no-drain",
         action="store_true",
         help="skip the deferred-hash backfill (time phase 1 alone)",
+    )
+    p_run.add_argument(
+        "--rescan",
+        action="store_true",
+        help="scan the indexed library again and time it (what every later full scan costs)",
     )
     cache = p_run.add_mutually_exclusive_group()
     cache.add_argument(

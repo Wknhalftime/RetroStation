@@ -28,7 +28,6 @@ def _file(repos: RepositoryFactory, path: str, work_id: str) -> LibraryFile:
         LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash=str(uuid4()),
             format="flac",
             work_id=work_id,
             audio=AudioMetadata(artist_name="Seal", track_title="Kiss from a Rose"),

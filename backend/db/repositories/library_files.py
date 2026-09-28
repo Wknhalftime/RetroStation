@@ -8,7 +8,7 @@ import psycopg
 
 from backend.db.repositories.path_prefix import dir_like_prefix
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
@@ -16,34 +16,42 @@ from backend.repositories.library_files import LibraryFileRepository
 # the row is read back afterwards.
 _UPSERT_SQL = """
     INSERT INTO library_files (
-        id, file_path, file_hash, format, enrichment_status,
+        id, file_path, format, enrichment_status,
         trace_id, recording_id, recording_mbid, artist_mbid,
         album_artist_mbid, release_mbid, release_title, release_type,
         release_type_secondary, release_status, track_title,
         track_number, disc_number, duration_ms, bitrate, raw_metadata,
         artist_name, normalized_artist_name, normalized_title,
-        work_id, file_size, file_mtime_ns,
+        work_id, file_size, file_mtime_ns, audio_hash,
         indexed_at
     ) VALUES (
-        %s, %s, %s, %s, %s,
         %s, %s, %s, %s,
         %s, %s, %s, %s,
+        %s, %s, %s, %s,
         %s, %s, %s,
         %s, %s, %s, %s, %s,
         %s, %s, %s,
-        %s, %s, %s,
+        %s, %s, %s, %s,
         NOW()
     )
     ON CONFLICT (file_path) DO UPDATE SET
-        file_hash              = EXCLUDED.file_hash,
         format                 = EXCLUDED.format,
+        -- Size + mtime decide whether the tags changed: a retag keeps the
+        -- audio hash, so the fingerprint cannot. Unchanged: enrichment stands.
         enrichment_status      = CASE
-            WHEN library_files.file_hash = EXCLUDED.file_hash
-              OR (library_files.file_hash IS NULL
-                  AND library_files.file_size = EXCLUDED.file_size
-                  AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns)
+            WHEN library_files.file_size = EXCLUDED.file_size
+             AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns
             THEN library_files.enrichment_status
             ELSE EXCLUDED.enrichment_status
+        END,
+        -- A fresh fingerprint wins. Without one, the stored fingerprint holds
+        -- only while the file is unchanged; otherwise it is cleared and the
+        -- backfill recomputes it.
+        audio_hash             = CASE
+            WHEN EXCLUDED.audio_hash IS NOT NULL THEN EXCLUDED.audio_hash
+            WHEN library_files.file_size = EXCLUDED.file_size
+             AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns
+            THEN library_files.audio_hash
         END,
         file_status            = 'present',
         trace_id               = EXCLUDED.trace_id,
@@ -88,7 +96,6 @@ def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
     return (
         file.id,
         file.file_path,
-        file.file_hash,
         file.format,
         file.enrichment_status.value,
         file.trace_id,
@@ -113,7 +120,12 @@ def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
         file.work_id,
         file.file_size,
         file.file_mtime_ns,
+        str(file.audio_hash) if file.audio_hash is not None else None,
     )
+
+
+def _audio_hash_of(value: str | None) -> AudioHash | None:
+    return AudioHash.parse(value) if value is not None else None
 
 
 class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
@@ -151,7 +163,6 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return LibraryFile(
             id=row["id"],
             file_path=row["file_path"],
-            file_hash=row["file_hash"],
             format=row.get("format") or "unknown",
             enrichment_status=EnrichmentStatus(row["enrichment_status"]),
             file_status=FileStatus(row.get("file_status", "present")),
@@ -161,6 +172,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             work_id=row.get("work_id"),
             file_size=row.get("file_size"),
             file_mtime_ns=row.get("file_mtime_ns"),
+            audio_hash=_audio_hash_of(row.get("audio_hash")),
             audio=audio,
         )
 
@@ -347,30 +359,16 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
-               WHERE normalized_artist_name = %s AND release_title = %s
+               WHERE normalized_artist_name = %s
                  AND track_number = %s AND normalized_title = %s
                  AND file_status = 'present'
                ORDER BY file_path""",
-            (normalized_artist_name, release_title, track_number, normalized_title),
-        ).fetchall()
-        return [self._row_to_model(r) for r in rows]
-
-    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
-        self._conn.execute(
-            "UPDATE library_files SET file_size = %s, file_mtime_ns = %s WHERE id = %s",
-            (file_size, file_mtime_ns, str(file_id)),
-        )
-
-    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
-        rows = self._conn.execute(
-            "SELECT * FROM library_files WHERE file_hash = %s",
-            (file_hash,),
+            (normalized_artist_name, track_number, normalized_title),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
@@ -418,60 +416,65 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         )
         self._conn.execute("DELETE FROM library_files WHERE id = %s", (source,))
 
-    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+    def get_by_audio_hash(self, audio_hash: AudioHash) -> list[LibraryFile]:
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE audio_hash = %s ORDER BY file_path",
+            (str(audio_hash),),
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def get_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
-               WHERE file_hash IS NULL AND file_size = %s AND file_mtime_ns = %s
+               WHERE file_size = %s AND file_mtime_ns = %s
                ORDER BY file_path""",
             (file_size, file_mtime_ns),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
-        # 'present' is inlined (not bound as a parameter) so psycopg's
-        # auto-prepared generic plan can still prove this matches the
-        # partial index idx_library_files_unhashed, whose predicate is
-        # WHERE file_hash IS NULL AND file_status = 'present' (migration
-        # 0026) — a bound parameter defeats that proof.
+    def get_audio_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        # 'present' and the format list are inlined, not bound, so psycopg's
+        # auto-prepared generic plan can still prove this matches the partial
+        # index idx_library_files_audio_unhashed (migration 0029).
         if after_path is None:
             rows = self._conn.execute(
                 """SELECT * FROM library_files
-                   WHERE file_hash IS NULL AND file_status = 'present'
-                   ORDER BY file_path
-                   LIMIT %s""",
+                   WHERE audio_hash IS NULL AND file_status = 'present'
+                     AND format IN ('flac', 'mp3')
+                   ORDER BY file_path LIMIT %s""",
                 (limit,),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 """SELECT * FROM library_files
-                   WHERE file_hash IS NULL AND file_status = 'present' AND file_path > %s
-                   ORDER BY file_path
-                   LIMIT %s""",
+                   WHERE audio_hash IS NULL AND file_status = 'present'
+                     AND format IN ('flac', 'mp3') AND file_path > %s
+                   ORDER BY file_path LIMIT %s""",
                 (after_path, limit),
             ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def set_file_hash(
+    def set_audio_hash(
         self,
         file_id: UUID,
-        file_hash: str,
+        audio_hash: AudioHash,
         file_size: int,
         file_mtime_ns: int,
     ) -> bool:
         result = self._conn.execute(
-            """UPDATE library_files SET file_hash = %s
-               WHERE id = %s AND file_hash IS NULL
+            """UPDATE library_files SET audio_hash = %s
+               WHERE id = %s AND audio_hash IS NULL
                  AND file_size = %s AND file_mtime_ns = %s""",
-            (file_hash, str(file_id), file_size, file_mtime_ns),
+            (str(audio_hash), str(file_id), file_size, file_mtime_ns),
         )
         return result.rowcount == 1
 
-    def count_unhashed(self) -> int:
-        # 'present' inlined for the same reason as get_unhashed_after above:
-        # a bound parameter here defeats the planner's partial-index proof.
+    def count_audio_unhashed(self) -> int:
+        # Inlined literals for the same partial-index reason as above.
         row = self._conn.execute(
             """SELECT COUNT(*) AS n FROM library_files
-               WHERE file_hash IS NULL AND file_status = 'present'"""
+               WHERE audio_hash IS NULL AND file_status = 'present'
+                 AND format IN ('flac', 'mp3')"""
         ).fetchone()
         return int(row["n"]) if row else 0
 

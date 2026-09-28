@@ -320,7 +320,6 @@ def test_drive_root_folder_lookup_finds_its_files(migrated_db: str) -> None:
             LibraryFile(
                 id=uuid4(),
                 file_path="X:\\song.mp3",
-                file_hash="h",
                 format="mp3",
             )
         )
@@ -329,20 +328,12 @@ def test_drive_root_folder_lookup_finds_its_files(migrated_db: str) -> None:
     assert [f.file_path for f in found] == ["X:\\song.mp3"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Accepted trade-off: rows indexed before migration 0025 have no stored "
-        "stat, and re-hashing every one of them is the full-library read the "
-        "stat shortcut exists to avoid. Closes once each row is backfilled."
-    ),
-)
 def test_legacy_row_replaced_by_older_file_is_reread(
     migrated_db: str,
     tmp_path: Path,
 ) -> None:
-    """A row with no stored stat trusts 'file older than its index row'.
-    A replacement restored from an archive keeps its old mtime."""
+    """A row with no stored stat is re-read, even when its file is older than
+    its index row: a replacement restored from an archive keeps its old mtime."""
     album = tmp_path / "album"
     track = _put("well_tagged.mp3", album / "a.mp3")
 
@@ -360,7 +351,8 @@ def test_legacy_row_replaced_by_older_file_is_reread(
 
         after = repos.library_files.get_by_path(str(track))
         assert after is not None
-        assert after.file_hash != before.file_hash
+        assert after.id == before.id
+        assert after.audio.track_title == "Partial Track"
 
 
 def test_repeat_visits_do_not_duplicate_quarantine(

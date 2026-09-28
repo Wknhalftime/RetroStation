@@ -87,7 +87,6 @@ def _make_file(
     return LibraryFile(
         id=file_id,
         file_path=file_path,
-        file_hash=f"hash-{file_id}",
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
         recording_id=recording_id,

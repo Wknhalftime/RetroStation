@@ -8,20 +8,21 @@ missing.
 
 from __future__ import annotations
 
-import re
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import mutagen
 import pytest
 from mutagen._util import MutagenError
 
 from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.library_scan_service import (
     _sanitise_tag_value,
-    extract_tags,
     read_tags,
     scan_directory,
 )
+from tests.fixtures.audio_builders import tag_flac, write_flac
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -50,74 +51,90 @@ def _require(path: Path) -> Path:
 
 class TestWellTaggedMp3:
     def test_recording_mbid(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.recording_mbid == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
     def test_artist_mbid(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.artist_mbid == "11111111-2222-3333-4444-555555555555"
 
     def test_album_artist_mbid(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.album_artist_mbid == "66666666-7777-8888-9999-aaaaaaaaaaaa"
 
     def test_release_mbid(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.release_mbid == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
 
     def test_track_title(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.track_title == "Test Track One"
 
     def test_release_title(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.release_title == "Test Album"
 
     def test_track_number_parsed_from_slash_notation(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.track_number == 3
 
     def test_disc_number_parsed_from_slash_notation(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.disc_number == 1
 
     def test_format_is_mp3(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.format == "mp3"
 
     def test_release_type_album(self) -> None:
         from backend.domain.enums import ReleaseType
 
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.release_type == ReleaseType.ALBUM
 
     def test_release_status_official(self) -> None:
         from backend.domain.enums import ReleaseStatus
 
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.release_status == ReleaseStatus.OFFICIAL
 
     def test_duration_ms_positive(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.duration_ms is not None
         assert lf.audio.duration_ms > 0
 
-    def test_file_hash_is_64_char_hex(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
-        assert re.fullmatch(r"[0-9a-f]{64}", lf.file_hash)
-
     def test_raw_metadata_present(self) -> None:
-        lf = extract_tags(_require(WELL_TAGGED))
+        lf = read_tags(_require(WELL_TAGGED))
         assert lf.audio.raw_metadata is not None
         assert len(lf.audio.raw_metadata) > 0
 
     def test_file_stat_captured(self) -> None:
         """Size + mtime are what lets the next scan skip this file unread."""
         path = _require(WELL_TAGGED)
-        lf = extract_tags(path)
+        lf = read_tags(path)
         st = path.stat()
         assert lf.file_size == st.st_size
         assert lf.file_mtime_ns == st.st_mtime_ns
+
+
+def test_a_retag_during_the_tag_read_leaves_a_stale_stored_stat(tmp_path: Path) -> None:
+    """The stat is taken before the read, so the next scan sees the rewrite and re-reads."""
+    path = write_flac(tmp_path / "a.flac", [(300, -300)])
+    tag_flac(path, {"title": "Kiss"})
+    before = path.stat()
+    real_parse = mutagen.File  # type: ignore[attr-defined]
+
+    def parse_then_retag(*args: object, **kwargs: object) -> object:
+        audio = real_parse(*args, **kwargs)
+        tag_flac(path, {"title": "Kiss (Extended Version)"})
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+        return audio
+
+    with patch("mutagen.File", side_effect=parse_then_retag):
+        lf = read_tags(path)
+
+    assert lf.audio.track_title == "Kiss"
+    assert (lf.file_size, lf.file_mtime_ns) == (before.st_size, before.st_mtime_ns)
 
 
 # ---------------------------------------------------------------------------
@@ -127,32 +144,28 @@ class TestWellTaggedMp3:
 
 class TestPartialTagsMp3:
     def test_track_title_present(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.audio.track_title == "Partial Track"
 
     def test_no_recording_mbid(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.audio.recording_mbid is None
 
     def test_no_artist_mbid(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.audio.artist_mbid is None
 
     def test_no_release_mbid(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.audio.release_mbid is None
 
     def test_track_number_without_slash(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.audio.track_number == 5
 
     def test_format_is_mp3(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
+        lf = read_tags(_require(PARTIAL_TAGS))
         assert lf.format == "mp3"
-
-    def test_file_hash_is_64_char_hex(self) -> None:
-        lf = extract_tags(_require(PARTIAL_TAGS))
-        assert re.fullmatch(r"[0-9a-f]{64}", lf.file_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -162,27 +175,23 @@ class TestPartialTagsMp3:
 
 class TestMinimalOgg:
     def test_track_title_present(self) -> None:
-        lf = extract_tags(_require(MINIMAL_OGG))
+        lf = read_tags(_require(MINIMAL_OGG))
         assert lf.audio.track_title == "Minimal Track"
 
     def test_no_mbids(self) -> None:
-        lf = extract_tags(_require(MINIMAL_OGG))
+        lf = read_tags(_require(MINIMAL_OGG))
         assert lf.audio.recording_mbid is None
         assert lf.audio.artist_mbid is None
         assert lf.audio.release_mbid is None
 
     def test_format_is_ogg(self) -> None:
-        lf = extract_tags(_require(MINIMAL_OGG))
+        lf = read_tags(_require(MINIMAL_OGG))
         assert lf.format == "ogg"
 
     def test_duration_ms_positive(self) -> None:
-        lf = extract_tags(_require(MINIMAL_OGG))
+        lf = read_tags(_require(MINIMAL_OGG))
         assert lf.audio.duration_ms is not None
         assert lf.audio.duration_ms > 0
-
-    def test_file_hash_is_64_char_hex(self) -> None:
-        lf = extract_tags(_require(MINIMAL_OGG))
-        assert re.fullmatch(r"[0-9a-f]{64}", lf.file_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -192,30 +201,26 @@ class TestMinimalOgg:
 
 class TestNoTagsWav:
     def test_format_is_wav(self) -> None:
-        lf = extract_tags(_require(NO_TAGS_WAV))
+        lf = read_tags(_require(NO_TAGS_WAV))
         assert lf.format == "wav"
 
     def test_no_track_title(self) -> None:
-        lf = extract_tags(_require(NO_TAGS_WAV))
+        lf = read_tags(_require(NO_TAGS_WAV))
         assert lf.audio.track_title is None
 
     def test_no_mbids(self) -> None:
-        lf = extract_tags(_require(NO_TAGS_WAV))
+        lf = read_tags(_require(NO_TAGS_WAV))
         assert lf.audio.recording_mbid is None
         assert lf.audio.artist_mbid is None
 
     def test_duration_ms_positive(self) -> None:
-        lf = extract_tags(_require(NO_TAGS_WAV))
+        lf = read_tags(_require(NO_TAGS_WAV))
         assert lf.audio.duration_ms is not None
         assert lf.audio.duration_ms > 0
 
-    def test_file_hash_is_64_char_hex(self) -> None:
-        lf = extract_tags(_require(NO_TAGS_WAV))
-        assert re.fullmatch(r"[0-9a-f]{64}", lf.file_hash)
-
 
 # ---------------------------------------------------------------------------
-# corrupt.mp3 — should raise on extract_tags
+# corrupt.mp3 — should raise on read_tags
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +228,7 @@ class TestCorruptMp3:
     def test_raises_mutagen_error(self) -> None:
         _require(CORRUPT_MP3)
         with pytest.raises(MutagenError):
-            extract_tags(CORRUPT_MP3)
+            read_tags(CORRUPT_MP3)
 
 
 # ---------------------------------------------------------------------------
@@ -266,15 +271,6 @@ class TestScanDirectory:
         assert len(files) == 1
         assert len(quarantine) == 0
         assert files[0].format == "wav"
-
-    def test_all_files_have_valid_hashes(self) -> None:
-        if not AUDIO_DIR.exists():
-            pytest.skip("Audio fixtures directory not found")
-        files, _ = scan_directory(AUDIO_DIR)
-        for lf in files:
-            assert re.fullmatch(r"[0-9a-f]{64}", lf.file_hash), (
-                f"Invalid hash for {lf.file_path}: {lf.file_hash!r}"
-            )
 
     def test_all_files_have_uuids(self) -> None:
         if not AUDIO_DIR.exists():
@@ -359,7 +355,7 @@ class TestSupportedExtensions:
 
 
 # ---------------------------------------------------------------------------
-# Generic fallback branch in extract_tags
+# Generic fallback branch in read_tags
 # ---------------------------------------------------------------------------
 
 
@@ -367,9 +363,8 @@ class TestExtractTagsGenericFallback:
     """Test the generic fallback when tag type is not ID3/Vorbis/WAV."""
 
     @patch("backend.services.library_scan_service.mutagen.File")
-    @patch("backend.services.library_scan_service.compute_file_hash", return_value="a" * 64)
     def test_generic_fallback_returns_library_file(
-        self, _mock_sha: MagicMock, mock_file: MagicMock, tmp_path: Path
+        self, mock_file: MagicMock, tmp_path: Path
     ) -> None:
         """Unknown tag type should hit the generic fallback path."""
         fake_audio = MagicMock()
@@ -382,12 +377,11 @@ class TestExtractTagsGenericFallback:
         path = tmp_path / "track.m4a"
         path.write_bytes(b"\x00" * 100)
 
-        from backend.services.library_scan_service import extract_tags
+        from backend.services.library_scan_service import read_tags
 
-        result = extract_tags(path)
+        result = read_tags(path)
 
         assert result.format == "aac"
-        assert result.file_hash == "a" * 64
         assert result.audio.duration_ms == 120500
         assert result.audio.track_title is None
         assert result.audio.recording_mbid is None
@@ -402,14 +396,14 @@ class TestScanDirectoryNonMutagenError:
     """Non-MutagenError exceptions during scan should create quarantine entries."""
 
     def test_non_mutagen_error_quarantines_file(self, tmp_path: Path) -> None:
-        """A generic Exception during extract_tags produces a quarantine entry."""
+        """A generic Exception during read_tags produces a quarantine entry."""
         audio_dir = tmp_path / "music"
         audio_dir.mkdir()
         bad_file = audio_dir / "problem.mp3"
         bad_file.write_bytes(b"\x00" * 10)
 
         with patch(
-            "backend.services.library_scan_service.extract_tags",
+            "backend.services.library_scan_service.read_tags",
             side_effect=PermissionError("Access denied"),
         ):
             from backend.services.library_scan_service import scan_directory
@@ -432,7 +426,7 @@ class TestScanDirectoryNonMutagenError:
         callback = MagicMock()
 
         with patch(
-            "backend.services.library_scan_service.extract_tags",
+            "backend.services.library_scan_service.read_tags",
             side_effect=OSError("Disk read error"),
         ):
             from backend.services.library_scan_service import scan_directory
@@ -445,28 +439,22 @@ class TestScanDirectoryNonMutagenError:
 
 
 class TestReadTags:
-    def test_reads_the_same_tags_as_extract_tags_without_hashing(self) -> None:
-        path = _require(WELL_TAGGED)
-        full = extract_tags(path)
-        with patch(
-            "backend.services.library_scan_service.compute_file_hash",
-            side_effect=AssertionError("content read"),
-        ):
-            tags_only = read_tags(path)
-
-        assert tags_only.file_hash is None
-        assert tags_only.audio == full.audio
-        assert (tags_only.format, tags_only.file_size, tags_only.file_mtime_ns) == (
-            full.format,
-            full.file_size,
-            full.file_mtime_ns,
-        )
-
-    def test_scan_directory_without_hashing_still_quarantines_bad_files(self) -> None:
+    def test_scan_directory_still_quarantines_bad_files(self) -> None:
         if not AUDIO_DIR.exists():
             pytest.skip("Audio fixtures directory not found")
-        files, quarantine = scan_directory(AUDIO_DIR, hash_content=False)
+        files, quarantine = scan_directory(AUDIO_DIR)
         assert len(files) == 4
         assert len(quarantine) == 1
-        assert all(lf.file_hash is None for lf in files)
         assert all(lf.file_size is not None for lf in files)
+
+    def test_scan_directory_never_reads_a_whole_file(self) -> None:
+        if not AUDIO_DIR.exists():
+            pytest.skip("Audio fixtures directory not found")
+        with patch(
+            "backend.services.library_scan_service.extract_tags",
+            side_effect=AssertionError("whole-file read"),
+            create=True,
+        ):
+            files, quarantine = scan_directory(AUDIO_DIR)
+
+        assert (len(files), len(quarantine)) == (4, 1)

@@ -87,7 +87,6 @@ def _pending_file(
     return LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4()}.flac",
-        file_hash="abc123",
         format="flac",
         enrichment_status=EnrichmentStatus.PENDING,
         audio=AudioMetadata(
@@ -263,7 +262,6 @@ def _grouped_file(work_id: str, **kwargs: str | None) -> LibraryFile:
     return LibraryFile(
         id=lf.id,
         file_path=lf.file_path,
-        file_hash=lf.file_hash,
         format=lf.format,
         enrichment_status=lf.enrichment_status,
         audio=lf.audio,

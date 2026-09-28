@@ -137,7 +137,6 @@ def _file_in(files: FakeLibraryFileRepository, work_id: str, fmt: str = "mp3") -
     f = LibraryFile(
         id=uuid4(),
         file_path=f"/music/{uuid4()}.{fmt}",
-        file_hash=str(uuid4()),
         format=fmt,
         work_id=work_id,
         audio=AudioMetadata(artist_name="Alice In Chains", track_title="Would?"),

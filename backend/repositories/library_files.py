@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import LibraryFile
+from backend.domain.library import AudioHash, LibraryFile
 
 
 class LibraryFileRepository(ABC):
@@ -91,14 +91,14 @@ class LibraryFileRepository(ABC):
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
-        """PRESENT rows of this artist's track number on this release, in file_path order.
+        """PRESENT rows of this artist's track number with this title, in file_path order.
 
         The release-track half of missing-file reconciliation: a retag that
-        drops or changes MBIDs still keeps these tags.
+        drops or changes MBIDs still keeps these tags. Any release title is
+        returned, since a retag may re-punctuate it; the caller compares it.
         """
         ...
 
@@ -109,11 +109,6 @@ class LibraryFileRepository(ABC):
         The row keeps its id and every link; only ``file_path`` changes and
         the file is PRESENT again.
         """
-        ...
-
-    @abstractmethod
-    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
-        """Return all files with the given content hash."""
         ...
 
     @abstractmethod
@@ -140,47 +135,43 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
-    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
-        """Record the on-disk size and mtime without touching any other column.
+    def get_by_audio_hash(self, audio_hash: AudioHash) -> list[LibraryFile]:
+        """Rows of any status with this audio fingerprint, in file_path order."""
+        ...
 
-        Used to backfill rows indexed before stat tracking existed, once a
-        scan has established the file is unchanged.
+    @abstractmethod
+    def get_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+        """Rows whose recorded size and mtime equal these, any audio hash state.
+
+        A move or rename on one volume keeps both size and mtime, whatever
+        the row's fingerprint state. Any status, file_path order.
         """
         ...
 
     @abstractmethod
-    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
-        """Rows with no content hash yet whose recorded size and mtime equal these.
-
-        Move detection's fallback while a first scan's hashes are being
-        filled in: a move or rename on one volume keeps size and mtime.
-        """
+    def get_audio_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        """PRESENT FLAC and MP3 rows with no audio hash, in file_path order, after *after_path*."""
         ...
 
     @abstractmethod
-    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
-        """PRESENT rows with no content hash, in file_path order, after *after_path*."""
-        ...
-
-    @abstractmethod
-    def set_file_hash(
+    def set_audio_hash(
         self,
         file_id: UUID,
-        file_hash: str,
+        audio_hash: AudioHash,
         file_size: int,
         file_mtime_ns: int,
     ) -> bool:
-        """Record a deferred content hash; True if it was recorded.
+        """Record a backfilled audio hash; True if it was recorded.
 
-        Writes only while the row is still unhashed and its stored size and
-        mtime equal the ones the hash was read under, so a row rescanned or
-        changed in the meantime keeps its own data.
+        Writes only while the row has none and its stored size and mtime equal
+        the ones the hash was read under, so a row rescanned or changed in the
+        meantime keeps its own data.
         """
         ...
 
     @abstractmethod
-    def count_unhashed(self) -> int:
-        """PRESENT rows still waiting for a content hash."""
+    def count_audio_unhashed(self) -> int:
+        """PRESENT FLAC and MP3 rows still waiting for an audio hash."""
         ...
 
     @abstractmethod

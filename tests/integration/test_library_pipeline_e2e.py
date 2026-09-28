@@ -190,7 +190,6 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         lib_file = LibraryFile(
             id=uuid4(),
             file_path=f"/music/metallica/{target_title.lower().replace(' ', '_')}.flac",
-            file_hash="deadbeef" + uuid4().hex[:24],
             format="flac",
             enrichment_status=EnrichmentStatus.ENRICHED,
             recording_id=recording_mbid,

@@ -3,15 +3,13 @@ from pathlib import Path
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import LibraryFile
+from backend.domain.library import AUDIO_HASHABLE_FORMATS, AudioHash, LibraryFile
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
 
-def _content_unchanged(existing: LibraryFile, incoming: LibraryFile) -> bool:
-    """Mirrors the PG upsert's enrichment_status CASE, including its NULL semantics."""
-    if existing.file_hash is not None:
-        return existing.file_hash == incoming.file_hash
+def _stat_unchanged(existing: LibraryFile, incoming: LibraryFile) -> bool:
+    """Mirrors the PG upsert's size + mtime test, including its NULL semantics."""
     return (
         existing.file_size is not None
         and existing.file_mtime_ns is not None
@@ -26,20 +24,28 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
         existing = self.get_by_path(file.file_path)
-        if existing:
-            if _content_unchanged(existing, file):
-                file.enrichment_status = existing.enrichment_status
-            # Mirrors the PG COALESCE: a fresh extraction carries no links,
-            # and must not erase the ones grouping/enrichment already built.
-            if file.work_id is None:
-                file.work_id = existing.work_id
-            if file.recording_id is None:
-                file.recording_id = existing.recording_id
-            file.file_status = FileStatus.PRESENT
-            self._data[existing.id] = file
+        if existing is None:
+            self._data[file.id] = file
             return file
-        self._data[file.id] = file
-        return file
+        # Pg updates the stored row, never the caller's object: the caller
+        # keeps its fresh id and its (absent) links.
+        stored = dataclasses.replace(file)
+        unchanged = _stat_unchanged(existing, file)
+        if unchanged:
+            stored.enrichment_status = existing.enrichment_status
+        if file.audio_hash is None and unchanged:
+            stored.audio_hash = existing.audio_hash
+        # Mirrors the PG COALESCE: a fresh extraction carries no links,
+        # and must not erase the ones grouping/enrichment already built.
+        if file.work_id is None:
+            stored.work_id = existing.work_id
+        if file.recording_id is None:
+            stored.recording_id = existing.recording_id
+        stored.file_status = FileStatus.PRESENT
+        # ON CONFLICT (file_path) updates the row in place: its id stays.
+        stored.id = existing.id
+        self._data[existing.id] = stored
+        return stored
 
     def upsert_write_only(self, file: LibraryFile) -> None:
         self.upsert(file)
@@ -185,11 +191,10 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
-        key = (normalized_artist_name, release_title, track_number, normalized_title)
+        key = (normalized_artist_name, track_number, normalized_title)
         return sorted(
             (
                 f
@@ -197,7 +202,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 if f.file_status == FileStatus.PRESENT
                 and (
                     f.audio.normalized_artist_name,
-                    f.audio.release_title,
                     f.audio.track_number,
                     f.audio.normalized_title,
                 )
@@ -205,9 +209,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             ),
             key=lambda f: f.file_path,
         )
-
-    def get_by_hash(self, file_hash: str) -> list[LibraryFile]:
-        return [f for f in self._data.values() if f.file_hash == file_hash]
 
     def get_by_path_ignoring_case(self, file_path: str) -> list[LibraryFile]:
         return sorted(
@@ -225,62 +226,57 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         # The fake holds no matches or masters; only the row itself goes.
         self._data.pop(source_id, None)
 
-    def update_file_stat(self, file_id: UUID, file_size: int, file_mtime_ns: int) -> None:
-        if file_id in self._data:
-            self._data[file_id] = dataclasses.replace(
-                self._data[file_id],
-                file_size=file_size,
-                file_mtime_ns=file_mtime_ns,
-            )
+    def get_by_audio_hash(self, audio_hash: AudioHash) -> list[LibraryFile]:
+        return sorted(
+            (f for f in self._data.values() if f.audio_hash == audio_hash),
+            key=lambda f: f.file_path,
+        )
 
-    def get_unhashed_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
+    def get_by_stat(self, file_size: int, file_mtime_ns: int) -> list[LibraryFile]:
         return sorted(
             (
                 f
                 for f in self._data.values()
-                if f.file_hash is None
-                and f.file_size == file_size
-                and f.file_mtime_ns == file_mtime_ns
+                if (f.file_size, f.file_mtime_ns) == (file_size, file_mtime_ns)
             ),
             key=lambda f: f.file_path,
         )
 
-    def get_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
-        rows = sorted(
+    def _audio_backlog(self) -> list[LibraryFile]:
+        return sorted(
             (
                 f
                 for f in self._data.values()
-                if f.file_hash is None
+                if f.audio_hash is None
                 and f.file_status == FileStatus.PRESENT
-                and (after_path is None or f.file_path > after_path)
+                and f.format in AUDIO_HASHABLE_FORMATS
             ),
             key=lambda f: f.file_path,
         )
+
+    def get_audio_unhashed_after(self, after_path: str | None, limit: int) -> list[LibraryFile]:
+        rows = [f for f in self._audio_backlog() if after_path is None or f.file_path > after_path]
         return rows[:limit]
 
-    def set_file_hash(
+    def set_audio_hash(
         self,
         file_id: UUID,
-        file_hash: str,
+        audio_hash: AudioHash,
         file_size: int,
         file_mtime_ns: int,
     ) -> bool:
         f = self._data.get(file_id)
         if (
             f is None
-            or f.file_hash is not None
+            or f.audio_hash is not None
             or (f.file_size, f.file_mtime_ns) != (file_size, file_mtime_ns)
         ):
             return False
-        self._data[file_id] = dataclasses.replace(f, file_hash=file_hash)
+        self._data[file_id] = dataclasses.replace(f, audio_hash=audio_hash)
         return True
 
-    def count_unhashed(self) -> int:
-        return sum(
-            1
-            for f in self._data.values()
-            if f.file_hash is None and f.file_status == FileStatus.PRESENT
-        )
+    def count_audio_unhashed(self) -> int:
+        return len(self._audio_backlog())
 
     def has_any(self) -> bool:
         return bool(self._data)

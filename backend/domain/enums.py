@@ -126,6 +126,13 @@ class LogCategory(StrEnum):
     SYSTEM = "system"
 
 
+class AudioHashKind(StrEnum):
+    """How an audio fingerprint was taken; the prefix of its stored text."""
+
+    FLAC_MD5 = "flac-md5"
+    AUDIO_SHA256 = "audio-sha256"
+
+
 # uppercase intentional: stable persisted keys for why a match is in NEEDS_REVIEW.
 # Values are written to broadcast_artists.reason_code / track_identities.reason_code;
 # do not rename — they are queried by telemetry and asserted in characterization tests.

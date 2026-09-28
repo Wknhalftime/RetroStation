@@ -99,7 +99,6 @@ def _lib_file(
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash="hash-" + path,
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id=recording_id,

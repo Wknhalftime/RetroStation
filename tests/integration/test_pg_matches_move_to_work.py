@@ -26,7 +26,6 @@ def _file(repos: RepositoryFactory, tmp_path: Path, work_id: str) -> LibraryFile
         LibraryFile(
             id=uuid4(),
             file_path=str(tmp_path / f"{uuid4()}.mp3"),
-            file_hash=str(uuid4()),
             format="mp3",
             work_id=work_id,
             audio=AudioMetadata(artist_name="Metallica", track_title="Battery"),

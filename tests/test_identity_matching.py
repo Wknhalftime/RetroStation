@@ -122,7 +122,6 @@ def test_tier2_mbid_graph_exact_match() -> None:
     lib_file = LibraryFile(
         id=uuid4(),
         file_path="/music/metallica/enter_sandman.flac",
-        file_hash="abc123",
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id="rec-enter-sandman",

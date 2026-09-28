@@ -34,7 +34,6 @@ def _linked_file(repos: RepositoryFactory, path: str) -> LibraryFile:
     return LibraryFile(
         id=uuid4(),
         file_path=path,
-        file_hash="original-hash",
         format="flac",
         enrichment_status=EnrichmentStatus.ENRICHED,
         recording_id=recording_id,
@@ -59,7 +58,6 @@ def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
         retagged = LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash="retagged-hash",
             format="flac",
             file_size=101,
             file_mtime_ns=6,
@@ -77,7 +75,7 @@ def test_reupsert_with_changed_hash_keeps_links_but_resets_enrichment(
         assert got.file_mtime_ns == 6
 
 
-def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Path) -> None:
+def test_reupsert_with_same_stat_keeps_everything(migrated_db: str, tmp_path: Path) -> None:
     path = str(tmp_path / "kiss.flac")
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
@@ -88,8 +86,9 @@ def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Pa
         same = LibraryFile(
             id=uuid4(),
             file_path=path,
-            file_hash="original-hash",
             format="flac",
+            file_size=100,
+            file_mtime_ns=5,
         )
         repos.library_files.upsert_write_only(same)
         conn.commit()
@@ -99,25 +98,3 @@ def test_reupsert_with_same_hash_keeps_everything(migrated_db: str, tmp_path: Pa
         assert got.work_id == original.work_id
         assert got.recording_id == original.recording_id
         assert got.enrichment_status == EnrichmentStatus.ENRICHED
-
-
-def test_update_file_stat_round_trip(migrated_db: str, tmp_path: Path) -> None:
-    path = str(tmp_path / "kiss.flac")
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos = RepositoryFactory(conn)
-        legacy = LibraryFile(id=uuid4(), file_path=path, file_hash="h", format="flac")
-        repos.library_files.upsert(legacy)
-        conn.commit()
-
-        before = repos.library_files.get_by_path(path)
-        assert before is not None
-        assert before.file_size is None
-        assert before.file_mtime_ns is None
-
-        repos.library_files.update_file_stat(legacy.id, file_size=2048, file_mtime_ns=99)
-        conn.commit()
-
-        after = repos.library_files.get_by_path(path)
-        assert after is not None
-        assert after.file_size == 2048
-        assert after.file_mtime_ns == 99
