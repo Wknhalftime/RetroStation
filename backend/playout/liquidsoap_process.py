@@ -21,6 +21,7 @@ else:
     _NO_WINDOW = 0
 _CACHE_VARS = ("LIQ_CACHE_DIR", "LIQ_CACHE_USER_DIR", "LIQ_CACHE_SYSTEM_DIR")
 _CACHE_BUILD_TIMEOUT_S = 120
+_KILL_WAIT_S = 10
 
 
 def long_path(path: Path) -> str:
@@ -96,20 +97,39 @@ def launch_env(
     }
 
 
+class ScriptCacheError(subprocess.CalledProcessError):
+    """Liquidsoap rejected the script; the message carries what it printed.
+
+    Liquidsoap 2.4.5 prints compile errors on stdout, so both streams are shown.
+    """
+
+    def __str__(self) -> str:
+        printed = [
+            f"{name}:\n{stream.decode(errors='replace').strip()}"
+            for name, stream in (("stderr", self.stderr), ("stdout", self.output))
+            if stream and stream.strip()
+        ]
+        return "\n".join([super().__str__(), *printed])
+
+
 def warm_script_cache(base_env: Mapping[str, str], engine: EngineConfig) -> None:
     """Type-check ``engine.script`` into ``engine.cache_dir`` without running it.
 
     A cold cache costs about 5 s at every session start; warm, it loads in under 0.1 s.
-    Raises ``subprocess.CalledProcessError`` if the script does not compile.
+    Raises ``ScriptCacheError`` (a ``subprocess.CalledProcessError``) with Liquidsoap's
+    output if the script does not compile, and ``subprocess.TimeoutExpired`` if the build
+    takes longer than ``_CACHE_BUILD_TIMEOUT_S``.
     """
-    subprocess.run(
-        [str(engine.exe), "--cache-only", str(engine.script)],
+    command = [str(engine.exe), "--cache-only", str(engine.script)]
+    build = subprocess.run(
+        command,
         env={**base_env, **_cache_env(engine.cache_dir)},
         capture_output=True,
-        check=True,
         timeout=_CACHE_BUILD_TIMEOUT_S,
         creationflags=_NO_WINDOW,
     )
+    if build.returncode != 0:
+        raise ScriptCacheError(build.returncode, command, build.stdout, build.stderr)
 
 
 def start_session(
@@ -118,7 +138,11 @@ def start_session(
     endpoint: SessionEndpoint,
     engine: EngineConfig,
 ) -> subprocess.Popen[bytes]:
-    """Start the process and hand its pid to ``assign``; kill it if ``assign`` fails."""
+    """Start the process and hand its pid to ``assign``; kill it if ``assign`` fails.
+
+    ``assign``'s ``OSError`` is re-raised. If the killed process does not exit within
+    ``_KILL_WAIT_S``, that is noted on the ``OSError`` rather than replacing it.
+    """
     with endpoint.log_path.open("ab") as log:
         process = subprocess.Popen(
             [str(engine.exe), str(engine.script)],
@@ -129,8 +153,13 @@ def start_session(
         )
     try:
         assign(process.pid)
-    except OSError:
+    except OSError as refused:
         process.kill()
-        process.wait(timeout=10)
+        try:
+            process.wait(timeout=_KILL_WAIT_S)
+        except subprocess.TimeoutExpired:
+            refused.add_note(
+                f"engine process {process.pid} was killed but had not exited after {_KILL_WAIT_S} s"
+            )
         raise
     return process

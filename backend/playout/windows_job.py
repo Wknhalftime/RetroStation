@@ -77,9 +77,15 @@ class _ExtendedLimits(ctypes.Structure):
     ]
 
 
+def _last_error(action: str) -> OSError:
+    """The calling thread's last Windows error, with the OS's own text for it."""
+    code = ctypes.get_last_error()
+    return ctypes.WinError(code, f"{action} failed: {ctypes.FormatError(code).strip()}")
+
+
 def _check(ok: object, action: str) -> None:
     if not ok:
-        raise ctypes.WinError(ctypes.get_last_error(), f"{action} failed")
+        raise _last_error(action)
 
 
 class KillOnCloseJob:
@@ -94,7 +100,7 @@ class KillOnCloseJob:
             handle, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
         )
         if not ok:
-            error = ctypes.WinError(ctypes.get_last_error(), "SetInformationJobObject failed")
+            error = _last_error("SetInformationJobObject")
             _kernel32.CloseHandle(handle)
             raise error
         self._handle: int | None = handle
