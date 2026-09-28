@@ -8,6 +8,7 @@ from uuid import uuid4
 from backend.domain.enums import AudioHashKind, FileStatus
 from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, MissingFilePlan
 from backend.services.missing_file_reconciliation_service import (
+    choose_successor,
     is_same_track,
     plan_missing_file_moves,
     successor_candidates,
@@ -202,7 +203,10 @@ def test_an_audio_match_needs_no_matching_tags_or_duration() -> None:
 
 def test_an_audio_match_wins_over_a_tag_match() -> None:
     old = _with_audio(_row(OLD, missing=True))
-    tag_twin = _row(r"D:\Music\Other\Samuel L. Jackson - Ezekiel 25;17.flac")
+    tag_twin = _with_audio(
+        _row(r"D:\Music\Other\Samuel L. Jackson - Ezekiel 25;17.flac"),
+        AudioHash(AudioHashKind.FLAC_MD5, "d" * 32),
+    )
     audio_twin = _with_audio(_row(NEW, recording_mbid=None, normalized_title="dialogue"))
 
     plan = _plan([old], [tag_twin, audio_twin])
@@ -213,7 +217,7 @@ def test_an_audio_match_wins_over_a_tag_match() -> None:
 def test_several_audio_matches_settle_by_file_name() -> None:
     old = _with_audio(_row(OLD, missing=True))
     same_name = _with_audio(_row(r"D:\Music\Moved\Samuel L. Jackson - Ezekiel 25;17.flac"))
-    other_name = _with_audio(_row(NEW))
+    other_name = _with_audio(_row(NEW, recording_mbid=None, normalized_title="dialogue"))
 
     plan = _plan([old], [other_name, same_name])
 
@@ -243,3 +247,29 @@ def test_successor_candidates_include_rows_with_the_same_audio() -> None:
     twin = repo.upsert(_with_audio(_row(NEW, recording_mbid=None, release_title=None)))
 
     assert twin.id in {c.id for c in successor_candidates(old, repo)}
+
+
+def test_an_audio_match_waits_while_a_hashable_candidate_has_no_fingerprint() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    compilation_twin = _with_audio(_row(r"D:\Music\Hits\16 Ezekiel.flac"))
+    retagged = dataclasses.replace(_row(NEW), format="mp3")
+
+    assert choose_successor(old, [compilation_twin, retagged]) is None
+    assert _plan([old], [compilation_twin, retagged]).ambiguous == (OLD,)
+
+
+def test_a_never_hashable_candidate_does_not_hold_an_audio_match_back() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    audio_twin = _with_audio(_row(r"D:\Music\Hits\16 Ezekiel.flac"))
+    ogg = dataclasses.replace(_row(NEW), format="ogg")
+
+    assert choose_successor(old, [audio_twin, ogg]) == audio_twin
+
+
+def test_several_audio_matches_without_a_name_match_do_not_fall_back_to_tags() -> None:
+    old = _with_audio(_row(OLD, missing=True))
+    twin_a = _with_audio(_row(r"D:\a\x.flac"))
+    twin_b = _with_audio(_row(r"D:\b\y.flac"))
+    tag_match = _with_audio(_row(NEW), AudioHash(AudioHashKind.FLAC_MD5, "d" * 32))
+
+    assert choose_successor(old, [twin_a, twin_b, tag_match]) is None

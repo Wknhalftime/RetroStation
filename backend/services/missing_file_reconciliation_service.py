@@ -6,8 +6,9 @@ as a new row and marks the old one missing, which still holds the file's
 matches and song-master pick. For each missing row this finds the one
 present row holding the same track, its successor, the way Navidrome pairs
 missing tracks by persistent ID, with the audio fingerprint as the first,
-exact rule. Rows with no successor, or several equally
-good ones, are left alone.
+exact rule: an audio match wins outright once every hashable candidate has
+its fingerprint, and until then the pairing waits for a later run. Rows
+with no successor, or several equally good ones, are left alone.
 """
 
 from __future__ import annotations
@@ -18,7 +19,12 @@ from pathlib import PureWindowsPath
 from uuid import UUID
 
 from backend.domain.enums import FileStatus
-from backend.domain.library import LibraryFile, MissingFileMove, MissingFilePlan
+from backend.domain.library import (
+    AUDIO_HASHABLE_FORMATS,
+    LibraryFile,
+    MissingFileMove,
+    MissingFilePlan,
+)
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
@@ -148,9 +154,21 @@ def ready_successors(missing: LibraryFile, candidates: list[LibraryFile]) -> lis
     ]
 
 
+def _awaiting_fingerprint(candidate: LibraryFile) -> bool:
+    """Whether the hash backfill will still give *candidate* an audio fingerprint."""
+    return candidate.audio_hash is None and candidate.format in AUDIO_HASHABLE_FORMATS
+
+
 def choose_successor(missing: LibraryFile, ready: list[LibraryFile]) -> LibraryFile | None:
-    """An audio match wins outright; ties, and the other rules, settle by file name."""
+    """The successor among *ready*, or None to leave *missing* alone for now.
+
+    An audio match wins outright once every hashable candidate has its
+    fingerprint; until then None, as an unhashed candidate may be the true
+    successor. Ties, and the other rules, settle by an identical file name.
+    """
     audio = [c for c in ready if _same_audio(missing, c)]
+    if audio and any(_awaiting_fingerprint(c) for c in ready):
+        return None
     return _pick(missing, audio or ready)
 
 
