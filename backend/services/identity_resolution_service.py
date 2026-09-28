@@ -10,11 +10,15 @@ Splits the work into two functions with distinct failure semantics:
 - ``recalculate_for_work_sync`` runs AFTER the caller commits, on a
   connection supplied by its ``repos_factory`` argument (mirrors
   ``backend/tasks/identity_matching_tasks.py:41``, which builds its own).
-  This recalc is a best-effort side effect: failures are caught and logged
-  so the durable match write is never undone by a recalc problem. The
-  router additionally wraps the to_thread call in its own try/except — that
-  outer catch covers thread/cancellation boundary errors that the
-  in-function catch cannot reach.
+  This recalc is a best-effort side effect for *database* failures only:
+  a ``psycopg.Error`` (the connection dropping, a constraint violation,
+  etc.) is caught and logged here so the durable match write is never
+  undone by a recalc problem. Anything else — a bug in scoring, a bad
+  work_id, whatever — is a genuine defect, not an expected operational
+  failure, so it propagates instead of being silently absorbed. The router
+  additionally wraps the to_thread call in its own try/except, which is
+  the backstop for exactly that: non-DB errors from this function, plus
+  thread/cancellation boundary errors this function's try can't reach.
 
 This module builds no Pg adapters and never imports the database layer
 (AUD-054): ``recalculate_for_work_sync`` depends only on the repository
@@ -41,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import structlog
 from psycopg import AsyncConnection
 
@@ -146,11 +151,13 @@ def recalculate_for_work_sync(
 ) -> None:
     """Re-run song-master selection for a single work_id, post-commit.
 
-    Best-effort: any failure is caught and logged here so the
-    already-committed manual match is not undone. ``repos_factory`` opens
-    its own connection (the async endpoint connection has already been
-    committed and released by the time this runs in a worker thread) —
-    in production this is ``repository_factory.recalc_repos``.
+    Best-effort, but only for the failure mode this actually expects: a
+    ``psycopg.Error`` is caught and logged here so the already-committed
+    manual match is not undone by a transient DB problem. Anything else
+    propagates — see the module docstring. ``repos_factory`` opens its own
+    connection (the async endpoint connection has already been committed
+    and released by the time this runs in a worker thread) — in production
+    this is ``repository_factory.recalc_repos``.
     """
     try:
         with repos_factory(db_url) as repos:
@@ -161,12 +168,17 @@ def recalculate_for_work_sync(
                 library_file_repo=repos.library_files,
             )
             repos.commit()
-    except Exception:  # noqa: BLE001
+    except psycopg.Error:
         # Swallow-and-log: the durable write already committed in the
-        # endpoint's async txn. Master selection is idempotent and will
-        # be retried whenever matching is re-run for this work, so it is
-        # safe (and intentional) to absorb every failure mode here rather
-        # than re-raise into the worker thread.
+        # endpoint's async txn, and a DB hiccup here (dropped connection,
+        # constraint violation, etc.) is exactly the transient/operational
+        # failure this recalc is meant to tolerate. Master selection is
+        # idempotent and will be retried whenever matching is re-run for
+        # this work, so it is safe (and intentional) to absorb it here
+        # rather than re-raise into the worker thread. Anything that is
+        # NOT a psycopg.Error is a genuine defect (bad scoring logic, a bad
+        # work_id, ...) and is deliberately left to propagate to the
+        # router's outer catch instead of being masked here.
         logger.warning(
             "manual_resolve_recalc_failed_inner",
             work_id=work_id,

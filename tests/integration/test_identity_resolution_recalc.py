@@ -1,15 +1,16 @@
 """Integration: identity_resolution_service.recalculate_for_work_sync.
 
-Locks the recalc path's current behaviour (AUD-054) before the
-composition-root injection refactor:
+Locks the recalc path's behaviour (AUD-054):
 
 - happy path: exactly the given work_id is recalculated and the master row
   is committed and visible on a fresh connection.
-- a DB-connection failure is caught and logged as
+- a DB-connection failure (``psycopg.Error``) is caught and logged as
   ``manual_resolve_recalc_failed_inner``, never raised.
-- a non-DB failure (today) is *also* caught and logged the same way — this
-  is the behaviour AUD-054's declared change narrows: after psycopg.Error
-  narrowing, only the DB-failure test below keeps this expectation.
+- a non-DB failure now propagates out of the function instead of being
+  swallowed — AUD-054's declared behaviour change: the inner catch narrowed
+  from bare ``except Exception`` to ``except psycopg.Error``. Only genuine
+  DB failures are this function's business; anything else is a defect that
+  should surface (to the router's outer catch, in production).
 """
 
 from __future__ import annotations
@@ -124,14 +125,14 @@ class TestRecalculateForWorkSyncFailureSwallowing:
         # exc_info=True so the traceback actually lands in the log record.
         assert warnings[0]["exc_info"] is True
 
-    def test_non_db_failure_is_also_swallowed_today(
+    def test_non_db_failure_propagates_instead_of_being_swallowed(
         self, migrated_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Today's un-narrowed `except Exception` swallows ANY failure — even
-        one that has nothing to do with the database. AUD-054's declared
-        behaviour change (narrowing to psycopg.Error) flips this exact
-        expectation to "propagates"; see the updated version of this test
-        alongside that commit.
+        """AUD-054's declared behaviour change: the inner catch narrowed from
+        bare `except Exception` to `except psycopg.Error`, so a failure that
+        has nothing to do with the database is no longer this function's
+        business to swallow — it propagates to the caller (the router's
+        outer catch, in production; see test_matching.py for that half).
         """
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
             work_id = _seed_work_with_file(RepositoryFactory(conn), tmp_path)
@@ -142,12 +143,12 @@ class TestRecalculateForWorkSyncFailureSwallowing:
 
         monkeypatch.setattr(master_selection_service, "recalculate_song_masters", _boom)
 
-        with capture_logs() as events:
+        with capture_logs() as events, pytest.raises(ValueError, match="not a database problem"):
             identity_resolution_service.recalculate_for_work_sync(
                 migrated_db, work_id, recalc_repos
             )
 
+        # Nothing logged inside recalculate_for_work_sync — this failure was
+        # never this layer's to catch.
         warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed_inner"]
-        assert len(warnings) == 1
-        assert warnings[0]["work_id"] == work_id
-        assert warnings[0]["exc_info"] is True
+        assert warnings == []

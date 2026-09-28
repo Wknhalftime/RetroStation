@@ -864,11 +864,15 @@ async def resolve_identity(
         if work_id is not None:
             settings = get_settings()
             try:
-                # Outer try is defense-in-depth for thread/cancellation
-                # boundary errors that recalculate_for_work_sync's internal
-                # try cannot reach. Both layers are intentional — do not
-                # collapse into one. The match is already committed at this
-                # point; recalc is best-effort.
+                # recalculate_for_work_sync's own try only swallows
+                # psycopg.Error (a transient DB problem — safe to retry via
+                # the next matching run). This outer try is the backstop for
+                # everything else that can come out of that call: a non-DB
+                # bug in the recalc itself, plus thread/cancellation
+                # boundary errors the inner try can't reach either way.
+                # Both layers are intentional — do not collapse into one.
+                # The match is already committed at this point; recalc is
+                # best-effort regardless of which layer catches the failure.
                 await asyncio.to_thread(
                     recalculate_for_work_sync,
                     settings.database_url,

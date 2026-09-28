@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from structlog.testing import capture_logs
 
 from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
@@ -1118,6 +1119,51 @@ class TestResolveIdentityWorkId:
         ).fetchone()
         assert id_row is not None
         assert id_row["match_status"] == "manual_matched"
+
+    def test_non_db_recalc_error_is_still_swallowed_by_the_outer_catch(
+        self, client, db_conn, monkeypatch
+    ):
+        """AUD-054 narrowed recalculate_for_work_sync's own catch to
+        psycopg.Error, so a non-DB failure (a bug in scoring, say) now
+        propagates out of that function instead of being swallowed there.
+        The router's outer try/except is the backstop for exactly that:
+        response is still 200, the match write is still durable, and
+        manual_resolve_recalc_failed (the OUTER event, not `_inner`) is
+        logged instead.
+        """
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        artist_id = _insert_canonical_artist(db_conn, "art-nondb-fail")
+        work_id = _insert_work(db_conn, "work-nondb-fail", artist_id)
+        rec_id = _insert_recording(db_conn, "rec-nondb-fail", work_id=work_id)
+        lib_file = _insert_library_file(db_conn, recording_id=rec_id, work_id=work_id)
+
+        def _boom(db_url: str, w: str, repos_factory: object) -> None:
+            raise ValueError("not a database problem")
+
+        monkeypatch.setattr("backend.routers.matching.recalculate_for_work_sync", _boom)
+
+        with capture_logs() as events:
+            resp = client.post(
+                f"/api/v1/matching/identities/{identity.id}/resolve",
+                json={
+                    "match_status": "manual_matched",
+                    "library_file_id": str(lib_file.id),
+                },
+            )
+        assert resp.status_code == 200
+
+        match_row = db_conn.execute(
+            "SELECT work_id, library_file_id FROM matches WHERE identity_id = %s",
+            (identity.id,),
+        ).fetchone()
+        assert match_row is not None
+        assert match_row["work_id"] == work_id
+        assert match_row["library_file_id"] == lib_file.id
+
+        outer_warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed"]
+        assert len(outer_warnings) == 1
+        assert outer_warnings[0]["work_id"] == work_id
+        assert outer_warnings[0]["identity_id"] == str(identity.id)
 
     def test_missing_library_file_id_returns_422(self, client, db_conn):
         """MANUAL_MATCHED without library_file_id is a contract violation —
