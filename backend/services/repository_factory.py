@@ -21,13 +21,16 @@ from backend.db.repositories.library_quarantine import PgLibraryQuarantineReposi
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
+from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
+from backend.domain.streaming import CUE_ANALYSER_VERSION
 from backend.services.identity_resolution_service import RecalcRepos
 
 
@@ -75,11 +78,22 @@ class SystemRepos:
     system_logs: PgSystemLogRepository
 
 
+@dataclass
+class StreamingRepos:
+    """Tune-in streaming repositories: the cue cache and the playable schedule reader.
+
+    The reader judges cue freshness by ``CUE_ANALYSER_VERSION``, the analysis in force.
+    """
+
+    cues: PgStreamCueRepository
+    schedule: PgPlayableScheduleRepository
+
+
 class RepositoryFactory:
     """Instantiate all PG repositories from a single connection.
 
     Provides grouped sub-factories (``repos.broadcast``, ``repos.library``,
-    ``repos.catalog``, ``repos.system``) and flat attribute access for
+    ``repos.catalog``, ``repos.system``, ``repos.streaming``) and flat attribute access for
     backwards compatibility with existing task and router code.
     """
 
@@ -111,6 +125,10 @@ class RepositoryFactory:
             musicbrainz_cache=PgMusicBrainzCacheRepository(conn),
             user_settings=PgUserSettingRepository(conn),
             system_logs=PgSystemLogRepository(conn),
+        )
+        self.streaming = StreamingRepos(
+            cues=PgStreamCueRepository(conn),
+            schedule=PgPlayableScheduleRepository(conn, CUE_ANALYSER_VERSION),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility
