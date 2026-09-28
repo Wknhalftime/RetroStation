@@ -21,6 +21,7 @@ from backend.domain.catalog import Artist, Recording, Work
 from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import EnrichmentStatus, SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
+from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -51,10 +52,13 @@ def _make_file(
     work_id: str | None = None,
     track_title: str = "Track Title",
     album_artist_mbid: str | None = None,
+    artist_mbid: str | None = None,
     artist_name: str | None = None,
+    file_id: UUID | None = None,
+    duration_ms: int | None = 210_000,
 ) -> LibraryFile:
     return LibraryFile(
-        id=uuid4(),
+        id=file_id if file_id is not None else uuid4(),
         file_path=file_path,
         format=format,
         enrichment_status=enrichment_status,
@@ -63,10 +67,11 @@ def _make_file(
         audio=AudioMetadata(
             track_title=track_title,
             album_artist_mbid=album_artist_mbid,
+            artist_mbid=artist_mbid,
             artist_name=artist_name,
             release_title="Album Title",
             bitrate=320,
-            duration_ms=210_000,
+            duration_ms=duration_ms,
         ),
     )
 
@@ -524,6 +529,156 @@ class TestWorkDetail:
         orphan_bucket = next(r for r in data["recordings"] if r["id"].startswith("orphan:"))
         assert len(orphan_bucket["files"]) == 1
         assert orphan_bucket["files"][0]["id"] == str(orphan_lf.id)
+
+    def test_falls_back_to_original_when_version_type_is_falsy(self, client, db_conn) -> None:
+        """An empty-string version_type (NOT NULL at the DB level) reads as 'original'.
+
+        ``recordings.version_type`` is ``NOT NULL DEFAULT 'original'`` (migration
+        0002), so the row can never be a true SQL NULL; the router's
+        ``row["rec_version_type"] or "original"`` guard is exercised the same
+        way by any falsy value, so this writes an empty string directly via SQL
+        to bypass the domain default that ``PgRecordingRepository`` would apply.
+        """
+        PgArtistRepository(db_conn).upsert(_make_artist("a-emptyver"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-emptyver", "A Work", artist_id="a-emptyver"))
+        db_conn.execute(
+            "INSERT INTO recordings (id, title, work_id, version_type) VALUES (%s, %s, %s, %s)",
+            ("r-emptyver", "A Recording", "w-emptyver", ""),
+        )
+        db_conn.commit()
+
+        resp = client.get("/api/v1/library/works/w-emptyver")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["recordings"]) == 1
+        assert data["recordings"][0]["version_type"] == "original"
+
+    def test_format_overrides_are_ordered_by_name(self, client, db_conn) -> None:
+        _, work, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-fo-order",
+            work_mbid="w-fo-order",
+            recording_mbid="r-fo-order",
+            file_path="/m/fo_order.flac",
+        )
+        for format_name in ("wav", "mp3", "flac"):
+            PgFormatOverrideRepository(db_conn).create(
+                FormatOverride(
+                    id=uuid4(),
+                    work_id=work.id,
+                    format_name=format_name,
+                    preferred_file_id=lf.id,
+                    notes=None,
+                )
+            )
+        db_conn.commit()
+
+        resp = client.get(f"/api/v1/library/works/{work.id}")
+        data = resp.json()
+        assert [fo["format_name"] for fo in data["format_overrides"]] == ["flac", "mp3", "wav"]
+
+
+class TestWorkDetailSynthetic:
+    """Synthetic work ids (``syn_...``) are decoded and answered from library_files directly.
+
+    ``get_work_detail`` never persists a synthetic id; it is decoded on every
+    request via ``backend.domain.synthetic_work_id.decode``.
+    """
+
+    def test_not_found_when_no_files_match(self, client) -> None:
+        synthetic_id = encode_synthetic_work_id("a-nomatch", "Nonexistent Track")
+        resp = client.get(f"/api/v1/library/works/{synthetic_id}")
+        assert resp.status_code == 404
+
+    def test_matches_via_album_artist_mbid(self, client, db_conn) -> None:
+        PgArtistRepository(db_conn).upsert(_make_artist("a-albumartist"))
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/syn_albumartist.flac",
+                track_title="Synthetic Track",
+                album_artist_mbid="a-albumartist",
+            )
+        )
+        db_conn.commit()
+
+        synthetic_id = encode_synthetic_work_id("a-albumartist", "Synthetic Track")
+        resp = client.get(f"/api/v1/library/works/{synthetic_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == synthetic_id
+        assert data["title"] == "Synthetic Track"
+        assert data["artist_id"] == "a-albumartist"
+        assert data["song_master"] is None
+        assert data["format_overrides"] == []
+        assert len(data["recordings"]) == 1
+        rec = data["recordings"][0]
+        assert rec["id"] == synthetic_id
+        assert rec["version_type"] == "original"
+        assert len(rec["files"]) == 1
+        assert rec["files"][0]["id"] == str(lf.id)
+
+    def test_matches_via_artist_mbid(self, client, db_conn) -> None:
+        PgArtistRepository(db_conn).upsert(_make_artist("a-trackartist"))
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/syn_trackartist.flac",
+                track_title="Synthetic Track 2",
+                artist_mbid="a-trackartist",
+            )
+        )
+        db_conn.commit()
+
+        synthetic_id = encode_synthetic_work_id("a-trackartist", "Synthetic Track 2")
+        resp = client.get(f"/api/v1/library/works/{synthetic_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["recordings"][0]["files"]) == 1
+        assert data["recordings"][0]["files"][0]["id"] == str(lf.id)
+
+    def test_several_files_ordered_by_path_and_duration_from_first_file(
+        self, client, db_conn
+    ) -> None:
+        """Multiple matching files come back ordered by file_path.
+
+        The synthetic recording's duration is taken from the *first* file in
+        that order, not the longest or the most recently inserted.
+        """
+        PgArtistRepository(db_conn).upsert(_make_artist("a-multi"))
+        # Insert out of path order so a naive "insertion order" implementation
+        # would fail this assertion.
+        lf_c = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/c.flac",
+                track_title="Multi Track",
+                album_artist_mbid="a-multi",
+                duration_ms=333_000,
+            )
+        )
+        lf_a = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/a.flac",
+                track_title="Multi Track",
+                album_artist_mbid="a-multi",
+                duration_ms=111_000,
+            )
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/b.flac",
+                track_title="Multi Track",
+                album_artist_mbid="a-multi",
+                duration_ms=222_000,
+            )
+        )
+        db_conn.commit()
+
+        synthetic_id = encode_synthetic_work_id("a-multi", "Multi Track")
+        resp = client.get(f"/api/v1/library/works/{synthetic_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        rec = data["recordings"][0]
+        assert [f["id"] for f in rec["files"]] == [str(lf_a.id), str(lf_b.id), str(lf_c.id)]
+        assert rec["duration_ms"] == 111_000
 
 
 # ---------------------------------------------------------------------------
@@ -1804,6 +1959,132 @@ class TestReassignFileWork:
 
         survived = db_conn.execute("SELECT id FROM works WHERE id = %s", (w1.id,)).fetchone()
         assert survived is not None
+
+    def test_file_not_found(self, client) -> None:
+        resp = client.patch(
+            f"/api/v1/library/files/{uuid4()}/work",
+            json={"work_id": "does-not-exist"},
+        )
+        assert resp.status_code == 404
+
+    def test_target_work_not_found(self, client, db_conn) -> None:
+        _, _, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-notarget",
+            work_mbid="w-notarget",
+            recording_mbid="r-notarget",
+            file_path="/m/notarget.flac",
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "does-not-exist"},
+        )
+        assert resp.status_code == 404
+
+    def test_already_assigned_to_target_work_is_422(self, client, db_conn) -> None:
+        _, work, _, lf = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-already",
+            work_mbid="w-already",
+            recording_mbid="r-already",
+            file_path="/m/already.flac",
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": work.id},
+        )
+        assert resp.status_code == 422
+
+    def test_current_work_id_none_skips_old_work_cleanup(self, client, db_conn) -> None:
+        """A file with no current work (work_id NULL) has nothing to clean up."""
+        PgArtistRepository(db_conn).upsert(_make_artist("a-nowork"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-target-nowork", "Target", "a-nowork"))
+        lf = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/nowork.flac",
+                format="flac",
+                recording_id=None,
+                work_id=None,
+            )
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf.id}/work",
+            json={"work_id": "w-target-nowork"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["old_work_id"] is None
+        assert data["old_work_deleted"] is False
+
+    def test_shared_recording_creates_a_new_recording_for_the_target(self, client, db_conn) -> None:
+        """Reassigning one of several files sharing a recording splits it off.
+
+        The moved file gets its own new recording on the target work (copying
+        the shared recording's title/version_type/duration_ms); the shared
+        recording itself stays on the old work with the other file(s).
+        """
+        _, w1, _, lf_a = _seed_canonical_chain(
+            db_conn,
+            artist_mbid="a-shared",
+            work_mbid="w1-shared",
+            recording_mbid="r1-shared",
+            file_path="/m/shared_a.flac",
+        )
+        lf_b = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(
+                "/m/shared_b.flac",
+                format="flac",
+                recording_id="r1-shared",
+                work_id="w1-shared",
+            )
+        )
+        # Target work has no recording with version_type "original" yet, so the
+        # tgt_rec branch cannot fire; is_shared must, since lf_b still points
+        # at r1-shared.
+        PgWorkRepository(db_conn).upsert(
+            _make_work("w2-shared", "Target Work", artist_id="a-shared")
+        )
+        db_conn.commit()
+
+        resp = client.patch(
+            f"/api/v1/library/files/{lf_a.id}/work",
+            json={"work_id": "w2-shared"},
+        )
+        assert resp.status_code == 200
+
+        moved = db_conn.execute(
+            "SELECT recording_id, work_id FROM library_files WHERE id = %s", (lf_a.id,)
+        ).fetchone()
+        assert moved is not None
+        assert moved["work_id"] == "w2-shared"
+        assert moved["recording_id"] != "r1-shared"
+
+        new_rec = db_conn.execute(
+            "SELECT title, work_id, version_type, duration_ms FROM recordings WHERE id = %s",
+            (moved["recording_id"],),
+        ).fetchone()
+        assert new_rec is not None
+        assert new_rec["work_id"] == "w2-shared"
+        assert new_rec["title"] == "Test Recording"
+        assert new_rec["version_type"] == "original"
+        assert new_rec["duration_ms"] == 210_000
+
+        untouched = db_conn.execute(
+            "SELECT recording_id FROM library_files WHERE id = %s", (lf_b.id,)
+        ).fetchone()
+        assert untouched is not None
+        assert untouched["recording_id"] == "r1-shared"
+
+        still_there = db_conn.execute(
+            "SELECT id FROM recordings WHERE id = %s", ("r1-shared",)
+        ).fetchone()
+        assert still_there is not None
 
 
 # ---------------------------------------------------------------------------

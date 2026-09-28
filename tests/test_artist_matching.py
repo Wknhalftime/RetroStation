@@ -7,7 +7,10 @@ from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, TargetType
 from backend.domain.matching import MappingRule
-from backend.services.artist_matching_service import match_artists_for_playlist
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    match_artists_for_playlist,
+)
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
@@ -67,11 +70,13 @@ def test_tier1_exact_match() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=StubMbClient(),
     )
 
@@ -105,11 +110,13 @@ def test_tier3_mb_api_auto_matched() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=mb_client,
     )
 
@@ -126,11 +133,13 @@ def test_no_match_any_tier_needs_review() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=FakeArtistRepository(),
-        match_repo=FakeMatchRepository(),
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=FakeMatchRepository(),
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=StubMbClient(),
     )
 
@@ -158,11 +167,13 @@ def test_global_rule_exact_match() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=FakeArtistRepository(),
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=StubMbClient(),
     )
 
@@ -192,11 +203,13 @@ def test_cascade_auto_rejected() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=FakeArtistRepository(),
-        match_repo=FakeMatchRepository(),
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=FakeArtistRepository(),
+            match_repo=FakeMatchRepository(),
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=StubMbClient(),
     )
 

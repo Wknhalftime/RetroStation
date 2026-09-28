@@ -1,0 +1,213 @@
+# serializer version: 1
+# name: test_match_artists_for_playlist_full_scenario_snapshot
+  dict({
+    'deferred_artist': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'reason_code': 'DEFERRED_RETRY',
+      'reason_detail': 'Unresolved across all matching tiers — deferred for retry on next playlist',
+    }),
+    'deferred_identity': dict({
+      'match_status': 'needs_review',
+      'reason_code': 'DEFERRED_RETRY',
+    }),
+    'mb_client_calls': list([
+      'Copper Harbor Station Feed Co',
+      'Wandering Prairie Skyline Wan',
+      'Zephyr Junction Broadcast Zep',
+    ]),
+    'musicbrainz_upserts': list([
+      dict({
+        'disambiguation': None,
+        'mbid': 'mb-truncated-auto',
+        'name': 'Zephyr Junction Broadcast Zep',
+        'normalized_name': 'zephyr junction broadcast zep',
+        'sort_name': 'Zephyr Junction Broadcast Zep',
+      }),
+    ]),
+    'norm_exact_local_artist': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'match_tier': 'normalization',
+        'target_id': 'local-combo-catalog-id',
+        'target_type': 'artist',
+      }),
+      'match_status': 'auto_matched',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'norm_exact_mbid_artist': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'match_tier': 'normalization',
+        'target_id': 'mbid-metallica-canonical',
+        'target_type': 'artist',
+      }),
+      'match_status': 'auto_matched',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'rejected_artist_unchanged': dict({
+      'match': None,
+      'match_status': 'auto_rejected',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'rejected_identity': dict({
+      'match_status': 'auto_rejected',
+      'reason_code': None,
+    }),
+    'rule_artist': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'match_tier': 'manual',
+        'target_id': 'mbid-ruleband',
+        'target_type': 'artist',
+      }),
+      'match_status': 'auto_matched',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'truncated_ambiguous_artist': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'reason_code': 'AMBIGUOUS_GAP',
+      'reason_detail': 'Top candidates within 7 points (gap < 10 required)',
+    }),
+    'truncated_auto_artist': dict({
+      'match': dict({
+        'confidence_score': 97.0,
+        'match_tier': 'musicbrainz_api',
+        'target_id': 'mb-truncated-auto',
+        'target_type': 'artist',
+      }),
+      'match_status': 'auto_matched',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'truncated_lowconf_artist': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'reason_code': 'LOW_CONFIDENCE',
+      'reason_detail': 'Score 62% — below confidence threshold',
+    }),
+  })
+# ---
+# name: test_match_identities_for_playlist_full_scenario_snapshot
+  dict({
+    'mb_client_calls': list([
+      'search_recording:mbid-no-candidates:nonexistent song',
+      'search_recording:mbid-step-a-ambiguous:enter sandman',
+      'search_recording:mbid-step-a-lowconf:enter sandman',
+      'search_recording:mbid-step-b:one',
+    ]),
+    'missing_record_identity': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'match_tier': 'musicbrainz_id_search',
+      'reason_code': 'MISSING_MATCH_RECORD',
+      'reason_detail': 'Artist is resolved but no match record found — data inconsistency',
+    }),
+    'no_candidates_identity': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'match_tier': 'musicbrainz_id_search',
+      'reason_code': 'NO_LOCAL_FILES',
+      'reason_detail': 'Artist MBID confirmed but no matching local recording found',
+    }),
+    'orphaned_identity': dict({
+      'match': None,
+      'match_status': 'needs_review',
+      'match_tier': 'unclassified',
+      'reason_code': 'ORPHANED_IDENTITY',
+      'reason_detail': 'No broadcast_artist row for id 00000000-0000-0000-0000-00000000270f',
+    }),
+    'rule_identity': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'library_file_id': '00000000-0000-0000-0000-00000000000b',
+        'match_tier': 'musicbrainz_id_exact',
+        'work_id': None,
+      }),
+      'match_status': 'auto_matched',
+      'match_tier': 'musicbrainz_id_exact',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'step_a_ambiguous_identity': dict({
+      'match': dict({
+        'confidence_score': 83.87096774193549,
+        'library_file_id': '00000000-0000-0000-0000-00000000000d',
+        'match_tier': 'musicbrainz_id_exact',
+        'work_id': None,
+      }),
+      'match_status': 'needs_review',
+      'match_tier': 'musicbrainz_id_exact',
+      'reason_code': 'AMBIGUOUS_GAP',
+      'reason_detail': 'Top candidates within 5 points (gap < 10 required)',
+    }),
+    'step_a_auto_identity': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'library_file_id': '00000000-0000-0000-0000-00000000000c',
+        'match_tier': 'musicbrainz_id_exact',
+        'work_id': 'work-master-of-puppets',
+      }),
+      'match_status': 'auto_matched',
+      'match_tier': 'musicbrainz_id_exact',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'step_a_lowconf_identity': dict({
+      'match': dict({
+        'confidence_score': 55.00000000000001,
+        'library_file_id': '00000000-0000-0000-0000-00000000000f',
+        'match_tier': 'musicbrainz_id_exact',
+        'work_id': None,
+      }),
+      'match_status': 'needs_review',
+      'match_tier': 'musicbrainz_id_exact',
+      'reason_code': 'LOW_CONFIDENCE',
+      'reason_detail': 'Score 55% — below confidence threshold',
+    }),
+    'step_b_identity': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'library_file_id': '00000000-0000-0000-0000-000000000010',
+        'match_tier': 'musicbrainz_id_search',
+        'work_id': None,
+      }),
+      'match_status': 'auto_matched',
+      'match_tier': 'musicbrainz_id_search',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'step_c_identity': dict({
+      'match': dict({
+        'confidence_score': 100.0,
+        'library_file_id': '00000000-0000-0000-0000-000000000011',
+        'match_tier': 'local_file_fuzzy',
+        'work_id': None,
+      }),
+      'match_status': 'auto_matched',
+      'match_tier': 'local_file_fuzzy',
+      'reason_code': None,
+      'reason_detail': None,
+    }),
+    'tier2_identity': dict({
+      'match': dict({
+        'confidence_score': 55.00000000000001,
+        'library_file_id': '00000000-0000-0000-0000-000000000012',
+        'match_tier': 'local_file_fuzzy',
+        'work_id': None,
+      }),
+      'match_status': 'needs_review',
+      'match_tier': 'local_file_fuzzy',
+      'reason_code': 'LOW_CONFIDENCE',
+      'reason_detail': 'Score 55% — below confidence threshold',
+    }),
+    'work_ids': list([
+      'work-master-of-puppets',
+    ]),
+  })
+# ---

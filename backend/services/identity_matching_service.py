@@ -5,7 +5,6 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 import structlog
-from rapidfuzz.fuzz import token_sort_ratio
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
@@ -28,14 +27,14 @@ from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
 )
-from backend.services.matching_utils import (
+from backend.services.matching_utils import rule_matches
+from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.title_scoring import (
+    _candidate_scores,
     broadcast_title_core_variants,
     broadcast_title_variants,
-    library_title_variants,
     normalize_title_for_scoring,
-    rule_matches,
 )
-from backend.services.mb_client import MusicBrainzClientProtocol
 
 logger = structlog.get_logger()
 
@@ -84,42 +83,6 @@ def _filter_to_artist(
     # null-as-wildcard would silently re-open the cross-artist hole the
     # Resolution Center invariant exists to close.
     return [f for f in candidates if f.audio.normalized_artist_name == artist_normalized_name]
-
-
-def _candidate_titles(f: LibraryFile) -> tuple[str, ...]:
-    """The library file's normalized title forms for scoring; see
-    library_title_variants for why the stored normalized_title comes first."""
-    return library_title_variants(f.audio.track_title, f.audio.normalized_title)
-
-
-def _candidate_scores(
-    full_bcs: list[str],
-    core_bcs: list[str],
-    f: LibraryFile,
-    strong_match_threshold: int,
-) -> tuple[float, float]:
-    """(score that ranks the candidate, score of the two full forms).
-
-    The full broadcast forms (guest credits stripped) are scored against the
-    file's full title. That is the score unless a comparison with bracketed
-    groups stripped from either side is itself a strong match, in which case
-    that higher score is used: the bracket on one side was noise ("Train In
-    Vain (Stand By Me)" against a tag of "Train in Vain"). Below the
-    threshold a stripped comparison is ignored, because shortening both
-    titles inflates the score of the wrong file as well, and the mid-band
-    gap rule would then auto-match it ("Cry Baby Cry" against "Baby It's You
-    [Mono]" climbs from 48 to 58).
-
-    The full-form score breaks ties, so a file whose tag carries the same
-    bracketed text as the log line beats one that only matches once the
-    brackets are stripped ("Hello (Live)" picks the live file over "Hello"
-    when both reach 100).
-    """
-    libs = [normalize_title_for_scoring(t) for t in _candidate_titles(f)]
-    exact = float(token_sort_ratio(full_bcs[0], libs[0]))
-    full = max(float(token_sort_ratio(bc, libs[0])) for bc in full_bcs)
-    stripped = max(float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs)
-    return (stripped if stripped >= strong_match_threshold else full), exact
 
 
 def _score_candidates(
@@ -536,15 +499,28 @@ class IdentityMatchingEngine:
         return None
 
 
+@dataclass(frozen=True)
+class IdentityMatchingRepos:
+    """The repositories match_identities_for_playlist reads from and writes through.
+
+    Every new collaborator this function needs means editing this dataclass and
+    the one place that builds it (identity_matching_tasks.py), not the
+    function signature — see AUD-015 and the precedent EnrichmentRepos set in
+    library_enrichment_service.py.
+    """
+
+    track_identity_repo: BroadcastTrackIdentityRepository
+    broadcast_artist_repo: BroadcastArtistRepository
+    match_repo: MatchRepository
+    library_file_repo: LibraryFileRepository
+    rules_repo: MappingRuleRepository
+    catalog_repo: ArtistCatalogRepository
+
+
 def match_identities_for_playlist(
     playlist_id: UUID,
-    track_identity_repo: BroadcastTrackIdentityRepository,
-    broadcast_artist_repo: BroadcastArtistRepository,
-    match_repo: MatchRepository,
-    library_file_repo: LibraryFileRepository,
-    rules_repo: MappingRuleRepository,
+    repos: IdentityMatchingRepos,
     mb_client: MusicBrainzClientProtocol,
-    catalog_repo: ArtistCatalogRepository,
     strong_match_threshold: int = 80,
 ) -> list[str]:
     """Resolve pending identities for a playlist.
@@ -556,28 +532,28 @@ def match_identities_for_playlist(
     can trigger downstream master-selection recalculation. This return
     contract is preserved from the legacy implementation.
     """
-    pending = track_identity_repo.get_pending_for_playlist(playlist_id)
+    pending = repos.track_identity_repo.get_pending_for_playlist(playlist_id)
     if not pending:
         logger.info("no_pending_identities", playlist_id=str(playlist_id))
         return []
 
-    rules = rules_repo.list_ordered()
+    rules = repos.rules_repo.list_ordered()
 
     # Resolve artists up-front to avoid N+1 queries inside the loop.
     artist_ids = [identity.broadcast_artist_id for identity in pending]
-    artists_by_id = {a.id: a for a in broadcast_artist_repo.get_by_ids(artist_ids)}
+    artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
 
     engine = IdentityMatchingEngine(
         [
-            IdentityMappingRuleStrategy(rules, library_file_repo),
+            IdentityMappingRuleStrategy(rules, repos.library_file_repo),
             ResolvedArtistMbidStrategy(
-                library_file_repo,
-                match_repo,
+                repos.library_file_repo,
+                repos.match_repo,
                 mb_client,
-                catalog_repo,
+                repos.catalog_repo,
                 strong_match_threshold,
             ),
-            BroadcastToLocalStrategy(library_file_repo, strong_match_threshold),
+            BroadcastToLocalStrategy(repos.library_file_repo, strong_match_threshold),
         ]
     )
 
@@ -595,7 +571,7 @@ def match_identities_for_playlist(
                 identity_id=str(identity.id),
                 missing_artist_id=str(identity.broadcast_artist_id),
             )
-            track_identity_repo.update_match_status(
+            repos.track_identity_repo.update_match_status(
                 identity.id,
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
@@ -611,7 +587,7 @@ def match_identities_for_playlist(
             # Engine exhausted all strategies. Should not happen given the
             # strategies' defensive exhaustiveness, but persist NEEDS_REVIEW so
             # the identity is surfaced rather than stuck PENDING.
-            track_identity_repo.update_match_status(
+            repos.track_identity_repo.update_match_status(
                 identity.id,
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
@@ -621,7 +597,7 @@ def match_identities_for_playlist(
             needs_review += 1
             continue
 
-        track_identity_repo.update_match_status(
+        repos.track_identity_repo.update_match_status(
             identity.id,
             result.status,
             result.tier,
@@ -633,7 +609,7 @@ def match_identities_for_playlist(
         # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
         # the real confidence_score/triage_bucket instead of NULL/"blocked".
         if result.library_file_id is not None:
-            match_repo.create(
+            repos.match_repo.create(
                 Match(
                     id=uuid4(),
                     identity_id=identity.id,

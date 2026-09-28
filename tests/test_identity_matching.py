@@ -6,7 +6,10 @@ from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
-from backend.services.identity_matching_service import match_identities_for_playlist
+from backend.services.identity_matching_service import (
+    IdentityMatchingRepos,
+    match_identities_for_playlist,
+)
 from backend.services.normalization import (
     compute_normalized_signature,
     normalize_artist,
@@ -134,13 +137,15 @@ def test_tier2_mbid_graph_exact_match() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=track_identity_repo,
-        broadcast_artist_repo=broadcast_artist_repo,
-        match_repo=match_repo,
-        library_file_repo=library_file_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=track_identity_repo,
+            broadcast_artist_repo=broadcast_artist_repo,
+            match_repo=match_repo,
+            library_file_repo=library_file_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=FakeMbClient(),
-        catalog_repo=FakeArtistRepository(),
     )
 
     # Identity should be AUTO_MATCHED
@@ -193,13 +198,15 @@ def test_no_library_files_falls_to_needs_review() -> None:
 
     work_ids = match_identities_for_playlist(
         playlist_id=playlist_id,
-        track_identity_repo=track_identity_repo,
-        broadcast_artist_repo=broadcast_artist_repo,
-        match_repo=match_repo,
-        library_file_repo=library_file_repo,
-        rules_repo=rules_repo,
+        repos=IdentityMatchingRepos(
+            track_identity_repo=track_identity_repo,
+            broadcast_artist_repo=broadcast_artist_repo,
+            match_repo=match_repo,
+            library_file_repo=library_file_repo,
+            rules_repo=rules_repo,
+            catalog_repo=FakeArtistRepository(),
+        ),
         mb_client=FakeMbClient(),
-        catalog_repo=FakeArtistRepository(),
     )
 
     updated_identity = track_identity_repo.get_by_id(identity.id)

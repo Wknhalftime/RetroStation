@@ -24,7 +24,6 @@ from backend.domain.catalog import Artist, Recording, Work
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 from backend.domain.system import SystemLog, TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
-from backend.services.matching_constants import MB_AUTO_LINK_SCORE
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
@@ -104,62 +103,39 @@ def _enhance_artist(
     repos: RepositoryFactory,
     *,
     mbid_map: dict[str, MbArtist | None] | None = None,
-    auto_link_score: int = MB_AUTO_LINK_SCORE,
 ) -> ArtistEnhanceOutcome:
-    """Tiered artist enhancement.
+    """Fill in missing artist fields from a MusicBrainz artist lookup.
 
-    Tier 1 (no MBID): name search → score gate → fill fields or bail out.
-    Tier 2/3 (MBID known): consult `mbid_map` (if provided) or call
-    `lookup_artist` directly; fill missing disambiguation / sort_name; a
-    `None` result (404 from the MB API or cached 404 in `mbid_map`) maps to
-    FAILED.
+    Artists gain an MBID only through release / recording enrichment
+    (`ArtistRepository.upsert_musicbrainz_artist`) — never here (AUD-R008).
+    `upsert_local_artist` inserts `needs_enhancement=FALSE`, so a bare local
+    artist should never reach this function; if one does, it is a logic
+    bug, not a work item, and is quarantined below instead of being
+    retried or crashing the phase.
+
+    Consults `mbid_map` (if provided) or calls `lookup_artist` directly;
+    fills missing disambiguation / sort_name; a `None` result (404 from the
+    MB API or a cached 404 in `mbid_map`) maps to FAILED.
 
     `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
-    MBID. Tier 1 ignores it; Tier 2/3 reads it so the caller can coalesce
-    one live lookup per distinct MBID across the queue. A value of `None`
-    in the map represents a cached 404 and is respected without re-querying.
-
-    `auto_link_score` is the Tier 1 confidence threshold. Defaults to the
-    module constant but the task wires `Settings.mb_auto_link_score` so
-    operators can tune the threshold via env without patching code.
+    MBID, so the caller can coalesce one live lookup per distinct MBID
+    across the queue. A value of `None` in the map represents a cached 404
+    and is respected without re-querying.
 
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
     if artist.mbid is None:
-        results = mb_client.search_artist(artist.name)
-        if not results:
-            repos.artists.mark_enhanced(artist.id)
-            return ArtistEnhanceOutcome.ENHANCED
-
-        best = results[0]
-        best_score = int(best.get("score", 0))
-        if best_score < auto_link_score:
-            repos.artists.mark_enhanced(artist.id)
-            logger.info(
-                "mb_artist_no_confident_match",
-                artist_id=artist.id,
-                name=artist.name,
-                best_score=best_score,
-            )
-            return ArtistEnhanceOutcome.ENHANCED
-
-        resolved_mbid: str = best["id"]
-        updates: dict[str, str] = {"mbid": resolved_mbid}
-        if best.get("sort-name"):
-            updates["sort_name"] = best["sort-name"]
-        if best.get("disambiguation"):
-            updates["disambiguation"] = best["disambiguation"]
-        _apply_artist_updates(conn, artist.id, updates)
-        repos.artists.mark_enhanced(artist.id)
-        logger.info(
-            "mb_artist_enhanced_tier1",
+        logger.warning(
+            "mb_artist_missing_mbid",
             artist_id=artist.id,
             name=artist.name,
-            resolved_mbid=resolved_mbid,
         )
-        return ArtistEnhanceOutcome.ENHANCED
+        repos.artists.mark_enhancement_failed(
+            artist.id,
+            "no MBID: artists gain MBIDs only via release enrichment",
+        )
+        return ArtistEnhanceOutcome.FAILED
 
-    # --- Tier 2 / Tier 3: MBID known ---
     if mbid_map is not None and artist.mbid in mbid_map:
         data = mbid_map[artist.mbid]
     else:
@@ -502,13 +478,14 @@ def _run_artist_phase(
     ctx: _PhaseContext,
     settings: Settings,
 ) -> None:
-    """Tier-1/2/3 artist enhancement with MBID coalescing.
+    """Artist MB-lookup enhancement (MBID known) with MBID coalescing.
 
     Mutates `ctx.done["artists"]`, `ctx.failed["artists"]`, and
     `ctx.metrics["artists"]` as it goes. Per-row failure isolation:
     transient errors roll back ONE artist's partial writes and leave
-    it in the queue for the next run; permanent 404s are quarantined
-    inside `_enhance_artist`. Whole-phase aborts propagate.
+    it in the queue for the next run; permanent 404s and MBID-less rows
+    (a logic bug per AUD-R008) are quarantined inside `_enhance_artist`.
+    Whole-phase aborts propagate.
     """
     ctx.done["artists"] = 0
     ctx.failed["artists"] = 0
@@ -540,7 +517,6 @@ def _run_artist_phase(
                 "mb_artist_phase_start",
                 rows_queued=rows_queued,
                 distinct_mbids=len(distinct_mbids),
-                bare_artists=sum(1 for a in pending_artists if a.mbid is None),
             )
 
             for artist in pending_artists:
@@ -551,7 +527,6 @@ def _run_artist_phase(
                         conn,
                         repos,
                         mbid_map=mbid_map,
-                        auto_link_score=settings.mb_auto_link_score,
                     )
                     # Commit applies to both ENHANCED (mark_enhanced write)
                     # and FAILED (mark_enhancement_failed write inside

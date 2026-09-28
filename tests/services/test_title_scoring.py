@@ -1,0 +1,127 @@
+from rapidfuzz.fuzz import token_sort_ratio
+
+from backend.services.title_scoring import (
+    broadcast_title_core_variants,
+    broadcast_title_variants,
+    library_title_variants,
+    normalize_title_for_scoring,
+)
+
+
+class TestNormalizeTitleForScoring:
+    def test_strip_live_suffix(self) -> None:
+        assert normalize_title_for_scoring("Purple Rain (Live)") == "Purple Rain"
+
+    def test_strip_feat_clause_parenthesised(self) -> None:
+        assert normalize_title_for_scoring("Song (feat. Artist)") == "Song"
+
+    def test_strip_feat_clause_bare(self) -> None:
+        assert normalize_title_for_scoring("Song feat. Artist") == "Song"
+
+    def test_strip_radio_edit(self) -> None:
+        assert normalize_title_for_scoring("Song (Radio Edit)") == "Song"
+
+    def test_strip_remaster(self) -> None:
+        assert normalize_title_for_scoring("Song (Remastered)") == "Song"
+
+    def test_idempotent_plain_title(self) -> None:
+        assert normalize_title_for_scoring("Song Title") == "Song Title"
+
+    def test_case_insensitive(self) -> None:
+        assert normalize_title_for_scoring("Song (LIVE)") == "Song"
+        assert normalize_title_for_scoring("Song (live)") == "Song"
+
+    def test_normalized_live_variant_scores_100_against_plain(self) -> None:
+        a = normalize_title_for_scoring("Purple Rain")
+        b = normalize_title_for_scoring("Purple Rain (Live)")
+        assert token_sort_ratio(a, b) == 100
+
+    def test_brackets_instead_of_parens(self) -> None:
+        assert normalize_title_for_scoring("Song [Live]") == "Song"
+
+
+class TestBroadcastTitleVariants:
+    """Broadcast logs credit guests as "f/Name" or "w/Name" after the title."""
+
+    def test_title_without_a_credit_is_its_normalized_form(self) -> None:
+        assert broadcast_title_variants("Enter Sandman") == ("enter sandman",)
+
+    def test_f_slash_credit_is_stripped(self) -> None:
+        assert broadcast_title_variants("Smooth f/Rob Thomas") == ("smooth",)
+
+    def test_f_slash_credit_after_ellipsis_or_in_parens_is_stripped(self) -> None:
+        assert broadcast_title_variants("Livin' My Life Like..f/C.Marks") == ("livin my life like",)
+        assert broadcast_title_variants("Smooth (f/Rob Thomas)") == ("smooth",)
+
+    def test_slash_inside_a_word_is_not_a_credit(self) -> None:
+        assert broadcast_title_variants("Rif/Raf") == ("rif raf",)
+
+    def test_w_slash_offers_the_title_with_and_without_the_credit(self) -> None:
+        """w/ is a credit in "The First Noel w/Faith Hill" but part of the
+        title in "Killing Me Softly W/His Song", so both forms are scored."""
+        assert broadcast_title_variants("The First Noel w/Faith Hill") == (
+            "the first noel w faith hill",
+            "the first noel",
+        )
+        assert broadcast_title_variants("Killing Me Softly W/His Song") == (
+            "killing me softly w his song",
+            "killing me softly",
+        )
+
+    def test_w_slash_o_and_w_slash_out_mean_without(self) -> None:
+        assert broadcast_title_variants("I Don't Want To Live W/o You") == (
+            "i dont want to live w o you",
+        )
+        assert broadcast_title_variants("I Don't Wanna Live W/out Your") == (
+            "i dont wanna live w out your",
+        )
+
+    def test_title_that_is_only_a_credit_is_kept(self) -> None:
+        assert broadcast_title_variants("f/Nobody") == ("f nobody",)
+
+    def test_bracketed_group_does_not_change_the_full_forms(self) -> None:
+        assert broadcast_title_variants("Train In Vain (Stand By Me)") == (
+            "train in vain stand by me",
+        )
+
+
+class TestBroadcastTitleCoreVariants:
+    """The full forms again without their bracketed groups, when that differs."""
+
+    def test_alt_title_in_brackets_is_stripped(self) -> None:
+        assert broadcast_title_core_variants("Train In Vain (Stand By Me)") == ("train in vain",)
+        assert broadcast_title_core_variants("(Keep Feeling) Fascination") == ("fascination",)
+
+    def test_plain_title_and_part_numbers_give_nothing(self) -> None:
+        assert broadcast_title_core_variants("Enter Sandman") == ()
+        assert broadcast_title_core_variants("Disco Duck (Part I)") == ()
+
+    def test_credit_and_bracketed_group_combine(self) -> None:
+        assert broadcast_title_core_variants("Smooth (Radio Edit) f/Rob Thomas") == ("smooth",)
+
+
+class TestLibraryTitleVariants:
+    def test_plain_title_is_its_stored_normalized_form(self) -> None:
+        assert library_title_variants("Enter Sandman", "enter sandman") == ("enter sandman",)
+
+    def test_bracketed_group_adds_a_stripped_form(self) -> None:
+        assert library_title_variants(
+            "Brass in Pocket (I'm Special)",
+            "brass in pocket im special",
+        ) == ("brass in pocket im special", "brass in pocket")
+
+    def test_missing_stored_form_is_derived_from_the_tag(self) -> None:
+        assert library_title_variants("Halo (Live)", None) == ("halo live", "halo")
+
+    def test_missing_tag_falls_back_to_the_stored_form(self) -> None:
+        assert library_title_variants(None, "halo") == ("halo",)
+        assert library_title_variants(None, None) == ("",)
+
+    def test_core_form_added_even_when_lexicographically_greater_than_full(self) -> None:
+        """A leading bracketed group can sort before the remaining title text,
+        so the stripped "core" form can sort AFTER the full form ("zzz" >
+        "aaa zzz"). Locks that the core form is still added on `!=`, not on
+        `<` — a mutant that replaces the inequality check with `<` would drop
+        this case (AUD-014 mutation gate: kills a survived `!=`->`<` mutant
+        on library_title_variants's `core != full` check)."""
+        assert library_title_variants("(Aaa) Zzz", None) == ("aaa zzz", "zzz")

@@ -35,3 +35,6 @@ huey_gw*.db
 
 # Benchmark harness output (scripts/bench_*.py --out)
 results/
+
+# Tune-in streaming work dir (STREAM_WORK_DIR) and bench output
+var/

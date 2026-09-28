@@ -1,0 +1,133 @@
+# serializer version: 1
+# name: test_mbid_map_cached_404_marks_enhancement_failed
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': 'MB lookup returned 404 for mbid=mb-uuid-known',
+      'mbid': 'mb-uuid-known',
+      'needs_enhancement': True,
+      'sort_name': 'Known Band',
+    }),
+    'live_lookup_calls': list([
+    ]),
+    'outcome': 'failed',
+    'sql_executed': list([
+    ]),
+  })
+# ---
+# name: test_mbid_map_hit_short_circuits_live_lookup
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': None,
+      'mbid': 'mb-uuid-known',
+      'needs_enhancement': False,
+      'sort_name': 'Known Band',
+    }),
+    'live_lookup_calls': list([
+    ]),
+    'outcome': 'enhanced',
+    'sql_executed': list([
+      dict({
+        'params': list([
+          'From map',
+          'Band, Known',
+          'local-uuid-2',
+        ]),
+        'sql': 'UPDATE artists SET "disambiguation" = %s, "sort_name" = %s WHERE id = %s',
+      }),
+    ]),
+  })
+# ---
+# name: test_tier1_high_confidence_auto_links_mbid
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': 'no MBID: artists gain MBIDs only via release enrichment',
+      'mbid': None,
+      'needs_enhancement': True,
+      'sort_name': 'Unknown Band',
+    }),
+    'outcome': 'failed',
+    'sql_executed': list([
+    ]),
+  })
+# ---
+# name: test_tier1_low_confidence_marks_enhanced_without_mbid
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': 'no MBID: artists gain MBIDs only via release enrichment',
+      'mbid': None,
+      'needs_enhancement': True,
+      'sort_name': 'Unknown Band',
+    }),
+    'outcome': 'failed',
+    'sql_executed': list([
+    ]),
+  })
+# ---
+# name: test_tier1_no_search_results_marks_enhanced
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': 'no MBID: artists gain MBIDs only via release enrichment',
+      'mbid': None,
+      'needs_enhancement': True,
+      'sort_name': 'Unknown Band',
+    }),
+    'outcome': 'failed',
+    'sql_executed': list([
+    ]),
+  })
+# ---
+# name: test_tier2_404_lookup_marks_enhancement_failed
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': 'MB lookup returned 404 for mbid=mb-uuid-known',
+      'mbid': 'mb-uuid-known',
+      'needs_enhancement': True,
+      'sort_name': 'Known Band',
+    }),
+    'outcome': 'failed',
+    'sql_executed': list([
+    ]),
+  })
+# ---
+# name: test_tier2_fills_disambiguation_and_sort_name
+  dict({
+    'artist_after': dict({
+      'disambiguation': None,
+      'enhancement_error': None,
+      'mbid': 'mb-uuid-known',
+      'needs_enhancement': False,
+      'sort_name': 'Known Band',
+    }),
+    'outcome': 'enhanced',
+    'sql_executed': list([
+      dict({
+        'params': list([
+          'US indie rock band',
+          'Band, Known',
+          'local-uuid-2',
+        ]),
+        'sql': 'UPDATE artists SET "disambiguation" = %s, "sort_name" = %s WHERE id = %s',
+      }),
+    ]),
+  })
+# ---
+# name: test_tier3_all_fields_present_no_update
+  dict({
+    'artist_after': dict({
+      'disambiguation': 'Already set',
+      'enhancement_error': None,
+      'mbid': 'mb-uuid-known',
+      'needs_enhancement': False,
+      'sort_name': 'Band, Known',
+    }),
+    'outcome': 'enhanced',
+    'sql_executed': list([
+    ]),
+  })
+# ---
