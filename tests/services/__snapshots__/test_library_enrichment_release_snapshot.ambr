@@ -1,0 +1,88 @@
+# serializer version: 1
+# name: test_enrich_by_release_over_a_multi_medium_release_with_mixed_files
+  dict({
+    'artists': dict({
+      '00000000-0000-4000-8000-000000000202': dict({
+        'mbid': '00000000-0000-4000-8000-000000000202',
+        'name': 'Retro Band',
+        'origin': 'musicbrainz',
+        'sort_name': 'Band, Retro',
+      }),
+    }),
+    'files': dict({
+      'file_a_linked_and_moved': dict({
+        'recording_id': '00000000-0000-4000-8000-000000000210',
+        'status': 'enriched',
+        'work_id': '00000000-0000-4000-8000-000000000220',
+      }),
+      'file_b_no_work_relation': dict({
+        'recording_id': '00000000-0000-4000-8000-000000000211',
+        'status': 'enriched',
+        'work_id': None,
+      }),
+      'file_c_merged_recording': dict({
+        'recording_id': '00000000-0000-4000-8000-000000000213',
+        'status': 'enriched',
+        'work_id': '00000000-0000-4000-8000-000000000221',
+      }),
+      'file_malformed_recording_mbid': dict({
+        'recording_id': None,
+        'status': 'failed',
+        'work_id': None,
+      }),
+      'file_no_recording_mbid': dict({
+        'recording_id': None,
+        'status': 'failed',
+        'work_id': None,
+      }),
+      'file_unknown_recording': dict({
+        'recording_id': None,
+        'status': 'failed',
+        'work_id': None,
+      }),
+    }),
+    'local_work_a_deleted': True,
+    'mb_client_calls': list([
+      'lookup_release:00000000-0000-4000-8000-000000000201',
+      'lookup_recording:00000000-0000-4000-8000-000000000212',
+      'lookup_recording:00000000-0000-4000-8000-0000000000ff',
+    ]),
+    'recordings': dict({
+      '00000000-0000-4000-8000-000000000210': dict({
+        'duration_ms': 200000,
+        'title': 'Song A',
+        'version_type': 'original',
+        'work_id': '00000000-0000-4000-8000-000000000220',
+      }),
+      '00000000-0000-4000-8000-000000000211': dict({
+        'duration_ms': 300000,
+        'title': 'Song B (Live)',
+        'version_type': 'live',
+        'work_id': None,
+      }),
+      '00000000-0000-4000-8000-000000000213': dict({
+        'duration_ms': 250000,
+        'title': 'Song C',
+        'version_type': 'original',
+        'work_id': '00000000-0000-4000-8000-000000000221',
+      }),
+    }),
+    'return_value': 3,
+    'work_a_song_master': dict({
+      'preferred_file': 'file_a_linked_and_moved',
+      'selection_method': 'auto',
+    }),
+    'works': dict({
+      '00000000-0000-4000-8000-000000000220': dict({
+        'artist_id': '00000000-0000-4000-8000-000000000202',
+        'origin': 'musicbrainz',
+        'title': 'Work A',
+      }),
+      '00000000-0000-4000-8000-000000000221': dict({
+        'artist_id': '00000000-0000-4000-8000-000000000202',
+        'origin': 'musicbrainz',
+        'title': 'Work C',
+      }),
+    }),
+  })
+# ---
