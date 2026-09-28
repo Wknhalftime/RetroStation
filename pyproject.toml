@@ -51,6 +51,7 @@ dev = [
     "pre-commit",
     # mutation testing (poe mutate-<module>, refactor gate step 2)
     "cosmic-ray>=8.7",
+    "psutil>=7.2.2",
 ]
 
 [tool.pytest.ini_options]
@@ -112,9 +113,13 @@ max-statements = 40
 [tool.deptry]
 # The dev extra is tooling (pytest, ruff, the audit kit); nothing imports it at runtime.
 optional_dependencies_dev_groups = ["dev"]
+# Dev-only bench driver: psutil (dev extra) and its sibling script modules.
+extend_exclude = ["scripts/bench_stream.py"]
 
 [tool.coverage.run]
 source = ["backend"]
+# Windows-only (ctypes kernel32); CI runs on Linux, where nothing can import it.
+omit = ["backend/playout/windows_job.py"]
 parallel = true
 branch = true
 
@@ -137,7 +142,7 @@ layers = [
     "backend.main",
     "backend.routers | backend.tasks",
     "backend.services",
-    "backend.db",
+    "backend.db | backend.playout",
     "backend.repositories",
     "backend.domain",
 ]
@@ -170,7 +175,15 @@ name = "Domain stays pure (stdlib only today)"
 type = "forbidden"
 source_modules = ["backend.domain"]
 forbidden_modules = ["fastapi", "psycopg", "huey", "httpx", "mutagen",
-                     "backend.db", "backend.services", "backend.repositories"]
+                     "backend.db", "backend.services", "backend.repositories",
+                     "backend.playout"]
+
+[[tool.importlinter.contracts]]
+name = "Playout takes primitives: it imports nothing else from backend"
+type = "forbidden"
+source_modules = ["backend.playout"]
+forbidden_modules = ["backend.domain", "backend.services", "backend.repositories",
+                     "backend.db", "backend.routers", "backend.tasks", "backend.main"]
 
 # ---- one command per audit step ----
 [tool.poe.env]
