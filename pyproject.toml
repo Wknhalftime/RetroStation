@@ -116,6 +116,8 @@ optional_dependencies_dev_groups = ["dev"]
 
 [tool.coverage.run]
 source = ["backend"]
+# Windows-only (ctypes kernel32); CI runs on Linux, where nothing can import it.
+omit = ["backend/playout/windows_job.py"]
 parallel = true
 branch = true
 
