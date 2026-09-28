@@ -1,8 +1,10 @@
 """Engine benchmark for tune-in streaming (spec: Delivery, PR A). Windows only.
 
 One stage per subcommand; each writes its own JSON (--out) and prints it:
-  latency    3 sequential + 5 concurrent sessions: seconds from launch to first MP3 byte
-  resources  N sessions with readers: CPU % of one core and RSS per Liquidsoap process
+  latency    3 sequential sessions, then 5 launched at once: seconds from launch to first
+             MP3 byte
+  resources  N sessions with readers: CPU % of one core and RSS per Liquidsoap process;
+             fails if a session falls behind real time or starts too few items
   soak       one session for M minutes over mixed-length tones with 3 broken paths
   gate       merge stage JSON files and print the verdict (exit 1 on any failure)
 
@@ -25,6 +27,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -65,6 +68,11 @@ from backend.playout.windows_job import KillOnCloseJob  # noqa: E402
 SOAK_SPANS_S = [10, 12, 15, 20, 30, 40]
 SOAK_BROKEN = {7, 19, 31}
 START_NEXT_S = 4  # sn_rem in stream_stub.item_annotations: decks overlap by this much
+SEQUENTIAL_SESSIONS = 3
+CONCURRENT_SESSIONS = 5
+RESOURCE_SPAN_S = 40
+STREAM_BYTES_PER_S = 128_000 / 8  # session.liq encodes MP3 at a constant 128 kbps
+MAX_BEHIND_S = 2.0  # a resources session further behind real time than this has stalled
 type Report = dict[str, object]
 
 
@@ -85,11 +93,22 @@ class StartedSession:
     log: StubLog
 
 
+@dataclass
+class StreamTally:
+    """What one drain reader got. Written only by its reader thread; read after join,
+    or read live for ``bytes_read`` (a single int, safe to read while it grows)."""
+
+    began: float
+    bytes_read: int = 0
+    error: str | None = None
+
+
 @dataclass(frozen=True)
 class Draining:
     session: StartedSession
     stop: threading.Event
     reader: threading.Thread
+    tally: StreamTally
 
 
 def build_items(spans: list[int], broken: set[int], config: BenchConfig) -> list[StubItem]:
@@ -123,17 +142,35 @@ def start(job: KillOnCloseJob, items: list[StubItem], config: BenchConfig) -> St
 
 
 def drain(session: StartedSession) -> Draining:
-    """Read and discard the stream in the background, as a listening player would."""
+    """Read and count the stream in the background, as a listening player would.
+
+    The response keeps first_audio's 5 s socket timeout, so a stalled session ends the
+    reader with TimeoutError; that, any other socket error, and an early EOF are recorded
+    in the tally. The response is always closed, which ends the session.
+    """
     stop = threading.Event()
+    tally = StreamTally(began=time.monotonic())
 
     def read() -> None:
-        while not stop.is_set() and session.response.read1(8192):
-            pass
-        session.response.close()
+        try:
+            while not stop.is_set():
+                chunk = session.response.read1(8192)
+                if not chunk:
+                    tally.error = "stream ended (EOF)"
+                    return
+                tally.bytes_read += len(chunk)
+        except (OSError, http.client.HTTPException) as error:  # TimeoutError is an OSError
+            tally.error = f"{type(error).__name__}: {error}"
+        finally:
+            session.response.close()
 
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    return Draining(session, stop, reader)
+    return Draining(session, stop, reader, tally)
+
+
+def start_draining(job: KillOnCloseJob, items: list[StubItem], config: BenchConfig) -> Draining:
+    return drain(start(job, items, config))
 
 
 def stop(draining: Draining) -> None:
@@ -146,11 +183,16 @@ def run_latency(config: BenchConfig) -> Report:
     items = build_items([30] * 4, set(), config)
     sequential: list[float] = []
     with KillOnCloseJob() as job:
-        for _ in range(3):
+        for _ in range(SEQUENTIAL_SESSIONS):
             session = start(job, items, config)
             sequential.append(session.latency_s)
             stop(drain(session))
-        concurrent = [drain(start(job, items, config)) for _ in range(5)]
+        # All launched at once, each from its own thread, so their startups overlap.
+        with ThreadPoolExecutor(max_workers=CONCURRENT_SESSIONS) as pool:
+            launches = [
+                pool.submit(start_draining, job, items, config) for _ in range(CONCURRENT_SESSIONS)
+            ]
+            concurrent = [launch.result() for launch in launches]
         for draining in concurrent:
             stop(draining)
     concurrent_s = [d.session.latency_s for d in concurrent]
@@ -169,8 +211,38 @@ class ResourceRun:
     warm_up_s: int = 10
 
 
+def expected_starts(heard_s: float, intro_fade_at_s: float) -> int:
+    """Items a healthy resources session has started ``heard_s`` after first audio.
+
+    The first item starts ``intro_fade_at_s`` into the intro, then one every
+    ``RESOURCE_SPAN_S - START_NEXT_S``; MAX_BEHIND_S of slack keeps a start that is due right now
+    from counting.
+    """
+    due = heard_s - intro_fade_at_s - MAX_BEHIND_S
+    return 1 + int(max(0.0, due) // (RESOURCE_SPAN_S - START_NEXT_S))
+
+
+def stall_problem(draining: Draining, intro_fade_at_s: float) -> str | None:
+    """Why this session is not keeping up with real time, or None if it is."""
+    session, tally = draining.session, draining.tally
+    heard_s = time.monotonic() - tally.began
+    behind_s = heard_s - tally.bytes_read / STREAM_BYTES_PER_S
+    started = len(session.log.started.seqs())
+    wanted = expected_starts(heard_s, intro_fade_at_s)
+    problems: list[str] = []
+    if tally.error is not None:
+        problems.append(f"reader stopped: {tally.error}")
+    if behind_s > MAX_BEHIND_S:
+        problems.append(f"{behind_s:.1f} s behind real time after {heard_s:.0f} s")
+    if started < wanted:
+        problems.append(f"started {started} items, expected at least {wanted}")
+    if not problems:
+        return None
+    return f"pid {session.process.pid}: " + "; ".join(problems)
+
+
 def run_resources(run: ResourceRun, config: BenchConfig) -> Report:
-    items = build_items([40] * 10, set(), config)
+    items = build_items([RESOURCE_SPAN_S] * 10, set(), config)
     with KillOnCloseJob() as job:
         running = [drain(start(job, items, config)) for _ in range(run.sessions)]
         procs = [psutil.Process(d.session.process.pid) for d in running]
@@ -187,6 +259,12 @@ def run_resources(run: ResourceRun, config: BenchConfig) -> Report:
                 memory = proc.memory_info()
                 rss[i] = max(rss[i], memory.rss / 1_048_576)
                 private[i] = max(private[i], getattr(memory, "private", 0) / 1_048_576)
+        stalled = [
+            problem
+            for problem in (stall_problem(d, config.engine.intro_fade_at_s) for d in running)
+            if problem is not None
+        ]
+        started = [len(d.session.log.started.seqs()) for d in running]
         for draining in running:
             stop(draining)
     return {
@@ -195,6 +273,9 @@ def run_resources(run: ResourceRun, config: BenchConfig) -> Report:
         "private_mb": private,
         "resource_sessions": run.sessions,
         "resource_seconds": run.seconds,
+        "resource_items_started": started,
+        "stream_bytes_read": [d.tally.bytes_read for d in running],
+        "stalled_sessions": stalled,
     }
 
 
@@ -298,7 +379,14 @@ def cmd_latency(args: argparse.Namespace) -> None:
 
 
 def cmd_resources(args: argparse.Namespace) -> None:
-    emit(run_resources(ResourceRun(args.sessions, args.seconds), bench_config(args)), args.out)
+    """A stalled session makes its CPU and memory figures meaningless: the stage prints
+    the report but does not write it, and fails."""
+    report = run_resources(ResourceRun(args.sessions, args.seconds), bench_config(args))
+    stalled = report["stalled_sessions"]
+    if stalled:
+        emit(report, None)
+        raise SystemExit(f"resources: sessions stopped keeping up: {stalled}")
+    emit(report, args.out)
 
 
 def cmd_soak(args: argparse.Namespace) -> None:
