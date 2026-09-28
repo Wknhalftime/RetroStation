@@ -4,9 +4,9 @@ from backend.domain.streaming import CueAnalysis
 
 
 class StreamCueRepository(ABC):
-    """Stores one cue analysis per library file for tune-in streaming."""
+    """Stores one cue analysis per audio (``AudioHash``) for tune-in streaming (D20)."""
 
     @abstractmethod
     def upsert(self, analysis: CueAnalysis) -> None:
-        """Store ``analysis`` as its file's cues, replacing any earlier analysis."""
+        """Store ``analysis`` as its audio's cues, replacing any earlier analysis."""
         ...

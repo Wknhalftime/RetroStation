@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
+from backend.domain.library import AudioHash
+
 _ONE_MS = timedelta(milliseconds=1)
 
 
@@ -30,14 +32,6 @@ class NoBroadcastError(StreamingError):
 
 class EndOfScheduleError(StreamingError):
     """The schedule has no further playable item."""
-
-
-class CueFileNotFoundError(StreamingError):
-    """Cues were stored for a library file that no longer exists."""
-
-    def __init__(self, file_id: UUID) -> None:
-        super().__init__(f"no library file with file_id={file_id} to store cues for")
-        self.file_id = file_id
 
 
 class StaleScheduleError(StreamingError):
@@ -101,33 +95,29 @@ class CuePoints:
 
 
 CUE_ANALYSER_VERSION = 1
-"""Version of the cue analysis in force. Stored rows of any other version are stale."""
+"""Version of the cue analysis in force, recorded on each row; never checked on read (D20)."""
 
 
 @dataclass(frozen=True)
 class CueAnalysis:
-    """The result of analysing one library file, as stored for playback.
+    """The result of analysing one audio, as stored for playback (D20).
 
-    ``file_size`` and ``file_mtime_ns`` are the file's stat when it was analysed; a
-    later mismatch with the library makes the stored cues stale. ``analysis_failed``
+    Keyed by the library's ``AudioHash``: every file that shares the audio shares the
+    cues, and no file needs to exist for the analysis to be stored. ``analysis_failed``
     records that ``cues`` are fallback values; it is data and changes nothing on read.
     """
 
-    file_id: UUID
+    audio_hash: AudioHash
     cues: CuePoints
     loudness_lufs: float | None
     analysis_failed: bool
     analyser_version: int
-    file_size: int | None
-    file_mtime_ns: int | None
 
     def __post_init__(self) -> None:
         if self.analyser_version < 1:
             raise InvalidStreamValueError(
                 f"CueAnalysis.analyser_version must be >= 1, got {self.analyser_version}"
             )
-        if self.file_size is not None:
-            _require_non_negative("CueAnalysis", file_size=self.file_size)
         if self.loudness_lufs is not None and not math.isfinite(self.loudness_lufs):
             raise InvalidStreamValueError(
                 f"CueAnalysis.loudness_lufs must be finite, got {self.loudness_lufs}"
