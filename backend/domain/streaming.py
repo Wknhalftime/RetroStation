@@ -172,7 +172,12 @@ class ScheduleItem:
 
 
 type DayLoader = Callable[[date], Sequence[ScheduleItem]]
-"""Returns one station day in logged order; an empty sequence when the day has no log."""
+"""Returns one station day in logged order; an empty sequence when the day has no log.
+
+Within one operation the same day may be requested more than once, so a loader must
+return identical results for a given day for the life of a session (PR D memoises it
+per session).
+"""
 
 
 @dataclass(frozen=True)
@@ -231,4 +236,5 @@ class Bookmark:
 
     def is_expired(self, now: datetime) -> bool:
         """True once the station clock has passed the bookmarked position."""
+        _require_naive("Bookmark.is_expired", now=now)
         return now + self.clock_offset >= self.expires_at

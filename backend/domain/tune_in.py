@@ -22,12 +22,16 @@ from backend.domain.streaming import (
 )
 
 
-def station_wall_clock(year: int, now: datetime) -> datetime:
-    """``now``'s month, day and time in ``year``; 29 Feb of a non-leap year does not exist."""
+def _require_naive_now(where: str, now: datetime) -> None:
     if now.tzinfo is not None:
         raise InvalidStreamValueError(
-            f"station_wall_clock now must be naive local time, got {now.isoformat()}"
+            f"{where} now must be naive local time, got {now.isoformat()}"
         )
+
+
+def station_wall_clock(year: int, now: datetime) -> datetime:
+    """``now``'s month, day and time in ``year``; 29 Feb of a non-leap year does not exist."""
+    _require_naive_now("station_wall_clock", now=now)
     if now.month == 2 and now.day == 29 and not calendar.isleap(year):
         raise NoBroadcastError(f"{year} has no 29 February")
     return datetime.combine(date(year, now.month, now.day), now.time())
@@ -92,14 +96,11 @@ def _next_playable(
     return None
 
 
-def _land_after_anchor(
-    load_day: DayLoader, anchor: Landing, timing: StreamTiming
-) -> Landing | None:
+def _land_from_anchor(load_day: DayLoader, anchor: Landing, timing: StreamTiming) -> Landing | None:
     """Inside the anchor song if enough of it is left, else the top of the next song (D15)."""
     file = _item_at(load_day, anchor.ref).file
     if (
         file is not None
-        and file.is_playable(timing)
         and anchor.offset_ms < file.span_ms()
         and file.tail_fits(anchor.offset_ms, timing)
     ):
@@ -138,7 +139,7 @@ def tune_in(load_day: DayLoader, year: int, now: datetime, timing: StreamTiming)
     ``timing.window`` of now (D2).
     """
     wall = station_wall_clock(year, now)
-    landing = _land_after_anchor(load_day, find_anchor(load_day, wall), timing)
+    landing = _land_from_anchor(load_day, find_anchor(load_day, wall), timing)
     if landing is None:
         raise NoBroadcastError(f"nothing playable after {wall.isoformat()}")
     logged_at = _item_at(load_day, landing.ref).logged_at
@@ -160,8 +161,17 @@ def next_item(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> Item
 
 
 def resume(load_day: DayLoader, bookmark: Bookmark, now: datetime, timing: StreamTiming) -> Landing:
-    """Where the station would be if it had kept playing since ``bookmark.left_at`` (D11)."""
-    landing = walk_forward(load_day, bookmark.landing.advanced_by(now - bookmark.left_at), timing)
+    """Where the station would be if it had kept playing since ``bookmark.left_at`` (D11).
+
+    If the bookmarked item is no longer playable (its file is gone, or its cues are now
+    too short), the stale offset into it is dropped: the walk starts from its top instead,
+    so the away time is not also spent on the next song.
+    """
+    _require_naive_now("resume", now=now)
+    start = bookmark.landing
+    if not _item_at(load_day, start.ref).is_playable(timing):
+        start = Landing(start.ref, 0)
+    landing = walk_forward(load_day, start.advanced_by(now - bookmark.left_at), timing)
     if landing is None:
         raise EndOfScheduleError(f"schedule ended while away since {bookmark.left_at}")
     return landing
