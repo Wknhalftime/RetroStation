@@ -27,6 +27,7 @@ from backend.domain.library import (
     MissingFileReconciliation,
 )
 from backend.domain.system import SystemLog, TaskProgress
+from backend.repositories.library_files import LibraryFileRepository
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import (
@@ -132,6 +133,24 @@ def reconcile_missing_after_scan(
     return result
 
 
+def _row_to_group(
+    lf: LibraryFile,
+    indexed_before: set[str],
+    file_repo: LibraryFileRepository,
+) -> LibraryFile | None:
+    """The stored row the grouping pass should give a work, or None if it needs none.
+
+    A path first indexed by this scan was stored as read, id and all. Any
+    other path kept its stored id (the upsert keys on the path, so *lf*'s
+    fresh id exists nowhere) and its work, so its stored row is the one to
+    group, and only while it has no work.
+    """
+    row = file_repo.get_by_path(lf.file_path) if lf.file_path in indexed_before else lf
+    if row is None or row.work_id is not None:
+        return None
+    return row
+
+
 def _run_scan(
     *,
     root_path: str,
@@ -156,7 +175,8 @@ def _run_scan(
     files_written = 0
     files_committed = 0
     quarantine_written = 0
-    files_relocated = 0
+    # New paths that adopted the row of a moved file, keeping its id.
+    relocated_paths: set[str] = set()
     pending_writes = 0
     written_files: list[LibraryFile] = []
     # Read cleanly but could not be stored; quarantined like a parse failure.
@@ -181,14 +201,14 @@ def _run_scan(
         pending_writes = 0
 
     def on_file(lf: LibraryFile) -> None:
-        nonlocal pending_writes, files_written, files_relocated
+        nonlocal pending_writes, files_written
         try:
             if (
                 not library_was_empty
                 and lf.file_path not in known_paths
                 and adopt_moved_row(lf, repos.library_files) is not None
             ):
-                files_relocated += 1
+                relocated_paths.add(lf.file_path)
             repos.library_files.upsert_write_only(lf)
         except psycopg.Error:
             # Bad metadata (e.g. null bytes) can poison the transaction.
@@ -266,7 +286,7 @@ def _run_scan(
         )
     logger.info(
         "scan_reconciled",
-        relocated=files_relocated,
+        relocated=len(relocated_paths),
         marked_missing=files_missing,
         quarantine_cleared=quarantine_cleared,
     )
@@ -279,15 +299,17 @@ def _run_scan(
     # this commit behind pending_writes > 0.
     library_conn.commit()
 
-    # --- Grouping pass: assign work_id to newly written files ---
+    # --- Grouping pass: assign work_id to written rows that have none ---
     grouped = 0
     grouping_pending = 0
+    indexed_before = set(known_paths) | relocated_paths
     for lf in written_files:
-        if lf.work_id is not None:
+        row = _row_to_group(lf, indexed_before, repos.library_files)
+        if row is None:
             continue
         try:
             result = assign_work(
-                lf,
+                row,
                 artist_repo=repos.artists,
                 work_repo=repos.works,
                 library_file_repo=repos.library_files,
@@ -295,10 +317,10 @@ def _run_scan(
                 song_master_repo=repos.song_masters,
             )
             if result:
-                repos.library_files.update_work_id(lf.id, result.work_id)
+                repos.library_files.update_work_id(row.id, result.work_id)
                 if result.recording_id:
                     repos.library_files.update_recording_link(
-                        lf.id,
+                        row.id,
                         result.recording_id,
                         EnrichmentStatus.PENDING,
                     )
@@ -315,7 +337,7 @@ def _run_scan(
         except (psycopg.Error, ValueError, OSError) as exc:
             logger.warning(
                 "grouping_failed",
-                file_id=str(lf.id),
+                file_id=str(row.id),
                 error=str(exc),
                 error_type=type(exc).__name__,
                 exc_info=True,
