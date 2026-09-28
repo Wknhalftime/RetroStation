@@ -20,7 +20,7 @@ from mutagen._util import MutagenError
 
 from backend.domain.enums import AudioHashKind, FileStatus
 from backend.domain.library import AudioHash, LibraryFile
-from backend.services.library_scan_service import (  # ⚠ AUD-009
+from backend.services.library_scan_service import (
     _deduplicated_by_id,
     _spelled_as_on_disk,
     adopt_moved_row,

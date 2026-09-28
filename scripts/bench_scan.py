@@ -49,7 +49,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from backend.config import get_settings  # noqa: E402
-from backend.services.library_scan_service import SUPPORTED_EXTENSIONS  # noqa: E402
+from backend.services.audio_tags import SUPPORTED_EXTENSIONS  # noqa: E402
 
 DEFAULT_BENCH_DB = "retrostation_bench"
 
@@ -138,9 +138,9 @@ def instrument(timers: Timers) -> list[str]:
     from backend.db.repositories import recordings as pg_recordings
     from backend.db.repositories import song_masters as pg_masters
     from backend.db.repositories import works as pg_works
+    from backend.services import audio_tags as at
     from backend.services import folder_hash_service as fhs
     from backend.services import grouping_service as gs
-    from backend.services import library_scan_service as lss
     from backend.tasks import library_scan_tasks as lst
 
     missing: list[str] = []
@@ -177,23 +177,19 @@ def instrument(timers: Timers) -> list[str]:
         patch(lst, attr, f"phase.{attr}")
 
     # Per-file extraction work (summed over worker threads if parallel).
-    # extract_tags (tags + whole-file SHA-256) exists only before PR B, where
-    # scans read tags only; its absence there is expected, so it is not reported.
-    _patch(timers, lss, "extract_tags", "file.extract_tags", "phase.scan_directory")
-    # A tags-only scan calls read_tags directly, never extract_tags, so this is
-    # what makes its per-file cost visible.
-    has_read_tags = patch(lss, "read_tags", "file.read_tags", "phase.scan_directory")
-    inner_within = "file.read_tags" if has_read_tags else "file.extract_tags"
-    # Whole-file SHA-256: before PR B only (also under its older private name).
-    if not _patch(timers, lss, "compute_file_hash", "file.sha256", "file.extract_tags"):
-        _patch(timers, lss, "_compute_file_hash", "file.sha256", "file.extract_tags")
-    # SHA-256 of audio bytes: from PR B on. A call during a scan (rather than
-    # during the backfill) means the scan reads whole files again.
+    # A tags-only scan calls read_tags directly. AUD-009 moved read_tags and
+    # disk_stat into backend.services.audio_tags, so that is where their own
+    # call sites (inside read_tags) resolve the name — patch it there, not on
+    # library_scan_service, or the disk_stat timer would silently wrap nothing.
+    has_read_tags = patch(at, "read_tags", "file.read_tags", "phase.scan_directory")
+    inner_within = "file.read_tags" if has_read_tags else "phase.scan_directory"
+    # SHA-256 of audio bytes. A call during a scan (rather than during the
+    # backfill) means the scan reads whole files again.
     if importlib.util.find_spec("backend.services.audio_hash") is not None:
         from backend.services import audio_hash as ah
 
         patch(ah, "_sha256_of_range", "file.audio_sha256", "phase.*")
-    patch_any(lss, ("disk_stat", "_disk_stat"), "file.stat", inner_within)
+    patch(at, "disk_stat", "file.stat", inner_within)
     # The service calls mutagen.File through the module, so patch it there.
     patch(mutagen, "File", "file.mutagen_parse", inner_within)
 

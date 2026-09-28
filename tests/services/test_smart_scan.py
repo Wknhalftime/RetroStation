@@ -12,14 +12,14 @@ from mutagen._util import MutagenError
 
 from backend.domain.enums import AudioHashKind, EnrichmentStatus, FileStatus
 from backend.domain.library import AudioHash, LibraryFile
-from backend.services.library_scan_service import (  # ⚠ AUD-009
+from backend.services.library_scan_service import (
     FolderScanResult,
     scan_folder_incrementally,
 )
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.library_quarantine import FakeLibraryQuarantineRepository
 
-# ⚠ AUD-009: patch the names where scan_folder_incrementally looks them up
+# Patch the names where scan_folder_incrementally looks them up
 # (an import in library_scan_service, since read_tags/disk_stat now live in
 # audio_tags.py — see that module's docstring).
 _READ = "backend.services.library_scan_service.read_tags"

@@ -19,7 +19,7 @@ import structlog
 
 from backend.domain.library import LibraryFolder
 from backend.repositories.library_folders import LibraryFolderRepository
-from backend.services.library_scan_service import SUPPORTED_EXTENSIONS
+from backend.services.audio_tags import SUPPORTED_EXTENSIONS
 
 logger = structlog.get_logger()
 

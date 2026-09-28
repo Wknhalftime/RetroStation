@@ -24,8 +24,8 @@ from syrupy.assertion import SnapshotAssertion
 
 from backend.domain.enums import FileStatus
 from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
+from backend.services.audio_tags import read_tags
 from backend.services.library_scan_service import (
-    read_tags,
     scan_directory,
     scan_folder_incrementally,
 )
