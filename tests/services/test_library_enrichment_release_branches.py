@@ -17,8 +17,11 @@ Every test here must pass unchanged before AND after that refactor.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 from uuid import UUID, uuid4
+
+import pytest
 
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import AudioMetadata, LibraryFile
@@ -44,8 +47,10 @@ _RELEASE = "00000000-0000-4000-8000-000000000101"
 _ARTIST = "00000000-0000-4000-8000-000000000102"
 _REC_OK = "00000000-0000-4000-8000-000000000103"
 _WORK = "00000000-0000-4000-8000-000000000104"
+_WORK_OTHER = "00000000-0000-4000-8000-000000000105"
 _MALFORMED = "not-a-uuid"
 _UNKNOWN_REC = "00000000-0000-4000-8000-0000000000ee"
+_ELSEWHERE_REC = "00000000-0000-4000-8000-0000000000dd"
 
 
 def _repos(
@@ -388,3 +393,58 @@ def test_batch_recording_without_artist_credit_still_links_file() -> None:
 
     assert outcome.enriched == 1
     assert artists.list_all() == []
+
+
+def test_batch_processes_files_after_an_earlier_unresolved_one() -> None:
+    """`continue` must not become `break`: a later resolvable file still gets enriched."""
+    files = FakeLibraryFileRepository()
+    unresolved_lf = _pending_file(recording_mbid=_UNKNOWN_REC)
+    resolved_lf = _pending_file(recording_mbid=_REC_OK)
+    files.upsert(unresolved_lf)
+    files.upsert(resolved_lf)
+    hit = _recording(_REC_OK, "Track", releases=[{"id": _RELEASE, "title": "R"}])
+    mb_client = FakeMbClient(recordings={_REC_OK: hit})  # _UNKNOWN_REC not configured
+
+    outcome = enrich_by_recording_batch([unresolved_lf, resolved_lf], _repos(files), mb_client)
+
+    assert outcome.enriched == 1
+    assert outcome.unresolved == (unresolved_lf,)
+    updated = files.get_by_id(resolved_lf.id)
+    assert updated is not None
+    assert updated.enrichment_status == EnrichmentStatus.ENRICHED
+
+
+# --- mutation-testing gap fills (AUD-048 gate 2 baseline survivors) -------------
+
+
+def test_enrichment_repos_is_frozen() -> None:
+    repos = _repos(FakeLibraryFileRepository())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        repos.artists = FakeArtistRepository()  # type: ignore[misc]
+
+
+def test_extract_work_skips_relation_type_that_sorts_after_performance() -> None:
+    """`==` must not become `>=`: a type sorting after "performance" must not match it."""
+    relations = [
+        {"type": "vocal", "work": {"id": _WORK_OTHER, "title": "Not This One"}},
+        {"type": "performance", "work": {"id": _WORK, "title": "T"}},
+    ]
+    assert _extract_work_from_relations(relations) == (_WORK, "T")
+
+
+def test_enrich_by_release_fails_when_the_redirect_target_is_also_not_on_the_release() -> None:
+    """A recording's redirect target must itself be on the release, not merely different."""
+    files = FakeLibraryFileRepository()
+    lf = _pending_file(recording_mbid=_UNKNOWN_REC)
+    files.upsert(lf)
+    mb_client = FakeMbClient(
+        releases={_RELEASE: _release_data()},
+        recordings={_UNKNOWN_REC: {"id": _ELSEWHERE_REC, "title": "Elsewhere"}},
+    )
+
+    count = enrich_by_release(_RELEASE, _repos(files), mb_client)
+
+    assert count == 0
+    updated = files.get_by_id(lf.id)
+    assert updated is not None
+    assert updated.enrichment_status == EnrichmentStatus.FAILED
