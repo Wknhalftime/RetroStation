@@ -989,7 +989,7 @@ class TestResolveIdentityWorkId:
         captured: list[tuple[str, str]] = []
         monkeypatch.setattr(
             "backend.routers.matching.recalculate_for_work_sync",
-            lambda db_url, w: captured.append((db_url, w)),
+            lambda db_url, w, repos_factory: captured.append((db_url, w)),
         )
 
         resp = client.post(
@@ -1029,7 +1029,7 @@ class TestResolveIdentityWorkId:
         captured: list[str] = []
         monkeypatch.setattr(
             "backend.routers.matching.recalculate_for_work_sync",
-            lambda db_url, w: captured.append(w),
+            lambda db_url, w, repos_factory: captured.append(w),
         )
 
         resp = client.post(
@@ -1060,7 +1060,7 @@ class TestResolveIdentityWorkId:
         captured: list[str] = []
         monkeypatch.setattr(
             "backend.routers.matching.recalculate_for_work_sync",
-            lambda db_url, w: captured.append(w),
+            lambda db_url, w, repos_factory: captured.append(w),
         )
 
         resp = client.post(
@@ -1089,7 +1089,7 @@ class TestResolveIdentityWorkId:
         rec_id = _insert_recording(db_conn, "rec-fail", work_id=work_id)
         lib_file = _insert_library_file(db_conn, recording_id=rec_id, work_id=work_id)
 
-        def _boom(db_url: str, w: str) -> None:
+        def _boom(db_url: str, w: str, repos_factory: object) -> None:
             raise RuntimeError("recalc exploded")
 
         monkeypatch.setattr("backend.routers.matching.recalculate_for_work_sync", _boom)

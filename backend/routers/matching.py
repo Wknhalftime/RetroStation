@@ -21,6 +21,7 @@ from backend.services.identity_resolution_service import (
 )
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.repository_factory import recalc_repos
 from backend.tasks.artist_matching_tasks import artist_matching_task
 from backend.tasks.identity_matching_tasks import identity_matching_task
 
@@ -872,6 +873,7 @@ async def resolve_identity(
                     recalculate_for_work_sync,
                     settings.database_url,
                     work_id,
+                    recalc_repos,
                 )
             except Exception:  # noqa: BLE001
                 logger.warning(

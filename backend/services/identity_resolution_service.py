@@ -7,13 +7,24 @@ Splits the work into two functions with distinct failure semantics:
   Anything raised here aborts the whole resolve — the txn rolls back, no
   partial state is left behind.
 
-- ``recalculate_for_work_sync`` runs AFTER the caller commits, on its own
-  sync connection (mirrors ``backend/tasks/identity_matching_tasks.py:41``).
+- ``recalculate_for_work_sync`` runs AFTER the caller commits, on a
+  connection supplied by its ``repos_factory`` argument (mirrors
+  ``backend/tasks/identity_matching_tasks.py:41``, which builds its own).
   This recalc is a best-effort side effect: failures are caught and logged
   so the durable match write is never undone by a recalc problem. The
   router additionally wraps the to_thread call in its own try/except — that
   outer catch covers thread/cancellation boundary errors that the
   in-function catch cannot reach.
+
+This module builds no Pg adapters and never imports the database layer
+(AUD-054): ``recalculate_for_work_sync`` depends only on the repository
+ports in
+``backend.repositories``, bundled into ``RecalcRepos``. The concrete wiring
+— opening a sync connection and constructing the three Pg repositories —
+lives in ``backend.services.repository_factory.recalc_repos``, which the
+manual-resolve router passes in as ``repos_factory``. Every new collaborator
+the recalc needs means editing ``RecalcRepos`` and ``recalc_repos``, not this
+function's signature (same precedent as ``IdentityMatchingRepos``).
 
 This file deliberately avoids both ``match_repo`` and the pre-existing raw
 SQL in ``routers/matching.resolve_identity``: the manual-resolve endpoint
@@ -24,20 +35,40 @@ branch. Refactoring the whole endpoint onto repositories is a separate PR.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
 from psycopg import AsyncConnection
 
-from backend.db.repositories.library_files import PgLibraryFileRepository
-from backend.db.repositories.recordings import PgRecordingRepository
-from backend.db.repositories.song_masters import PgSongMasterRepository
-from backend.db.sync_conn import connect_sync
 from backend.domain.enums import MatchTier, TargetType
+from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.recordings import RecordingRepository
+from backend.repositories.song_masters import SongMasterRepository
 from backend.services import master_selection_service
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class RecalcRepos:
+    """Repository ports (+ commit) that ``recalculate_for_work_sync`` needs.
+
+    Built by ``backend.services.repository_factory.recalc_repos`` from a
+    db_url; the caller (the manual-resolve router) passes that function in
+    as ``repos_factory`` so this module never imports the concrete adapters.
+    """
+
+    song_masters: SongMasterRepository
+    recordings: RecordingRepository
+    library_files: LibraryFileRepository
+    commit: Callable[[], None]
+
+
+RecalcReposFactory = Callable[[str], AbstractContextManager[RecalcRepos]]
 
 
 class IdentityResolutionError(Exception):
@@ -108,23 +139,28 @@ async def persist_manual_match(
     return derived_work_id
 
 
-def recalculate_for_work_sync(db_url: str, work_id: str) -> None:
+def recalculate_for_work_sync(
+    db_url: str,
+    work_id: str,
+    repos_factory: RecalcReposFactory,
+) -> None:
     """Re-run song-master selection for a single work_id, post-commit.
 
     Best-effort: any failure is caught and logged here so the
-    already-committed manual match is not undone. Opens its own sync
-    connection (the async endpoint connection has already been committed
-    and released by the time this runs in a worker thread).
+    already-committed manual match is not undone. ``repos_factory`` opens
+    its own connection (the async endpoint connection has already been
+    committed and released by the time this runs in a worker thread) —
+    in production this is ``repository_factory.recalc_repos``.
     """
     try:
-        with connect_sync(db_url) as conn:
+        with repos_factory(db_url) as repos:
             master_selection_service.recalculate_song_masters(
                 work_ids=[work_id],
-                song_master_repo=PgSongMasterRepository(conn),
-                recording_repo=PgRecordingRepository(conn),
-                library_file_repo=PgLibraryFileRepository(conn),
+                song_master_repo=repos.song_masters,
+                recording_repo=repos.recordings,
+                library_file_repo=repos.library_files,
             )
-            conn.commit()
+            repos.commit()
     except Exception:  # noqa: BLE001
         # Swallow-and-log: the durable write already committed in the
         # endpoint's async txn. Master selection is idempotent and will

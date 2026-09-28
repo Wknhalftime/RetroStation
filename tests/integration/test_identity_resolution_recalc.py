@@ -26,7 +26,7 @@ from backend.domain.catalog import Recording
 from backend.domain.enums import VersionType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services import identity_resolution_service, master_selection_service
-from backend.services.repository_factory import RepositoryFactory
+from backend.services.repository_factory import RepositoryFactory, recalc_repos
 
 pytestmark = pytest.mark.integration
 
@@ -87,7 +87,9 @@ class TestRecalculateForWorkSyncHappyPath:
             real_recalculate(work_ids, **kwargs)  # type: ignore[arg-type]
 
         monkeypatch.setattr(master_selection_service, "recalculate_song_masters", _spy_recalculate)
-        identity_resolution_service.recalculate_for_work_sync(migrated_db, target_work_id)
+        identity_resolution_service.recalculate_for_work_sync(
+            migrated_db, target_work_id, recalc_repos
+        )
 
         assert captured_work_ids == [[target_work_id]]
 
@@ -112,7 +114,9 @@ class TestRecalculateForWorkSyncFailureSwallowing:
         bad_url = _bad_db_url(migrated_db)
 
         with capture_logs() as events:
-            identity_resolution_service.recalculate_for_work_sync(bad_url, "some-work-id")
+            identity_resolution_service.recalculate_for_work_sync(
+                bad_url, "some-work-id", recalc_repos
+            )
 
         warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed_inner"]
         assert len(warnings) == 1
@@ -139,7 +143,9 @@ class TestRecalculateForWorkSyncFailureSwallowing:
         monkeypatch.setattr(master_selection_service, "recalculate_song_masters", _boom)
 
         with capture_logs() as events:
-            identity_resolution_service.recalculate_for_work_sync(migrated_db, work_id)
+            identity_resolution_service.recalculate_for_work_sync(
+                migrated_db, work_id, recalc_repos
+            )
 
         warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed_inner"]
         assert len(warnings) == 1
