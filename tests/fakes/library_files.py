@@ -24,25 +24,28 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
         existing = self.get_by_path(file.file_path)
-        if existing:
-            unchanged = _stat_unchanged(existing, file)
-            if unchanged:
-                file.enrichment_status = existing.enrichment_status
-            if file.audio_hash is None and unchanged:
-                file.audio_hash = existing.audio_hash
-            # Mirrors the PG COALESCE: a fresh extraction carries no links,
-            # and must not erase the ones grouping/enrichment already built.
-            if file.work_id is None:
-                file.work_id = existing.work_id
-            if file.recording_id is None:
-                file.recording_id = existing.recording_id
-            file.file_status = FileStatus.PRESENT
-            # ON CONFLICT (file_path) updates the row in place: its id stays.
-            file.id = existing.id
-            self._data[existing.id] = file
+        if existing is None:
+            self._data[file.id] = file
             return file
-        self._data[file.id] = file
-        return file
+        # Pg updates the stored row, never the caller's object: the caller
+        # keeps its fresh id and its (absent) links.
+        stored = dataclasses.replace(file)
+        unchanged = _stat_unchanged(existing, file)
+        if unchanged:
+            stored.enrichment_status = existing.enrichment_status
+        if file.audio_hash is None and unchanged:
+            stored.audio_hash = existing.audio_hash
+        # Mirrors the PG COALESCE: a fresh extraction carries no links,
+        # and must not erase the ones grouping/enrichment already built.
+        if file.work_id is None:
+            stored.work_id = existing.work_id
+        if file.recording_id is None:
+            stored.recording_id = existing.recording_id
+        stored.file_status = FileStatus.PRESENT
+        # ON CONFLICT (file_path) updates the row in place: its id stays.
+        stored.id = existing.id
+        self._data[existing.id] = stored
+        return stored
 
     def upsert_write_only(self, file: LibraryFile) -> None:
         self.upsert(file)

@@ -313,3 +313,19 @@ def test_fake_audio_hash_lookups_mirror_pg() -> None:
     assert repo.set_audio_hash(pending.id, _H2, 100, 2_000) is False
     assert repo.set_audio_hash(pending.id, _H2, 100, 1_000) is True
     assert repo.count_audio_unhashed() == 0
+
+
+def test_upsert_of_an_indexed_path_leaves_the_callers_object_alone() -> None:
+    """Like Pg, the stored row keeps its id and work; the fresh read is not rewritten."""
+    repo = FakeLibraryFileRepository()
+    stored = repo.upsert(_stat_row("/m/kiss.flac"))
+    repo.update_work_id(stored.id, "w-kiss")
+    fresh = _stat_row("/m/kiss.flac")
+    fresh_id = fresh.id
+
+    returned = repo.upsert(fresh)
+
+    assert (fresh.id, fresh.work_id) == (fresh_id, None)
+    assert (returned.id, returned.work_id) == (stored.id, "w-kiss")
+    row = repo.get_by_path("/m/kiss.flac")
+    assert row is not None and (row.id, row.work_id) == (stored.id, "w-kiss")
