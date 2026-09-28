@@ -13,7 +13,11 @@ from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, MatchStatus, ReasonCode, TaskType
-from backend.services.artist_matching_service import match_artists_for_playlist
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    ArtistMatchThresholds,
+    match_artists_for_playlist,
+)
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.tasks._error_boundary import task_failure_telemetry
 from backend.tasks.huey_app import huey
@@ -70,19 +74,25 @@ def artist_matching_task(playlist_id: str) -> None:
                 identities_reset=identities_reset,
             )
 
-            match_artists_for_playlist(
-                playlist_id=pid,
+            repos = ArtistMatchingRepos(
                 broadcast_artist_repo=broadcast_artist_repo,
                 track_identity_repo=track_identity_repo,
                 artist_repo=PgArtistRepository(conn),
                 match_repo=PgMatchRepository(conn),
                 rules_repo=PgMappingRuleRepository(conn),
-                mb_client=mb_client,
+            )
+            thresholds = ArtistMatchThresholds(
                 strong_match_threshold=settings.strong_match_threshold,
                 mb_score_gap=settings.mb_score_gap,
                 mb_auto_link_score=settings.mb_auto_link_score,
-                broadcast_name_max_len=settings.broadcast_name_max_len,
                 min_presentation_score=settings.min_presentation_score,
+                broadcast_name_max_len=settings.broadcast_name_max_len,
+            )
+            match_artists_for_playlist(
+                playlist_id=pid,
+                repos=repos,
+                mb_client=mb_client,
+                thresholds=thresholds,
             )
             conn.commit()
 

@@ -16,16 +16,22 @@ and the AUTO_REJECTED cascade preserved from the legacy implementation.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 from uuid import uuid4
 
 import httpx
+import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.matching import MappingRule
-from backend.services.artist_matching_service import match_artists_for_playlist
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    ArtistMatchThresholds,
+    match_artists_for_playlist,
+)
 from backend.services.matching_constants import MB_SCORE_GAP
 from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
@@ -49,6 +55,30 @@ def _pending_artist(
     broadcast_artist_repo.upsert(artist)
     broadcast_artist_repo.register_playlist_artist(playlist_id, artist.id)  # type: ignore[arg-type]
     return artist
+
+
+def test_artist_matching_repos_is_frozen() -> None:
+    """`frozen=True` is load-bearing: AUD-040 exists precisely so this object
+    is built once per task and never mutated afterwards. Guards against the
+    `frozen=True` -> `frozen=False` mutant."""
+    repos = ArtistMatchingRepos(
+        broadcast_artist_repo=FakeBroadcastArtistRepository(),
+        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+        artist_repo=FakeArtistRepository(),
+        match_repo=FakeMatchRepository(),
+        rules_repo=FakeMappingRuleRepository(),
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        repos.match_repo = FakeMatchRepository()  # type: ignore[misc]
+
+
+def test_artist_match_thresholds_is_frozen() -> None:
+    """Same rationale as `test_artist_matching_repos_is_frozen`: the
+    thresholds object is threaded through `_run_local_phase` and
+    `_run_mb_or_deferred_phase` and must not be mutable in transit."""
+    thresholds = ArtistMatchThresholds()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        thresholds.mb_auto_link_score = 1  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -77,11 +107,13 @@ def test_match_artists_rule_hit_creates_match_with_manual_tier() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=FakeArtistRepository(),
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -118,11 +150,13 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -167,11 +201,13 @@ def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -217,11 +253,13 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -259,13 +297,17 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
-        mb_score_gap=MB_SCORE_GAP,
+        thresholds=ArtistMatchThresholds(
+            mb_score_gap=MB_SCORE_GAP,
+        ),
     )
 
     stored = broadcast_artist_repo.get_by_id(artist.id)
@@ -290,11 +332,13 @@ def test_match_artists_unresolved_non_truncated_persists_deferred_retry() -> Non
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=FakeArtistRepository(),
-        match_repo=FakeMatchRepository(),
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=FakeMatchRepository(),
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -331,11 +375,13 @@ def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=mb_client,
     )
 
@@ -371,11 +417,13 @@ def test_match_artists_auto_rejected_cascades_to_identity_bulk_reject() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=FakeArtistRepository(),
-        match_repo=FakeMatchRepository(),
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=FakeArtistRepository(),
+            match_repo=FakeMatchRepository(),
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -568,11 +616,13 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=mb,
     )
 
@@ -606,11 +656,13 @@ def test_match_artists_empty_bucket_skips_live_call() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=mb,
     )
 
@@ -662,11 +714,13 @@ def test_match_artists_emits_mb_task_summary() -> None:
     with capture_logs() as events:
         match_artists_for_playlist(
             playlist_id=playlist_id,
-            broadcast_artist_repo=broadcast_artist_repo,
-            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-            artist_repo=artist_repo,
-            match_repo=match_repo,
-            rules_repo=FakeMappingRuleRepository(),
+            repos=ArtistMatchingRepos(
+                broadcast_artist_repo=broadcast_artist_repo,
+                track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+                artist_repo=artist_repo,
+                match_repo=match_repo,
+                rules_repo=FakeMappingRuleRepository(),
+            ),
             mb_client=mb,
         )
 
@@ -712,11 +766,13 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
     with capture_logs() as events, contextlib.suppress(httpx.HTTPError):
         match_artists_for_playlist(
             playlist_id=playlist_id,
-            broadcast_artist_repo=broadcast_artist_repo,
-            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
-            artist_repo=artist_repo,
-            match_repo=match_repo,
-            rules_repo=FakeMappingRuleRepository(),
+            repos=ArtistMatchingRepos(
+                broadcast_artist_repo=broadcast_artist_repo,
+                track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+                artist_repo=artist_repo,
+                match_repo=match_repo,
+                rules_repo=FakeMappingRuleRepository(),
+            ),
             mb_client=mb,
         )
 
@@ -833,11 +889,13 @@ def test_mb_auto_matched_triggers_catalog_upsert_from_orchestration() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -876,11 +934,13 @@ def test_orchestration_non_truncated_unresolved_persists_deferred_retry_no_mb_ca
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -918,11 +978,13 @@ def test_orchestration_truncated_unresolved_calls_mb() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -950,11 +1012,13 @@ def test_orchestration_truncated_with_no_mb_candidates_falls_to_deferred() -> No
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -989,11 +1053,13 @@ def test_orchestration_local_match_always_wins_over_truncation_check() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=artist_repo,
-        match_repo=match_repo,
-        rules_repo=rules_repo,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
         mb_client=mb_client,
     )
 
@@ -1027,11 +1093,13 @@ def test_match_artists_deferred_retry_cascades_to_identity_bulk_defer() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        broadcast_artist_repo=broadcast_artist_repo,
-        track_identity_repo=track_identity_repo,
-        artist_repo=FakeArtistRepository(),
-        match_repo=FakeMatchRepository(),
-        rules_repo=FakeMappingRuleRepository(),
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=track_identity_repo,
+            artist_repo=FakeArtistRepository(),
+            match_repo=FakeMatchRepository(),
+            rules_repo=FakeMappingRuleRepository(),
+        ),
         mb_client=FakeMbClient(),
     )
 
@@ -1096,3 +1164,151 @@ def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
     assert did_after is not None
     assert did_after.match_status == MatchStatus.NEEDS_REVIEW
     assert did_after.reason_code == ReasonCode.DEFERRED_RETRY
+
+
+# ---------------------------------------------------------------------------
+# Threshold-default boundary regressions (AUD-040 gate 2)
+# ---------------------------------------------------------------------------
+#
+# Mutation baseline for artist_matching_service.py surfaced surviving
+# NumberReplacer mutants on two of match_artists_for_playlist's defaults:
+# strong_match_threshold=80 -> 79, and broadcast_name_max_len=30 -> 29. Both
+# defaults move into ArtistMatchThresholds during the AUD-040 refactor, so
+# pin them here before touching the signature.
+
+
+def test_match_artists_default_strong_threshold_boundary_stays_needs_review() -> None:
+    """A canonical scoring ~79.25 (gap >> MB_SCORE_GAP) against a distant
+    runner-up must stay NEEDS_REVIEW/LOW_CONFIDENCE at the real
+    strong_match_threshold default (80), and would wrongly AUTO_MATCH if the
+    default silently drifted to 79.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    artist_repo = FakeArtistRepository()
+
+    artist_repo.upsert(
+        Artist(
+            id="mbid-boundary-fuzzy",
+            name="boundary artist   mv  xampie",
+            sort_name="boundary artist   mv  xampie",
+            mbid="mbid-boundary-fuzzy",
+            normalized_name=normalize_artist("boundary artist   mv  xampie"),
+        )
+    )
+    artist_repo.upsert(
+        Artist(
+            id="mbid-unrelated",
+            name="Totally Unrelated Combo Words",
+            sort_name="Totally Unrelated Combo Words",
+            mbid="mbid-unrelated",
+            normalized_name=normalize_artist("Totally Unrelated Combo Words"),
+        )
+    )
+
+    artist = _pending_artist("Boundary Artist Name Example", broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=artist_repo,
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
+        mb_client=FakeMbClient(),
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+
+
+def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> None:
+    """An MB candidate scoring exactly 80 with a distant runner-up (gap >>
+    MB_SCORE_GAP) must AUTO_MATCH at the real strong_match_threshold default
+    (80), and would wrongly stay NEEDS_REVIEW if the default silently
+    drifted to 81 — a second off-by-one mutant on this exact default
+    (80 -> 81) previously survived mutation testing. Uses the MB tier (exact
+    integer scores) rather than fuzzy text so the boundary is unambiguous.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+
+    # Truncated (len >= 28, alnum end) so Phase 2 reaches MusicBrainzApiStrategy;
+    # no canonicals/rules seeded so Phase 1 always falls through to Phase 2.
+    name = "Boundary Threshold Broadcastt"
+    assert len(name) == 29
+
+    mb_client = FakeMbClient(
+        responses={
+            name: [
+                {"id": "mb-80", "score": 80, "name": name},
+                {"id": "mb-60", "score": 60, "name": name},
+            ]
+        }
+    )
+
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
+        mb_client=mb_client,
+    )
+
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    created = match_repo.get_by_artist(artist.id)
+    assert created is not None
+    assert created.target_id == "mb-80"
+    assert created.confidence_score == 80.0
+
+
+def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:
+    """A 27-character name is NOT truncated at the real broadcast_name_max_len
+    default (30) — it must park in NEEDS_REVIEW/DEFERRED_RETRY without ever
+    calling MusicBrainz. At a mutated default of 29 this same name crosses
+    the truncation heuristic (len >= max_len - 2) and triggers a live MB
+    search instead.
+    """
+    playlist_id = uuid4()
+    broadcast_artist_repo = FakeBroadcastArtistRepository()
+    match_repo = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    mb_client = FakeMbClient()
+
+    name = "Not Truncated Combo Names77"
+    assert len(name) == 27
+    artist = _pending_artist(name, broadcast_artist_repo, playlist_id)
+
+    match_artists_for_playlist(
+        playlist_id=playlist_id,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=broadcast_artist_repo,
+            track_identity_repo=FakeBroadcastTrackIdentityRepository(),
+            artist_repo=FakeArtistRepository(),
+            match_repo=match_repo,
+            rules_repo=rules_repo,
+        ),
+        mb_client=mb_client,
+    )
+
+    assert mb_client.calls == []
+    stored = broadcast_artist_repo.get_by_id(artist.id)
+    assert stored is not None
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.reason_code == ReasonCode.DEFERRED_RETRY

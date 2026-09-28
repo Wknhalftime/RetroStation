@@ -18,8 +18,14 @@ from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.domain.broadcast import BroadcastStation
 from backend.domain.enums import MatchStatus
-from backend.services.artist_matching_service import match_artists_for_playlist
-from backend.services.identity_matching_service import match_identities_for_playlist
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    match_artists_for_playlist,
+)
+from backend.services.identity_matching_service import (
+    IdentityMatchingRepos,
+    match_identities_for_playlist,
+)
 from backend.services.ingestion_service import ingest_csv
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.mb_client import FakeMbClient
@@ -96,11 +102,13 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
 
         match_artists_for_playlist(
             playlist_id=playlist_id,
-            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
-            artist_repo=PgArtistRepository(conn),
-            match_repo=PgMatchRepository(conn),
-            rules_repo=PgMappingRuleRepository(conn),
+            repos=ArtistMatchingRepos(
+                broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+                track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+                artist_repo=PgArtistRepository(conn),
+                match_repo=PgMatchRepository(conn),
+                rules_repo=PgMappingRuleRepository(conn),
+            ),
             mb_client=fake_mb,
         )
         conn.commit()
@@ -120,13 +128,15 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         # Step 4: Identity matching (no library → NEEDS_REVIEW)
         match_identities_for_playlist(
             playlist_id=playlist_id,
-            track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
-            broadcast_artist_repo=PgBroadcastArtistRepository(conn),
-            match_repo=PgMatchRepository(conn),
-            library_file_repo=FakeLibraryFileRepository(),
-            rules_repo=PgMappingRuleRepository(conn),
+            repos=IdentityMatchingRepos(
+                track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
+                broadcast_artist_repo=PgBroadcastArtistRepository(conn),
+                match_repo=PgMatchRepository(conn),
+                library_file_repo=FakeLibraryFileRepository(),
+                rules_repo=PgMappingRuleRepository(conn),
+                catalog_repo=PgArtistRepository(conn),
+            ),
             mb_client=FakeMbClient(),
-            catalog_repo=PgArtistRepository(conn),
         )
         conn.commit()
 
