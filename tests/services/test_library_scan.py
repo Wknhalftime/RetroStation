@@ -8,6 +8,7 @@ missing.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -18,7 +19,9 @@ from mutagen._util import MutagenError
 
 from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.library_scan_service import (
+    DiskStat,
     _extract_audio_stream_metrics,
+    _extract_first_tag_value,
     _parse_slash_int,
     _sanitise_tag_value,
     _to_release_status,
@@ -467,6 +470,32 @@ class TestTagParseFallbacks:
         fake_audio.info = None
 
         assert _extract_audio_stream_metrics(fake_audio) == (None, None)
+
+    def test_extract_audio_stream_metrics_bitrate_is_bits_per_second_floor_divided_by_1000(
+        self,
+    ) -> None:
+        """AUD-009 gate 2: kills the FloorDiv/NumberReplacer survivors on this line."""
+        fake_audio = MagicMock()
+        fake_audio.info.length = 10.0
+        fake_audio.info.bitrate = 1_000_000
+
+        _duration_ms, bitrate = _extract_audio_stream_metrics(fake_audio)
+
+        assert bitrate == 1000
+
+
+def test_extract_first_tag_value_uses_the_first_of_several_list_elements() -> None:
+    """AUD-009 gate 2: every existing fixture's list tags have one element, so a
+    survived mutant swapping index 0 for 1 went uncaught."""
+    assert _extract_first_tag_value({"key": ["first", "second"]}, "key") == "first"
+
+
+def test_disk_stat_is_frozen() -> None:
+    """AUD-009 gate 2: kills the ReplaceTrueWithFalse survivor on frozen=True."""
+    stat = DiskStat(size=1, mtime_ns=1)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        stat.size = 2  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
