@@ -91,6 +91,9 @@ target-version = "py313"
 # RUFF_PROPOSED; adopting one means moving it here.
 select = ["E", "F", "I", "UP", "B", "SIM", "N", "BLE"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
