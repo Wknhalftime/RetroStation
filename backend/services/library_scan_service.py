@@ -3,7 +3,8 @@ Library scan service — tag extraction and directory walking.
 
 Public API:
   read_tags(path)          -> LibraryFile  (tags, stat, a FLAC's stored audio MD5;
-                                            raises MutagenError on an unreadable file)
+                                            raises OSError on a file it cannot stat,
+                                            MutagenError on an unreadable one)
   scan_directory(root, on_progress=None, on_file=None, on_quarantine=None)
                            -> (list[LibraryFile], list[LibraryQuarantine])
 
@@ -310,15 +311,13 @@ def disk_stat(path: Path) -> DiskStat:
     return DiskStat(size=st.st_size, mtime_ns=st.st_mtime_ns)
 
 
-def _with_disk_stat(lf: LibraryFile, path: Path) -> LibraryFile:
+def _with_disk_stat(lf: LibraryFile, stat: DiskStat) -> LibraryFile:
     """Stamp the on-disk stat onto a freshly extracted file.
 
-    Taken after the tags are read and before a FLAC's stored MD5 is
-    confirmed, so a file rewritten after this point keeps a stored stat
-    that no longer matches, and the next scan re-reads it rather than
-    trusting it. A rewrite during the tag read itself is not caught.
+    *stat* is taken before the file is parsed, so a file rewritten while
+    or after it is read keeps a stored stat that no longer matches, and
+    the next scan re-reads it rather than trusting it.
     """
-    stat = disk_stat(path)
     lf.file_size = stat.size
     lf.file_mtime_ns = stat.mtime_ns
     return lf
@@ -378,13 +377,14 @@ def read_tags(path: Path) -> LibraryFile:
     reading only the file's header and tag blocks.
 
     A file without a stored MD5 (every MP3, a FLAC with none) is left with no
-    audio hash: its audio is not read here. Raises :exc:`mutagen.MutagenError`
-    if the file cannot be read or parsed.
+    audio hash: its audio is not read here. Raises :exc:`OSError` if the file
+    cannot be stat'ed, :exc:`mutagen.MutagenError` if it cannot be read or parsed.
     """
+    stat = disk_stat(path)
     audio: MutagenFileType | None = mutagen.File(str(path), easy=False)  # type: ignore[attr-defined]
     if audio is None:
         raise MutagenError(f"mutagen could not identify file: {path}")
-    lf = _with_disk_stat(_extract_by_format(audio, path), path)
+    lf = _with_disk_stat(_extract_by_format(audio, path), stat)
     lf.audio_hash = _stored_audio_hash(audio, path)
     return lf
 

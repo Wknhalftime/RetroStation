@@ -8,9 +8,11 @@ missing.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import mutagen
 import pytest
 from mutagen._util import MutagenError
 
@@ -20,6 +22,7 @@ from backend.services.library_scan_service import (
     read_tags,
     scan_directory,
 )
+from tests.fixtures.audio_builders import tag_flac, write_flac
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -112,6 +115,26 @@ class TestWellTaggedMp3:
         st = path.stat()
         assert lf.file_size == st.st_size
         assert lf.file_mtime_ns == st.st_mtime_ns
+
+
+def test_a_retag_during_the_tag_read_leaves_a_stale_stored_stat(tmp_path: Path) -> None:
+    """The stat is taken before the read, so the next scan sees the rewrite and re-reads."""
+    path = write_flac(tmp_path / "a.flac", [(300, -300)])
+    tag_flac(path, {"title": "Kiss"})
+    before = path.stat()
+    real_parse = mutagen.File  # type: ignore[attr-defined]
+
+    def parse_then_retag(*args: object, **kwargs: object) -> object:
+        audio = real_parse(*args, **kwargs)
+        tag_flac(path, {"title": "Kiss (Extended Version)"})
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+        return audio
+
+    with patch("mutagen.File", side_effect=parse_then_retag):
+        lf = read_tags(path)
+
+    assert lf.audio.track_title == "Kiss"
+    assert (lf.file_size, lf.file_mtime_ns) == (before.st_size, before.st_mtime_ns)
 
 
 # ---------------------------------------------------------------------------
