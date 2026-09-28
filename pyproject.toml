@@ -138,7 +138,7 @@ layers = [
     "backend.main",
     "backend.routers | backend.tasks",
     "backend.services",
-    "backend.db",
+    "backend.db | backend.playout",
     "backend.repositories",
     "backend.domain",
 ]
@@ -176,7 +176,15 @@ name = "Domain stays pure (stdlib only today)"
 type = "forbidden"
 source_modules = ["backend.domain"]
 forbidden_modules = ["fastapi", "psycopg", "huey", "httpx", "mutagen",
-                     "backend.db", "backend.services", "backend.repositories"]
+                     "backend.db", "backend.services", "backend.repositories",
+                     "backend.playout"]
+
+[[tool.importlinter.contracts]]
+name = "Playout takes primitives: it imports nothing else from backend"
+type = "forbidden"
+source_modules = ["backend.playout"]
+forbidden_modules = ["backend.domain", "backend.services", "backend.repositories",
+                     "backend.db", "backend.routers", "backend.tasks", "backend.main"]
 
 # ---- one command per audit step ----
 [tool.poe.env]
