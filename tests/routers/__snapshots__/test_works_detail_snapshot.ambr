@@ -1,0 +1,121 @@
+# serializer version: 1
+# name: test_rich_real_work_detail_snapshot
+  dict({
+    'artist_id': 'a-snapshot-rich',
+    'format_overrides': list([
+      dict({
+        'created_at': '<TIMESTAMP>',
+        'format_name': 'flac',
+        'id': '00000000-0000-4000-8000-0000000000c1',
+        'notes': None,
+        'preferred_file_id': '00000000-0000-4000-8000-0000000000a2',
+      }),
+      dict({
+        'created_at': '<TIMESTAMP>',
+        'format_name': 'mp3',
+        'id': '00000000-0000-4000-8000-0000000000c2',
+        'notes': 'mp3 override',
+        'preferred_file_id': '00000000-0000-4000-8000-0000000000a1',
+      }),
+    ]),
+    'id': 'w-snapshot-rich',
+    'recordings': list([
+      dict({
+        'duration_ms': None,
+        'files': list([
+        ]),
+        'id': 'r-snapshot-no-files',
+        'title': 'Recording With No Files',
+        'version_type': 'live',
+      }),
+      dict({
+        'duration_ms': None,
+        'files': list([
+          dict({
+            'bitrate': 320,
+            'duration_ms': 111000,
+            'enrichment_status': 'pending',
+            'file_path': '/music/snapshot/a.flac',
+            'file_status': 'present',
+            'format': 'flac',
+            'id': '00000000-0000-4000-8000-0000000000a1',
+            'release_title': 'Snapshot Album',
+            'track_title': 'Track Title',
+          }),
+          dict({
+            'bitrate': 320,
+            'duration_ms': 222000,
+            'enrichment_status': 'pending',
+            'file_path': '/music/snapshot/b.flac',
+            'file_status': 'present',
+            'format': 'flac',
+            'id': '00000000-0000-4000-8000-0000000000a2',
+            'release_title': 'Snapshot Album',
+            'track_title': 'Track Title',
+          }),
+        ]),
+        'id': 'r-snapshot-with-files',
+        'title': 'Recording With Files',
+        'version_type': 'original',
+      }),
+      dict({
+        'duration_ms': None,
+        'files': list([
+          dict({
+            'bitrate': 320,
+            'duration_ms': 333000,
+            'enrichment_status': 'pending',
+            'file_path': '/music/snapshot/orphan.flac',
+            'file_status': 'present',
+            'format': 'flac',
+            'id': '00000000-0000-4000-8000-0000000000a3',
+            'release_title': 'Snapshot Album',
+            'track_title': 'Track Title',
+          }),
+        ]),
+        'id': 'orphan:w-snapshot-rich',
+        'title': 'Snapshot Work',
+        'version_type': 'original',
+      }),
+    ]),
+    'song_master': dict({
+      'id': '00000000-0000-4000-8000-0000000000b1',
+      'preferred_file_id': '00000000-0000-4000-8000-0000000000a1',
+      'score': None,
+      'selection_method': 'manual',
+      'updated_at': '<TIMESTAMP>',
+    }),
+    'title': 'Snapshot Work',
+  })
+# ---
+# name: test_synthetic_work_detail_snapshot
+  dict({
+    'artist_id': 'a-snapshot-synthetic',
+    'format_overrides': list([
+    ]),
+    'id': 'syn_YS1zbmFwc2hvdC1zeW50aGV0aWM6U25hcHNob3QgU3ludGhldGljIFRyYWNr',
+    'recordings': list([
+      dict({
+        'duration_ms': 456000,
+        'files': list([
+          dict({
+            'bitrate': 320,
+            'duration_ms': 456000,
+            'enrichment_status': 'pending',
+            'file_path': '/music/snapshot/synthetic.flac',
+            'file_status': 'present',
+            'format': 'flac',
+            'id': '00000000-0000-4000-8000-0000000000d1',
+            'release_title': 'Snapshot Album',
+            'track_title': 'Snapshot Synthetic Track',
+          }),
+        ]),
+        'id': 'syn_YS1zbmFwc2hvdC1zeW50aGV0aWM6U25hcHNob3QgU3ludGhldGljIFRyYWNr',
+        'title': 'Snapshot Synthetic Track',
+        'version_type': 'original',
+      }),
+    ]),
+    'song_master': None,
+    'title': 'Snapshot Synthetic Track',
+  })
+# ---
