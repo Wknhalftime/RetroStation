@@ -51,6 +51,7 @@ dev = [
     "pre-commit",
     # mutation testing (poe mutate-<module>, refactor gate step 2)
     "cosmic-ray>=8.7",
+    "psutil>=7.2.2",
 ]
 
 [tool.pytest.ini_options]
@@ -90,6 +91,9 @@ target-version = "py313"
 # Enforced in CI and pre-commit. Rules the audit proposes are in [tool.poe.env]
 # RUFF_PROPOSED; adopting one means moving it here.
 select = ["E", "F", "I", "UP", "B", "SIM", "N", "BLE"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
