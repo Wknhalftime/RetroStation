@@ -389,3 +389,49 @@ def test_plan_pairs_a_missing_row_with_its_audio_twin_despite_new_tags(
         plan = plan_for_library(repos.library_files)
 
     assert [(m.missing_id, m.successor_id) for m in plan.moves] == [(old.id, new.id)]
+
+
+def _promo_file(
+    repos: RepositoryFactory,
+    path: str,
+    work_id: str,
+    audio: AudioMetadata,
+) -> LibraryFile:
+    return repos.library_files.upsert(
+        LibraryFile(id=uuid4(), file_path=path, format="flac", work_id=work_id, audio=audio)
+    )
+
+
+def test_plan_pairs_a_moved_file_whose_release_title_was_repunctuated(
+    migrated_db: str,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    before = AudioMetadata(
+        release_title="Promo Only: Mainstream Radio (March 1999)",
+        track_number=14,
+        duration_ms=266_000,
+        normalized_artist_name="mariah carey",
+        normalized_title="heartbreaker",
+    )
+    after = replace(
+        before,
+        release_title="Promo Only: Mainstream Radio, March 1999",
+        recording_mbid="rec-heartbreaker",
+        release_mbid="rel-promo-1999-03",
+        duration_ms=267_500,
+    )
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("Mariah Carey", "mariah carey")
+        work = repos.works.create_local("Heartbreaker", artist_id)
+        old = _promo_file(
+            repos, str(tmp_path / "14 Mariah Carey - Heartbreaker.flac"), work, before
+        )
+        repos.library_files.mark_missing(old.file_path)
+        new = _promo_file(repos, str(tmp_path / "14 Heartbreaker.flac"), work, after)
+
+        plan = plan_for_library(repos.library_files)
+
+    assert [(m.missing_id, m.successor_id) for m in plan.moves] == [(old.id, new.id)]

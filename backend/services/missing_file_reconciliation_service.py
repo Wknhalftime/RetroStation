@@ -7,8 +7,12 @@ matches and song-master pick. For each missing row this finds the one
 present row holding the same track, its successor, the way Navidrome pairs
 missing tracks by persistent ID, with the audio fingerprint as the first,
 exact rule: an audio match wins outright once every hashable candidate has
-its fingerprint, and until then the pairing waits for a later run. Rows
-with no successor, or several equally good ones, are left alone.
+its fingerprint, and until then the pairing waits for a later run. Without
+one, durations within 2 s and either the same recording and release MBIDs,
+or the same artist, disc, track number and title on the same release, where
+release titles are compared by their letters and digits only (Picard turns
+"Radio (March 1999)" into "Radio, March 1999"). Rows with no successor, or
+several equally good ones, are left alone.
 """
 
 from __future__ import annotations
@@ -49,10 +53,23 @@ def _same_recording(a: LibraryFile, b: LibraryFile) -> bool:
     )
 
 
+def release_key(title: str | None) -> str | None:
+    """*title* casefolded, with only its letters and digits; None when it has none.
+
+    A retag that re-punctuates a release ("Radio (March 1999)" to "Radio,
+    March 1999") keeps its key. Words are not rewritten: "&" is not "and".
+    """
+    if title is None:
+        return None
+    key = "".join(c for c in title.casefold() if c.isalnum())
+    return key or None
+
+
 def _release_track(f: LibraryFile) -> tuple[object, ...] | None:
     a = f.audio
+    release = release_key(a.release_title)
     if (
-        a.release_title is None
+        release is None
         or a.track_number is None
         or a.normalized_title is None
         or a.normalized_artist_name is None
@@ -60,7 +77,7 @@ def _release_track(f: LibraryFile) -> tuple[object, ...] | None:
         return None
     return (
         a.normalized_artist_name,
-        a.release_title,
+        release,
         a.disc_number,
         a.track_number,
         a.normalized_title,
@@ -76,7 +93,8 @@ def is_same_track(missing: LibraryFile, candidate: LibraryFile) -> bool:
 
     The same audio fingerprint, whatever the tags now say. Otherwise, with
     durations within 2 s: the same recording on the same release, or the
-    same artist's track number and title on the same release.
+    same artist's disc, track number and title on a release whose title
+    has the same letters and digits (release_key).
     """
     if _same_audio(missing, candidate):
         return True
@@ -106,13 +124,13 @@ def _release_track_twins(
     a = missing.audio
     if (
         a.normalized_artist_name is None
-        or a.release_title is None
+        or release_key(a.release_title) is None
         or a.track_number is None
         or a.normalized_title is None
     ):
         return []
     return file_repo.get_present_by_track(
-        a.normalized_artist_name, a.release_title, a.track_number, a.normalized_title
+        a.normalized_artist_name, a.track_number, a.normalized_title
     )
 
 

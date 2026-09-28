@@ -11,6 +11,7 @@ from backend.services.missing_file_reconciliation_service import (
     choose_successor,
     is_same_track,
     plan_missing_file_moves,
+    release_key,
     successor_candidates,
 )
 from tests.fakes.library_files import FakeLibraryFileRepository
@@ -272,3 +273,109 @@ def test_several_audio_matches_without_a_name_match_do_not_fall_back_to_tags() -
     tag_match = _with_audio(_row(NEW), AudioHash(AudioHashKind.FLAC_MD5, "d" * 32))
 
     assert choose_successor(old, [twin_a, twin_b, tag_match]) is None
+
+
+PROMO_OLD_TITLE = "Promo Only: Mainstream Radio (March 1999)"
+PROMO_NEW_TITLE = "Promo Only: Mainstream Radio, March 1999"
+PROMO_OLD = r"D:\Music\Promo Only\Mainstream Radio 1999-03\14 Mariah Carey - Heartbreaker.flac"
+PROMO_NEW = r"D:\Music\Promo Only\Mainstream Radio, March 1999\14 Heartbreaker.flac"
+
+
+def test_release_key_ignores_punctuation_and_spacing() -> None:
+    assert release_key(PROMO_OLD_TITLE) == release_key(PROMO_NEW_TITLE)
+    assert release_key(PROMO_NEW_TITLE) == "promoonlymainstreamradiomarch1999"
+
+
+def test_release_key_ignores_case() -> None:
+    assert release_key("PULP FICTION") == release_key("Pulp Fiction")
+
+
+def test_release_key_does_not_equate_an_ampersand_with_and() -> None:
+    assert release_key("Rock & Roll") != release_key("Rock and Roll")
+
+
+def test_release_key_of_a_title_without_letters_or_digits_is_none() -> None:
+    assert release_key("...!?") is None
+    assert release_key("") is None
+    assert release_key(None) is None
+
+
+def test_release_key_keeps_non_latin_letters() -> None:
+    # "Kimi no Na wa." in Japanese, and "Serdtse - 2" in Cyrillic.
+    assert release_key("\u541b\u306e\u540d\u306f\u3002") == "\u541b\u306e\u540d\u306f"
+    assert release_key("\u0421\u0435\u0440\u0434\u0446\u0435 \u2014 2") == (
+        "\u0441\u0435\u0440\u0434\u0446\u0435" + "2"
+    )
+
+
+def _promo(
+    path: str,
+    release_title: str,
+    *,
+    missing: bool = False,
+    mbid: str | None = None,
+    disc_number: int | None = 1,
+    track_number: int = 14,
+    duration_ms: int = 266_000,
+) -> LibraryFile:
+    return _row(
+        path,
+        missing=missing,
+        recording_mbid=mbid,
+        release_mbid=None if mbid is None else "rel-promo-1999-03",
+        duration_ms=duration_ms,
+        release_title=release_title,
+        disc_number=disc_number,
+        track_number=track_number,
+        normalized_title="heartbreaker",
+        normalized_artist_name="mariah carey",
+    )
+
+
+def _old_promo() -> LibraryFile:
+    return _promo(PROMO_OLD, PROMO_OLD_TITLE, missing=True)
+
+
+def test_a_retag_that_only_repunctuates_the_release_title_pairs_the_moved_file() -> None:
+    repo = FakeLibraryFileRepository()
+    old = repo.upsert(_old_promo())
+    repo.mark_missing(PROMO_OLD)
+    new = repo.upsert(_promo(PROMO_NEW, PROMO_NEW_TITLE, mbid="rec-1", duration_ms=267_500))
+
+    plan = plan_missing_file_moves(repo.get_missing(), lambda m: successor_candidates(m, repo))
+
+    assert [(m.missing_id, m.successor_id) for m in plan.moves] == [(old.id, new.id)]
+
+
+def test_a_repunctuated_release_on_another_disc_or_track_is_not_the_same_track() -> None:
+    old = _old_promo()
+
+    assert not is_same_track(old, _promo(PROMO_NEW, PROMO_NEW_TITLE, disc_number=2))
+    assert not is_same_track(old, _promo(PROMO_NEW, PROMO_NEW_TITLE, track_number=15))
+
+
+def test_a_repunctuated_release_more_than_two_seconds_off_is_not_the_same_track() -> None:
+    new = _promo(PROMO_NEW, PROMO_NEW_TITLE, duration_ms=266_000 + 2_001)
+
+    assert not is_same_track(_old_promo(), new)
+
+
+def test_release_titles_without_letters_or_digits_are_not_the_same_release() -> None:
+    old = _promo(PROMO_OLD, "?!", missing=True)
+
+    assert not is_same_track(old, _promo(PROMO_NEW, "?!"))
+
+
+def test_two_releases_whose_titles_normalize_equal_are_ambiguous() -> None:
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_old_promo())
+    repo.mark_missing(PROMO_OLD)
+    repo.upsert(_promo(PROMO_NEW, PROMO_NEW_TITLE))
+    repo.upsert(
+        _promo(r"D:\Music\Copy\Heartbreaker.flac", "PROMO ONLY - Mainstream Radio: March, 1999")
+    )
+
+    plan = plan_missing_file_moves(repo.get_missing(), lambda m: successor_candidates(m, repo))
+
+    assert plan.moves == ()
+    assert plan.ambiguous == (PROMO_OLD,)

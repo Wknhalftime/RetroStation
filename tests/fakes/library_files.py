@@ -191,11 +191,10 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
-        key = (normalized_artist_name, release_title, track_number, normalized_title)
+        key = (normalized_artist_name, track_number, normalized_title)
         return sorted(
             (
                 f
@@ -203,7 +202,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 if f.file_status == FileStatus.PRESENT
                 and (
                     f.audio.normalized_artist_name,
-                    f.audio.release_title,
                     f.audio.track_number,
                     f.audio.normalized_title,
                 )

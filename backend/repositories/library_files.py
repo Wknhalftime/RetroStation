@@ -91,14 +91,14 @@ class LibraryFileRepository(ABC):
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
-        """PRESENT rows of this artist's track number on this release, in file_path order.
+        """PRESENT rows of this artist's track number with this title, in file_path order.
 
         The release-track half of missing-file reconciliation: a retag that
-        drops or changes MBIDs still keeps these tags.
+        drops or changes MBIDs still keeps these tags. Any release title is
+        returned, since a retag may re-punctuate it; the caller compares it.
         """
         ...
 

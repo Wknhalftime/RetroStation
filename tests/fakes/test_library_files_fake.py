@@ -258,7 +258,7 @@ def test_fake_missing_lookups_mirror_pg() -> None:
     gone = _track_file(repo, "/m/old.flac", missing=True)
 
     assert [f.id for f in repo.get_missing()] == [gone.id]
-    assert [f.id for f in repo.get_present_by_track("artist", "Album", 1, "song")] == [present.id]
+    assert [f.id for f in repo.get_present_by_track("artist", 1, "song")] == [present.id]
     assert [f.id for f in repo.get_by_recording_mbid("rec-1")] == [present.id]
     assert [f.id for f in repo.get_by_normalized_artist_name("artist")] == [present.id]
     assert gone.file_status == FileStatus.MISSING

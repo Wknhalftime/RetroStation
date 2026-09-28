@@ -21,6 +21,7 @@ def _file(
     *,
     missing: bool = False,
     track_number: int = 16,
+    release_title: str = "Pulp Fiction",
 ) -> LibraryFile:
     lf = repos.library_files.upsert(
         LibraryFile(
@@ -30,7 +31,7 @@ def _file(
             audio=AudioMetadata(
                 recording_mbid="rec-1",
                 normalized_artist_name="samuel l jackson",
-                release_title="Pulp Fiction",
+                release_title=release_title,
                 track_number=track_number,
                 normalized_title="ezekiel 25 17",
             ),
@@ -61,14 +62,20 @@ def test_get_present_by_track_skips_missing_rows_and_other_tracks(migrated_db: s
         _file(repos, r"D:\m\old.flac", missing=True)
         _file(repos, r"D:\m\other.flac", track_number=3)
 
-        found = repos.library_files.get_present_by_track(
-            "samuel l jackson",
-            "Pulp Fiction",
-            16,
-            "ezekiel 25 17",
-        )
+        found = repos.library_files.get_present_by_track("samuel l jackson", 16, "ezekiel 25 17")
 
         assert [f.id for f in found] == [present.id]
+
+
+def test_get_present_by_track_finds_every_release_title_in_path_order(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        renamed = _file(repos, r"D:\m\b.flac", release_title="Pulp Fiction: Music From the Film")
+        original = _file(repos, r"D:\m\a.flac")
+
+        found = repos.library_files.get_present_by_track("samuel l jackson", 16, "ezekiel 25 17")
+
+        assert [f.id for f in found] == [original.id, renamed.id]
 
 
 def test_matcher_lookups_skip_missing_rows(migrated_db: str) -> None:

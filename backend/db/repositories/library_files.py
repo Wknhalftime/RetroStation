@@ -359,17 +359,16 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
     def get_present_by_track(
         self,
         normalized_artist_name: str,
-        release_title: str,
         track_number: int,
         normalized_title: str,
     ) -> list[LibraryFile]:
         rows = self._conn.execute(
             """SELECT * FROM library_files
-               WHERE normalized_artist_name = %s AND release_title = %s
+               WHERE normalized_artist_name = %s
                  AND track_number = %s AND normalized_title = %s
                  AND file_status = 'present'
                ORDER BY file_path""",
-            (normalized_artist_name, release_title, track_number, normalized_title),
+            (normalized_artist_name, track_number, normalized_title),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
