@@ -117,6 +117,8 @@ class TestRecalculateForWorkSyncFailureSwallowing:
         warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed_inner"]
         assert len(warnings) == 1
         assert warnings[0]["work_id"] == "some-work-id"
+        # exc_info=True so the traceback actually lands in the log record.
+        assert warnings[0]["exc_info"] is True
 
     def test_non_db_failure_is_also_swallowed_today(
         self, migrated_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -142,3 +144,4 @@ class TestRecalculateForWorkSyncFailureSwallowing:
         warnings = [e for e in events if e.get("event") == "manual_resolve_recalc_failed_inner"]
         assert len(warnings) == 1
         assert warnings[0]["work_id"] == work_id
+        assert warnings[0]["exc_info"] is True
