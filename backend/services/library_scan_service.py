@@ -2,11 +2,10 @@
 Library scan service — tag extraction and directory walking.
 
 Public API:
-  extract_tags(path)       -> LibraryFile  (raises MutagenError on unreadable file)
-  read_tags(path)          -> LibraryFile  (tags, stat and a FLAC's stored MD5; no
-                                             content read)
-  scan_directory(root, on_progress=None, on_file=None, on_quarantine=None,
-                 hash_content=True)        -> (list[LibraryFile], list[LibraryQuarantine])
+  read_tags(path)          -> LibraryFile  (tags, stat, a FLAC's stored audio MD5;
+                                            raises MutagenError on an unreadable file)
+  scan_directory(root, on_progress=None, on_file=None, on_quarantine=None)
+                           -> (list[LibraryFile], list[LibraryQuarantine])
 
 Supported formats: .flac, .mp3, .m4a, .ogg, .wav
 """
@@ -14,7 +13,6 @@ Supported formats: .flac, .mp3, .m4a, .ogg, .wav
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -69,15 +67,6 @@ _VORBIS_RELEASE_MBID = "musicbrainz_albumid"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def compute_file_hash(path: Path) -> str:
-    """SHA-256 of *path*'s whole content, as lowercase hex."""
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _extract_first_tag_value(tags: object, key: str) -> str | None:
@@ -402,23 +391,11 @@ def read_tags(path: Path) -> LibraryFile:
     return lf
 
 
-def extract_tags(path: Path) -> LibraryFile:
-    """
-    :func:`read_tags` plus the SHA-256 of the file's whole content.
-
-    Raises :exc:`mutagen.MutagenError` if the file cannot be read or parsed.
-    """
-    lf = read_tags(path)
-    lf.file_hash = compute_file_hash(path)
-    return lf
-
-
 def scan_directory(
     root: Path,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_file: Callable[[LibraryFile], None] | None = None,
     on_quarantine: Callable[[LibraryQuarantine], None] | None = None,
-    hash_content: bool = True,
 ) -> tuple[list[LibraryFile], list[LibraryQuarantine]]:
     """
     Walk *root* recursively and extract tags from all supported audio files.
@@ -431,8 +408,6 @@ def scan_directory(
       *on_quarantine* — called with each :class:`LibraryQuarantine` entry.
       *on_progress* — called with ``(processed, total, current_path)`` every
         50 files and on the final file.
-      *hash_content* — False reads tags and stat only and leaves file_hash
-        None (a first scan; library_hash_backfill_task hashes later).
     """
     candidates = sorted(
         p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
@@ -447,7 +422,7 @@ def scan_directory(
 
     for processed_idx, path in enumerate(candidates, start=1):
         try:
-            lf = extract_tags(path) if hash_content else read_tags(path)
+            lf = read_tags(path)
             files.append(lf)
             if on_file is not None:
                 on_file(lf)

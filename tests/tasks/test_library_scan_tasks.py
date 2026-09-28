@@ -282,7 +282,7 @@ class TestRunScanChunkedCommits:
     @patch("backend.tasks.library_scan_tasks.adopt_moved_row")
     @patch("backend.tasks.library_scan_tasks.diff_tree", return_value=([], []))
     @patch("backend.tasks.library_scan_tasks.scan_directory")
-    def test_first_scan_defers_hashes_and_skips_move_detection(
+    def test_first_scan_skips_move_detection(
         self,
         mock_scan: MagicMock,
         _mock_diff: MagicMock,
@@ -310,12 +310,11 @@ class TestRunScanChunkedCommits:
             task_id="t",
         )
 
-        assert mock_scan.call_args.kwargs["hash_content"] is False
         mock_adopt.assert_not_called()
 
     @patch("backend.tasks.library_scan_tasks.diff_tree", return_value=([], []))
     @patch("backend.tasks.library_scan_tasks.scan_directory", return_value=([], []))
-    def test_scan_of_a_non_empty_library_hashes_inline(
+    def test_no_scan_asks_for_whole_file_hashes(
         self,
         mock_scan: MagicMock,
         _mock_diff: MagicMock,
@@ -331,4 +330,4 @@ class TestRunScanChunkedCommits:
             progress_repo=MagicMock(),
             task_id="t",
         )
-        assert mock_scan.call_args.kwargs["hash_content"] is True
+        assert "hash_content" not in mock_scan.call_args.kwargs
