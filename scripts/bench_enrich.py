@@ -347,8 +347,8 @@ def point_app_at(dsn: str) -> None:
     """Make ``get_settings().database_url`` return *dsn* for the rest of the process.
 
     The task opens its own connections from settings, so this is how the
-    in-process run lands in the bench DB. Must run before any task module is
-    imported: ``huey_app`` reads settings at import.
+    in-process run lands in the bench DB. Must run before ``_quiet_logging``,
+    which points the ``system_logs`` sink at the configured database.
     """
     require_bench_name(str(psycopg.conninfo.conninfo_to_dict(dsn)["dbname"]))
     os.environ["DATABASE_URL"] = dsn
@@ -433,7 +433,6 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     from backend.tasks.library_enrichment_tasks import library_enrichment_task
 
-    # After the import: huey_app configures logging when it loads.
     _quiet_logging()
 
     timers = Timers()

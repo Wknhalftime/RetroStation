@@ -15,11 +15,20 @@ _huey_filename = f"huey_{_worker}.db" if _worker else "huey.db"
 # Replace with RedisHuey for multi-worker or multi-user deployments.
 huey = SqliteHuey(filename=_huey_filename, results=False)
 
-# Ensure structured logging is configured in the worker process.
-# The FastAPI server calls configure_logging() in its lifespan, but the
-# Huey consumer is a separate process that never imports backend.main.
-_settings = get_settings()
-configure_logging(_settings.log_level, database_url=_settings.database_url)
+
+@huey.on_startup()  # type: ignore[untyped-decorator]
+def configure_consumer_logging() -> None:
+    """Send the consumer's structlog events to stdout and ``system_logs``.
+
+    The FastAPI server calls configure_logging() in its lifespan, but the
+    Huey consumer is a separate process that never imports backend.main.
+    Huey runs this in each worker before its first task. A startup hook, not
+    an import side effect, so importing a task module (tests, bench scripts)
+    leaves the process's logging alone.
+    """
+    settings = get_settings()
+    configure_logging(settings.log_level, database_url=settings.database_url)
+
 
 # Import all task modules so they register with the Huey consumer.
 # Without these imports, the worker cannot deserialize queued tasks.

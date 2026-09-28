@@ -173,9 +173,9 @@ def _debug_bound_logger() -> Generator[None]:
     """Make DEBUG-level events visible to `capture_logs` for this test.
 
     `capture_logs` swaps the processor chain but not `wrapper_class` (see
-    `tests/services/test_mb_client_observability.py`). Importing this task
-    module pulls in `backend.tasks.huey_app`, which calls `configure_logging`
-    at import time with the app's default level (INFO) — so without this
+    `tests/services/test_mb_client_observability.py`). An earlier test on the
+    same worker may have run `configure_logging` (a TestClient starting the
+    app's lifespan does) at the app's default level (INFO) — so without this
     override, a `logger.debug(...)` call never reaches the processor chain
     and `capture_logs` would silently see nothing, whether or not the
     production code actually logs at DEBUG.
