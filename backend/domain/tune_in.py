@@ -7,6 +7,7 @@ from collections.abc import Iterator, Sequence
 from datetime import date, datetime, timedelta
 
 from backend.domain.streaming import (
+    Bookmark,
     DayLoader,
     EndOfScheduleError,
     InvalidStreamValueError,
@@ -156,3 +157,11 @@ def next_item(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> Item
     if ref is None:
         raise EndOfScheduleError(f"no playable item after {after.day} #{after.index}")
     return ref
+
+
+def resume(load_day: DayLoader, bookmark: Bookmark, now: datetime, timing: StreamTiming) -> Landing:
+    """Where the station would be if it had kept playing since ``bookmark.left_at`` (D11)."""
+    landing = walk_forward(load_day, bookmark.landing.advanced_by(now - bookmark.left_at), timing)
+    if landing is None:
+        raise EndOfScheduleError(f"schedule ended while away since {bookmark.left_at}")
+    return landing
