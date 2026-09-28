@@ -113,6 +113,8 @@ max-statements = 40
 [tool.deptry]
 # The dev extra is tooling (pytest, ruff, the audit kit); nothing imports it at runtime.
 optional_dependencies_dev_groups = ["dev"]
+# Dev-only bench driver: psutil (dev extra) and its sibling script modules.
+extend_exclude = ["scripts/bench_stream.py"]
 
 [tool.coverage.run]
 source = ["backend"]
