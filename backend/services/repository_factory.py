@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import psycopg
@@ -25,6 +27,8 @@ from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.works import PgWorkRepository
+from backend.db.sync_conn import connect_sync
+from backend.services.identity_resolution_service import RecalcRepos
 
 
 @dataclass
@@ -130,3 +134,21 @@ class RepositoryFactory:
         self.musicbrainz_cache = self.system.musicbrainz_cache
         self.user_settings = self.system.user_settings
         self.system_logs = self.system.system_logs
+
+
+@contextmanager
+def recalc_repos(db_url: str) -> Iterator[RecalcRepos]:
+    """Open a sync connection scoped to one manual-resolve master recalc.
+
+    Composition root for ``identity_resolution_service.recalculate_for_work_sync``'s
+    ``repos_factory`` argument (AUD-054): builds the concrete Pg adapters and
+    hands back the ``RecalcRepos`` port bundle the service depends on, so
+    that module never imports ``backend.db`` itself.
+    """
+    with connect_sync(db_url) as conn:
+        yield RecalcRepos(
+            song_masters=PgSongMasterRepository(conn),
+            recordings=PgRecordingRepository(conn),
+            library_files=PgLibraryFileRepository(conn),
+            commit=conn.commit,
+        )

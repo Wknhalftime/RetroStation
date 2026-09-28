@@ -21,6 +21,7 @@ from backend.services.identity_resolution_service import (
 )
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.repository_factory import recalc_repos
 from backend.tasks.artist_matching_tasks import artist_matching_task
 from backend.tasks.identity_matching_tasks import identity_matching_task
 
@@ -863,15 +864,20 @@ async def resolve_identity(
         if work_id is not None:
             settings = get_settings()
             try:
-                # Outer try is defense-in-depth for thread/cancellation
-                # boundary errors that recalculate_for_work_sync's internal
-                # try cannot reach. Both layers are intentional — do not
-                # collapse into one. The match is already committed at this
-                # point; recalc is best-effort.
+                # recalculate_for_work_sync's own try only swallows
+                # psycopg.Error (a transient DB problem — safe to retry via
+                # the next matching run). This outer try is the backstop for
+                # everything else that can come out of that call: a non-DB
+                # bug in the recalc itself, plus thread/cancellation
+                # boundary errors the inner try can't reach either way.
+                # Both layers are intentional — do not collapse into one.
+                # The match is already committed at this point; recalc is
+                # best-effort regardless of which layer catches the failure.
                 await asyncio.to_thread(
                     recalculate_for_work_sync,
                     settings.database_url,
                     work_id,
+                    recalc_repos,
                 )
             except Exception:  # noqa: BLE001
                 logger.warning(

@@ -160,11 +160,6 @@ forbidden_modules = ["backend.db"]
 ignore_imports = [
     # composition root: the one place services may build Pg repositories
     "backend.services.repository_factory -> backend.db.**",
-    # AUDIT BASELINE 2026-09-26 (see the layers contract above)
-    "backend.services.identity_resolution_service -> backend.db.repositories.library_files",
-    "backend.services.identity_resolution_service -> backend.db.repositories.recordings",
-    "backend.services.identity_resolution_service -> backend.db.repositories.song_masters",
-    "backend.services.identity_resolution_service -> backend.db.sync_conn",
 ]
 
 [[tool.importlinter.contracts]]
