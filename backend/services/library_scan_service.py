@@ -640,27 +640,26 @@ def _file_name(path: str) -> str:
     return PureWindowsPath(path).name
 
 
-def _same_track_position(a: LibraryFile, b: LibraryFile) -> bool:
-    return (a.audio.release_title, a.audio.disc_number, a.audio.track_number) == (
-        b.audio.release_title,
-        b.audio.disc_number,
-        b.audio.track_number,
-    )
+def _track_position(lf: LibraryFile) -> tuple[str | None, int | None, int | None]:
+    return (lf.audio.release_title, lf.audio.disc_number, lf.audio.track_number)
 
 
 def _choose_move_origin(lf: LibraryFile, gone: list[LibraryFile]) -> LibraryFile | None:
     """The row among *gone* that *lf* was moved from, or None when that is not clear.
 
     The only candidate; else the only one on the same release, disc and
-    track; else the only one with the same file name. Bit-identical twins
-    moved together otherwise match each other's rows, and adopting the
-    wrong one would swap their ids, so an undecided choice adopts nothing.
+    track, when *lf* carries all three; else the only one with the same
+    file name. Bit-identical twins moved together otherwise match each
+    other's rows, and adopting the wrong one would swap their ids, so an
+    undecided choice adopts nothing.
     """
     if len(gone) == 1:
         return gone[0]
-    same_track = [c for c in gone if _same_track_position(c, lf)]
-    if len(same_track) == 1:
-        return same_track[0]
+    position = _track_position(lf)
+    if None not in position:
+        same_track = [c for c in gone if _track_position(c) == position]
+        if len(same_track) == 1:
+            return same_track[0]
     name = _file_name(lf.file_path)
     same_name = [c for c in gone if _file_name(c.file_path) == name]
     return same_name[0] if len(same_name) == 1 else None

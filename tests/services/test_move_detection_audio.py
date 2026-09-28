@@ -232,3 +232,20 @@ def test_twins_moved_together_with_nothing_to_tell_them_apart_adopt_neither(
     assert adopt_moved_row(_seen(new, H1), repo) is None
     assert repo.get_by_path(str(best_of)) is not None
     assert repo.get_by_path(str(parade)) is not None
+
+
+def test_an_untagged_new_file_is_matched_by_file_name_not_by_empty_tags(
+    tmp_path: Path,
+) -> None:
+    """Missing tags on both sides are not evidence of the same track position."""
+    untagged = tmp_path / "Best Of" / "07 Kiss.flac"
+    tagged = tmp_path / "Parade" / "03 Kiss.flac"
+    new = _write(tmp_path / "Prince" / "03 Kiss.flac")
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_twin(untagged))
+    stored_tagged = repo.upsert(_twin(tagged, ("Parade", 1, 3)))
+
+    assert adopt_moved_row(_seen(new, H1), repo) == str(tagged)
+
+    moved = repo.get_by_id(stored_tagged.id)
+    assert moved is not None and moved.file_path == str(new)
