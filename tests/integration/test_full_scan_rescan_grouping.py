@@ -9,6 +9,8 @@ their work used to create a song master pointing at the fresh id.
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -111,3 +113,45 @@ def test_rescan_groups_the_stored_row_of_a_file_that_had_no_work(
 
     assert after.id == before.id
     assert after.work_id is not None and work_exists
+
+
+def _move_keeping_stat(old: Path, new: Path) -> None:
+    """A plain move: same size, same mtime, so a rescan adopts the row by its stat."""
+    st = old.stat()
+    new.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(old, new)
+    os.utime(new, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def test_rescan_leaves_the_work_of_a_row_adopted_by_its_stat(
+    migrated_db: str, tmp_path: Path
+) -> None:
+    """A moved file adopts its row; the fresh read's id must not be grouped.
+
+    The row's work was retitled after it was grouped (as enrichment does with a
+    MusicBrainz title), so the file's own tags no longer fuzzy-match any work.
+    """
+    old = _unfingerprinted_flac(tmp_path / "unsorted" / "kiss.flac", "Kiss", 300)
+    new = tmp_path / "Prince" / "kiss.flac"
+
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        _full_scan(conn, tmp_path)
+        before = _stored(repos, old)
+        conn.execute(
+            "UPDATE works SET title = 'Sometimes It Snows in April' WHERE id = %s",
+            (before.work_id,),
+        )
+        conn.commit()
+
+        # Grouped in the same chunk as the moved file, before it.
+        added = _unfingerprinted_flac(tmp_path / "A New" / "alphabet.flac", "Alphabet St.", 700)
+        _move_keeping_stat(old, new)
+        _full_scan(conn, tmp_path)
+
+        after = _stored(repos, new)
+        added_after = _stored(repos, added)
+        added_work_exists = _work_exists(conn, added_after.work_id)
+
+    assert (after.id, after.work_id) == (before.id, before.work_id)
+    assert added_after.work_id is not None and added_work_exists
