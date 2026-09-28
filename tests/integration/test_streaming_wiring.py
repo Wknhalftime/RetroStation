@@ -1,4 +1,7 @@
-"""Acceptance tests: RepositoryFactory wiring and the domain's DayLoader (spec: Data, PR C)."""
+"""Acceptance tests: RepositoryFactory wiring and the domain's DayLoader (spec: Data, PR C, D20).
+
+DRAFT for D20: replaces ``test_streaming_wiring.py`` once the user approves.
+"""
 
 from __future__ import annotations
 
@@ -40,20 +43,22 @@ class TestWiring:
         assert isinstance(repos.streaming.cues, StreamCueRepository)
         assert isinstance(repos.streaming.schedule, PlayableScheduleRepository)
 
-    def test_factory_reader_judges_freshness_by_the_current_analyser_version(
-        self, conn: Conn
-    ) -> None:
+    def test_factory_reader_serves_cues_whatever_their_analyser_version(self, conn: Conn) -> None:
+        """No version check on read (D20): an analyser change purges rows, the reader never."""
         st = seed.station(conn)
         pl = seed.playlist(conn, st)
-        current, outdated = seed.library_file(conn), seed.library_file(conn)
+        current, other = seed.audio_hash(), seed.audio_hash()
         seed.cue_row(conn, current, analyser_version=CUE_ANALYSER_VERSION)
-        seed.cue_row(conn, outdated, analyser_version=CUE_ANALYSER_VERSION + 1)
-        seed.matched_play(conn, pl, at("08:00"), current)
-        seed.matched_play(conn, pl, at("09:00"), outdated)
+        seed.cue_row(conn, other, analyser_version=CUE_ANALYSER_VERSION + 1)
+        seed.matched_play(conn, pl, at("08:00"), seed.library_file(conn, audio_hash=current))
+        seed.matched_play(conn, pl, at("09:00"), seed.library_file(conn, audio_hash=other))
 
         items = RepositoryFactory(conn).streaming.schedule.get_day(st, DAY)
 
-        assert [item.file.cues if item.file else "no file" for item in items] == [CUE_POINTS, None]
+        assert [item.file.cues if item.file else "no file" for item in items] == [
+            CUE_POINTS,
+            CUE_POINTS,
+        ]
 
     @pytest.mark.parametrize(
         ("hms", "landing"),
@@ -77,13 +82,15 @@ class TestWiring:
         unresolved = seed.identity(conn, status="pending", identity_id=UUID(int=0xB))
         seed.play(conn, pl, unresolved, at("06:01:10"))
         work = seed.work(conn)
+        master_audio = seed.audio_hash()
         master = seed.library_file(
-            conn, duration_ms=400_000, recording_id=seed.work_recording(conn, work)
+            conn,
+            duration_ms=400_000,
+            recording_id=seed.work_recording(conn, work),
+            audio_hash=master_audio,
         )
         seed.song_master(conn, work, master)
-        seed.cue_row(
-            conn, master, cue_in_ms=1_000, cue_out_ms=211_000, analyser_version=CUE_ANALYSER_VERSION
-        )
+        seed.cue_row(conn, master_audio, cue_in_ms=1_000, cue_out_ms=211_000)
         cued = seed.identity(conn, identity_id=UUID(int=0xC))
         seed.match(conn, cued, seed.work_file(conn, work))
         seed.play(conn, pl, cued, at("06:01:10"))

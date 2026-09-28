@@ -1,8 +1,12 @@
-"""Acceptance tests: the playable schedule reader over PostgreSQL (spec: Data, D3, D4, D16).
+"""Acceptance tests: the playable schedule reader over PostgreSQL (spec: Data, D3, D4, D16, D20).
 
 ``PgPlayableScheduleRepository.get_day(station_id, day)`` returns one station-day of
 ``ScheduleItem``s: every logged play, in ``(played_at, identity_id, event_id)`` order, each resolved
-to the file the station would play, with fresh cue points or none.
+to the file the station would play, with the cue points of that file's audio or none (D20).
+
+DRAFT for D20: replaces ``test_playable_schedule.py`` once the user approves. Outside the cue
+section only the reader's constructor changed (no ``analyser_version``: nothing is checked on
+read).
 """
 
 from __future__ import annotations
@@ -19,7 +23,14 @@ from structlog.testing import capture_logs
 
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
-from backend.domain.streaming import CueAnalysis, CuePoints, PlayableFile, ScheduleItem
+from backend.domain.library import AudioHash
+from backend.domain.streaming import (
+    CUE_ANALYSER_VERSION,
+    CueAnalysis,
+    CuePoints,
+    PlayableFile,
+    ScheduleItem,
+)
 from tests.integration import stream_seed as seed
 from tests.integration.stream_seed import (
     CUE_POINTS,
@@ -44,7 +55,7 @@ def conn(migrated_db: str) -> Iterator[Conn]:
 
 
 def get_day(conn: Conn, station_id: UUID) -> list[ScheduleItem]:
-    return PgPlayableScheduleRepository(conn, VERSION).get_day(station_id, DAY)
+    return PgPlayableScheduleRepository(conn).get_day(station_id, DAY)
 
 
 def only_file(conn: Conn, station_id: UUID) -> PlayableFile | None:
@@ -414,8 +425,7 @@ class TestUnavailableFiles:
     def test_clean_day_logs_no_schedule_warning(self, conn: Conn) -> None:
         st = seed.station(conn)
         pl = seed.playlist(conn, st)
-        file_id = seed.library_file(conn)
-        seed.cue_row(conn, file_id)
+        file_id, _ = seed.cued_file(conn)
         seed.matched_play(conn, pl, at("08:00"), file_id)
         seed.play(conn, pl, seed.identity(conn, status="pending"), at("09:00"))
 
@@ -426,63 +436,106 @@ class TestUnavailableFiles:
         assert warnings(logs, "schedule_cues_invalid") == []
 
 
-# --- cue points ------------------------------------------------------------------------------
+# --- cue points: the audio's, if it has any (D20) --------------------------------------------
 
 
 def _file_with_cues(conn: Conn, **row: object) -> UUID:
-    """A station with one resolved play whose file has a cue row (``CUE_ROW`` + ``row``)."""
+    """A station with one resolved play whose file's audio has a cue row (``CUE_ROW`` + ``row``)."""
     st = seed.station(conn)
-    file_id = seed.library_file(conn)
-    seed.cue_row(conn, file_id, **row)
+    audio = seed.audio_hash()
+    file_id = seed.library_file(conn, audio_hash=audio)
+    seed.cue_row(conn, audio, **row)
     seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
     return st
 
 
+def _cues_of_one_play(conn: Conn, file_id: UUID) -> CuePoints | None:
+    """The cues a one-play day resolved to ``file_id`` reads for it."""
+    st = seed.station(conn)
+    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
+    file = only_file(conn, st)
+    assert file is not None
+    return file.cues
+
+
+def _set_file_column(conn: Conn, file_id: UUID, column: str, value: object) -> None:
+    assert column in {"file_size", "file_mtime_ns", "audio_hash"}
+    conn.execute(f"UPDATE library_files SET {column} = %s WHERE id = %s", (value, file_id))
+
+
 class TestCues:
-    def test_fresh_cue_row_becomes_cue_points(self, conn: Conn) -> None:
+    def test_row_for_the_file_audio_becomes_cue_points(self, conn: Conn) -> None:
         file = only_file(conn, _file_with_cues(conn))
         assert file is not None
         assert file.cues == CUE_POINTS
 
+    def test_audio_without_a_row_gives_no_cues(self, conn: Conn) -> None:
+        seed.cued_file(conn)  # another audio has cues
+        file_id = seed.library_file(conn, audio_hash=seed.audio_hash())
+
+        assert _cues_of_one_play(conn, file_id) is None
+
+    def test_file_without_an_audio_hash_gives_no_cues(self, conn: Conn) -> None:
+        seed.cued_file(conn)  # some audio has cues
+        file_id = seed.library_file(conn, audio_hash=None)
+
+        assert _cues_of_one_play(conn, file_id) is None
+
     @pytest.mark.parametrize(
-        "row",
+        "version",
+        [1, VERSION, CUE_ANALYSER_VERSION + 1, 99],
+        ids=["one", "seeded", "newer-than-current", "far-future"],
+    )
+    def test_analyser_version_is_not_checked(self, conn: Conn, version: int) -> None:
+        file = only_file(conn, _file_with_cues(conn, analyser_version=version))
+        assert file is not None
+        assert file.cues == CUE_POINTS
+
+    @pytest.mark.parametrize(
+        "stat",
         [
             {"file_size": FILE_SIZE + 1},
             {"file_mtime_ns": FILE_MTIME_NS + 1},
-            {"analyser_version": VERSION - 1},
-            {"analyser_version": VERSION + 1},
+            {"file_size": None, "file_mtime_ns": None},
         ],
-        ids=["size", "mtime", "older-analyser", "newer-analyser"],
+        ids=["size", "mtime", "unknown"],
     )
-    def test_stale_cue_row_gives_no_cues(self, conn: Conn, row: dict[str, object]) -> None:
-        file = only_file(conn, _file_with_cues(conn, **row))
-        assert file is not None
-        assert file.cues is None
+    def test_file_stat_is_not_checked(self, conn: Conn, stat: dict[str, object]) -> None:
+        """A moved or retagged file keeps its audio, so it keeps its cues (D20)."""
+        file_id, _ = seed.cued_file(conn)
+        for column, value in stat.items():
+            _set_file_column(conn, file_id, column, value)
 
-    @pytest.mark.parametrize(
-        ("file_stat", "row_stat", "fresh"),
-        [
-            ((None, None), (None, None), True),
-            ((FILE_SIZE, FILE_MTIME_NS), (None, None), False),
-            ((None, None), (FILE_SIZE, FILE_MTIME_NS), False),
-        ],
-        ids=["both-unknown", "row-unknown", "file-unknown"],
-    )
-    def test_unknown_stat_matches_only_unknown_stat(
-        self,
-        conn: Conn,
-        file_stat: tuple[int | None, int | None],
-        row_stat: tuple[int | None, int | None],
-        fresh: bool,
-    ) -> None:
+        assert _cues_of_one_play(conn, file_id) == CUE_POINTS
+
+    def test_changed_audio_gives_no_cues_though_the_old_row_remains(self, conn: Conn) -> None:
+        file_id, old_audio = seed.cued_file(conn)
+        _set_file_column(conn, file_id, "audio_hash", seed.audio_hash())
+
+        assert _cues_of_one_play(conn, file_id) is None
+        kept = conn.execute(
+            "SELECT count(*) AS n FROM stream_cues WHERE audio_hash = %s", (old_audio,)
+        ).fetchone()
+        assert kept == {"n": 1}
+
+    def test_files_with_the_same_audio_share_one_row(self, conn: Conn) -> None:
         st = seed.station(conn)
-        file_id = seed.library_file(conn, file_size=file_stat[0], file_mtime_ns=file_stat[1])
-        seed.cue_row(conn, file_id, file_size=row_stat[0], file_mtime_ns=row_stat[1])
-        seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
+        pl = seed.playlist(conn, st)
+        first, audio = seed.cued_file(conn)
+        second = seed.library_file(conn, audio_hash=audio)
+        seed.matched_play(conn, pl, at("08:00"), first)
+        seed.matched_play(conn, pl, at("09:00"), second)
 
-        file = only_file(conn, st)
-        assert file is not None
-        assert file.cues == (CUE_POINTS if fresh else None)
+        items = get_day(conn, st)
+
+        assert [(i.file.file_id, i.file.cues) if i.file else None for i in items] == [
+            (first, CUE_POINTS),
+            (second, CUE_POINTS),
+        ]
+        rows = conn.execute(
+            "SELECT count(*) AS n FROM stream_cues WHERE audio_hash = %s", (audio,)
+        ).fetchone()
+        assert rows == {"n": 1}
 
     def test_failed_analysis_row_is_returned_as_normal_cues(self, conn: Conn) -> None:
         file = only_file(
@@ -522,14 +575,18 @@ class TestCues:
         [warning] = warnings(logs, "schedule_cues_invalid")
         assert str(warning["event_id"]) == str(item.event_id)
         assert str(warning["file_id"]) == str(item.file.file_id)
+        assert warning["error"]
 
-    def test_cues_are_those_of_the_resolved_file(self, conn: Conn) -> None:
+    def test_cues_are_those_of_the_resolved_file_audio(self, conn: Conn) -> None:
         st = seed.station(conn)
         work = seed.work(conn)
-        direct, master = seed.work_file(conn, work), seed.work_file(conn, work)
+        recording = seed.work_recording(conn, work)
+        direct_audio, master_audio = seed.audio_hash(), seed.audio_hash()
+        direct = seed.library_file(conn, recording_id=recording, audio_hash=direct_audio)
+        master = seed.library_file(conn, recording_id=recording, audio_hash=master_audio)
         seed.song_master(conn, work, master)
-        seed.cue_row(conn, direct, gain_db=-1.5)
-        seed.cue_row(conn, master, gain_db=-6.5)
+        seed.cue_row(conn, direct_audio, gain_db=-1.5)
+        seed.cue_row(conn, master_audio, gain_db=-6.5)
         seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
 
         file = only_file(conn, st)
@@ -538,23 +595,17 @@ class TestCues:
         assert file.cues.gain_db == -6.5
 
 
-def test_reader_rejects_an_analyser_version_below_one(conn: Conn) -> None:
-    with pytest.raises(ValueError, match="analyser_version"):
-        PgPlayableScheduleRepository(conn, 0)
-
-
 def test_upserted_cues_are_what_the_reader_returns(conn: Conn) -> None:
     st = seed.station(conn)
-    file_id = seed.library_file(conn)
+    audio = seed.audio_hash()
+    file_id = seed.library_file(conn, audio_hash=audio)
     seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
     analysis = CueAnalysis(
-        file_id=file_id,
+        audio_hash=AudioHash.parse(audio),
         cues=CUE_POINTS,
         loudness_lufs=-13.5,
         analysis_failed=False,
         analyser_version=VERSION,
-        file_size=FILE_SIZE,
-        file_mtime_ns=FILE_MTIME_NS,
     )
 
     PgStreamCueRepository(conn).upsert(analysis)
@@ -568,9 +619,13 @@ def test_a_day_is_read_with_one_statement(conn: Conn, monkeypatch: pytest.Monkey
     st = seed.station(conn, format_name="AC")
     pl = seed.playlist(conn, st)
     work = seed.work(conn)
-    direct, master = seed.work_file(conn, work), seed.work_file(conn, work)
+    master_audio = seed.audio_hash()
+    direct = seed.work_file(conn, work)
+    master = seed.library_file(
+        conn, recording_id=seed.work_recording(conn, work), audio_hash=master_audio
+    )
     seed.song_master(conn, work, master)
-    seed.cue_row(conn, master)
+    seed.cue_row(conn, master_audio)
     seed.matched_play(conn, pl, at("06:00"), direct)
     seed.matched_play(conn, pl, at("06:04"), seed.library_file(conn, status="missing"))
     seed.play(conn, pl, seed.identity(conn, status="pending"), at("06:08"))

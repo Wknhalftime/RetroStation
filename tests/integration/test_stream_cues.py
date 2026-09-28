@@ -1,20 +1,26 @@
-"""Acceptance tests: ``PgStreamCueRepository.upsert`` (spec: Data)."""
+"""Acceptance tests: ``PgStreamCueRepository.upsert`` (spec: Data, D20).
+
+One row per audio hash. An upsert needs no library file to exist: a row for audio no
+longer (or not yet) in the library is harmless.
+
+DRAFT for D20: replaces ``test_stream_cues.py`` once the user approves.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
 from backend.db.repositories.stream_cues import PgStreamCueRepository
-from backend.domain.streaming import CueAnalysis, CueFileNotFoundError, CuePoints
+from backend.domain.library import AudioHash
+from backend.domain.streaming import CueAnalysis, CuePoints
 from tests.integration import stream_seed as seed
-from tests.integration.stream_seed import FILE_MTIME_NS, FILE_SIZE, VERSION, Conn
+from tests.integration.stream_seed import VERSION, Conn
 
 CUES = CuePoints(
     cue_in_ms=1_500,
@@ -32,23 +38,23 @@ def conn(migrated_db: str) -> Iterator[Conn]:
         yield connection
 
 
-def analysis(file_id: UUID, **overrides: Any) -> CueAnalysis:
+def new_audio() -> AudioHash:
+    return AudioHash.parse(seed.audio_hash())
+
+
+def analysis(audio: AudioHash, **overrides: Any) -> CueAnalysis:
     fields: dict[str, Any] = {
-        "file_id": file_id,
+        "audio_hash": audio,
         "cues": CUES,
         "loudness_lufs": -13.5,
         "analysis_failed": False,
         "analyser_version": VERSION,
-        "file_size": FILE_SIZE,
-        "file_mtime_ns": FILE_MTIME_NS,
     }
     return CueAnalysis(**{**fields, **overrides})
 
 
-def stored(conn: Conn, file_id: UUID) -> dict[str, Any]:
-    rows = conn.execute(
-        "SELECT * FROM stream_cues WHERE library_file_id = %s", (file_id,)
-    ).fetchall()
+def stored(conn: Conn, audio: AudioHash) -> dict[str, Any]:
+    rows = conn.execute("SELECT * FROM stream_cues WHERE audio_hash = %s", (str(audio),)).fetchall()
     assert len(rows) == 1
     return dict(rows[0])
 
@@ -56,7 +62,7 @@ def stored(conn: Conn, file_id: UUID) -> dict[str, Any]:
 def as_row(a: CueAnalysis) -> dict[str, Any]:
     """The columns an upsert of ``a`` must store (all but ``analysed_at``)."""
     return {
-        "library_file_id": a.file_id,
+        "audio_hash": str(a.audio_hash),
         "cue_in_ms": a.cues.cue_in_ms,
         "cue_out_ms": a.cues.cue_out_ms,
         "fade_in_ms": a.cues.fade_in_ms,
@@ -64,8 +70,6 @@ def as_row(a: CueAnalysis) -> dict[str, Any]:
         "start_next_ms": a.cues.start_next_ms,
         "loudness_lufs": a.loudness_lufs,
         "gain_db": a.cues.gain_db,
-        "file_size": a.file_size,
-        "file_mtime_ns": a.file_mtime_ns,
         "analyser_version": a.analyser_version,
         "analysis_failed": a.analysis_failed,
     }
@@ -76,42 +80,56 @@ def without_analysed_at(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_upsert_stores_every_field(conn: Conn) -> None:
-    a = analysis(seed.library_file(conn))
+    audio = new_audio()
+    seed.library_file(conn, audio_hash=str(audio))
+    a = analysis(audio)
 
     PgStreamCueRepository(conn).upsert(a)
 
-    assert without_analysed_at(stored(conn, a.file_id)) == as_row(a)
+    assert without_analysed_at(stored(conn, audio)) == as_row(a)
 
 
 def test_upsert_stamps_analysed_at(conn: Conn) -> None:
-    a = analysis(seed.library_file(conn))
+    a = analysis(new_audio())
 
     PgStreamCueRepository(conn).upsert(a)
 
     row = conn.execute(
-        "SELECT analysed_at = now() AS stamped FROM stream_cues WHERE library_file_id = %s",
-        (a.file_id,),
+        "SELECT analysed_at = now() AS stamped FROM stream_cues WHERE audio_hash = %s",
+        (str(a.audio_hash),),
     ).fetchone()
     assert row == {"stamped": True}
 
 
-def test_upsert_stores_unknown_loudness_and_stat_as_null(conn: Conn) -> None:
-    a = analysis(seed.library_file(conn), loudness_lufs=None, file_size=None, file_mtime_ns=None)
+def test_upsert_stores_unknown_loudness_as_null(conn: Conn) -> None:
+    a = analysis(new_audio(), loudness_lufs=None)
 
     PgStreamCueRepository(conn).upsert(a)
 
-    row = stored(conn, a.file_id)
-    assert (row["loudness_lufs"], row["file_size"], row["file_mtime_ns"]) == (None, None, None)
+    assert stored(conn, a.audio_hash)["loudness_lufs"] is None
 
 
-def test_upsert_replaces_the_row_of_the_same_file_and_restamps_it(conn: Conn) -> None:
-    file_id = seed.library_file(conn)
+def test_upsert_for_audio_no_file_has_succeeds(conn: Conn) -> None:
+    """No library file carries this hash: the row is stored all the same (D20)."""
+    a = analysis(new_audio())
+    files = conn.execute(
+        "SELECT count(*) AS n FROM library_files WHERE audio_hash = %s", (str(a.audio_hash),)
+    ).fetchone()
+    assert files == {"n": 0}
+
+    PgStreamCueRepository(conn).upsert(a)
+
+    assert without_analysed_at(stored(conn, a.audio_hash)) == as_row(a)
+
+
+def test_upsert_replaces_the_row_of_the_same_audio_and_restamps_it(conn: Conn) -> None:
+    audio = new_audio()
     repo = PgStreamCueRepository(conn)
-    repo.upsert(analysis(file_id))
+    repo.upsert(analysis(audio))
     long_ago = datetime(2000, 1, 1, tzinfo=UTC)
     conn.execute("UPDATE stream_cues SET analysed_at = %s", (long_ago,))
     again = analysis(
-        file_id,
+        audio,
         cues=CuePoints(
             cue_in_ms=0,
             cue_out_ms=90_000,
@@ -123,19 +141,17 @@ def test_upsert_replaces_the_row_of_the_same_file_and_restamps_it(conn: Conn) ->
         loudness_lufs=None,
         analysis_failed=True,
         analyser_version=VERSION + 1,
-        file_size=FILE_SIZE + 1,
-        file_mtime_ns=FILE_MTIME_NS + 1,
     )
 
     repo.upsert(again)
 
-    row = stored(conn, file_id)
+    row = stored(conn, audio)
     assert without_analysed_at(row) == as_row(again)
     assert row["analysed_at"] > long_ago
 
 
-def test_upsert_keeps_other_files_rows(conn: Conn) -> None:
-    first, second = seed.library_file(conn), seed.library_file(conn)
+def test_upsert_keeps_other_audios_rows(conn: Conn) -> None:
+    first, second = new_audio(), new_audio()
     repo = PgStreamCueRepository(conn)
     repo.upsert(analysis(first))
     repo.upsert(analysis(second, analysis_failed=True))
@@ -144,21 +160,9 @@ def test_upsert_keeps_other_files_rows(conn: Conn) -> None:
     assert stored(conn, second)["analysis_failed"] is True
 
 
-def test_upsert_for_a_file_that_does_not_exist_raises_cue_file_not_found(conn: Conn) -> None:
-    ghost = uuid4()
+def test_both_hash_kinds_are_stored(conn: Conn) -> None:
+    sha = AudioHash.parse("audio-sha256:" + "ab" * 32)
 
-    with pytest.raises(CueFileNotFoundError, match=str(ghost)) as raised:
-        PgStreamCueRepository(conn).upsert(analysis(ghost))
+    PgStreamCueRepository(conn).upsert(analysis(sha))
 
-    assert raised.value.file_id == ghost
-
-
-def test_the_callers_transaction_survives_an_upsert_for_a_missing_file(conn: Conn) -> None:
-    kept = seed.library_file(conn)  # opens the caller's transaction
-    repo = PgStreamCueRepository(conn)
-
-    with pytest.raises(CueFileNotFoundError):
-        repo.upsert(analysis(uuid4()))
-
-    repo.upsert(analysis(kept))
-    assert stored(conn, kept)["library_file_id"] == kept
+    assert stored(conn, sha)["audio_hash"] == str(sha)
