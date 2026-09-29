@@ -18,7 +18,7 @@ import structlog
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 from backend.services.audio_hash import AudioHasher, compute_audio_hash
-from backend.services.library_scan_service import disk_stat  # ⚠ AUD-009
+from backend.services.audio_tags import disk_stat
 
 logger = structlog.get_logger()
 
