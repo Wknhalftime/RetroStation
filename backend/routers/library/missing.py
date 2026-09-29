@@ -29,8 +29,9 @@ from backend.services.missing_file_reconciliation_service import (
 
 router = APIRouter()
 
-Repos = SyncRepos
 ReconRepos = Annotated[ReconciliationRepos, Depends(get_reconciliation_repos)]
+# Declared first in every endpoint: FastAPI resolves dependencies in declaration
+# order, so a request without a token gets its 401 before a connection is opened.
 Token = Annotated[str, Depends(get_current_token)]
 
 
@@ -112,8 +113,8 @@ class DeletionOut(BaseModel):
 
 @router.get("/missing-files", response_model=MissingFilePageOut)
 def get_missing_files(
-    repos: Repos,
     _token: Token,
+    repos: SyncRepos,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> MissingFilePageOut:
@@ -123,7 +124,7 @@ def get_missing_files(
 
 
 @router.post("/missing-files/{file_id}/remap", status_code=status.HTTP_204_NO_CONTENT)
-def remap_file(file_id: UUID, body: RemapIn, recon: ReconRepos, _token: Token) -> None:
+def remap_file(_token: Token, file_id: UUID, body: RemapIn, recon: ReconRepos) -> None:
     """Fold a missing row into the chosen present file."""
     try:
         remap_missing_file(file_id, body.target_file_id, recon)
@@ -134,7 +135,7 @@ def remap_file(file_id: UUID, body: RemapIn, recon: ReconRepos, _token: Token) -
 
 
 @router.delete("/missing-files", response_model=DeletionOut)
-def delete_files(body: DeleteIn, recon: ReconRepos, repos: Repos, _token: Token) -> DeletionOut:
+def delete_files(_token: Token, body: DeleteIn, recon: ReconRepos, repos: SyncRepos) -> DeletionOut:
     """Delete missing rows; their matches go back to review."""
     try:
         result = delete_missing_files(body.selection(), recon, repos.broadcast_identities)

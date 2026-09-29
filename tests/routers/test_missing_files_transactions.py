@@ -124,6 +124,34 @@ def test_a_driver_error_mid_delete_is_500_and_rolls_back_the_release(
     _assert_untouched(db_conn, file_id, identity_id)
 
 
+def test_a_failed_commit_is_a_500_not_a_success(
+    client: TestClient, db_conn: Conn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The transaction ends before the response goes out ("function" scope).
+
+    Under FastAPI's default "request" scope the commit runs after the 200 is sent,
+    and this test sees that 200.
+    """
+    file_id, identity_id = _seed(db_conn)
+    real_connect = sync_conn.connect_sync
+
+    def _commit_fails(dsn: str, **kwargs: Any) -> psycopg.Connection[Any]:
+        conn = real_connect(dsn, **kwargs)
+
+        def _raise() -> None:
+            raise psycopg.OperationalError("simulated commit failure")
+
+        conn.commit = _raise  # type: ignore[method-assign]
+        return conn
+
+    monkeypatch.setattr(sync_conn, "connect_sync", _commit_fails)
+
+    response = client.request("DELETE", URL, json={"ids": [str(file_id)]})
+
+    assert response.status_code == 500
+    _assert_untouched(db_conn, file_id, identity_id)
+
+
 def test_a_delete_opens_one_connection(
     client: TestClient, db_conn: Conn, monkeypatch: pytest.MonkeyPatch
 ) -> None:
