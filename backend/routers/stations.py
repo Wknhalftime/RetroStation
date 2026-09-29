@@ -305,7 +305,7 @@ async def get_station_events_by_date(
         SELECT COUNT(*) AS total
         FROM play_events le
         JOIN playlists p ON p.id = le.playlist_id
-        WHERE p.station_id = %s AND le.played_at::date = %s
+        WHERE p.station_id = %s AND (le.played_at AT TIME ZONE 'UTC')::date = %s
         """,
         (station_id, date),
     )
@@ -327,7 +327,7 @@ async def get_station_events_by_date(
         JOIN track_identities li ON li.id = le.identity_id
         JOIN broadcast_artists la ON la.id = li.broadcast_artist_id
         JOIN playlists p ON p.id = le.playlist_id
-        WHERE p.station_id = %s AND le.played_at::date = %s
+        WHERE p.station_id = %s AND (le.played_at AT TIME ZONE 'UTC')::date = %s
         ORDER BY le.played_at
         LIMIT %s OFFSET %s
         """,

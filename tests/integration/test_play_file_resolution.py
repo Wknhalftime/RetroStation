@@ -15,7 +15,7 @@ One row per play event, every play included, with the columns ``play_event_id``,
 
 The view does not filter by status: it reports the final file and its ``file_status``.
 
-DRAFT for D22: replaces ``test_play_file_resolution.py`` once the user approves.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

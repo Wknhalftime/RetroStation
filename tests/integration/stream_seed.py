@@ -8,7 +8,7 @@ write model would reject).
 Under D22 a matched file never plays because it was matched: its work decides. A test that
 wants "this file plays" seeds it with ``mastered_file``, a file that is its own work's master.
 
-DRAFT for D22: replaces ``stream_seed.py`` once the user approves; then renamed back.
+Approved seed helpers for the D22 acceptance tests; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

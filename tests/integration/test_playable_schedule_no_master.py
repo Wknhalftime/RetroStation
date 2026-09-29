@@ -8,7 +8,7 @@ play unresolved: ``file=None`` and exactly one ``schedule_no_master`` warning ca
 first: such a play has no final file, so it is never judged on availability, length or cues.
 An unmatched play has no file and logs nothing.
 
-NEW for D22 (no locked counterpart); imports the D22 seed draft.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

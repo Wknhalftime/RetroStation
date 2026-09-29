@@ -9,7 +9,7 @@ file's.
 
 The reader is taken from ``RepositoryFactory``, as production wires it.
 
-DRAFT for D22: replaces ``test_playable_schedule_warnings.py`` once the user approves.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

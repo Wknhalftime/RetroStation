@@ -72,8 +72,10 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
     ) -> list[BroadcastPlayEvent]:
-        # "A station's plays on a date" is broadcast's view station_day_plays (D19): the
-        # stored wall-clock date whatever the session TimeZone, in position order.
+        # "A station's plays on a date" is broadcast's view station_day_plays (D19). played_at
+        # holds station wall-clock labelled UTC, and the view's play_date is
+        # (played_at AT TIME ZONE 'UTC')::date, so a bare ::date's session-TimeZone shift
+        # across midnight cannot happen; plays come in position order.
         rows = self._conn.execute(
             """SELECT pe.* FROM station_day_plays dp
                JOIN play_events pe ON pe.id = dp.play_event_id

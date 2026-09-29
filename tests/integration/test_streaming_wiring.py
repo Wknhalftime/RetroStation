@@ -2,7 +2,7 @@
 
 Under D22 every play that should sound is seeded as its work's master (``seed.mastered_file``).
 
-DRAFT for D22: replaces ``test_streaming_wiring.py`` once the user approves.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

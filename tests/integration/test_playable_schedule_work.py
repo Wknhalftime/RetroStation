@@ -13,7 +13,7 @@ make the day is broadcast's, tested at ``station_day_plays``. Here only the read
 Under D22 a matched file is the final file only as its work's master, so "the matched file
 is the bad one" is seeded with ``seed.mastered_file``.
 
-DRAFT for D22: replaces ``test_playable_schedule_work.py`` once the user approves.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ import { MatchStatusBadge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { usePlaylistEvents } from "@/api/playlists";
-import { formatDateTime } from "@/lib/utils";
+import { formatWallClock } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,7 +95,7 @@ export function PlaylistEventTable({ playlistId }: PlaylistEventTableProps) {
             {data.items.map((event) => (
               <tr key={event.id} className="hover:bg-gray-50">
                 <td className="whitespace-nowrap px-4 py-3 text-gray-600">
-                  {formatDateTime(event.played_at)}
+                  {formatWallClock(event.played_at)}
                 </td>
                 <td className="px-4 py-3 text-gray-900">{event.artist_name}</td>
                 <td className="px-4 py-3 text-gray-900">{event.title}</td>

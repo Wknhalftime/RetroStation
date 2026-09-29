@@ -1,0 +1,192 @@
+# serializer version: 1
+# name: test_mid_run_exception_reports_failed_with_partial_progress
+  list([
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': '',
+        'phase': 'artists',
+        'processed': 0,
+        'total': 2,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'artists': 2,
+        'recordings': 0,
+        'works': 0,
+      }),
+      'kind': 'log',
+      'level': 'INFO',
+      'message': 'mb_enrichment_started',
+    }),
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': 'artist:a0',
+        'phase': 'artists',
+        'processed': 1,
+        'total': 2,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'completed_at_is_set': True,
+      'kind': 'progress',
+      'progress_data': dict({
+        'error': 'boom mid-run',
+        'processed': 1,
+        'total': 2,
+      }),
+      'status': 'failed',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'error': 'boom mid-run',
+        'traceback': '<TRACEBACK>',
+      }),
+      'kind': 'log',
+      'level': 'ERROR',
+      'message': 'mb_enrichment_failed',
+    }),
+  ])
+# ---
+# name: test_success_with_periodic_rows_full_envelope_sequence
+  list([
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': '',
+        'phase': 'artists',
+        'processed': 0,
+        'total': 2,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'artists': 2,
+        'recordings': 0,
+        'works': 0,
+      }),
+      'kind': 'log',
+      'level': 'INFO',
+      'message': 'mb_enrichment_started',
+    }),
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': 'artist:a0',
+        'phase': 'artists',
+        'processed': 1,
+        'total': 2,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': 'artist:a1',
+        'phase': 'artists',
+        'processed': 2,
+        'total': 2,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'completed_at_is_set': True,
+      'kind': 'progress',
+      'progress_data': dict({
+        'artists_done': 0,
+        'artists_failed': 2,
+        'orphans_deleted': 0,
+        'processed': 2,
+        'recordings_done': 0,
+        'recordings_failed': 0,
+        'total': 2,
+        'works_done': 0,
+        'works_failed': 0,
+      }),
+      'status': 'completed',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'artists_done': 0,
+        'artists_failed': 2,
+        'orphans_deleted': 0,
+        'recordings_done': 0,
+        'recordings_failed': 0,
+        'works_done': 0,
+        'works_failed': 0,
+      }),
+      'kind': 'log',
+      'level': 'INFO',
+      'message': 'mb_enrichment_completed',
+    }),
+  ])
+# ---
+# name: test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_failed
+  list([
+    dict({
+      'completed_at_is_set': False,
+      'kind': 'progress',
+      'progress_data': dict({
+        'current_item': '',
+        'phase': 'artists',
+        'processed': 0,
+        'total': 1,
+      }),
+      'status': 'running',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'artists': 1,
+        'recordings': 0,
+        'works': 0,
+      }),
+      'kind': 'log',
+      'level': 'INFO',
+      'message': 'mb_enrichment_started',
+    }),
+    dict({
+      'completed_at_is_set': True,
+      'kind': 'progress',
+      'progress_data': dict({
+        'error': 'simulated telemetry write failure',
+        'processed': 1,
+        'total': 1,
+      }),
+      'status': 'failed',
+      'task_type': 'mb_enrichment',
+    }),
+    dict({
+      'category': 'enrichment',
+      'details': dict({
+        'error': 'simulated telemetry write failure',
+        'traceback': '<TRACEBACK>',
+      }),
+      'kind': 'log',
+      'level': 'ERROR',
+      'message': 'mb_enrichment_failed',
+    }),
+  ])
+# ---
