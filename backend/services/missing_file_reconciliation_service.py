@@ -29,8 +29,12 @@ from backend.domain.library import (
     MissingFileChangedError,
     MissingFileDeletion,
     MissingFileMove,
+    MissingFileNotFoundError,
     MissingFilePlan,
     MissingFileSelection,
+    RemapTargetNotFoundError,
+    RemapTargetNotPresentError,
+    RemapTargetUngroupedError,
 )
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
@@ -376,3 +380,25 @@ def delete_missing_files(
             deleted += 1
             released += outcome
     return MissingFileDeletion(deleted=deleted, matches_released=released, skipped=skipped)
+
+
+def _remap_target(target_id: UUID, file_repo: LibraryFileRepository) -> LibraryFile:
+    """The present, grouped file a missing row may be folded into; raises otherwise."""
+    target = file_repo.get_by_id(target_id)
+    if target is None:
+        raise RemapTargetNotFoundError(f"File {target_id} not found")
+    if target.file_status != FileStatus.PRESENT:
+        raise RemapTargetNotPresentError(f"File {target_id} is missing from disk")
+    if target.work_id is None:
+        raise RemapTargetUngroupedError(f"File {target_id} has no work yet; scan the library")
+    return target
+
+
+def remap_missing_file(missing_id: UUID, target_id: UUID, repos: ReconciliationRepos) -> None:
+    """Fold a missing row into the present file the user chose, as reconciliation does."""
+    missing = repos.files.get_by_id(missing_id)
+    if missing is None or missing.file_status != FileStatus.MISSING:
+        raise MissingFileNotFoundError(f"No missing file {missing_id}")
+    move = _move(missing, _remap_target(target_id, repos.files))
+    if not apply_missing_file_move(move, repos):
+        raise MissingFileNotFoundError(f"No missing file {missing_id}")

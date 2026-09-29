@@ -259,3 +259,19 @@ class MissingFileDeletion:
     deleted: int
     matches_released: int
     skipped: int
+
+
+class MissingFileNotFoundError(MissingFileError):
+    """No missing row has this id (it came back, or was folded or deleted)."""
+
+
+class RemapTargetNotFoundError(MissingFileError):
+    """The chosen target file does not exist."""
+
+
+class RemapTargetNotPresentError(MissingFileError):
+    """The chosen target file is itself missing from disk."""
+
+
+class RemapTargetUngroupedError(MissingFileError):
+    """The chosen target has no work yet, so the moved matches would lose theirs."""
