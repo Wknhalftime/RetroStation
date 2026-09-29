@@ -70,11 +70,9 @@ def test_task_failure_telemetry_writes_failed_row_and_reraises(
         assert log_row["level"] == LogLevel.ERROR.value
         assert log_row["message"] == f"{TaskType.MATCHING.value}_failed"
         assert log_row["details"]["error"] == "deliberate"
-        # AUD-R011 decision 3: today task_failure_telemetry's failed
-        # SystemLog carries no traceback (unlike `_task_run.task_run`,
-        # which already does). This pins that gap; the decision-3 commit
-        # flips this to assert a non-empty traceback is present instead.
-        assert "traceback" not in log_row["details"]
+        # AUD-R011 decision 3: task_failure_telemetry's failed SystemLog now
+        # carries a traceback too, matching `_task_run.task_run`.
+        assert "RuntimeError: deliberate" in log_row["details"]["traceback"]
 
 
 def test_task_failure_telemetry_no_writes_on_success(

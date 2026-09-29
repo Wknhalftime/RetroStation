@@ -169,12 +169,16 @@ class TestLibraryScanTaskEnqueueFailureOwnership:
         assert messages["library_enrichment_task_enqueue_failed"]["error"] == "second failure"
 
 
-class TestLibraryScanTaskFailedDetailsHaveNoTracebackYet:
+class TestLibraryScanTaskFailedDetailsHaveTraceback:
+    """AUD-R011 decision 3: library_scan_task's failed SystemLog details now
+    carry a traceback, matching `_task_run.task_run`'s existing shape.
+    """
+
     @patch("backend.tasks.library_scan_tasks.connect_sync", side_effect=_fake_connect_sync)
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.library_scan_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_scan_tasks._run_scan")
-    def test_scan_body_failure_failed_log_has_no_traceback(
+    def test_scan_body_failure_failed_log_has_traceback(
         self,
         mock_run_scan: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -194,7 +198,7 @@ class TestLibraryScanTaskFailedDetailsHaveNoTracebackYet:
         failed_log = next(log for log in fake_sys_log.all if log.message == "scan_failed")
         assert failed_log.details is not None
         assert failed_log.details["error"] == "scan body boom"
-        assert "traceback" not in failed_log.details
+        assert "RuntimeError: scan body boom" in failed_log.details["traceback"]
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ task shares the same reporting shape.
 
 from __future__ import annotations
 
+import traceback
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -83,6 +84,10 @@ def task_failure_telemetry(
     try:
         yield resolved_task_id
     except Exception as exc:
+        # Captured inside the except, not after it: `traceback.format_exc()`
+        # reads the exception currently being handled, so it must be called
+        # while that context is still active.
+        tb = traceback.format_exc()
         _report_failure(
             database_url=resolved_db_url,
             task_id=resolved_task_id,
@@ -90,6 +95,7 @@ def task_failure_telemetry(
             log_category=log_category,
             started_at=started_at,
             error_message=str(exc),
+            traceback_text=tb,
         )
         raise
 
@@ -102,6 +108,7 @@ def _report_failure(
     log_category: LogCategory,
     started_at: datetime,
     error_message: str,
+    traceback_text: str,
 ) -> None:
     """Write FAILED TaskProgress + ERROR SystemLog. Swallow telemetry errors
     so the primary exception stays the dominant signal in logs.
@@ -144,7 +151,7 @@ def _report_failure(
                         level=LogLevel.ERROR,
                         message=f"{task_type.value}_failed",
                         trace_id=task_id,
-                        details={"error": error_message},
+                        details={"error": error_message, "traceback": traceback_text},
                     )
                 )
             except Exception as syslog_exc:  # noqa: BLE001

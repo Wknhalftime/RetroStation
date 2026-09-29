@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -511,7 +512,7 @@ def library_scan_task(root_path: str) -> str:
                         level=LogLevel.ERROR,
                         message="scan_failed",
                         trace_id=task_id,
-                        details={"error": str(exc)},
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
                     )
                 )
         raise
