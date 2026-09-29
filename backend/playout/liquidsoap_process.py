@@ -21,6 +21,7 @@ from backend.playout.errors import EngineStartError
 from backend.playout.harbor import Upstream, open_upstream
 
 __all__ = [
+    "SESSION_LOG_KEEP",
     "SESSION_SCRIPT",
     "EngineConfig",
     "EngineStartError",
@@ -30,6 +31,7 @@ __all__ = [
     "free_port",
     "launch_env",
     "long_path",
+    "prune_session_logs",
     "session_base_env",
     "start_ready_engine",
     "start_session",
@@ -45,6 +47,7 @@ else:
 _CACHE_VARS = ("LIQ_CACHE_DIR", "LIQ_CACHE_USER_DIR", "LIQ_CACHE_SYSTEM_DIR")
 _CACHE_BUILD_TIMEOUT_S = 120
 _KILL_WAIT_S = 10
+SESSION_LOG_KEEP = 50  # D35: per-session engine logs, kept at app start
 _LONG_PREFIX = "\\\\?\\"
 _UNC_PREFIX = _LONG_PREFIX + "UNC\\"
 # What the engine needs from the API's environment, and nothing else: PATH for DLL lookup,
@@ -78,6 +81,21 @@ def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+def prune_session_logs(log_dir: Path, keep: int = SESSION_LOG_KEEP) -> None:
+    """Delete every ``*.log`` in ``log_dir`` past the newest ``keep`` (D35).
+
+    A missing folder is a no-op. Files are ordered by ``(mtime, name)``, newest first;
+    only ``*.log`` files are considered, so unrelated files in the folder are untouched.
+    """
+    if not log_dir.is_dir():
+        return
+    logs = sorted(
+        log_dir.glob("*.log"), key=lambda log: (log.stat().st_mtime, log.name), reverse=True
+    )
+    for stale in logs[keep:]:
+        stale.unlink()
 
 
 @dataclass(frozen=True)
