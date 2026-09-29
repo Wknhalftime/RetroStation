@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -11,10 +10,11 @@ import structlog
 
 from backend.config import get_settings
 from backend.db.ingest_transaction import ingest_transaction
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.retry import retry_on_deadlock
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import TaskStatus, TaskType
+from backend.domain.enums import LogCategory, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.services.ingestion_service import (
     CsvDecodeError,
@@ -24,6 +24,7 @@ from backend.services.ingestion_service import (
     count_csv_rows,
     ingest_csv,
 )
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
@@ -295,11 +296,19 @@ def ingestion_task(
 
         # Embedding dispatch is decoupled from ingestion COMPLETED: the DB
         # commit has already happened, so a broker hiccup here is a separate
-        # operational concern, not an ingestion failure.
+        # operational concern, not an ingestion failure. Guarded (AUD-R011
+        # decision 1): the caller owns the handoff, so an enqueue failure is
+        # logged on this ingestion run's own task_id instead of silently
+        # swallowed — progress_conn is still open at this point.
         from backend.tasks.embedding_tasks import embedding_task
 
-        with contextlib.suppress(Exception):
-            embedding_task(result.playlist_id)
+        enqueue_or_log(
+            lambda: embedding_task(result.playlist_id),
+            task_name="embedding_task",
+            caller_task_id=task_id,
+            log_category=LogCategory.INGESTION,
+            sys_log_repo=PgSystemLogRepository(progress_conn),
+        )
 
         return task_id
 

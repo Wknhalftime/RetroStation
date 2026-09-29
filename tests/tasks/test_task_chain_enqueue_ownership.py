@@ -3,21 +3,20 @@
 `library_scan_task`, `library_scan_files_task` (the watcher), and
 `ingestion_task` each chain into a downstream Huey task by calling it
 directly (e.g. `library_enrichment_task()`), which only ENQUEUES the next
-task rather than running it. Today that enqueue call is not guarded
-consistently:
+task rather than running it.
 
-- `library_scan_task` and `library_scan_files_task` enqueue INSIDE their own
-  try block, so an enqueue failure (patched here to raise the real
-  `sqlite3.Error` SqliteHuey's storage backend raises) marks their own
-  otherwise-successful run FAILED.
-- Neither task writes a SystemLog at all today (started/completed/failed),
-  pinned here via a global patch on `PgSystemLogRepository.__init__` so the
-  assertion holds regardless of which module would go on to instantiate it.
+Decision 1 (AUD-R011): the caller owns the handoff. An enqueue failure
+(the real `sqlite3.Error` SqliteHuey's storage backend raises) is logged as
+an ERROR SystemLog on the caller's own trace_id via
+`backend.tasks._enqueue_chain.enqueue_or_log`, and the caller keeps its own
+COMPLETED status — it no longer flips to FAILED. `library_scan_task`
+enqueues two tasks; if the first fails, the second is still attempted, and
+each failure is logged on its own.
 
-These tests pin that behaviour on unchanged code. AUD-R011 decisions 1 and 2
-change all of this; the corresponding tests are updated in the commits that
-implement each decision (see the commit messages for exactly which
-assertions flip and why).
+Decision 2 (not yet implemented here) will add started/completed/failed
+SystemLogs to the watcher and to `ingestion_task` themselves. The classes
+below pin that neither task writes those YET — only the decision-1 enqueue-
+failure log exists so far.
 """
 
 from __future__ import annotations
@@ -47,16 +46,16 @@ def _fake_connect_sync(_url: str, *, autocommit: bool = False) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# library_scan_task: enqueue failure ownership
+# library_scan_task: enqueue failure ownership (AUD-R011 decision 1)
 # ---------------------------------------------------------------------------
 
 
-class TestLibraryScanTaskEnqueueFailurePinsToday:
+class TestLibraryScanTaskEnqueueFailureOwnership:
     @patch("backend.tasks.library_scan_tasks.connect_sync", side_effect=_fake_connect_sync)
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.library_scan_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_scan_tasks._run_scan")
-    def test_hash_backfill_enqueue_failure_marks_scans_own_run_failed(
+    def test_hash_backfill_enqueue_failure_logs_and_keeps_scan_completed(
         self,
         mock_run_scan: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -66,7 +65,8 @@ class TestLibraryScanTaskEnqueueFailurePinsToday:
         mock_run_scan.return_value = (5, 0, {"processed": 5, "total": 5, "current_path": ""})
         fake_progress = FakeTaskProgressRepository()
         mock_progress_cls.return_value = fake_progress
-        mock_sys_log_cls.return_value = FakeSystemLogRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
 
         with (
             patch(
@@ -77,22 +77,29 @@ class TestLibraryScanTaskEnqueueFailurePinsToday:
         ):
             from backend.tasks.library_scan_tasks import library_scan_task
 
-            with pytest.raises(sqlite3.OperationalError):
-                library_scan_task.call_local("/music")
+            # Must NOT raise: the caller owns the handoff and keeps COMPLETED.
+            library_scan_task.call_local("/music")
 
-        # Today: the enqueue failure IS the primary exception, so scan's own
-        # otherwise-successful run is reported FAILED, and the second
-        # enqueue (library_enrichment_task) never runs.
-        mock_enrich.assert_not_called()
+        # The second enqueue is still attempted even though the first failed.
+        mock_enrich.assert_called_once()
         terminal = fake_progress.received_upserts[-1]
-        assert terminal.status == TaskStatus.FAILED
-        assert terminal.progress_data["error"] == "database is locked"
+        assert terminal.status == TaskStatus.COMPLETED
+
+        enqueue_failed_logs = [
+            log
+            for log in fake_sys_log.all
+            if log.message == "library_hash_backfill_task_enqueue_failed"
+        ]
+        assert len(enqueue_failed_logs) == 1
+        assert enqueue_failed_logs[0].trace_id == terminal.task_id
+        assert enqueue_failed_logs[0].details is not None
+        assert enqueue_failed_logs[0].details["error"] == "database is locked"
 
     @patch("backend.tasks.library_scan_tasks.connect_sync", side_effect=_fake_connect_sync)
     @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.library_scan_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_scan_tasks._run_scan")
-    def test_enrichment_enqueue_failure_marks_scans_own_run_failed(
+    def test_enrichment_enqueue_failure_logs_and_keeps_scan_completed(
         self,
         mock_run_scan: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -102,7 +109,8 @@ class TestLibraryScanTaskEnqueueFailurePinsToday:
         mock_run_scan.return_value = (5, 0, {"processed": 5, "total": 5, "current_path": ""})
         fake_progress = FakeTaskProgressRepository()
         mock_progress_cls.return_value = fake_progress
-        mock_sys_log_cls.return_value = FakeSystemLogRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
 
         with (
             patch("backend.tasks.library_hash_backfill_tasks.library_hash_backfill_task"),
@@ -113,12 +121,53 @@ class TestLibraryScanTaskEnqueueFailurePinsToday:
         ):
             from backend.tasks.library_scan_tasks import library_scan_task
 
-            with pytest.raises(sqlite3.OperationalError):
-                library_scan_task.call_local("/music")
+            library_scan_task.call_local("/music")
 
         terminal = fake_progress.received_upserts[-1]
-        assert terminal.status == TaskStatus.FAILED
-        assert terminal.progress_data["error"] == "disk I/O error"
+        assert terminal.status == TaskStatus.COMPLETED
+
+        enqueue_failed_logs = [
+            log
+            for log in fake_sys_log.all
+            if log.message == "library_enrichment_task_enqueue_failed"
+        ]
+        assert len(enqueue_failed_logs) == 1
+        assert enqueue_failed_logs[0].details is not None
+        assert enqueue_failed_logs[0].details["error"] == "disk I/O error"
+
+    @patch("backend.tasks.library_scan_tasks.connect_sync", side_effect=_fake_connect_sync)
+    @patch("backend.tasks.library_scan_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.library_scan_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.library_scan_tasks._run_scan")
+    def test_both_enqueue_failures_are_logged_separately(
+        self,
+        mock_run_scan: MagicMock,
+        mock_sys_log_cls: MagicMock,
+        mock_progress_cls: MagicMock,
+        _connect: MagicMock,
+    ) -> None:
+        mock_run_scan.return_value = (5, 0, {"processed": 5, "total": 5, "current_path": ""})
+        mock_progress_cls.return_value = FakeTaskProgressRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
+
+        with (
+            patch(
+                "backend.tasks.library_hash_backfill_tasks.library_hash_backfill_task",
+                side_effect=sqlite3.OperationalError("first failure"),
+            ),
+            patch(
+                "backend.tasks.library_enrichment_tasks.library_enrichment_task",
+                side_effect=sqlite3.OperationalError("second failure"),
+            ),
+        ):
+            from backend.tasks.library_scan_tasks import library_scan_task
+
+            library_scan_task.call_local("/music")
+
+        messages = {log.message: log.details for log in fake_sys_log.all}
+        assert messages["library_hash_backfill_task_enqueue_failed"]["error"] == "first failure"
+        assert messages["library_enrichment_task_enqueue_failed"]["error"] == "second failure"
 
 
 class TestLibraryScanTaskFailedDetailsHaveNoTracebackYet:
@@ -169,15 +218,17 @@ def _watcher_harness() -> tuple[MagicMock, MagicMock]:
     return progress_conn, library_conn
 
 
-class TestWatcherScanTaskEnqueueFailurePinsToday:
+class TestWatcherScanTaskEnqueueFailureOwnership:
     @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_watcher_tasks.scan_folder_incrementally")
     @patch("backend.tasks.library_watcher_tasks.RepositoryFactory")
     @patch("backend.tasks.library_watcher_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.library_watcher_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_watcher_tasks.connect_sync")
-    def test_enrichment_enqueue_failure_marks_watchers_own_run_failed(
+    def test_enrichment_enqueue_failure_logs_and_keeps_watcher_completed(
         self,
         mock_connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
         mock_progress_cls: MagicMock,
         mock_repo_factory: MagicMock,
         mock_scan_folder: MagicMock,
@@ -189,6 +240,8 @@ class TestWatcherScanTaskEnqueueFailurePinsToday:
         mock_scan_folder.return_value = FolderScanResult(files_written=1)
         fake_progress = FakeTaskProgressRepository()
         mock_progress_cls.return_value = fake_progress
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
 
         with patch(
             "backend.tasks.library_enrichment_tasks.library_enrichment_task",
@@ -196,22 +249,32 @@ class TestWatcherScanTaskEnqueueFailurePinsToday:
         ):
             from backend.tasks.library_watcher_tasks import library_scan_files_task
 
-            with pytest.raises(sqlite3.OperationalError):
-                library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
+            # Must NOT raise: the caller owns the handoff and keeps COMPLETED.
+            library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
 
         terminal = fake_progress.received_upserts[-1]
-        assert terminal.status == TaskStatus.FAILED
-        assert terminal.progress_data["error"] == "database is locked"
+        assert terminal.status == TaskStatus.COMPLETED
+
+        enqueue_failed_logs = [
+            log
+            for log in fake_sys_log.all
+            if log.message == "library_enrichment_task_enqueue_failed"
+        ]
+        assert len(enqueue_failed_logs) == 1
+        assert enqueue_failed_logs[0].trace_id == terminal.task_id
+        assert enqueue_failed_logs[0].details is not None
+        assert enqueue_failed_logs[0].details["error"] == "database is locked"
 
 
 # ---------------------------------------------------------------------------
-# Neither the watcher nor ingestion write any SystemLog today, on success or
-# on failure. Pinned via a patch on the concrete repository class itself so
-# the assertion holds regardless of which module ends up instantiating it.
+# Decision 2 (not yet implemented): neither the watcher nor ingestion write
+# their own started/completed/failed SystemLogs yet. Only a decision-1
+# enqueue-failure log can exist so far, and only on the success path (a
+# body-level failure never reaches the enqueue call at all).
 # ---------------------------------------------------------------------------
 
 
-class TestWatcherAndIngestionWriteNoSystemLogYet:
+class TestWatcherAndIngestionLifecycleLogsNotYetAdded:
     @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_watcher_tasks.scan_folder_incrementally")
     @patch("backend.tasks.library_watcher_tasks.RepositoryFactory")
@@ -232,21 +295,21 @@ class TestWatcherAndIngestionWriteNoSystemLogYet:
         mock_progress_cls.return_value = FakeTaskProgressRepository()
 
         with (
-            patch.object(PgSystemLogRepository, "__init__", return_value=None) as ctor,
+            patch.object(PgSystemLogRepository, "create") as create,
             patch("backend.tasks.library_enrichment_tasks.library_enrichment_task"),
         ):
             from backend.tasks.library_watcher_tasks import library_scan_files_task
 
             library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
 
-        ctor.assert_not_called()
+        create.assert_not_called()
 
     @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_watcher_tasks.scan_folder_incrementally")
     @patch("backend.tasks.library_watcher_tasks.RepositoryFactory")
     @patch("backend.tasks.library_watcher_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.library_watcher_tasks.connect_sync")
-    def test_watcher_failure_writes_no_system_log(
+    def test_watcher_body_failure_writes_no_system_log(
         self,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
@@ -259,13 +322,13 @@ class TestWatcherAndIngestionWriteNoSystemLogYet:
         mock_scan_folder.side_effect = RuntimeError("folder scan boom")
         mock_progress_cls.return_value = FakeTaskProgressRepository()
 
-        with patch.object(PgSystemLogRepository, "__init__", return_value=None) as ctor:
+        with patch.object(PgSystemLogRepository, "create") as create:
             from backend.tasks.library_watcher_tasks import library_scan_files_task
 
             with pytest.raises(RuntimeError, match="folder scan boom"):
                 library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
 
-        ctor.assert_not_called()
+        create.assert_not_called()
 
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
@@ -290,20 +353,20 @@ class TestWatcherAndIngestionWriteNoSystemLogYet:
         )
 
         with (
-            patch.object(PgSystemLogRepository, "__init__", return_value=None) as ctor,
+            patch.object(PgSystemLogRepository, "create") as create,
             patch("backend.tasks.embedding_tasks.embedding_task"),
         ):
             from backend.tasks.ingestion_tasks import ingestion_task
 
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-1")
 
-        ctor.assert_not_called()
+        create.assert_not_called()
 
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
     @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
-    def test_ingestion_failure_writes_no_system_log(
+    def test_ingestion_body_failure_writes_no_system_log(
         self,
         _connect: MagicMock,
         mock_progress_cls: MagicMock,
@@ -313,20 +376,17 @@ class TestWatcherAndIngestionWriteNoSystemLogYet:
         mock_progress_cls.return_value = FakeTaskProgressRepository()
         mock_run_ingest.side_effect = RuntimeError("ingest boom")
 
-        with patch.object(PgSystemLogRepository, "__init__", return_value=None) as ctor:
+        with patch.object(PgSystemLogRepository, "create") as create:
             from backend.tasks.ingestion_tasks import ingestion_task
 
             with pytest.raises(RuntimeError, match="ingest boom"):
                 ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-2")
 
-        ctor.assert_not_called()
+        create.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# ingestion_task: embedding_task enqueue failure is silently swallowed today
-# (contextlib.suppress(Exception) around the whole call). Already pinned by
-# tests/tasks/test_ingestion_task_progress.py::
-# TestIngestionTaskEmbeddingDecoupling::test_embedding_failure_does_not_flip_to_failed
-# (updated in the decision-1 commit to use the real enqueue error type and
-# assert the new SystemLog).
+# ingestion_task: embedding_task enqueue failure ownership is covered in
+# tests/tasks/test_ingestion_task_progress.py::TestIngestionTaskEmbeddingDecoupling
+# (kept there, next to the rest of ingestion_task's lifecycle tests).
 # ---------------------------------------------------------------------------

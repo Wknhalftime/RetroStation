@@ -44,6 +44,7 @@ from backend.services.missing_file_reconciliation_service import (
     repick_stranded_masters,
 )
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
@@ -454,7 +455,13 @@ def library_scan_task(root_path: str) -> str:
             quarantined=quarantine_written,
         )
 
-        # Fire-and-forget: chain into enrichment if any files were written
+        # Fire-and-forget: chain into enrichment if any files were written.
+        # Each enqueue is guarded independently (AUD-R011 decision 1): this
+        # scan's own run already reported COMPLETED above, so a downstream
+        # enqueue failure must not retroactively flip it to FAILED. The
+        # caller owns the handoff — an enqueue failure is logged on this
+        # scan's own task_id and the second enqueue is still attempted even
+        # if the first one failed.
         if files_written > 0:
             from backend.tasks.library_enrichment_tasks import library_enrichment_task
             from backend.tasks.library_hash_backfill_tasks import library_hash_backfill_task
@@ -463,8 +470,20 @@ def library_scan_task(root_path: str) -> str:
             # short next to enrichment's MusicBrainz lookups. Until it finishes,
             # move detection falls back to size + mtime for MP3s and FLACs
             # without a stored MD5. A no-op when nothing is waiting.
-            library_hash_backfill_task()
-            library_enrichment_task()
+            enqueue_or_log(
+                library_hash_backfill_task,
+                task_name="library_hash_backfill_task",
+                caller_task_id=task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=sys_log_repo,
+            )
+            enqueue_or_log(
+                library_enrichment_task,
+                task_name="library_enrichment_task",
+                caller_task_id=task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=sys_log_repo,
+            )
 
     except Exception as exc:
         if library_conn is not None:
