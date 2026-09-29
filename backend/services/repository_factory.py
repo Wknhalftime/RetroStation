@@ -34,6 +34,7 @@ from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
+from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 
 
 @dataclass
@@ -191,3 +192,18 @@ def recalc_repos(db_url: str) -> Iterator[RecalcRepos]:
             library_files=PgLibraryFileRepository(conn),
             commit=conn.commit,
         )
+
+
+def reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
+    """The port bundle missing-file folds and deletes write through, on *repos*' connection.
+
+    Composition root, beside recalc_repos (AUD-054): the scan task and the Missing
+    Files endpoints build it here instead of each wiring it by hand.
+    """
+    return ReconciliationRepos(
+        files=repos.library_files,
+        matches=repos.matches,
+        works=repos.works,
+        song_masters=repos.song_masters,
+        format_overrides=repos.format_overrides,
+    )

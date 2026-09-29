@@ -22,13 +22,16 @@ from dataclasses import dataclass
 from pathlib import PureWindowsPath
 from uuid import UUID
 
-from backend.domain.enums import FileStatus
+from backend.domain.enums import FileStatus, MatchStatus, ReasonCode
 from backend.domain.library import (
     AUDIO_HASHABLE_FORMATS,
     LibraryFile,
+    MissingFileDeletion,
     MissingFileMove,
     MissingFilePlan,
+    MissingFileSelection,
 )
+from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
@@ -293,3 +296,72 @@ def plan_for_library(file_repo: LibraryFileRepository) -> MissingFilePlan:
         file_repo.get_missing(),
         lambda m: successor_candidates(m, file_repo),
     )
+
+
+def _release_matches(
+    file_id: UUID,
+    matches: MatchRepository,
+    identities: BroadcastTrackIdentityRepository,
+) -> int:
+    """Delete the file's matches; each identity left with none goes back to review."""
+    identity_ids = matches.delete_for_file(file_id)
+    for identity_id in set(identity_ids):
+        if matches.get_by_identity(identity_id) is None:
+            identities.update_match_status(
+                identity_id, MatchStatus.NEEDS_REVIEW, None, ReasonCode.LIBRARY_FILE_REMOVED
+            )
+    return len(identity_ids)
+
+
+def _detach_curation(file_id: UUID, repos: ReconciliationRepos) -> None:
+    """Remove the file's overrides and masters; each work whose master it was re-picks one.
+
+    Masters go before the re-pick: a Pg upsert never overwrites a MANUAL master,
+    so re-picking first would leave a manual pick on the file being deleted.
+    """
+    repos.format_overrides.delete_for_file(file_id)
+    for work_id in repos.song_masters.delete_for_file(file_id):
+        reselect_master_from_files(work_id, repos.song_masters, repos.files)
+
+
+def _delete_missing_row(
+    file_id: UUID,
+    repos: ReconciliationRepos,
+    identities: BroadcastTrackIdentityRepository,
+) -> int | None:
+    """Delete one missing row; the matches it released, or None if it is not missing."""
+    row = repos.files.get_by_id(file_id)
+    if row is None or row.file_status != FileStatus.MISSING:
+        return None
+    released = _release_matches(row.id, repos.matches, identities)
+    _detach_curation(row.id, repos)
+    repos.files.delete_missing(row.id)
+    if row.work_id is not None:
+        repos.works.delete_if_empty(row.work_id)
+    return released
+
+
+def _selected_ids(
+    selection: MissingFileSelection,
+    file_repo: LibraryFileRepository,
+) -> tuple[UUID, ...]:
+    if selection.every_row:
+        return tuple(f.id for f in file_repo.get_missing())
+    return selection.ids
+
+
+def delete_missing_files(
+    selection: MissingFileSelection,
+    repos: ReconciliationRepos,
+    identities: BroadcastTrackIdentityRepository,
+) -> MissingFileDeletion:
+    """Delete the selected missing rows, releasing their matches back to review."""
+    deleted = released = skipped = 0
+    for file_id in _selected_ids(selection, repos.files):
+        outcome = _delete_missing_row(file_id, repos, identities)
+        if outcome is None:
+            skipped += 1
+        else:
+            deleted += 1
+            released += outcome
+    return MissingFileDeletion(deleted=deleted, matches_released=released, skipped=skipped)

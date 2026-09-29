@@ -44,7 +44,7 @@ from backend.services.missing_file_reconciliation_service import (
     plan_for_library,
     repick_stranded_masters,
 )
-from backend.services.repository_factory import RepositoryFactory
+from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
@@ -85,16 +85,6 @@ def apply_missing_file_moves(
     return folded, failed, stale
 
 
-def _reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
-    return ReconciliationRepos(
-        files=repos.library_files,
-        matches=repos.matches,
-        works=repos.works,
-        song_masters=repos.song_masters,
-        format_overrides=repos.format_overrides,
-    )
-
-
 def reconcile_missing_after_scan(
     library_conn: psycopg.Connection[Any],
     repos: RepositoryFactory,
@@ -106,7 +96,7 @@ def reconcile_missing_after_scan(
     skipped on its own; a failure outside one fold (planning, the master
     sweep, the commit) rolls back the whole run and returns None.
     """
-    recon_repos = _reconciliation_repos(repos)
+    recon_repos = reconciliation_repos(repos)
     try:
         plan = plan_for_library(recon_repos.files)
         folded, failed, stale = apply_missing_file_moves(plan, library_conn, recon_repos)

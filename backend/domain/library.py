@@ -217,3 +217,37 @@ class MissingFileListing:
     rows: tuple[MissingFileRow, ...]
     total: int
     total_match_count: int
+
+
+class MissingFileError(LibraryError):
+    """Base class for errors about missing library rows."""
+
+
+class InvalidMissingFileSelectionError(MissingFileError):
+    """A deletion must name either some rows or every row, not both or neither."""
+
+
+@dataclass(frozen=True)
+class MissingFileSelection:
+    """Which missing rows to delete: these ids, or every missing row."""
+
+    ids: tuple[UUID, ...] = ()
+    every_row: bool = False
+
+    def __post_init__(self) -> None:
+        if self.every_row == bool(self.ids):
+            raise InvalidMissingFileSelectionError("give either ids or every_row")
+
+
+@dataclass(frozen=True)
+class MissingFileDeletion:
+    """What a deletion did.
+
+    ``matches_released``: identity matches deleted with the rows; each identity
+    left with no match went back to review. ``skipped``: ids no longer missing
+    (restored or folded since they were listed) or unknown.
+    """
+
+    deleted: int
+    matches_released: int
+    skipped: int
