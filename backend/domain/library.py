@@ -219,6 +219,31 @@ class MissingFileListing:
     total_match_count: int
 
 
+@dataclass(frozen=True)
+class MissingFileCandidate:
+    """A present file that could take over a missing row."""
+
+    id: UUID
+    file_path: str
+
+
+@dataclass(frozen=True)
+class MissingFileEntry:
+    """A listed missing row and the present files reconciliation would accept for it."""
+
+    row: MissingFileRow
+    candidates: tuple[MissingFileCandidate, ...]
+
+
+@dataclass(frozen=True)
+class MissingFilePage:
+    """A page of the Missing Files list, with totals over every missing row."""
+
+    entries: tuple[MissingFileEntry, ...]
+    total: int
+    total_match_count: int
+
+
 class MissingFileError(LibraryError):
     """Base class for errors about missing library rows."""
 

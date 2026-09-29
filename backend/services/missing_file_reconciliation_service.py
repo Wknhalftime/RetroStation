@@ -26,10 +26,13 @@ from backend.domain.enums import FileStatus, MatchStatus, ReasonCode
 from backend.domain.library import (
     AUDIO_HASHABLE_FORMATS,
     LibraryFile,
+    MissingFileCandidate,
     MissingFileChangedError,
     MissingFileDeletion,
+    MissingFileEntry,
     MissingFileMove,
     MissingFileNotFoundError,
+    MissingFilePage,
     MissingFilePlan,
     MissingFileSelection,
     RemapTargetNotFoundError,
@@ -40,6 +43,7 @@ from backend.repositories.broadcast_track_identities import BroadcastTrackIdenti
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.missing_files import MissingFileListingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
@@ -399,3 +403,34 @@ def remap_missing_file(missing_id: UUID, target_id: UUID, repos: ReconciliationR
     if not apply_missing_file_move(move, repos):
         _remap_target(target_id, repos.files)
         raise MissingFileNotFoundError(f"No missing file {missing_id}")
+
+
+def _candidates(
+    file_id: UUID,
+    file_repo: LibraryFileRepository,
+) -> tuple[MissingFileCandidate, ...]:
+    """The present, grouped files holding the row's track, in path order.
+
+    Every ready successor, not choose_successor's pick: the user settles ambiguous
+    rows, and a row PR B is still waiting on may be remapped by hand.
+    """
+    missing = file_repo.get_by_id(file_id)
+    if missing is None:
+        return ()
+    ready = ready_successors(missing, successor_candidates(missing, file_repo))
+    return tuple(
+        MissingFileCandidate(id=c.id, file_path=c.file_path)
+        for c in sorted(ready, key=lambda c: c.file_path)
+    )
+
+
+def list_missing_files(
+    offset: int,
+    limit: int,
+    listing: MissingFileListingRepository,
+    file_repo: LibraryFileRepository,
+) -> MissingFilePage:
+    """A page of missing rows, each with the present files it could be folded into."""
+    page = listing.list_page(offset, limit)
+    entries = tuple(MissingFileEntry(row, _candidates(row.id, file_repo)) for row in page.rows)
+    return MissingFilePage(entries, page.total, page.total_match_count)
