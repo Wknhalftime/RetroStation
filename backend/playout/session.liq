@@ -174,7 +174,6 @@ awaiting = ref(null)  # (seq, pushed at, deck index, request) of a push not yet 
 # never-started check measures the item, not the track still playing ahead of it.
 deck_free_at = [ref(0.), ref(0.), ref(0.)]
 deck_wait_until = ref(0.)  # > 0: every deck was busy; push when the first frees up
-abandoned_seq = ref("")  # the last item failed as never started; skipped if it starts late
 
 # The deck the push waits on is taken even while idle.
 def deck_is_free(k) =
@@ -329,7 +328,6 @@ def fail_push_that_never_started() =
       time() >= pushed_at + play_check_s
     then
       awaiting := null
-      abandoned_seq := "#{seq}"
       list.nth(queues, i).remove(r)
       note("PLAY_FAILED", "seq=#{seq} deck=#{list.nth(names, i)}")
       post_in_background("/items/#{seq}/failed")
@@ -374,13 +372,6 @@ def track_span(q, name, m) =
   end
 end
 
-# An item already reported failed that starts after all: skip it, so it never plays on
-# top of the item that replaced it.
-def skip_abandoned(q, name, seq) =
-  note("LATE_START_SKIPPED", "deck=#{name} seq=#{seq}")
-  q.skip()
-end
-
 def wire(q, name, free_at) =
   sn_rem = ref(0.)
   fired = ref(false)
@@ -410,20 +401,14 @@ def wire(q, name, free_at) =
       post_in_background("/items/#{seq}/started")
     end
   end
+  # No late-start skip (D41): a failed push's remove() clears its deck's queue at once, and
+  # decks are pulled before the bell in every streaming step, so a pushed item always starts
+  # before any check can fail it. A track reaching on_track is never one already abandoned.
   q.on_track(
     synchronous=true,
     fun (m) ->
       begin
-        seq = m["item_seq"]
-        if
-          seq != "" and seq == abandoned_seq()
-        then
-          # fired: the skipped track's early end must not trigger a start-next push.
-          fired := true
-          skip_abandoned(q, name, seq)
-        else
-          started(m)
-        end
+        started(m)
         retry_fetch()
       end
   )
