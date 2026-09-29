@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -139,6 +140,87 @@ def recalculate_song_masters(
     )
 
 
+@dataclass(frozen=True)
+class _KeepMaster:
+    """Leave the work's master as it is."""
+
+
+@dataclass(frozen=True)
+class _RemoveMaster:
+    """The work has no present file and its master points outside it."""
+
+
+@dataclass(frozen=True)
+class _StoreMaster:
+    """Store ``master``; ``over_manual`` when it replaces a manual pick no longer valid."""
+
+    master: SongMaster
+    over_manual: bool
+
+
+_MasterDecision = _KeepMaster | _RemoveMaster | _StoreMaster
+
+
+def _holds(master: SongMaster | None, files: list[LibraryFile]) -> bool:
+    """Whether the master's file is one of ``files``."""
+    return master is not None and any(f.id == master.preferred_file_id for f in files)
+
+
+def _pick_from_files(
+    work_id: str,
+    present: list[LibraryFile],
+    manual_file_id: UUID | None,
+    master_id: UUID,
+) -> SongMaster:
+    """The carried manual choice when it is present, else the best-scoring present file."""
+    carried = next((f for f in present if f.id == manual_file_id), None)
+    chosen = carried if carried is not None else max(present, key=_score_file)
+    method = SelectionMethod.MANUAL if carried is not None else SelectionMethod.AUTO
+    return SongMaster(
+        id=master_id,
+        work_id=work_id,
+        preferred_file_id=chosen.id,
+        selection_method=method,
+        score=_score_file(chosen)[0],
+    )
+
+
+def _decide_master(
+    work_id: str,
+    existing: SongMaster | None,
+    work_files: list[LibraryFile],
+    manual_file_id: UUID | None,
+) -> _MasterDecision:
+    """Decide a work's master from its files (any status) and its current master."""
+    present = _present(work_files)
+    is_manual = existing is not None and existing.selection_method == SelectionMethod.MANUAL
+    if is_manual and _holds(existing, present):
+        return _KeepMaster()
+    if not present:
+        # A2 keeps a master on the work's own file (it may come back); one that now
+        # points outside the work cannot stay, and a missing file is never chosen.
+        if existing is None or _holds(existing, work_files):
+            return _KeepMaster()
+        return _RemoveMaster()
+    master_id = existing.id if existing is not None else uuid4()
+    master = _pick_from_files(work_id, present, manual_file_id, master_id)
+    return _StoreMaster(master=master, over_manual=is_manual)
+
+
+def _apply_master_decision(
+    work_id: str,
+    decision: _MasterDecision,
+    song_master_repo: SongMasterRepository,
+) -> None:
+    """Write the decision; only an invalid manual pick is replaced past upsert's guard."""
+    if isinstance(decision, _RemoveMaster):
+        song_master_repo.delete_by_work(work_id)
+    elif isinstance(decision, _StoreMaster) and decision.over_manual:
+        song_master_repo.replace(decision.master)
+    elif isinstance(decision, _StoreMaster):
+        song_master_repo.upsert(decision.master)
+
+
 def reselect_master_from_files(
     work_id: str,
     song_master_repo: SongMasterRepository,
@@ -150,40 +232,12 @@ def reselect_master_from_files(
     Unlike :func:`recalculate_song_masters` this reads ``library_files.work_id``
     rather than going through recordings, which most local works lack. A manual
     master is kept while its file is still a present file of the work; one
-    whose file went missing or moved away is replaced. ``manual_file_id``
-    carries a manual choice over from a work merged into this one, if that
-    file is attached.
+    whose file went missing or moved away is replaced by the automatic pick.
+    With no present file, the master is kept while it points at a file of the
+    work and removed otherwise. ``manual_file_id`` carries a manual choice over
+    from a work merged into this one, if that file is attached.
     """
     existing = song_master_repo.get_by_work(work_id)
-    files = _present(library_file_repo.get_by_work(work_id))
-    if (
-        existing is not None
-        and existing.selection_method == SelectionMethod.MANUAL
-        and any(f.id == existing.preferred_file_id for f in files)
-    ):
-        return
-    if not files:
-        return
-    master_id = existing.id if existing else uuid4()
-    carried = next((f for f in files if f.id == manual_file_id), None)
-    if carried is not None:
-        song_master_repo.upsert(
-            SongMaster(
-                id=master_id,
-                work_id=work_id,
-                preferred_file_id=carried.id,
-                selection_method=SelectionMethod.MANUAL,
-                score=_score_file(carried)[0],
-            )
-        )
-        return
-    best = max(files, key=_score_file)
-    song_master_repo.upsert(
-        SongMaster(
-            id=master_id,
-            work_id=work_id,
-            preferred_file_id=best.id,
-            selection_method=SelectionMethod.AUTO,
-            score=_score_file(best)[0],
-        )
-    )
+    work_files = library_file_repo.get_by_work(work_id)
+    decision = _decide_master(work_id, existing, work_files, manual_file_id)
+    _apply_master_decision(work_id, decision, song_master_repo)

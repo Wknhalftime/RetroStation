@@ -12,8 +12,18 @@ class FakeSongMasterRepository(SongMasterRepository):
         self._library_file_repo: LibraryFileRepository | None = None
 
     def upsert(self, master: SongMaster) -> SongMaster:
+        # Mirrors PgSongMasterRepository: a stored MANUAL pick is never overwritten.
+        stored = self._data.get(master.work_id)
+        if stored is not None and stored.selection_method == SelectionMethod.MANUAL:
+            return stored
         self._data[master.work_id] = master
         return master
+
+    def replace(self, master: SongMaster) -> None:
+        self._data[master.work_id] = master
+
+    def delete_by_work(self, work_id: str) -> None:
+        self._data.pop(work_id, None)
 
     def get_by_work(self, work_id: str) -> SongMaster | None:
         return self._data.get(work_id)
