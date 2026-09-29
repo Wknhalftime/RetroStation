@@ -133,11 +133,11 @@ function Stop-Snapshot {
 #   Uses Get-NetTCPConnection instead of parsing netstat output.
 #
 #   Ports covered:
-#     8000 — uvicorn / FastAPI (backend.run_server)
+#     8010 — uvicorn / FastAPI (backend.run_server)
 #     5173 — Vite dev server  (frontend, per vite.config.ts)
 # ---------------------------------------------------------------------------
 function Clear-OccupiedPorts {
-    foreach ($port in @(8000, 5173)) {
+    foreach ($port in @(8010, 5173)) {
         $conn = Get-NetTCPConnection -LocalPort $port -State Listen `
             -ErrorAction SilentlyContinue |
             Select-Object -First 1

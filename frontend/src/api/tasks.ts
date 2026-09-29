@@ -2,7 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { TaskList } from "@/lib/schemas/tasks";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "http://127.0.0.1:8010";
 const TOKEN = "dev-token";
 
 export function useActiveTasks() {
