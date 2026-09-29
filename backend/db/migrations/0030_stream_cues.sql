@@ -30,6 +30,9 @@ CREATE TABLE stream_cues (
 -- Curation owns "which file plays" (D16, D17): one row per play event, the final file's
 -- id, file_status and source (direct / master / override). No status filter: consumers
 -- decide what an unavailable final file means. Unresolved plays get a row of NULLs.
+-- Consumption contract: query per play. Filter on play_event_id, or join it through
+-- LATERAL (... WHERE play_event_id = x OFFSET 0). A plain join or a station-wide filter
+-- computes it for every play (about 10 s on dev, 5M plays).
 CREATE VIEW play_file_resolution AS
 SELECT pe.id AS play_event_id,
        pl.station_id,
@@ -62,10 +65,18 @@ LEFT JOIN format_overrides fo
 LEFT JOIN library_files f
        ON f.id = COALESCE(fo.preferred_file_id, sm.preferred_file_id, direct.id);
 
+COMMENT ON VIEW play_file_resolution IS
+    'Query per play: filter on play_event_id, or join it through LATERAL (... WHERE '
+    'play_event_id = x OFFSET 0). A plain join or a station-wide filter computes it for '
+    'every play (about 10 s on dev, 5M plays).';
+
 -- Broadcast owns "a station's plays on a date" (D19): play_date is the UTC-label date
 -- (D3), independent of the session TimeZone; logged_at is the naive wall-clock time;
 -- position is the 0-based index in the station-day under the D4 total order. No file
 -- columns: resolution belongs to play_file_resolution alone (D17).
+-- Consumption contract: always filter on station_id and play_date (a play_date range is
+-- fine). Positions are computed per station-day, so a filter on play_event_id alone
+-- computes windows for every play (about 5 s on dev).
 CREATE VIEW station_day_plays AS
 SELECT pe.id AS play_event_id,
        pl.station_id,
@@ -78,6 +89,11 @@ SELECT pe.id AS play_event_id,
        ) - 1 AS position
 FROM play_events pe
 JOIN playlists pl ON pl.id = pe.playlist_id;
+
+COMMENT ON VIEW station_day_plays IS
+    'Always filter on station_id and play_date (a play_date range is fine). Positions are '
+    'computed per station-day, so a filter on play_event_id alone computes windows for '
+    'every play (about 5 s on dev).';
 
 -- station_day_plays filters on play_date: index the identical expression so it is sargable
 -- (D19), independent of the session TimeZone.

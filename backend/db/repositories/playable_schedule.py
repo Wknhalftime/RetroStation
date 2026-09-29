@@ -25,7 +25,10 @@ logger = structlog.get_logger()
 #   filter on station_id and play_date, order by position.
 # - Which file plays is curation's view play_file_resolution (D17). It is joined PER PLAY:
 #   OFFSET 0 fences the LATERAL subquery so the planner cannot pull it up and compute the
-#   view for every play (on dev, 5M plays: 9.2 s unfenced, about 8 ms fenced).
+#   view for every play. On dev (5M plays) unfenced takes about 9-10 s; fenced about
+#   0.4-0.7 s until the 0030 play_date index exists, and about 10 ms with it.
+#   The join is LEFT: if the view ever drops a play, the play is returned unresolved
+#   rather than vanishing and shifting every later position (ItemRef.index).
 # - Cues are the final file's audio's row, if any (D20): no stat or version check.
 _DAY_SQL = """
 SELECT dp.play_event_id AS event_id,
@@ -39,7 +42,7 @@ SELECT dp.play_event_id AS event_id,
 FROM station_day_plays dp
 JOIN track_identities ti ON ti.id = dp.identity_id
 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
-JOIN LATERAL (
+LEFT JOIN LATERAL (
     SELECT r.file_id, r.file_status, r.source
     FROM play_file_resolution r
     WHERE r.play_event_id = dp.play_event_id

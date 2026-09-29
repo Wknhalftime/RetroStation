@@ -185,6 +185,12 @@ source_modules = ["backend.playout"]
 forbidden_modules = ["backend.domain", "backend.services", "backend.repositories",
                      "backend.db", "backend.routers", "backend.tasks", "backend.main"]
 
+[[tool.importlinter.contracts]]
+name = "Library never references streaming (D20)"
+type = "forbidden"
+source_modules = ["backend.domain.library"]
+forbidden_modules = ["backend.domain.streaming", "backend.domain.tune_in"]
+
 # ---- one command per audit step ----
 [tool.poe.env]
 # Proposed by the audit kit: reported by `poe audit` and the non-blocking CI job, not
