@@ -10,7 +10,9 @@ interface RemapPanelProps {
   onCancel: () => void;
 }
 
-const BUTTON = "rounded-md border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50";
+const BUTTON =
+  "rounded-md border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 " +
+  "disabled:opacity-50";
 
 export function RemapPanel({ file, pending, error, onRemap, onCancel }: RemapPanelProps) {
   const [searching, setSearching] = useState(false);
@@ -48,7 +50,12 @@ export function RemapPanel({ file, pending, error, onRemap, onCancel }: RemapPan
         </p>
       )}
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={() => setSearching(true)} className={BUTTON}>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setSearching(true)}
+          className={BUTTON}
+        >
           Search the library…
         </button>
         <button type="button" onClick={onCancel} className={BUTTON}>
@@ -61,7 +68,7 @@ export function RemapPanel({ file, pending, error, onRemap, onCancel }: RemapPan
         mode="file"
         onSelectFile={(target) => {
           setSearching(false);
-          onRemap(target.id);
+          if (!pending) onRemap(target.id);
         }}
       />
     </section>
