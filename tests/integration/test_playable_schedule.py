@@ -635,9 +635,7 @@ def test_a_day_is_read_with_one_statement(conn: Conn, monkeypatch: pytest.Monkey
     original = psycopg.Cursor.execute
 
     def counting(self: psycopg.Cursor[Any], *args: Any, **kwargs: Any) -> psycopg.Cursor[Any]:
-        # Only the reader's connection: a log sink may write on its own connection.
-        if self.connection is conn:
-            calls.append(args[0] if args else kwargs.get("query"))
+        calls.append(args[0] if args else kwargs.get("query"))
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(psycopg.Cursor, "execute", counting)
