@@ -35,8 +35,9 @@ class FakeBroadcastPlayEventRepository(BroadcastPlayEventRepository):
         self, station_id: UUID, broadcast_date: date
     ) -> list[BroadcastPlayEvent]:
         playlist_ids = {pid for pid, sid in self._playlist_station_map.items() if sid == station_id}
-        return [
+        plays = [
             e
             for e in self._data.values()
             if e.playlist_id in playlist_ids and e.played_at.date() == broadcast_date
         ]
+        return sorted(plays, key=lambda e: (e.played_at, e.identity_id, e.id))

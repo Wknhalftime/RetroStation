@@ -475,7 +475,6 @@ def _generate_station_m3u_sync(
     station_id_str: str,
     date_str: str,
     database_url: str,
-    station_format: str | None,
 ) -> str:
     """Run M3U generation for a station+date on a sync connection."""
     from datetime import date as date_type
@@ -485,17 +484,7 @@ def _generate_station_m3u_sync(
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
         events = repos.broadcast_events.get_by_station_date(sid, d)
-        return generate_m3u(
-            events=events,
-            track_identity_repo=repos.broadcast_identities,
-            match_repo=repos.matches,
-            library_file_repo=repos.library_files,
-            recording_repo=repos.recordings,
-            song_master_repo=repos.song_masters,
-            format_override_repo=repos.format_overrides,
-            user_settings_repo=repos.user_settings,
-            station_format=station_format,
-        )
+        return generate_m3u(events, repos.m3u_repos())
 
 
 @router.post("/{station_id}/export-m3u")
@@ -510,14 +499,12 @@ async def export_station_m3u(
     call_letters = station_row["call_letters"]
 
     database_url = get_settings().database_url
-    station_format = station_row.get("format_name")
 
     m3u_content = await asyncio.to_thread(
         _generate_station_m3u_sync,
         str(station_id),
         body.date.isoformat(),
         database_url,
-        station_format,
     )
 
     filename = f"{call_letters}-{body.date.isoformat()}.m3u"
