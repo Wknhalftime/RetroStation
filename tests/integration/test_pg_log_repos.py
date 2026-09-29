@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg.rows import dict_row
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
@@ -346,3 +347,65 @@ def test_broadcast_artist_get_by_ids(migrated_db: str) -> None:
         assert {a.id for a in out} == {a1.id, a2.id}
         assert repo.get_by_ids([]) == []
         conn.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("session_tz", ["America/Chicago", "Asia/Tokyo"])
+def test_play_events_by_station_date_use_stored_wall_clock_date(
+    migrated_db: str, session_tz: str
+) -> None:
+    """played_at stores station wall-clock labelled UTC; its date must not
+    shift with the session TimeZone.
+
+    Chicago (behind UTC) used to pull a 00:30 play back to the previous day;
+    Tokyo (ahead of UTC) used to push a 23:30 play forward to the next one.
+    """
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        conn.execute(psycopg.sql.SQL("SET TIME ZONE {}").format(psycopg.sql.Literal(session_tz)))
+        station = PgBroadcastStationRepository(conn).create(
+            BroadcastStation(id=uuid4(), call_letters="KAZR-TZ", name="KAZR TZ")
+        )
+        playlist = PgBroadcastPlaylistRepository(conn).create(
+            BroadcastPlaylist(
+                id=uuid4(),
+                name="tz.csv",
+                content_hash="tz_test_" + "0" * 56,
+                station_id=station.id,
+            )
+        )
+        artist = PgBroadcastArtistRepository(conn).upsert(
+            BroadcastArtist(id=uuid4(), original_name="TZ ARTIST", normalized_name="tz artist")
+        )
+        identity = PgBroadcastTrackIdentityRepository(conn).upsert(
+            BroadcastTrackIdentity(
+                id=uuid4(),
+                broadcast_artist_id=artist.id,
+                original_title="Midnight",
+                normalized_title="midnight",
+                normalized_signature="tz_sig_" + "0" * 25,
+            )
+        )
+        repo = PgBroadcastPlayEventRepository(conn)
+        late = repo.create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=datetime(2001, 3, 15, 23, 30, tzinfo=UTC),
+            )
+        )
+        early = repo.create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=identity.id,
+                playlist_id=playlist.id,
+                played_at=datetime(2001, 3, 16, 0, 30, tzinfo=UTC),
+            )
+        )
+
+        on_15th = repo.get_by_station_date(station.id, date(2001, 3, 15))
+        on_16th = repo.get_by_station_date(station.id, date(2001, 3, 16))
+
+        assert [e.id for e in on_15th] == [late.id]
+        assert [e.id for e in on_16th] == [early.id]
+        conn.rollback()
