@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
+from backend.domain.library import AudioHash
+
 _ONE_MS = timedelta(milliseconds=1)
 
 
@@ -90,6 +92,40 @@ class CuePoints:
             )
         if not math.isfinite(self.gain_db):
             raise InvalidStreamValueError(f"CuePoints.gain_db must be finite, got {self.gain_db}")
+
+
+CUE_ANALYSER_VERSION = 1
+"""Version of the cue analysis in force, recorded on each row; never checked on read (D20).
+
+Policy (D20): an analyser change purges the old rows once. That purge belongs to a later PR;
+nothing here enforces it.
+"""
+
+
+@dataclass(frozen=True)
+class CueAnalysis:
+    """The result of analysing one audio, as stored for playback (D20).
+
+    Keyed by the library's ``AudioHash``: every file that shares the audio shares the
+    cues, and no file needs to exist for the analysis to be stored. ``analysis_failed``
+    records that ``cues`` are fallback values; it is data and changes nothing on read.
+    """
+
+    audio_hash: AudioHash
+    cues: CuePoints
+    loudness_lufs: float | None
+    analysis_failed: bool
+    analyser_version: int
+
+    def __post_init__(self) -> None:
+        if self.analyser_version < 1:
+            raise InvalidStreamValueError(
+                f"CueAnalysis.analyser_version must be >= 1, got {self.analyser_version}"
+            )
+        if self.loudness_lufs is not None and not math.isfinite(self.loudness_lufs):
+            raise InvalidStreamValueError(
+                f"CueAnalysis.loudness_lufs must be finite, got {self.loudness_lufs}"
+            )
 
 
 @dataclass(frozen=True)
