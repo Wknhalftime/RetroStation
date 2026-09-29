@@ -32,9 +32,10 @@ const RESOLVED_BUCKETS = {
 } as const;
 type ResolvedBuckets = { auto_matched: number; manual_matched: number; rejected: number };
 
-function partitionByReviewState(
-  identities: QueueIdentity[]
-): { review: QueueIdentity[]; resolved: QueueIdentity[] } {
+function partitionByReviewState(identities: QueueIdentity[]): {
+  review: QueueIdentity[];
+  resolved: QueueIdentity[];
+} {
   const review: QueueIdentity[] = [];
   const resolved: QueueIdentity[] = [];
   for (const id of identities) {
@@ -46,19 +47,24 @@ function partitionByReviewState(
 
 // A needs_review item whose best guess is below the presentation floor is
 // the artist's nearest title, not a candidate: usually a song the library
-// doesn't have. Curator-unmatched items also land in "blocked" (unmatch drops
-// the score) but they are the curator's own work in progress, so they stay.
+// doesn't have. Items whose match was taken away also land in "blocked" with
+// no score, but they stay: curator-unmatched ones are the curator's own work in
+// progress, and ones released by deleting a missing library file must return to
+// review (spec C2). Mirrors `likely` in the backend queue's _QUEUE_BUCKET_CTE.
+const KEPT_WITHOUT_SCORE = new Set(["USER_UNMATCHED", "LIBRARY_FILE_REMOVED"]);
+
 function isUnlikely(identity: QueueIdentity): boolean {
   return (
     identity.match_status === "needs_review" &&
     identity.triage_bucket === "blocked" &&
-    identity.reason_code !== "USER_UNMATCHED"
+    !KEPT_WITHOUT_SCORE.has(identity.reason_code ?? "")
   );
 }
 
-function partitionByLikelihood(
-  identities: QueueIdentity[]
-): { likely: QueueIdentity[]; unlikely: QueueIdentity[] } {
+function partitionByLikelihood(identities: QueueIdentity[]): {
+  likely: QueueIdentity[];
+  unlikely: QueueIdentity[];
+} {
   const likely: QueueIdentity[] = [];
   const unlikely: QueueIdentity[] = [];
   for (const id of identities) {
@@ -375,9 +381,7 @@ function ReviewSection({
       </header>
 
       {items.length === 0 ? (
-        <p className="py-4 text-sm text-gray-500">
-          {emptyReviewMessage(hasResolved, hasUnlikely)}
-        </p>
+        <p className="py-4 text-sm text-gray-500">{emptyReviewMessage(hasResolved, hasUnlikely)}</p>
       ) : (
         <div className="space-y-2">
           {items.map((identity) => (
@@ -404,13 +408,7 @@ interface ReviewCardProps {
   onFileSearch: (identityId: string) => void;
 }
 
-function ReviewCard({
-  identity,
-  isPending,
-  onApprove,
-  onReject,
-  onFileSearch,
-}: ReviewCardProps) {
+function ReviewCard({ identity, isPending, onApprove, onReject, onFileSearch }: ReviewCardProps) {
   const chip = reviewChipFor(identity);
   const Icon = chip.Icon;
   // The bucket chip is the dominant signal; avoid double-encoding the same
@@ -438,15 +436,11 @@ function ReviewCard({
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-gray-800">
-            {identity.original_title}
-          </p>
+          <p className="truncate text-sm font-medium text-gray-800">{identity.original_title}</p>
           {tierScoreSegments.length > 0 && (
             <p className="text-xs text-gray-400">{tierScoreSegments.join(" · ")}</p>
           )}
-          {reasonText && (
-            <p className="mt-1 text-xs text-amber-600">⚠ {reasonText}</p>
-          )}
+          {reasonText && <p className="mt-1 text-xs text-amber-600">⚠ {reasonText}</p>}
         </div>
         <span
           className={cn(
@@ -477,8 +471,7 @@ function ReviewCard({
             </p>
           )}
           <p className="truncate text-xs text-gray-400">
-            via {identity.proposed_match.candidate_match_tier} ·{" "}
-            {identity.proposed_match.file_path}
+            via {identity.proposed_match.candidate_match_tier} · {identity.proposed_match.file_path}
           </p>
         </div>
       )}
@@ -682,13 +675,7 @@ interface ResolvedRowProps {
   onFileSearch: (identityId: string) => void;
 }
 
-function ResolvedRow({
-  identity,
-  isPending,
-  onReject,
-  onUnmatch,
-  onFileSearch,
-}: ResolvedRowProps) {
+function ResolvedRow({ identity, isPending, onReject, onUnmatch, onFileSearch }: ResolvedRowProps) {
   const isMatched =
     identity.match_status === "auto_matched" || identity.match_status === "manual_matched";
   const isRejected =
@@ -717,10 +704,7 @@ function ResolvedRow({
 
   return (
     <div className="group flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 focus-within:bg-gray-50">
-      <LeadingIcon
-        className={cn("h-3.5 w-3.5 shrink-0", leadingClass)}
-        aria-hidden="true"
-      />
+      <LeadingIcon className={cn("h-3.5 w-3.5 shrink-0", leadingClass)} aria-hidden="true" />
       <span className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
         {label}
       </span>

@@ -9,6 +9,7 @@ import {
   type DeleteMissingFilesBody,
 } from "@/api/missing";
 import { MissingFilesTable } from "@/components/domain/library/MissingFilesTable";
+import { PurgeMissingSetting } from "@/components/domain/library/PurgeMissingSetting";
 import { RemapPanel } from "@/components/domain/library/RemapPanel";
 import { deletionPrompt } from "@/components/domain/library/deletionPrompt";
 import type { MissingFile, MissingFileDeletion } from "@/lib/schemas/missing";
@@ -176,6 +177,9 @@ export function MissingFiles() {
           />
         }
       />
+      <div className="mb-4">
+        <PurgeMissingSetting />
+      </div>
       <DeletionNote result={deletion.data} />
       <DeletionError error={deletion.error} />
       {data.total === 0 ? (
