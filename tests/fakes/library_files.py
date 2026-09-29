@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -18,9 +20,14 @@ def _stat_unchanged(existing: LibraryFile, incoming: LibraryFile) -> bool:
     )
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], datetime] = _utcnow) -> None:
         self._data: dict[UUID, LibraryFile] = {}
+        self._clock = clock
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
         existing = self.get_by_path(file.file_path)
@@ -42,6 +49,7 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         if file.recording_id is None:
             stored.recording_id = existing.recording_id
         stored.file_status = FileStatus.PRESENT
+        stored.missing_since = None
         # ON CONFLICT (file_path) updates the row in place: its id stays.
         stored.id = existing.id
         self._data[existing.id] = stored
@@ -158,6 +166,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def mark_missing(self, file_path: str) -> None:
         for f in self._data.values():
             if f.file_path == file_path:
+                if f.file_status != FileStatus.MISSING:
+                    f.missing_since = self._clock()
                 f.file_status = FileStatus.MISSING
                 break
 
@@ -167,6 +177,7 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
                 self._data[file_id],
                 file_path=new_path,
                 file_status=FileStatus.PRESENT,
+                missing_since=None,
             )
 
     def update_work_id(self, file_id: UUID, work_id: str | None) -> None:

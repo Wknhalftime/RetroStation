@@ -105,6 +105,9 @@ class LibraryFile:
     # stored MD5; library_hash_backfill_task fills the rest. None until then,
     # and for formats that have none.
     audio_hash: AudioHash | None = None
+    # When the file went missing: set by mark_missing, cleared whenever the row is
+    # PRESENT again (the upsert, relocate). None while the file is on disk.
+    missing_since: datetime | None = None
     audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 

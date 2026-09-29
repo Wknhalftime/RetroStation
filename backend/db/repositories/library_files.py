@@ -54,7 +54,8 @@ _UPSERT_SQL = """
             THEN library_files.audio_hash
         END,
         file_status            = 'present',
-        trace_id               = EXCLUDED.trace_id,
+        missing_since          = NULL,
+        trace_id              = EXCLUDED.trace_id,
         -- A fresh tag extraction carries no links. Keep the ones grouping
         -- and enrichment already built, even across a content change: a
         -- retag is not a new song. A caller that means to relink passes
@@ -173,6 +174,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             file_size=row.get("file_size"),
             file_mtime_ns=row.get("file_mtime_ns"),
             audio_hash=_audio_hash_of(row.get("audio_hash")),
+            missing_since=row.get("missing_since"),
             audio=audio,
         )
 
@@ -322,14 +324,21 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return {r["file_path"]: FileStatus(r["file_status"]) for r in rows}
 
     def mark_missing(self, file_path: str) -> None:
+        # A row already missing keeps the time it first went missing.
         self._conn.execute(
-            "UPDATE library_files SET file_status = %s WHERE file_path = %s",
-            (FileStatus.MISSING, file_path),
+            """UPDATE library_files
+               SET missing_since = CASE WHEN file_status = %s THEN missing_since
+                                        ELSE now() END,
+                   file_status = %s
+               WHERE file_path = %s""",
+            (FileStatus.MISSING, FileStatus.MISSING, file_path),
         )
 
     def relocate(self, file_id: UUID, new_path: str) -> None:
         self._conn.execute(
-            "UPDATE library_files SET file_path = %s, file_status = %s WHERE id = %s",
+            """UPDATE library_files
+               SET file_path = %s, file_status = %s, missing_since = NULL
+               WHERE id = %s""",
             (new_path, FileStatus.PRESENT, str(file_id)),
         )
 
