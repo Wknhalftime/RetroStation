@@ -5,7 +5,7 @@ foreign key (a hash is not unique in the library, and a row may outlive its file
 identity or stat columns. No migration number appears here: the migration and its rollback
 are found by name.
 
-DRAFT for D20: replaces ``test_stream_cues_schema.py`` once the user approves.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

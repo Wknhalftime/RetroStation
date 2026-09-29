@@ -2,7 +2,7 @@
 
 Like the real table: one analysis per audio hash, the latest wins, and no file is needed.
 
-DRAFT for D20: replaces ``test_stream_cue_fake.py`` once the user approves.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations
