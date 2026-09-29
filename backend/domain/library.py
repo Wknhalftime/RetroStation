@@ -190,3 +190,30 @@ class MissingFileReconciliation:
     ambiguous: int
     unmatched: int
     masters_repicked: int
+
+
+@dataclass(frozen=True)
+class MissingFileRow:
+    """One missing row as the Missing Files page lists it."""
+
+    id: UUID
+    file_path: str
+    artist_name: str | None
+    track_title: str | None
+    release_title: str | None
+    missing_since: datetime | None
+    work_id: str | None
+    work_title: str | None
+    # Identity matches that still name this row: deleting it releases them.
+    match_count: int
+    # Whether the row's work still has a file on disk.
+    work_has_present_file: bool
+
+
+@dataclass(frozen=True)
+class MissingFileListing:
+    """A page of missing rows, with totals over every missing row."""
+
+    rows: tuple[MissingFileRow, ...]
+    total: int
+    total_match_count: int

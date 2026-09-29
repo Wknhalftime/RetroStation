@@ -20,6 +20,7 @@ from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.missing_files import PgMissingFileListingRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
@@ -55,6 +56,7 @@ class LibraryRepos:
     folders: PgLibraryFolderRepository
     quarantine: PgLibraryQuarantineRepository
     format_overrides: PgFormatOverrideRepository
+    missing_files: PgMissingFileListingRepository
 
 
 @dataclass
@@ -117,6 +119,7 @@ class RepositoryFactory:
             folders=PgLibraryFolderRepository(conn),
             quarantine=PgLibraryQuarantineRepository(conn),
             format_overrides=PgFormatOverrideRepository(conn),
+            missing_files=PgMissingFileListingRepository(conn),
         )
         self.catalog = CatalogRepos(
             artists=PgArtistRepository(conn),
@@ -155,6 +158,7 @@ class RepositoryFactory:
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
         self.format_overrides = self.library.format_overrides
+        self.missing_files = self.library.missing_files
         self.mapping_rules = self.system.mapping_rules
         self.task_progress = self.system.task_progress
         self.musicbrainz_cache = self.system.musicbrainz_cache
