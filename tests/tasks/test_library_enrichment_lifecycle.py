@@ -1,15 +1,17 @@
-"""AUD-025 gate-1 characterisation tests for `library_enrichment_task`'s
-RUNNING/COMPLETED/FAILED lifecycle envelope, taken BEFORE the `task_run`
-extraction. These pin exact row sequences with syrupy; they must stay
-byte-identical (`.ambr` unchanged) once the envelope moves into
-`backend.tasks._task_run`.
+"""AUD-025 characterisation tests for `library_enrichment_task`'s
+RUNNING/COMPLETED/FAILED lifecycle envelope, now implemented via
+`backend.tasks._task_run.task_run`. These pin the exact row sequence with
+syrupy; the .ambr is byte-identical to the pre-extraction baseline (see git
+history of this file — the gate-1 commit captured it against the old,
+inline implementation).
 
 Follows the MagicMock-patching setup already used by
 tests/tasks/test_library_enrichment_progress.py (connect_sync /
-RepositoryFactory / MusicBrainzApiClient mocked; no Postgres, no network),
-swapping only `PgTaskProgressRepository` / `PgSystemLogRepository` for the
-ordered recorders in `_lifecycle_recording` so the full interleaved row
-sequence can be captured and snapshotted.
+RepositoryFactory / MusicBrainzApiClient mocked; no Postgres, no network).
+The progress/SystemLog connection and repositories now live in
+`_task_run`, so those three are patched there instead of on
+`library_enrichment_tasks`; the ordered recorders in `_lifecycle_recording`
+capture the full interleaved row sequence for snapshotting.
 """
 
 from __future__ import annotations
@@ -59,12 +61,19 @@ def _fake_connect_factory(
 class _Patched:
     """Bundles the standard patch decorators shared by every test below.
 
-    Innermost first: mock args land in this order — mirrors the stacked
-    @patch order in tests/tasks/test_library_enrichment_progress.py.
+    Innermost first: mock args land in this order. The progress/SystemLog
+    connection and repositories are constructed inside
+    `backend.tasks._task_run` (the shared envelope), not on
+    `library_enrichment_tasks` itself — patched there accordingly.
+    `_task_run`'s `connect_sync` always returns a bare, pre-configured mock
+    connection (its real identity is irrelevant: `PgTaskProgressRepository`
+    / `PgSystemLogRepository` are themselves replaced by the ordered
+    recorders below, so nothing ever reads through it).
     """
 
     @staticmethod
     def apply(func: Any) -> Any:
+        func = patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())(func)
         func = patch("backend.tasks.library_enrichment_tasks.connect_sync")(func)
         func = patch("backend.tasks.library_enrichment_tasks.enrich_by_recording", return_value=1)(
             func
@@ -72,8 +81,8 @@ class _Patched:
         func = patch("backend.tasks.library_enrichment_tasks.enrich_by_release", return_value=1)(
             func
         )
-        func = patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")(func)
-        func = patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")(func)
+        func = patch("backend.tasks._task_run.PgTaskProgressRepository")(func)
+        func = patch("backend.tasks._task_run.PgSystemLogRepository")(func)
         func = patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")(func)
         func = patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")(func)
         func = patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")(func)
@@ -82,6 +91,7 @@ class _Patched:
 
 @_Patched.apply
 def test_success_with_periodic_rows_full_envelope_sequence(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     _enrich_recording: MagicMock,
     _enrich_release: MagicMock,
@@ -118,6 +128,7 @@ def test_success_with_periodic_rows_full_envelope_sequence(
 
 @_Patched.apply
 def test_mid_run_exception_reports_failed_with_partial_progress(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     _enrich_recording: MagicMock,
     mock_enrich_release: MagicMock,
@@ -164,6 +175,7 @@ def test_mid_run_exception_reports_failed_with_partial_progress(
 
 @_Patched.apply
 def test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_failed(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     _enrich_recording: MagicMock,
     _enrich_release: MagicMock,
@@ -203,6 +215,7 @@ def test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_f
 
 @_Patched.apply
 def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_recorded(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     _enrich_recording: MagicMock,
     _enrich_release: MagicMock,
@@ -252,6 +265,7 @@ def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_reco
 
 @_Patched.apply
 def test_exception_before_total_is_computed_reports_failed_with_zero_processed_and_total(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     _enrich_recording: MagicMock,
     _enrich_release: MagicMock,
