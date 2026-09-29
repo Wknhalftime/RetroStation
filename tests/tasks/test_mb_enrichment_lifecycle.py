@@ -1,15 +1,17 @@
-"""AUD-025 gate-1 characterisation tests for `mb_enrichment_task`'s
-RUNNING/COMPLETED/FAILED lifecycle envelope, taken BEFORE the `task_run`
-extraction. These pin exact row sequences with syrupy; they must stay
-byte-identical (`.ambr` unchanged) once the envelope moves into
-`backend.tasks._task_run`.
+"""AUD-025 characterisation tests for `mb_enrichment_task`'s
+RUNNING/COMPLETED/FAILED lifecycle envelope, now implemented via
+`backend.tasks._task_run.task_run`. These pin the exact row sequence with
+syrupy; the .ambr is byte-identical to the pre-extraction baseline (see git
+history of this file — the gate-1 commit captured it against the old,
+inline implementation).
 
 Follows the MagicMock-patching setup already used by
 tests/tasks/test_mb_enrichment_progress.py (connect_sync / RepositoryFactory
-/ MusicBrainzApiClient mocked; no Postgres, no network), swapping only
-`PgTaskProgressRepository` / `PgSystemLogRepository` for the ordered
-recorders in `_lifecycle_recording` so the full interleaved row sequence
-can be captured and snapshotted.
+/ MusicBrainzApiClient mocked; no Postgres, no network). The
+progress/SystemLog connection and repositories now live in `_task_run`, so
+those three are patched there instead of on `mb_enrichment_tasks`; the
+ordered recorders in `_lifecycle_recording` capture the full interleaved
+row sequence for snapshotting.
 """
 
 from __future__ import annotations
@@ -67,16 +69,26 @@ def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
 
 
 class _Patched:
-    """Bundles the standard patch decorators shared by every test below."""
+    """Bundles the standard patch decorators shared by every test below.
+
+    The progress/SystemLog connection and repositories are constructed
+    inside `backend.tasks._task_run` (the shared envelope), not on
+    `mb_enrichment_tasks` itself — patched there accordingly. `_task_run`'s
+    `connect_sync` always returns a bare, pre-configured mock connection
+    (its real identity is irrelevant: `PgTaskProgressRepository` /
+    `PgSystemLogRepository` are themselves replaced by the ordered
+    recorders below, so nothing ever reads through it) — tests that care
+    about the call itself (e.g. the `autocommit=True` contract) inspect
+    `task_run_connect` directly.
+    """
 
     @staticmethod
     def apply(func: Any) -> Any:
-        # Innermost first: mock args land in this same order (connect_sync
-        # first, MusicBrainzApiClient last) — mirrors the stacked @patch
-        # order in tests/tasks/test_mb_enrichment_progress.py.
+        # Innermost first: mock args land in this same order.
+        func = patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())(func)
         func = patch("backend.tasks.mb_enrichment_tasks.connect_sync")(func)
-        func = patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")(func)
-        func = patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")(func)
+        func = patch("backend.tasks._task_run.PgTaskProgressRepository")(func)
+        func = patch("backend.tasks._task_run.PgSystemLogRepository")(func)
         func = patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")(func)
         func = patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")(func)
         func = patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")(func)
@@ -85,6 +97,7 @@ class _Patched:
 
 @_Patched.apply
 def test_success_with_periodic_rows_full_envelope_sequence(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     mock_progress_cls: MagicMock,
     mock_sys_log_cls: MagicMock,
@@ -130,6 +143,7 @@ def test_success_with_periodic_rows_full_envelope_sequence(
 
 @_Patched.apply
 def test_mid_run_exception_reports_failed_with_partial_progress(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     mock_progress_cls: MagicMock,
     mock_sys_log_cls: MagicMock,
@@ -182,6 +196,7 @@ def test_mid_run_exception_reports_failed_with_partial_progress(
 
 @_Patched.apply
 def test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_failed(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     mock_progress_cls: MagicMock,
     mock_sys_log_cls: MagicMock,
@@ -233,6 +248,7 @@ def test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_f
 
 @_Patched.apply
 def test_exception_before_precount_reports_failed_with_zero_processed_and_total(
+    _task_run_connect: MagicMock,
     mock_connect: MagicMock,
     mock_progress_cls: MagicMock,
     mock_sys_log_cls: MagicMock,
@@ -242,20 +258,17 @@ def test_exception_before_precount_reports_failed_with_zero_processed_and_total(
 ) -> None:
     """An exception during pre-count (before `ctx` exists and before `total`
     is computed) must report FAILED with `processed=0, total=0` — the
-    fallback defaults on what becomes `config.read_progress()` after the
-    `task_run` extraction. Kills a cosmic-ray survivor that mutated both the
-    `total = 0` initializer and the `else 0` fallback in the FAILED payload.
+    fallback defaults on `config.read_progress()`. Kills a cosmic-ray
+    survivor that mutated both the `total = 0` initializer and the
+    `else 0` fallback in the FAILED payload.
+
+    The progress connection now lives in `_task_run`, so the counting
+    connection (`mb_enrichment_tasks.connect_sync`'s only remaining caller
+    besides the per-phase connections) is the first and only call that
+    needs to fail here.
     """
     events: list[LifecycleEvent] = []
-    call_log = {"n": 0}
-
-    def failing_connect(_url: str, *, autocommit: bool = False) -> MagicMock:
-        call_log["n"] += 1
-        if call_log["n"] == 1:
-            return _mk_conn()  # progress_conn (autocommit=True)
-        raise RuntimeError("pre-count boom")  # counting_conn
-
-    mock_connect.side_effect = failing_connect
+    mock_connect.side_effect = RuntimeError("pre-count boom")
     mock_factory_cls.side_effect = _stub_repo_factory([], [], [])
     mock_progress_cls.return_value = OrderedProgressRepo(events)
     mock_sys_log_cls.return_value = OrderedSystemLogRepo(events)
@@ -274,6 +287,7 @@ def test_exception_before_precount_reports_failed_with_zero_processed_and_total(
 
 @_Patched.apply
 def test_progress_connection_is_opened_autocommit(
+    task_run_connect: MagicMock,
     mock_connect: MagicMock,
     mock_progress_cls: MagicMock,
     mock_sys_log_cls: MagicMock,
@@ -281,11 +295,11 @@ def test_progress_connection_is_opened_autocommit(
     _cache_cls: MagicMock,
     mock_mb_cls: MagicMock,
 ) -> None:
-    """The FIRST `connect_sync` call — the dedicated progress/SystemLog
-    connection — must be opened with `autocommit=True`. Losing this
-    silently re-introduces the WS-empty-during-mb_enrichment bug (see the
-    module's connection-comment). Kills a cosmic-ray survivor that flipped
-    this to `autocommit=False`.
+    """`task_run`'s dedicated progress/SystemLog connection must be opened
+    with `autocommit=True`. Losing this silently re-introduces the
+    WS-empty-during-mb_enrichment bug (see `_task_run.task_run`'s
+    docstring). Kills a cosmic-ray survivor that flipped this to
+    `autocommit=False`.
     """
     events: list[LifecycleEvent] = []
     mock_connect.side_effect = _fake_connect
@@ -299,5 +313,5 @@ def test_progress_connection_is_opened_autocommit(
 
     mb_enrichment_task.call_local()
 
-    first_call = mock_connect.call_args_list[0]
-    assert first_call.kwargs.get("autocommit") is True
+    task_run_connect.assert_called_once()
+    assert task_run_connect.call_args.kwargs.get("autocommit") is True
