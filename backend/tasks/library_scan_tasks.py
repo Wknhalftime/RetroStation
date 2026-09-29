@@ -18,12 +18,16 @@ from backend.domain.enums import (
     EnrichmentStatus,
     LogCategory,
     LogLevel,
+    PurgeMissingPolicy,
     TaskStatus,
     TaskType,
 )
 from backend.domain.library import (
+    PURGE_MISSING_SETTING,
     LibraryFile,
     LibraryQuarantine,
+    MissingFileChangedError,
+    MissingFileDeletion,
     MissingFilePlan,
     MissingFileReconciliation,
 )
@@ -42,6 +46,7 @@ from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
     apply_missing_file_move,
     plan_for_library,
+    purge_unmatched_missing,
     repick_stranded_masters,
 )
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
@@ -121,6 +126,39 @@ def reconcile_missing_after_scan(
         ambiguous=result.ambiguous,
         unmatched=result.unmatched,
         masters_repicked=result.masters_repicked,
+    )
+    return result
+
+
+def purge_missing_after_scan(
+    library_conn: psycopg.Connection[Any],
+    repos: RepositoryFactory,
+    root: Path,
+    walk_saw_files: bool,
+) -> MissingFileDeletion | None:
+    """With library.purge_missing = after_scan, delete missing rows nothing replaces.
+
+    Skipped when the walk saw no files (probably an unmounted drive), as
+    mark_unseen_missing is. Its own transaction: a refusal, or a row a concurrent
+    scan restored, rolls back only the purge.
+    """
+    setting = repos.user_settings.get(PURGE_MISSING_SETTING)
+    policy = PurgeMissingPolicy.from_setting(setting.value if setting else None)
+    if not walk_saw_files or policy != PurgeMissingPolicy.AFTER_SCAN:
+        return None
+    try:
+        result = purge_unmatched_missing(
+            str(root), reconciliation_repos(repos), repos.broadcast_identities
+        )
+        library_conn.commit()
+    except (psycopg.Error, MissingFileChangedError):
+        library_conn.rollback()
+        logger.warning("missing_purge_failed", exc_info=True)
+        return None
+    logger.info(
+        "missing_files_purged",
+        deleted=result.deleted,
+        matches_released=result.matches_released,
     )
     return result
 
@@ -343,7 +381,9 @@ def _run_scan(
         logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
 
     # Successors need their work (grouping above) before rows fold into them.
-    reconcile_missing_after_scan(library_conn, repos)
+    if reconcile_missing_after_scan(library_conn, repos) is not None:
+        # Only after a reconciliation that ran: what it could not fold may be purged.
+        purge_missing_after_scan(library_conn, repos, root, walk_saw_files=bool(seen_paths))
 
     return files_written, quarantine_written, last_progress
 

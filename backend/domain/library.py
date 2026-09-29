@@ -300,3 +300,7 @@ class RemapTargetNotPresentError(MissingFileError):
 
 class RemapTargetUngroupedError(MissingFileError):
     """The chosen target has no work yet, so the moved matches would lose theirs."""
+
+
+# User setting holding a PurgeMissingPolicy value.
+PURGE_MISSING_SETTING = "library.purge_missing"

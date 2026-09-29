@@ -434,3 +434,46 @@ def list_missing_files(
     page = listing.list_page(offset, limit)
     entries = tuple(MissingFileEntry(row, _candidates(row.id, file_repo)) for row in page.rows)
     return MissingFilePage(entries, page.total, page.total_match_count)
+
+
+def _has_present_copy(missing: LibraryFile, candidates: list[LibraryFile]) -> bool:
+    """Whether a file on disk holds *missing*'s track, grouped or not.
+
+    Wider than ready_successors (which also needs a work): a copy whose grouping
+    failed this run still makes the row a fold, not a deletion.
+    """
+    return any(
+        c.id != missing.id and c.file_status == FileStatus.PRESENT and is_same_track(missing, c)
+        for c in candidates
+    )
+
+
+def purgeable_ids(
+    missing_rows: list[LibraryFile],
+    candidates_for: Callable[[LibraryFile], list[LibraryFile]],
+) -> tuple[UUID, ...]:
+    """Missing rows no present file holds the track of.
+
+    A row whose copy is present but not grouped yet waits for reconciliation, a
+    row PR B is waiting on waits for the fingerprint, and an ambiguous row waits
+    for the user; none of them is purged.
+    """
+    return tuple(m.id for m in missing_rows if not _has_present_copy(m, candidates_for(m)))
+
+
+def purge_unmatched_missing(
+    root: str,
+    repos: ReconciliationRepos,
+    identities: BroadcastTrackIdentityRepository,
+) -> MissingFileDeletion:
+    """Delete the missing rows under *root* that no present file replaces."""
+    under_root = {
+        path
+        for path, status in repos.files.get_path_statuses_under(root).items()
+        if status == FileStatus.MISSING
+    }
+    rows = [m for m in repos.files.get_missing() if m.file_path in under_root]
+    ids = purgeable_ids(rows, lambda m: successor_candidates(m, repos.files))
+    if not ids:
+        return MissingFileDeletion(deleted=0, matches_released=0, skipped=0)
+    return delete_missing_files(MissingFileSelection(ids=ids), repos, identities)
