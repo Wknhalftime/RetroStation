@@ -1,12 +1,15 @@
-"""Acceptance tests: one warning per play, and cues from the final file (spec D16, D18, D20, D21).
+"""Acceptance tests: one warning per play, and cues from the final file (D16, D18, D20-D22).
 
-A play logs at most one warning, and which one follows a fixed order: availability first
+A play logs at most one warning, and which one follows a fixed order: no master first
+(``schedule_no_master``, D22: the play has no final file), then availability
 (``schedule_file_unavailable``: a file that is not present is never judged on its length or
 its cues), then the file row itself (``schedule_file_invalid``), then its cues
-(``schedule_cues_invalid``). Cues are those of the FINAL file's audio, never the direct
+(``schedule_cues_invalid``). Cues are those of the FINAL file's audio, never the matched
 file's.
 
 The reader is taken from ``RepositoryFactory``, as production wires it.
+
+DRAFT for D22: replaces ``test_playable_schedule_warnings.py`` once the user approves.
 """
 
 from __future__ import annotations
@@ -56,7 +59,8 @@ def file_with_audio(
 def test_invalid_cue_row_is_the_play_only_warning(conn: Conn) -> None:
     """A good, present file whose audio has an invalid cue row: one cue warning, nothing else."""
     st = seed.station(conn)
-    file_id, audio = file_with_audio(conn)
+    audio = seed.audio_hash()
+    file_id = seed.mastered_file(conn, audio_hash=audio)
     seed.cue_row(conn, audio, fade_in_ms=-1)
     event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), file_id)
 
@@ -74,9 +78,9 @@ def test_cues_are_those_of_the_resolved_file_audio(conn: Conn, source: str) -> N
     st = seed.station(conn, format_name="AC")
     work = seed.work(conn)
     recording = seed.work_recording(conn, work)
-    direct, direct_audio = file_with_audio(conn, recording_id=recording)
+    matched, matched_audio = file_with_audio(conn, recording_id=recording)
     master, master_audio = file_with_audio(conn, recording_id=recording)
-    seed.cue_row(conn, direct_audio, gain_db=-1.5)
+    seed.cue_row(conn, matched_audio, gain_db=-1.5)
     seed.cue_row(conn, master_audio, gain_db=-6.5)
     seed.song_master(conn, work, master)
     final, final_gain = master, -6.5
@@ -85,7 +89,7 @@ def test_cues_are_those_of_the_resolved_file_audio(conn: Conn, source: str) -> N
         seed.cue_row(conn, override_audio, gain_db=-9.25)
         seed.format_override(conn, work, "AC", override)
         final, final_gain = override, -9.25
-    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), matched)
 
     [item] = get_day(conn, st)
 
@@ -95,7 +99,7 @@ def test_cues_are_those_of_the_resolved_file_audio(conn: Conn, source: str) -> N
     assert item.file.cues.gain_db == final_gain
 
 
-def test_unavailable_master_logs_one_warning_whatever_the_direct_cues(conn: Conn) -> None:
+def test_unavailable_master_logs_one_warning_whatever_the_matched_cues(conn: Conn) -> None:
     """Neither invalid cue row is read: the play's one warning is the master's unavailability.
 
     The master's own row is invalid too, so reading the final file's cues before checking its
@@ -104,12 +108,12 @@ def test_unavailable_master_logs_one_warning_whatever_the_direct_cues(conn: Conn
     st = seed.station(conn)
     work = seed.work(conn)
     recording = seed.work_recording(conn, work)
-    direct, direct_audio = file_with_audio(conn, recording_id=recording)
-    seed.cue_row(conn, direct_audio, fade_in_ms=-1)
+    matched, matched_audio = file_with_audio(conn, recording_id=recording)
+    seed.cue_row(conn, matched_audio, fade_in_ms=-1)
     master, master_audio = file_with_audio(conn, recording_id=recording, status="missing")
     seed.cue_row(conn, master_audio, fade_in_ms=-1)
     seed.song_master(conn, work, master)
-    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), matched)
 
     with capture_logs() as logs:
         items = get_day(conn, st)
@@ -120,20 +124,20 @@ def test_unavailable_master_logs_one_warning_whatever_the_direct_cues(conn: Conn
     assert (str(warning["source"]), str(warning["file_status"])) == ("master", "missing")
 
 
-@pytest.mark.parametrize("source", ["direct", "master"])
+@pytest.mark.parametrize("source", ["matched-is-master", "other-master"])
 def test_missing_file_with_negative_duration_logs_only_unavailable(conn: Conn, source: str) -> None:
     """User ruling: availability is checked first; a missing file is never judged on its length."""
     st = seed.station(conn)
-    if source == "direct":
-        direct = final = seed.library_file(conn, status="missing", duration_ms=-1)
+    if source == "matched-is-master":
+        matched = final = seed.mastered_file(conn, status="missing", duration_ms=-1)
     else:
         work = seed.work(conn)
-        direct = seed.work_file(conn, work)
+        matched = seed.work_file(conn, work)
         final = seed.library_file(
             conn, status="missing", duration_ms=-1, recording_id=seed.work_recording(conn, work)
         )
         seed.song_master(conn, work, final)
-    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), direct)
+    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), matched)
 
     with capture_logs() as logs:
         items = get_day(conn, st)
@@ -141,4 +145,4 @@ def test_missing_file_with_negative_duration_logs_only_unavailable(conn: Conn, s
     assert [(item.event_id, item.file) for item in items] == [(event, None)]
     assert all_warnings(logs) == [("schedule_file_unavailable", str(event), str(final))]
     [warning] = [e for e in logs if e["log_level"] == "warning"]
-    assert (str(warning["source"]), str(warning["file_status"])) == (source, "missing")
+    assert (str(warning["source"]), str(warning["file_status"])) == ("master", "missing")

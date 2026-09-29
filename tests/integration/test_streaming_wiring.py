@@ -1,6 +1,8 @@
-"""Acceptance tests: RepositoryFactory wiring and the domain's DayLoader (spec: Data, PR C, D20).
+"""Acceptance tests: RepositoryFactory wiring and the domain's DayLoader (spec: Data, D20, D22).
 
-DRAFT for D20: replaces ``test_streaming_wiring.py`` once the user approves.
+Under D22 every play that should sound is seeded as its work's master (``seed.mastered_file``).
+
+DRAFT for D22: replaces ``test_streaming_wiring.py`` once the user approves.
 """
 
 from __future__ import annotations
@@ -50,8 +52,8 @@ class TestWiring:
         current, other = seed.audio_hash(), seed.audio_hash()
         seed.cue_row(conn, current, analyser_version=CUE_ANALYSER_VERSION)
         seed.cue_row(conn, other, analyser_version=CUE_ANALYSER_VERSION + 1)
-        seed.matched_play(conn, pl, at("08:00"), seed.library_file(conn, audio_hash=current))
-        seed.matched_play(conn, pl, at("09:00"), seed.library_file(conn, audio_hash=other))
+        seed.matched_play(conn, pl, at("08:00"), seed.mastered_file(conn, audio_hash=current))
+        seed.matched_play(conn, pl, at("09:00"), seed.mastered_file(conn, audio_hash=other))
 
         items = RepositoryFactory(conn).streaming.schedule.get_day(st, DAY)
 
@@ -78,7 +80,7 @@ class TestWiring:
     ) -> None:
         st = seed.station(conn, format_name="AC")
         pl = seed.playlist(conn, st)
-        seed.matched_play(conn, pl, at("05:57:00"), seed.library_file(conn, duration_ms=240_000))
+        seed.matched_play(conn, pl, at("05:57:00"), seed.mastered_file(conn, duration_ms=240_000))
         unresolved = seed.identity(conn, status="pending", identity_id=UUID(int=0xB))
         seed.play(conn, pl, unresolved, at("06:01:10"))
         work = seed.work(conn)
@@ -94,8 +96,8 @@ class TestWiring:
         cued = seed.identity(conn, identity_id=UUID(int=0xC))
         seed.match(conn, cued, seed.work_file(conn, work))
         seed.play(conn, pl, cued, at("06:01:10"))
-        seed.matched_play(conn, pl, at("06:05:00"), seed.library_file(conn, status="missing"))
-        seed.matched_play(conn, pl, at("06:05:40"), seed.library_file(conn, duration_ms=180_000))
+        seed.matched_play(conn, pl, at("06:05:00"), seed.mastered_file(conn, status="missing"))
+        seed.matched_play(conn, pl, at("06:05:40"), seed.mastered_file(conn, duration_ms=180_000))
 
         load_day: DayLoader = partial(RepositoryFactory(conn).streaming.schedule.get_day, st)
         now = datetime.combine(datetime(2026, 3, 14), datetime.strptime(hms, "%H:%M:%S").time())

@@ -1,11 +1,14 @@
-"""Seed helpers for the playable-schedule and stream-cue tests (spec: Data, D3, D16, D20).
+"""Seed helpers for the playable-schedule and stream-cue tests (spec: Data, D3, D16, D20, D22).
 
 One row per call with explicit values, so each test states the chain it needs:
 station → playlist → play → identity → match → file → recording → work → master/override,
 plus raw ``stream_cues`` rows keyed by audio hash (raw so that a test can store a row the
 write model would reject).
 
-DRAFT for D20: replaces ``stream_seed.py`` once the user approves; then renamed back.
+Under D22 a matched file never plays because it was matched: its work decides. A test that
+wants "this file plays" seeds it with ``mastered_file``, a file that is its own work's master.
+
+DRAFT for D22: replaces ``stream_seed.py`` once the user approves; then renamed back.
 """
 
 from __future__ import annotations
@@ -180,6 +183,18 @@ def format_override(conn: Conn, work_id: str, format_name: str, file_id: UUID) -
     )
 
 
+def mastered_file(conn: Conn, **file_fields: Any) -> UUID:
+    """A library file on a work of its own whose song master is the file itself (D22).
+
+    Matched, it plays as its work's master. ``file_fields`` go to ``library_file``.
+    """
+    work_id = work(conn)
+    file_id = library_file(conn, **file_fields)
+    conn.execute("UPDATE library_files SET work_id = %s WHERE id = %s", (work_id, file_id))
+    song_master(conn, work_id, file_id)
+    return file_id
+
+
 def match(
     conn: Conn,
     identity_id: UUID,
@@ -268,5 +283,13 @@ def cued_file(conn: Conn, **file_fields: Any) -> tuple[UUID, str]:
     """A library file with a fresh ``audio_hash`` and a ``CUE_ROW`` for that audio."""
     hash_text = audio_hash()
     file_id = library_file(conn, audio_hash=hash_text, **file_fields)
+    cue_row(conn, hash_text)
+    return file_id, hash_text
+
+
+def cued_master(conn: Conn, **file_fields: Any) -> tuple[UUID, str]:
+    """A ``mastered_file`` with a fresh ``audio_hash`` and a ``CUE_ROW`` for that audio."""
+    hash_text = audio_hash()
+    file_id = mastered_file(conn, audio_hash=hash_text, **file_fields)
     cue_row(conn, hash_text)
     return file_id, hash_text
