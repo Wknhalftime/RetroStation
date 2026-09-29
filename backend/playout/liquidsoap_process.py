@@ -12,6 +12,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -251,24 +252,81 @@ def _reap(process: subprocess.Popen[bytes]) -> str:
         return f"engine process {process.pid} was killed but had not exited after {_KILL_WAIT_S} s"
 
 
+def _abandon(process: subprocess.Popen[bytes]) -> None:
+    """Kill ``process`` now and reap it in a background thread, without waiting here."""
+    if process.poll() is None:
+        process.kill()
+    threading.Thread(target=_reap, args=(process,), name="engine-reap", daemon=True).start()
+
+
+def _abandon_started(starting: asyncio.Future[subprocess.Popen[bytes]]) -> None:
+    """Done-callback: abandon the process a start nobody is waiting for produced."""
+    if not starting.cancelled() and starting.exception() is None:
+        _abandon(starting.result())
+
+
+async def _spawn(
+    assign: Callable[[int], None],
+    base_env: Mapping[str, str],
+    endpoint: SessionEndpoint,
+    engine: EngineConfig,
+) -> subprocess.Popen[bytes]:
+    """``start_session`` in a worker thread; if we are cancelled, its process is abandoned.
+
+    The thread cannot be stopped, so it is shielded and its result killed when it arrives.
+    """
+    starting = asyncio.ensure_future(
+        asyncio.to_thread(start_session, assign, base_env, endpoint, engine)
+    )
+    claimed = False
+    try:
+        process = await asyncio.shield(starting)
+        claimed = True
+    finally:
+        if not claimed:
+            starting.add_done_callback(_abandon_started)
+    return process
+
+
+def _attempt_failed(message: str, cause: BaseException) -> EngineStartError:
+    """An attempt failure whose ``__cause__`` is what went wrong."""
+    failed = EngineStartError(message)
+    failed.__cause__ = cause
+    return failed
+
+
+def _with_notes(error: BaseException) -> str:
+    """``error``'s text followed by any notes added to it."""
+    return "; ".join([str(error), *getattr(error, "__notes__", ())])
+
+
 async def _attempt(
     assign: Callable[[int], None],
     base_env: Mapping[str, str],
     endpoint: SessionEndpoint,
     engine: EngineConfig,
 ) -> RunningEngine | EngineStartError:
-    """One start: the engine once its harbor answers 200, or why it did not."""
+    """One start: the engine once its harbor answers 200, or why it did not.
+
+    On every other way out (not ready, cancelled, an unexpected error) the process is killed.
+    """
     try:
-        process = await asyncio.to_thread(start_session, assign, base_env, endpoint, engine)
+        process = await _spawn(assign, base_env, endpoint, engine)
     except OSError as refused:
-        return EngineStartError(f"engine did not start: {refused}")
+        return _attempt_failed(f"engine did not start: {_with_notes(refused)}", refused)
     port = endpoint.harbor_port
+    ready = False
     try:
         upstream = await open_upstream(
             port, engine.ready_timeout_s, alive=lambda: process.poll() is None
         )
+        ready = True
     except EngineStartError as not_ready:
-        return EngineStartError(f"{not_ready}; {await asyncio.to_thread(_reap, process)}")
+        reaped = await asyncio.to_thread(_reap, process)
+        return _attempt_failed(f"{not_ready}; {reaped}", not_ready)
+    finally:
+        if not ready and process.returncode is None:
+            _abandon(process)
     return RunningEngine(pid=process.pid, port=port, stop=_stopper(process), upstream=upstream)
 
 

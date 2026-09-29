@@ -36,12 +36,13 @@ def _status_of(head: bytes) -> int | None:
 async def _answer(port: int) -> Upstream | None:
     """One ``GET /stream``: the upstream if the harbor answers 200, else ``None``.
 
-    A refused connect, a dropped connection or any other status is ``None``. The connection
-    is closed on every path but a 200, including when the caller's deadline cancels us.
+    A refused or reset connect, a dropped connection or any other status is ``None``. The
+    connection is closed on every path but a 200, including when the caller's deadline
+    cancels us.
     """
     try:
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    except ConnectionRefusedError:
+    except ConnectionError:  # refused, reset or aborted: not listening yet, or dying
         return None
     upstream: Upstream | None = None
     try:
