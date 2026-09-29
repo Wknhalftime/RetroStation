@@ -497,14 +497,19 @@ def _git_describe() -> str:
 
 
 def _quiet_logging() -> None:
-    """Drop scan INFO logs so the console carries only the results.
+    """Configure logging as the Huey consumer does, minus INFO noise.
 
-    Call after importing the backend: its import configures logging.
+    The consumer's own configuration runs in a Huey startup hook, which an
+    in-process run never fires; the console then carries only the results.
     """
     import logging
 
     import structlog
 
+    from backend.logging_config import configure_logging
+
+    settings = get_settings()
+    configure_logging(settings.log_level, database_url=settings.database_url)
     logging.getLogger().setLevel(logging.WARNING)
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING),
