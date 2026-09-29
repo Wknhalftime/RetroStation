@@ -78,18 +78,14 @@ class TaskRunHandle:
         *,
         task_id: str,
         started_at: datetime,
-        task_type: TaskType,
-        log_category: LogCategory,
-        messages: TaskLifecycleMessages,
+        config: TaskRunConfig,
         progress_repo: TaskProgressRepository,
         sys_log_repo: PgSystemLogRepository,
     ) -> None:
         self.task_id = task_id
         self.started_at = started_at
         self.progress_repo = progress_repo
-        self._task_type = task_type
-        self._log_category = log_category
-        self._messages = messages
+        self._config = config
         self._sys_log_repo = sys_log_repo
         self.completed_progress_data: dict[str, Any] = {}
         self.completed_details: dict[str, Any] = {}
@@ -101,7 +97,7 @@ class TaskRunHandle:
         self.progress_repo.upsert(
             TaskProgress(
                 task_id=self.task_id,
-                task_type=self._task_type,
+                task_type=self._config.task_type,
                 status=TaskStatus.RUNNING,
                 progress_data=progress_data,
                 started_at=self.started_at,
@@ -115,9 +111,9 @@ class TaskRunHandle:
         """
         self._sys_log_repo.create(
             SystemLog(
-                category=self._log_category,
+                category=self._config.log_category,
                 level=LogLevel.INFO,
-                message=self._messages.started,
+                message=self._config.messages.started,
                 trace_id=self.task_id,
                 details=details,
             )
@@ -155,9 +151,7 @@ def task_run(database_url: str, config: TaskRunConfig) -> Iterator[TaskRunHandle
         handle = TaskRunHandle(
             task_id=task_id,
             started_at=started_at,
-            task_type=config.task_type,
-            log_category=config.log_category,
-            messages=config.messages,
+            config=config,
             progress_repo=progress_repo,
             sys_log_repo=sys_log_repo,
         )
