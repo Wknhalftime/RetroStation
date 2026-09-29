@@ -438,6 +438,110 @@ class TestIngestionLifecycleLogs:
         assert failed.details["error"] == "ingest boom"
         assert "RuntimeError: ingest boom" in failed.details["traceback"]
 
+    @patch("backend.tasks.ingestion_tasks.logger")
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_transient_systemlog_write_fault_is_dropped_not_fatal(
+        self,
+        _connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
+        mock_progress_cls: MagicMock,
+        mock_run_ingest: MagicMock,
+        _count: MagicMock,
+        mock_logger: MagicMock,
+    ) -> None:
+        """`_safe_system_log_create`'s own guard: a transient driver fault
+        writing the "started" log must not abort ingestion — it is dropped
+        and warned about, mirroring `_safe_progress_upsert`.
+        """
+        import psycopg
+
+        class _DroppedStartedLogRepo(FakeSystemLogRepository):
+            def create(self, log: Any) -> None:
+                if log.message == "ingestion_started":
+                    raise psycopg.OperationalError("progress conn dropped")
+                super().create(log)
+
+        fake_repo = FakeTaskProgressRepository()
+        mock_progress_cls.return_value = fake_repo
+        fake_sys_log = _DroppedStartedLogRepo()
+        mock_sys_log_cls.return_value = fake_sys_log
+        mock_run_ingest.return_value = IngestionResult(
+            playlist_id="pl-1",
+            rows_processed=1,
+            rows_skipped=0,
+            artists_created=1,
+            identities_created=1,
+            events_created=1,
+            broadcast_days_created=1,
+        )
+
+        with patch("backend.tasks.embedding_tasks.embedding_task"):
+            from backend.tasks.ingestion_tasks import ingestion_task
+
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-3")
+
+        # Only "ingestion_completed" made it through; "ingestion_started" was
+        # dropped, not raised.
+        assert [log.message for log in fake_sys_log.all] == ["ingestion_completed"]
+        assert fake_repo.received_upserts[-1].status == TaskStatus.COMPLETED
+
+        dropped_warnings = [
+            c
+            for c in mock_logger.warning.call_args_list
+            if c.args and c.args[0] == "ingestion_system_log_create_dropped"
+        ]
+        assert len(dropped_warnings) == 1
+        assert dropped_warnings[0].kwargs["lifecycle"] == "started"
+
+    @patch("backend.tasks.ingestion_tasks.logger")
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_non_transient_systemlog_write_fault_on_failed_log_does_not_shadow_original(
+        self,
+        _connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
+        mock_progress_cls: MagicMock,
+        mock_run_ingest: MagicMock,
+        _count: MagicMock,
+        mock_logger: MagicMock,
+    ) -> None:
+        """A non-transient bug (outside `_PROGRESS_DROP_ERRORS`) writing the
+        "failed" SystemLog is caught by the caller's own shadow guard — the
+        real ingestion exception must still be what propagates, not this
+        secondary systemlog-write bug.
+        """
+
+        class _ShadowFailingLogRepo(FakeSystemLogRepository):
+            def create(self, log: Any) -> None:
+                if log.message == "ingestion_failed":
+                    raise ValueError("system_logs schema drift")
+                super().create(log)
+
+        mock_progress_cls.return_value = FakeTaskProgressRepository()
+        mock_sys_log_cls.return_value = _ShadowFailingLogRepo()
+        mock_run_ingest.side_effect = RuntimeError("real ingestion boom")
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with pytest.raises(RuntimeError, match="real ingestion boom"):
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-4")
+
+        shadow_warnings = [
+            c
+            for c in mock_logger.warning.call_args_list
+            if c.args and c.args[0] == "ingestion_system_log_create_shadow_prevented"
+        ]
+        assert len(shadow_warnings) == 1
+        assert shadow_warnings[0].kwargs["original_error"] == "real ingestion boom"
+        assert shadow_warnings[0].kwargs["shadow_error"] == "system_logs schema drift"
+
 
 # ---------------------------------------------------------------------------
 # ingestion_task: embedding_task enqueue failure ownership is covered in
