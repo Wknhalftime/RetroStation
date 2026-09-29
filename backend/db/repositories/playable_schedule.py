@@ -19,7 +19,7 @@ from backend.repositories.playable_schedule import PlayableScheduleRepository
 
 logger = structlog.get_logger()
 
-# One station-day in one statement (spec: Data, D17-D20). The reader holds no rules of its
+# One station-day in one statement (spec: Data, D17-D20, D22). The reader holds no rules of its
 # own; it adds times, titles and cues to what the two views say.
 # - Plays, the day window and the order are broadcast's view station_day_plays (D19):
 #   filter on station_id and play_date, order by position.
@@ -78,19 +78,16 @@ def _to_item(row: DictRow) -> ScheduleItem:
 
 
 def _to_file(row: DictRow) -> PlayableFile | None:
-    """The resolved file, or none: no master (D22), unmatched, not present (D21) or invalid (D18).
+    """The resolved file, or none: no master (D22), unmatched (silent, no warning), not
+    present (D21) or invalid (D18).
 
-    One warning per play: the checks run no master, then availability, then the file, then
-    its cues, and the first that fails ends them, so a bad file's cues are never read.
+    The checks run in order: no master, availability, file validity, cues. The first that
+    fails ends them, so a bad file's cues are never read.
     """
+    if row["file_id"] is None and row["matched_file_id"] is not None:
+        _warn_no_master(row)
+        return None
     if row["file_id"] is None:
-        if row["matched_file_id"] is not None:
-            logger.warning(
-                "schedule_no_master",
-                event_id=str(row["event_id"]),
-                matched_file_id=str(row["matched_file_id"]),
-                work_id=row["work_id"],
-            )
         return None
     if row["file_status"] != FileStatus.PRESENT:
         logger.warning(
@@ -105,6 +102,16 @@ def _to_file(row: DictRow) -> PlayableFile | None:
     if file is None:
         return None
     return dataclasses.replace(file, cues=_to_cues(row))
+
+
+def _warn_no_master(row: DictRow) -> None:
+    """Log the D22 no-master warning: a matched file whose work has no override or master."""
+    logger.warning(
+        "schedule_no_master",
+        event_id=str(row["event_id"]),
+        matched_file_id=str(row["matched_file_id"]),
+        work_id=row["work_id"],
+    )
 
 
 def _to_valid_file(row: DictRow) -> PlayableFile | None:

@@ -70,7 +70,9 @@ LEFT JOIN library_files f
 COMMENT ON VIEW play_file_resolution IS
     'Query per play: filter on play_event_id, or join it through LATERAL (... WHERE '
     'play_event_id = x OFFSET 0). A plain join or a station-wide filter computes it for '
-    'every play (about 10 s on dev, 5M plays).';
+    'every play (about 10 s on dev, 5M plays). matched_file_id is only the route to '
+    'work_id and never plays; file_id is the override or master, and source is override, '
+    'master or NULL.';
 
 -- Broadcast owns "a station's plays on a date" (D19): play_date is the UTC-label date
 -- (D3), independent of the session TimeZone; logged_at is the naive wall-clock time;
