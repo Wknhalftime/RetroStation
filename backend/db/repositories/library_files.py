@@ -55,7 +55,7 @@ _UPSERT_SQL = """
         END,
         file_status            = 'present',
         missing_since          = NULL,
-        trace_id              = EXCLUDED.trace_id,
+        trace_id               = EXCLUDED.trace_id,
         -- A fresh tag extraction carries no links. Keep the ones grouping
         -- and enrichment already built, even across a content change: a
         -- retag is not a new song. A caller that means to relink passes
