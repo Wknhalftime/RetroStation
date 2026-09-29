@@ -6,27 +6,31 @@ Takes primitives only. ``start_session`` does not know about job objects: the ca
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import socket
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from backend.playout.errors import EngineStartError
+from backend.playout.harbor import Upstream, open_upstream
 
 __all__ = [
     "SESSION_SCRIPT",
     "EngineConfig",
     "EngineStartError",
+    "RunningEngine",
     "ScriptCacheError",
     "SessionEndpoint",
     "free_port",
     "launch_env",
     "long_path",
     "session_base_env",
+    "start_ready_engine",
     "start_session",
     "warm_script_cache",
 ]
@@ -86,6 +90,7 @@ class EngineConfig:
     intro_sfx: Path | None
     intro_fade_at_s: float = 1.0
     no_client_exit_s: float = 15.0
+    ready_timeout_s: float = 5.0  # D37
 
     def __post_init__(self) -> None:
         if _BACKSLASH_DIGIT.search(str(self.exe)):
@@ -100,6 +105,10 @@ class EngineConfig:
         if self.no_client_exit_s <= 0:
             raise ValueError(
                 f"EngineConfig.no_client_exit_s must be > 0, got {self.no_client_exit_s}"
+            )
+        if self.ready_timeout_s <= 0:
+            raise ValueError(
+                f"EngineConfig.ready_timeout_s must be > 0, got {self.ready_timeout_s}"
             )
 
 
@@ -209,3 +218,87 @@ def start_session(
             )
         raise
     return process
+
+
+@dataclass(frozen=True)
+class RunningEngine:
+    """A session engine whose harbor answered 200: its pid, port, stop and audio.
+
+    ``stop`` kills the process if it is still alive and returns at once; it never waits,
+    because it is called from the event loop.
+    """
+
+    pid: int
+    port: int
+    stop: Callable[[], None]
+    upstream: Upstream
+
+
+def _stopper(process: subprocess.Popen[bytes]) -> Callable[[], None]:
+    def stop() -> None:
+        if process.poll() is None:
+            process.kill()
+
+    return stop
+
+
+def _reap(process: subprocess.Popen[bytes]) -> str:
+    """Kill ``process`` and wait for its exit code (blocking: run it in a worker thread)."""
+    process.kill()
+    try:
+        return f"engine exit code {process.wait(timeout=_KILL_WAIT_S)}"
+    except subprocess.TimeoutExpired:
+        return f"engine process {process.pid} was killed but had not exited after {_KILL_WAIT_S} s"
+
+
+async def _attempt(
+    assign: Callable[[int], None],
+    base_env: Mapping[str, str],
+    endpoint: SessionEndpoint,
+    engine: EngineConfig,
+) -> RunningEngine | EngineStartError:
+    """One start: the engine once its harbor answers 200, or why it did not."""
+    try:
+        process = await asyncio.to_thread(start_session, assign, base_env, endpoint, engine)
+    except OSError as refused:
+        return EngineStartError(f"engine did not start: {refused}")
+    port = endpoint.harbor_port
+    try:
+        upstream = await open_upstream(
+            port, engine.ready_timeout_s, alive=lambda: process.poll() is None
+        )
+    except EngineStartError as not_ready:
+        return EngineStartError(f"{not_ready}; {await asyncio.to_thread(_reap, process)}")
+    return RunningEngine(pid=process.pid, port=port, stop=_stopper(process), upstream=upstream)
+
+
+def _another_port(taken: int) -> int:
+    """A free loopback port other than ``taken``."""
+    port = free_port()
+    while port == taken:
+        port = free_port()
+    return port
+
+
+async def start_ready_engine(
+    assign: Callable[[int], None],
+    base_env: Mapping[str, str],
+    endpoint: SessionEndpoint,
+    engine: EngineConfig,
+) -> RunningEngine:
+    """Start a session engine and wait until its harbor serves audio (D37).
+
+    An attempt that fails to start, exits, or is not ready within ``engine.ready_timeout_s``
+    is killed, reaped in a worker thread, and retried once on another port. Raises
+    ``EngineStartError`` naming both failures.
+    """
+    first = await _attempt(assign, base_env, endpoint, engine)
+    if isinstance(first, RunningEngine):
+        return first
+    retry = replace(endpoint, harbor_port=_another_port(endpoint.harbor_port))
+    second = await _attempt(assign, base_env, retry, engine)
+    if isinstance(second, RunningEngine):
+        return second
+    raise EngineStartError(
+        f"session {endpoint.session_id}: {first}; retry on port {retry.harbor_port}: {second}"
+    ) from second
