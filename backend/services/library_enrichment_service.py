@@ -176,7 +176,7 @@ def _settle_previous_work(
     moved_to: str,
     repos: EnrichmentRepos,
 ) -> None:
-    """Delete or re-pick the master of the work a file just left.
+    """Delete the work a file just left, or re-pick its master if the work stays.
 
     Once nothing references the work it is deleted, taking its now-stale song
     master with it. Otherwise its master is re-picked from its own present
