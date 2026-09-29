@@ -27,21 +27,23 @@ CREATE TABLE stream_cues (
     analysed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Curation owns "which file plays" (D16, D17): one row per play event, the final file's
--- id, file_status and source (direct / master / override). No status filter: consumers
--- decide what an unavailable final file means. Unresolved plays get a row of NULLs.
+-- Curation owns "which file plays" (D16, D17, D22): one row per play event. The matched
+-- file is only the route to the work (matched_file_id, work_id); the work decides what
+-- plays: the station format's override, else the song master (source override / master).
+-- No work, or neither, leaves file_id / file_status / source NULL (no master). No status
+-- filter: consumers decide what an unavailable final file means. Unmatched plays get NULLs.
 -- Consumption contract: query per play. Filter on play_event_id, or join it through
 -- LATERAL (... WHERE play_event_id = x OFFSET 0). A plain join or a station-wide filter
 -- computes it for every play (about 10 s on dev, 5M plays).
 CREATE VIEW play_file_resolution AS
 SELECT pe.id AS play_event_id,
        pl.station_id,
+       best.library_file_id AS matched_file_id,
+       COALESCE(matched.work_id, r.work_id) AS work_id,
        f.id AS file_id,
        f.file_status,
-       CASE WHEN f.id IS NULL THEN NULL
-            WHEN fo.preferred_file_id IS NOT NULL THEN 'override'
+       CASE WHEN fo.preferred_file_id IS NOT NULL THEN 'override'
             WHEN sm.preferred_file_id IS NOT NULL THEN 'master'
-            ELSE 'direct'
        END AS source
 FROM play_events pe
 JOIN playlists pl ON pl.id = pe.playlist_id
@@ -56,14 +58,14 @@ LEFT JOIN LATERAL (
     ORDER BY m.confidence_score DESC, m.created_at, m.id
     LIMIT 1
 ) best ON true
-LEFT JOIN library_files direct ON direct.id = best.library_file_id
-LEFT JOIN recordings r ON r.id = direct.recording_id
-LEFT JOIN song_masters sm ON sm.work_id = COALESCE(direct.work_id, r.work_id)
+LEFT JOIN library_files matched ON matched.id = best.library_file_id
+LEFT JOIN recordings r ON r.id = matched.recording_id
+LEFT JOIN song_masters sm ON sm.work_id = COALESCE(matched.work_id, r.work_id)
 LEFT JOIN format_overrides fo
-       ON fo.work_id = COALESCE(direct.work_id, r.work_id)
+       ON fo.work_id = COALESCE(matched.work_id, r.work_id)
       AND fo.format_name = s.format_name
 LEFT JOIN library_files f
-       ON f.id = COALESCE(fo.preferred_file_id, sm.preferred_file_id, direct.id);
+       ON f.id = COALESCE(fo.preferred_file_id, sm.preferred_file_id);
 
 COMMENT ON VIEW play_file_resolution IS
     'Query per play: filter on play_event_id, or join it through LATERAL (... WHERE '

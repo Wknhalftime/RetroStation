@@ -35,7 +35,7 @@ SELECT dp.play_event_id AS event_id,
        dp.logged_at,
        ti.original_title AS title,
        ba.original_name AS artist,
-       res.file_id, res.file_status, res.source,
+       res.matched_file_id, res.work_id, res.file_id, res.file_status, res.source,
        f.file_path, f.duration_ms,
        c.audio_hash AS cued_audio,
        c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db
@@ -43,7 +43,7 @@ FROM station_day_plays dp
 JOIN track_identities ti ON ti.id = dp.identity_id
 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
 LEFT JOIN LATERAL (
-    SELECT r.file_id, r.file_status, r.source
+    SELECT r.matched_file_id, r.work_id, r.file_id, r.file_status, r.source
     FROM play_file_resolution r
     WHERE r.play_event_id = dp.play_event_id
     OFFSET 0
@@ -78,12 +78,19 @@ def _to_item(row: DictRow) -> ScheduleItem:
 
 
 def _to_file(row: DictRow) -> PlayableFile | None:
-    """The resolved file, or none: unresolved, not present (D21) or invalid (D18).
+    """The resolved file, or none: no master (D22), unmatched, not present (D21) or invalid (D18).
 
-    One warning per play: the checks run availability, then the file, then its cues, and
-    the first that fails ends them, so a bad file's cues are never read.
+    One warning per play: the checks run no master, then availability, then the file, then
+    its cues, and the first that fails ends them, so a bad file's cues are never read.
     """
     if row["file_id"] is None:
+        if row["matched_file_id"] is not None:
+            logger.warning(
+                "schedule_no_master",
+                event_id=str(row["event_id"]),
+                matched_file_id=str(row["matched_file_id"]),
+                work_id=row["work_id"],
+            )
         return None
     if row["file_status"] != FileStatus.PRESENT:
         logger.warning(
