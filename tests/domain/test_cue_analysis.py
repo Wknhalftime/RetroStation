@@ -3,7 +3,7 @@
 Cues belong to the audio, not the file: an analysis names the library's ``AudioHash`` and
 carries no file identity and no file stat. ``analyser_version`` is recorded, never checked.
 
-DRAFT for D20: replaces ``test_cue_analysis.py`` once the user approves.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

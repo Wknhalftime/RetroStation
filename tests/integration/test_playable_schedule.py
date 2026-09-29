@@ -8,7 +8,7 @@ cue points of that file's audio or none (D20).
 A test that wants "this matched file plays" seeds ``seed.mastered_file``: a file that is its own
 work's master. The matched file never plays merely for being matched (D22).
 
-DRAFT for D22: replaces ``test_playable_schedule.py`` once the user approves.
+Approved acceptance tests for D22; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 One row per audio hash. An upsert needs no library file to exist: a row for audio no
 longer (or not yet) in the library is harmless.
 
-DRAFT for D20: replaces ``test_stream_cues.py`` once the user approves.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
 """
 
 from __future__ import annotations
