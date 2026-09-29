@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from backend.domain.enums import AudioHashKind, FileStatus
 from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
-from backend.services.library_scan_service import adopt_moved_row  # ⚠ AUD-009
+from backend.services.library_scan_service import adopt_moved_row
 from tests.fakes.library_files import FakeLibraryFileRepository
 
 H1 = AudioHash(AudioHashKind.FLAC_MD5, "1" * 32)

@@ -19,7 +19,7 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.services.library_scan_service import scan_folder_incrementally  # ⚠ AUD-009
+from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks.library_scan_tasks import _run_scan
 from tests.fixtures.audio_builders import tag_flac, write_flac

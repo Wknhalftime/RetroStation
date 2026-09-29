@@ -173,12 +173,13 @@ def _debug_bound_logger() -> Generator[None]:
     """Make DEBUG-level events visible to `capture_logs` for this test.
 
     `capture_logs` swaps the processor chain but not `wrapper_class` (see
-    `tests/services/test_mb_client_observability.py`). Importing this task
-    module pulls in `backend.tasks.huey_app`, which calls `configure_logging`
-    at import time with the app's default level (INFO) — so without this
-    override, a `logger.debug(...)` call never reaches the processor chain
-    and `capture_logs` would silently see nothing, whether or not the
-    production code actually logs at DEBUG.
+    `tests/services/test_mb_client_observability.py`). If an earlier test on
+    the same worker left `configure_logging` in force at the app's default
+    level (INFO) — the lifespan TestClients restore structlog on teardown via
+    `tests/lifespan_client.py`, but nothing enforces that for new callers —
+    then without this override a `logger.debug(...)` call never reaches the
+    processor chain and `capture_logs` would silently see nothing, whether
+    or not the production code actually logs at DEBUG.
     """
     original_config = structlog.get_config()
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG))

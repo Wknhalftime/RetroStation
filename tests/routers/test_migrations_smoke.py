@@ -16,10 +16,10 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 import backend.main as backend_main
 from backend.db.migrations import run_migrations as _real_run_migrations
+from tests.lifespan_client import lifespan_client
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -59,7 +59,7 @@ def test_lifespan_runs_migrations_when_flag_unset(
     backend_main.app.dependency_overrides[get_current_token] = _skip_auth
 
     try:
-        with TestClient(backend_main.app, raise_server_exceptions=False) as c:
+        with lifespan_client(backend_main.app) as c:
             response = c.get("/health")
             assert response.status_code == 200
             assert response.json() == {"status": "ok"}

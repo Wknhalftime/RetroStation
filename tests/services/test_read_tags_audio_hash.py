@@ -8,7 +8,7 @@ from unittest.mock import patch
 from backend.domain.enums import AudioHashKind
 from backend.domain.library import AudioHash
 from backend.services.audio_hash import compute_audio_hash
-from backend.services.library_scan_service import read_tags  # ⚠ AUD-009
+from backend.services.audio_tags import read_tags
 from tests.fixtures.audio_builders import (
     flac_frames,
     pcm_md5,
