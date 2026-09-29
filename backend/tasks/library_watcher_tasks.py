@@ -9,6 +9,7 @@ using smart per-folder diffing and chains into enrichment.
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,16 +20,18 @@ import structlog
 from huey import crontab  # type: ignore[import-untyped]
 
 from backend.config import get_settings
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import EnrichmentStatus, TaskStatus, TaskType
-from backend.domain.system import TaskProgress
+from backend.domain.enums import EnrichmentStatus, LogCategory, LogLevel, TaskStatus, TaskType
+from backend.domain.system import SystemLog, TaskProgress
 from backend.repositories.library_folder_staging import LibraryFolderHashStaging
 from backend.repositories.library_folders import LibraryFolderRepository
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
@@ -111,12 +114,13 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
     library_conn = None
 
     try:
-        # Autocommit connection for progress tracking
+        # Autocommit connection for progress tracking and system logs
         progress_conn = connect_sync(
             settings.database_url,
             autocommit=True,
         )
         progress_repo = PgTaskProgressRepository(progress_conn)
+        sys_log_repo = PgSystemLogRepository(progress_conn)
 
         # Data connection
         library_conn = connect_sync(
@@ -154,6 +158,16 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                 },
                 started_at=task_started_at,
                 updated_at=task_started_at,
+            )
+        )
+
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="watcher_scan_started",
+                trace_id=scan_task_id,
+                details={"folder_count": len(folder_paths)},
             )
         )
 
@@ -270,19 +284,43 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
             )
         )
 
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="watcher_scan_completed",
+                trace_id=scan_task_id,
+                details={
+                    "processed": len(folder_paths),
+                    "total": len(folder_paths),
+                    "files_written": total_written,
+                },
+            )
+        )
+
         logger.info(
             "watcher_scan_complete",
             folders=len(folder_paths),
             total_written=total_written,
         )
 
-        # Chain into enrichment if files were written
+        # Chain into enrichment if files were written. Guarded (AUD-R011
+        # decision 1): this scan's own run already reported COMPLETED above,
+        # so a downstream enqueue failure must not retroactively flip it to
+        # FAILED. The caller owns the handoff and logs the failure on its
+        # own task_id instead.
         if total_written > 0:
             from backend.tasks.library_enrichment_tasks import (
                 library_enrichment_task,
             )
 
-            library_enrichment_task()
+            enqueue_or_log(
+                library_enrichment_task,
+                task_name="library_enrichment_task",
+                caller_task_id=scan_task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=sys_log_repo,
+            )
 
     except Exception as exc:
         if library_conn is not None:
@@ -305,6 +343,16 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                         completed_at=datetime.now(UTC),
+                    )
+                )
+            with contextlib.suppress(Exception):
+                PgSystemLogRepository(progress_conn).create(
+                    SystemLog(
+                        category=LogCategory.SCAN,
+                        level=LogLevel.ERROR,
+                        message="watcher_scan_failed",
+                        trace_id=scan_task_id,
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
                     )
                 )
 

@@ -25,6 +25,7 @@ from backend.services.ingestion_service import (
     DuplicatePlaylistError,
     IngestionResult,
 )
+from tests.fakes.system_logs import FakeSystemLogRepository
 from tests.fakes.task_progress import FakeTaskProgressRepository
 
 CSV_PAYLOAD = (
@@ -260,32 +261,94 @@ class TestIngestionTaskFailurePaths:
 
 
 class TestIngestionTaskEmbeddingDecoupling:
+    """AUD-R011 decision 1: the caller owns the embedding_task handoff.
+
+    Before this decision, `contextlib.suppress(Exception)` swallowed ANY
+    exception from the enqueue call, including logic bugs. Now only the
+    real SqliteHuey enqueue-failure type (`sqlite3.Error`) is caught and
+    logged; the caller still keeps its own COMPLETED status. Anything else
+    is not a storage fault and propagates, tightening the old blanket
+    swallow.
+    """
+
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
     @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
     @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
-    def test_embedding_failure_does_not_flip_to_failed(
+    def test_embedding_enqueue_failure_does_not_flip_to_failed(
         self,
         _connect: MagicMock,
         repo_cls: MagicMock,
+        sys_log_cls: MagicMock,
         run_ingest: MagicMock,
         _count: MagicMock,
     ) -> None:
+        import sqlite3
+
         fake_repo = FakeTaskProgressRepository()
         repo_cls.return_value = fake_repo
+        fake_sys_log = FakeSystemLogRepository()
+        sys_log_cls.return_value = fake_sys_log
         run_ingest.return_value = _result()
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
         with patch(
             "backend.tasks.embedding_tasks.embedding_task",
-            side_effect=RuntimeError("broker down"),
+            side_effect=sqlite3.OperationalError("database is locked"),
         ):
-            # Must NOT raise: embedding dispatch is decoupled.
+            # Must NOT raise: the caller owns the handoff and keeps its own
+            # COMPLETED status.
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-e")
 
         terminal = fake_repo.received_upserts[-1]
         assert terminal.status == TaskStatus.COMPLETED
+
+        enqueue_failed_logs = [
+            log for log in fake_sys_log.all if log.message == "embedding_task_enqueue_failed"
+        ]
+        assert len(enqueue_failed_logs) == 1
+        assert enqueue_failed_logs[0].trace_id == "tid-e"
+        assert enqueue_failed_logs[0].details is not None
+        assert enqueue_failed_logs[0].details["error"] == "database is locked"
+
+    @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=2)
+    @patch("backend.tasks.ingestion_tasks._run_ingest")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
+    @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
+    def test_embedding_non_enqueue_error_now_propagates_and_flips_to_failed(
+        self,
+        _connect: MagicMock,
+        repo_cls: MagicMock,
+        sys_log_cls: MagicMock,
+        run_ingest: MagicMock,
+        _count: MagicMock,
+    ) -> None:
+        """A non-`sqlite3.Error` (a logic bug, not a storage fault) is no
+        longer swallowed by a blanket `except Exception` — it propagates,
+        and this run is now correctly reported FAILED instead of the old
+        blanket "decoupled" COMPLETED.
+        """
+        fake_repo = FakeTaskProgressRepository()
+        repo_cls.return_value = fake_repo
+        sys_log_cls.return_value = FakeSystemLogRepository()
+        run_ingest.return_value = _result()
+
+        from backend.tasks.ingestion_tasks import ingestion_task
+
+        with (
+            patch(
+                "backend.tasks.embedding_tasks.embedding_task",
+                side_effect=RuntimeError("broker down"),
+            ),
+            pytest.raises(RuntimeError, match="broker down"),
+        ):
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-e2")
+
+        terminal = fake_repo.received_upserts[-1]
+        assert terminal.status == TaskStatus.FAILED
 
 
 class TestIngestionTaskBackwardCompat:
