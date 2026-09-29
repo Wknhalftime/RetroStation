@@ -5,7 +5,23 @@ from backend.domain.curation import SongMaster
 
 class SongMasterRepository(ABC):
     @abstractmethod
-    def upsert(self, master: SongMaster) -> SongMaster: ...
+    def upsert(self, master: SongMaster) -> SongMaster:
+        """Store the work's pick unless the stored one is manual; return the stored row."""
+        ...
+
+    @abstractmethod
+    def replace(self, master: SongMaster) -> None:
+        """Store the work's pick whatever the stored one's method.
+
+        Only for a manual pick that is no longer valid (its file is missing or left the
+        work); ``upsert`` keeps refusing to overwrite a manual pick.
+        """
+        ...
+
+    @abstractmethod
+    def delete_by_work(self, work_id: str) -> None:
+        """Remove the work's song master, if it has one."""
+        ...
 
     @abstractmethod
     def get_by_work(self, work_id: str) -> SongMaster | None: ...

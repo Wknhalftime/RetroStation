@@ -50,6 +50,29 @@ class PgSongMasterRepository(SongMasterRepository):
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
 
+    def replace(self, master: SongMaster) -> None:
+        self._conn.execute(
+            """INSERT INTO song_masters
+               (id, work_id, preferred_file_id, selection_method, score, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (work_id) DO UPDATE SET
+                 preferred_file_id = EXCLUDED.preferred_file_id,
+                 selection_method = EXCLUDED.selection_method,
+                 score = EXCLUDED.score,
+                 updated_at = EXCLUDED.updated_at""",
+            (
+                master.id,
+                master.work_id,
+                master.preferred_file_id,
+                master.selection_method.value,
+                master.score,
+                master.updated_at,
+            ),
+        )
+
+    def delete_by_work(self, work_id: str) -> None:
+        self._conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
+
     def get_by_work(self, work_id: str) -> SongMaster | None:
         row = self._conn.execute(
             "SELECT * FROM song_masters WHERE work_id = %s", (work_id,)
