@@ -93,11 +93,13 @@ class TestMbEnrichmentProgress:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_emits_running_with_combined_total(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -130,11 +132,13 @@ class TestMbEnrichmentProgress:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_processed_reaches_total_by_completion(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -167,11 +171,13 @@ class TestMbEnrichmentProgress:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_phase_label_cycles_through_three_phases(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -208,11 +214,13 @@ class TestMbEnrichmentProgress:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_marks_failed_on_mid_run_exception(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -274,11 +282,13 @@ class TestMbEnrichmentProgress:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_zero_pending_completes_cleanly(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -312,11 +322,13 @@ class TestMbEnrichmentSummary:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_summary_includes_all_three_phases_with_stable_schema(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -384,11 +396,13 @@ class TestMbEnrichmentSummary:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_recordings_phase_404_sentinel_does_not_refetch(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -435,11 +449,13 @@ class TestArtistPhaseOutcomeCounting:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_enhanced_and_404_failed_artists_are_counted_separately(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -472,11 +488,13 @@ class TestArtistPhaseOutcomeCounting:
     @patch("backend.tasks.mb_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.mb_enrichment_tasks.PgMusicBrainzCacheRepository")
     @patch("backend.tasks.mb_enrichment_tasks.RepositoryFactory")
-    @patch("backend.tasks.mb_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.mb_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.mb_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_retriable_exception_is_isolated_to_one_artist(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import time
-import traceback
-import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,16 +15,15 @@ from psycopg import sql
 
 from backend.config import Settings, get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
-from backend.db.repositories.system_logs import PgSystemLogRepository
-from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.catalog import Artist, Recording, Work
-from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
-from backend.domain.system import SystemLog, TaskProgress
+from backend.domain.enums import LogCategory, TaskStatus, TaskType
+from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
 
 # Threshold for the slow-iteration warning emitted from inside the coalesce
@@ -762,161 +759,89 @@ def mb_enrichment_task() -> dict[str, int]:
     independently.  This is the final step in the library pipeline chain.
     """
     settings = get_settings()
-    task_id = uuid.uuid4().hex
-    task_started_at = datetime.now(UTC)
 
     total = 0
-    # ctx is created after `total` is computed inside the try block. The
-    # outer except handler reads ctx.processed / ctx.done / ctx.failed /
-    # ctx.metrics if ctx was reached, else falls back to defaults. All
-    # phase counters live on ctx so a mid-loop raise leaves accurate
-    # partial values visible to the FAILED progress upsert and the
-    # mb_task_summary `finally` emission.
+    # ctx is created after `total` is computed inside the `task_run` block.
+    # `read_progress` (used only for the FAILED payload) and the `finally`
+    # summary emission both read ctx.* defensively for the same reason: a
+    # mid-loop raise must leave accurate partial values visible even though
+    # ctx was created after some of this function's early setup.
     ctx: _PhaseContext | None = None
 
-    progress_conn: psycopg.Connection | None = None
-    progress_repo: PgTaskProgressRepository | None = None
-    sys_log_repo: PgSystemLogRepository | None = None
+    config = TaskRunConfig(
+        task_type=TaskType.MB_ENRICHMENT,
+        log_category=LogCategory.ENRICHMENT,
+        messages=TaskLifecycleMessages(
+            started="mb_enrichment_started",
+            completed="mb_enrichment_completed",
+            failed="mb_enrichment_failed",
+        ),
+        read_progress=lambda: (ctx.processed if ctx is not None else 0, total),
+    )
 
     try:
-        # MUST be autocommit=True. The /ws WebSocket reader polls
-        # `progress_tracking` from a separate connection on the async pool;
-        # pre-pass heartbeats (`touch_running`) and per-item upserts both
-        # need to be immediately visible across connections so the WS
-        # broadcast doesn't go silent during long pre-pass phases. A future
-        # refactor that shares a transactional connection here will
-        # silently re-introduce the WS-empty-during-mb_enrichment bug. See
-        # the "Public contract — autocommit dependency" section in the WS
-        # fix plan for the full rationale.
-        progress_conn = connect_sync(settings.database_url, autocommit=True)
-        progress_repo = PgTaskProgressRepository(progress_conn)
-        sys_log_repo = PgSystemLogRepository(progress_conn)
+        with task_run(settings.database_url, config) as handle:
+            # Pre-count all three queues so `total` is known for the initial
+            # RUNNING upsert. Each phase re-opens its own transactional
+            # connection below for mutations; this counting connection is
+            # read-only.
+            with connect_sync(settings.database_url) as counting_conn:
+                counting_repos = RepositoryFactory(counting_conn)
+                pending_artists = counting_repos.artists.list_unenhanced()
+                pending_works = counting_repos.works.list_needing_enhancement()
+                pending_recordings = counting_repos.recordings.list_needing_enhancement()
 
-        # Pre-count all three queues so `total` is known for the initial
-        # RUNNING upsert. Each phase re-opens its own transactional connection
-        # below for mutations; this counting connection is read-only.
-        with connect_sync(settings.database_url) as counting_conn:
-            counting_repos = RepositoryFactory(counting_conn)
-            pending_artists = counting_repos.artists.list_unenhanced()
-            pending_works = counting_repos.works.list_needing_enhancement()
-            pending_recordings = counting_repos.recordings.list_needing_enhancement()
+            total = len(pending_artists) + len(pending_works) + len(pending_recordings)
 
-        total = len(pending_artists) + len(pending_works) + len(pending_recordings)
-
-        progress_repo.upsert(
-            TaskProgress(
-                task_id=task_id,
-                task_type=TaskType.MB_ENRICHMENT,
-                status=TaskStatus.RUNNING,
+            handle.report_running(
                 progress_data={
                     "processed": 0,
                     "total": total,
                     "current_item": "",
                     "phase": "artists",
-                },
-                started_at=task_started_at,
-                updated_at=task_started_at,
+                }
             )
-        )
-
-        sys_log_repo.create(
-            SystemLog(
-                category=LogCategory.ENRICHMENT,
-                level=LogLevel.INFO,
-                message="mb_enrichment_started",
-                trace_id=task_id,
+            handle.log_started(
                 details={
                     "artists": len(pending_artists),
                     "works": len(pending_works),
                     "recordings": len(pending_recordings),
-                },
+                }
             )
-        )
 
-        # Single ctx shared across phases. Helpers mutate ctx.processed /
-        # ctx.done / ctx.failed / ctx.metrics per row so the outer except
-        # handler can read accurate partial values if a phase raises
-        # mid-loop.
-        ctx = _PhaseContext(
-            task_id=task_id,
-            task_started_at=task_started_at,
-            total=total,
-            progress_repo=progress_repo,
-        )
+            # Single ctx shared across phases. Helpers mutate ctx.processed /
+            # ctx.done / ctx.failed / ctx.metrics per row so the outer except
+            # handler can read accurate partial values if a phase raises
+            # mid-loop.
+            ctx = _PhaseContext(
+                task_id=handle.task_id,
+                task_started_at=handle.started_at,
+                total=total,
+                progress_repo=handle.progress_repo,
+            )
 
-        _run_artist_phase(pending_artists, ctx, settings)
-        _run_works_phase(pending_works, ctx, settings)
-        _run_recordings_phase(pending_recordings, ctx, settings)
+            _run_artist_phase(pending_artists, ctx, settings)
+            _run_works_phase(pending_works, ctx, settings)
+            _run_recordings_phase(pending_recordings, ctx, settings)
 
-        completion_details = {
-            "artists_done": ctx.done.get("artists", 0),
-            "artists_failed": ctx.failed.get("artists", 0),
-            "works_done": ctx.done.get("works", 0),
-            "works_failed": ctx.failed.get("works", 0),
-            "recordings_done": ctx.done.get("recordings", 0),
-            "recordings_failed": ctx.failed.get("recordings", 0),
-            "orphans_deleted": ctx.orphans_deleted,
-        }
+            completion_details = {
+                "artists_done": ctx.done.get("artists", 0),
+                "artists_failed": ctx.failed.get("artists", 0),
+                "works_done": ctx.done.get("works", 0),
+                "works_failed": ctx.failed.get("works", 0),
+                "recordings_done": ctx.done.get("recordings", 0),
+                "recordings_failed": ctx.failed.get("recordings", 0),
+                "orphans_deleted": ctx.orphans_deleted,
+            }
 
-        progress_repo.upsert(
-            TaskProgress(
-                task_id=task_id,
-                task_type=TaskType.MB_ENRICHMENT,
-                status=TaskStatus.COMPLETED,
+            handle.set_completed(
                 progress_data={
                     "processed": ctx.processed,
                     "total": total,
                     **completion_details,
                 },
-                started_at=task_started_at,
-                updated_at=datetime.now(UTC),
-                completed_at=datetime.now(UTC),
-            )
-        )
-
-        sys_log_repo.create(
-            SystemLog(
-                category=LogCategory.ENRICHMENT,
-                level=LogLevel.INFO,
-                message="mb_enrichment_completed",
-                trace_id=task_id,
                 details=completion_details,
             )
-        )
-
-    except Exception as exc:
-        if progress_repo is not None:
-            with contextlib.suppress(Exception):
-                progress_repo.upsert(
-                    TaskProgress(
-                        task_id=task_id,
-                        task_type=TaskType.MB_ENRICHMENT,
-                        status=TaskStatus.FAILED,
-                        progress_data={
-                            # Read live counter from ctx so a mid-loop raise
-                            # records the actual rows processed, not the
-                            # pre-phase value.
-                            "processed": ctx.processed if ctx is not None else 0,
-                            "total": total,
-                            "error": str(exc),
-                        },
-                        started_at=task_started_at,
-                        updated_at=datetime.now(UTC),
-                        completed_at=datetime.now(UTC),
-                    )
-                )
-        if sys_log_repo is not None:
-            with contextlib.suppress(Exception):
-                sys_log_repo.create(
-                    SystemLog(
-                        category=LogCategory.ENRICHMENT,
-                        level=LogLevel.ERROR,
-                        message="mb_enrichment_failed",
-                        trace_id=task_id,
-                        details={"error": str(exc), "traceback": traceback.format_exc()},
-                    )
-                )
-        raise
 
     finally:
         # Emit the summary even on partial failure. `ctx.metrics` is built
@@ -931,8 +856,6 @@ def mb_enrichment_task() -> dict[str, int]:
                 task_type="mb_enrichment",
                 phases=ctx.metrics if ctx is not None else {},
             )
-        if progress_conn is not None:
-            progress_conn.close()
 
     artists_done = ctx.done.get("artists", 0)
     artists_failed = ctx.failed.get("artists", 0)

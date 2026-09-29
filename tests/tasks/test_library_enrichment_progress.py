@@ -58,13 +58,15 @@ class TestLibraryEnrichmentProgress:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_release", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_emits_running_on_start_with_correct_total(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _enrich_recording: MagicMock,
         _enrich_release: MagicMock,
@@ -97,13 +99,15 @@ class TestLibraryEnrichmentProgress:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_release", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_processed_counter_monotonic_across_success_and_failure(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _enrich_recording: MagicMock,
         mock_enrich_release: MagicMock,
@@ -139,11 +143,13 @@ class TestLibraryEnrichmentProgress:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_zero_pending_work_still_emits_running_then_completed(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         _sys_log_cls: MagicMock,
@@ -169,11 +175,13 @@ class TestLibraryEnrichmentProgress:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_marks_failed_when_library_connect_raises(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -181,17 +189,10 @@ class TestLibraryEnrichmentProgress:
         _repo_cls: MagicMock,
         _mb_cls: MagicMock,
     ) -> None:
-        # First call to connect_sync is for progress_conn (autocommit=True); succeed.
-        # Second call is the library connection; raise.
-        def fake(_url: str, *, autocommit: bool = False) -> Any:
-            if autocommit:
-                conn = MagicMock()
-                conn.__enter__.return_value = conn
-                conn.__exit__.return_value = False
-                return conn
-            raise RuntimeError("db down")
-
-        mock_connect.side_effect = fake
+        # The progress/SystemLog connection now lives in `_task_run`
+        # (`_task_run_connect`, patched separately); this mock only covers
+        # the library connection, so it can raise unconditionally.
+        mock_connect.side_effect = RuntimeError("db down")
         mock_progress_repo = MagicMock()
         mock_progress_cls.return_value = mock_progress_repo
         mock_sys_log = MagicMock()
@@ -218,11 +219,13 @@ class TestLibraryEnrichmentProgress:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_system_logs_carry_trace_id_matching_task_id(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         mock_progress_cls: MagicMock,
         mock_sys_log_cls: MagicMock,
@@ -268,14 +271,16 @@ class TestLibraryEnrichmentBatchedPass:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording_batch")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_release", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_batches_of_100_files_each_committed_and_counted(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _enrich_recording: MagicMock,
         _enrich_release: MagicMock,
@@ -317,14 +322,16 @@ class TestLibraryEnrichmentBatchedPass:
     @patch("backend.tasks.library_enrichment_tasks.MusicBrainzApiClient")
     @patch("backend.tasks.library_enrichment_tasks.RepositoryFactory")
     @patch("backend.tasks.library_enrichment_tasks.PgMusicBrainzCacheRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgSystemLogRepository")
-    @patch("backend.tasks.library_enrichment_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks._task_run.PgSystemLogRepository")
+    @patch("backend.tasks._task_run.PgTaskProgressRepository")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording_batch")
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_release", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.enrich_by_recording", return_value=1)
     @patch("backend.tasks.library_enrichment_tasks.connect_sync")
+    @patch("backend.tasks._task_run.connect_sync", return_value=MagicMock())
     def test_batch_failure_leaves_files_to_the_per_release_fallback(
         self,
+        _task_run_connect: MagicMock,
         mock_connect: MagicMock,
         _enrich_recording: MagicMock,
         mock_enrich_release: MagicMock,
