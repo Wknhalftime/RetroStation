@@ -9,6 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
 
+from tests.lifespan_client import lifespan_client
+
 # psycopg async requires SelectorEventLoop on Windows (not ProactorEventLoop)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -48,7 +50,7 @@ def _router_client(_migrated_db_url: str) -> Generator[TestClient]:
         # names are bound; the outer finally below guarantees mp.undo() runs
         # even if an import above raises (no UnboundLocalError masking).
         try:
-            with TestClient(app, raise_server_exceptions=False) as c:
+            with lifespan_client(app) as c:
                 yield c
         finally:
             app.dependency_overrides.clear()

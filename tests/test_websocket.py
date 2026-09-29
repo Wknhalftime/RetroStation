@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
+from tests.lifespan_client import lifespan_client
 
 # psycopg async requires SelectorEventLoop on Windows (not ProactorEventLoop)
 if sys.platform == "win32":
@@ -27,9 +28,12 @@ if sys.platform == "win32":
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def _ws_client(_migrated_db_url: str) -> Generator[TestClient]:
-    """Session-scoped TestClient with the real token in settings.
+    """Module-scoped TestClient with the real token in settings.
+
+    Module scope, not session: ``lifespan_client`` restores structlog on
+    teardown, which must happen before the worker's next module runs.
 
     We do NOT override get_current_token here because the WebSocket uses its
     own token check (query param), not the FastAPI dependency.
@@ -42,7 +46,7 @@ def _ws_client(_migrated_db_url: str) -> Generator[TestClient]:
 
     from backend.main import app
 
-    with TestClient(app, raise_server_exceptions=False) as c:
+    with lifespan_client(app) as c:
         yield c
 
     get_settings.cache_clear()
