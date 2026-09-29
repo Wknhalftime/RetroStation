@@ -286,6 +286,24 @@ class MissingFileDeletion:
     skipped: int
 
 
+@dataclass(frozen=True)
+class MissingFilePurge:
+    """What an after-scan purge deleted, and the unreplaced rows it held back.
+
+    ``deleted``, ``matches_released`` and ``skipped`` as in MissingFileDeletion.
+    ``awaiting_fingerprint``: rows with an audio fingerprint, kept while a present
+    file still waits for one (the backfill may yet fold them). ``unreadable_folder``:
+    rows whose folder is there but could not be listed (the walk may have skipped
+    them, not lost them).
+    """
+
+    deleted: int
+    matches_released: int
+    skipped: int
+    awaiting_fingerprint: int
+    unreadable_folder: int
+
+
 class MissingFileNotFoundError(MissingFileError):
     """No missing row has this id (it came back, or was folded or deleted)."""
 

@@ -17,9 +17,10 @@ several equally good ones, are left alone.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from uuid import UUID
 
 from backend.domain.enums import FileStatus, MatchStatus, ReasonCode
@@ -34,6 +35,7 @@ from backend.domain.library import (
     MissingFileNotFoundError,
     MissingFilePage,
     MissingFilePlan,
+    MissingFilePurge,
     MissingFileSelection,
     RemapTargetNotFoundError,
     RemapTargetNotPresentError,
@@ -448,32 +450,110 @@ def _has_present_copy(missing: LibraryFile, candidates: list[LibraryFile]) -> bo
     )
 
 
-def purgeable_ids(
+def unreplaced_rows(
     missing_rows: list[LibraryFile],
     candidates_for: Callable[[LibraryFile], list[LibraryFile]],
-) -> tuple[UUID, ...]:
+) -> list[LibraryFile]:
     """Missing rows no present file holds the track of.
 
     A row whose copy is present but not grouped yet waits for reconciliation, a
     row PR B is waiting on waits for the fingerprint, and an ambiguous row waits
-    for the user; none of them is purged.
+    for the user; none of them is returned.
     """
-    return tuple(m.id for m in missing_rows if not _has_present_copy(m, candidates_for(m)))
+    return [m for m in missing_rows if not _has_present_copy(m, candidates_for(m))]
+
+
+def _awaits_fingerprint(missing: LibraryFile, fingerprints_pending: bool) -> bool:
+    """Whether the hash backfill may still fold *missing* by its audio.
+
+    A scan reads tags only, so a copy retagged and moved looks like nothing
+    else until the backfill fingerprints it. A row with no fingerprint of its
+    own can never be folded by audio.
+    """
+    return fingerprints_pending and missing.audio_hash is not None
+
+
+@dataclass(frozen=True)
+class PurgeSelection:
+    """The unreplaced rows a purge deletes, and how many it holds back and why."""
+
+    ids: tuple[UUID, ...]
+    awaiting_fingerprint: int
+    unreadable_folder: int
+
+
+def select_purge(
+    unreplaced: list[LibraryFile],
+    fingerprints_pending: bool,
+    in_unreadable_folders: frozenset[str],
+) -> PurgeSelection:
+    """Hold back rows the backfill may fold and rows the walk may have skipped. Pure."""
+    waiting = [m for m in unreplaced if _awaits_fingerprint(m, fingerprints_pending)]
+    rest = [m for m in unreplaced if not _awaits_fingerprint(m, fingerprints_pending)]
+    unreadable = [m for m in rest if m.file_path in in_unreadable_folders]
+    return PurgeSelection(
+        ids=tuple(m.id for m in rest if m.file_path not in in_unreadable_folders),
+        awaiting_fingerprint=len(waiting),
+        unreadable_folder=len(unreadable),
+    )
+
+
+def folder_unreadable(folder: str) -> bool:
+    """Whether *folder* is there but cannot be listed, so a walk skipped its files.
+
+    A folder that no longer exists is not unreadable: its files really went.
+    """
+    try:
+        with os.scandir(folder):
+            return False
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return True
+
+
+def _in_unreadable_folders(rows: list[LibraryFile]) -> frozenset[str]:
+    """Paths of *rows* whose folder is unreadable. Reads the disk, each folder once."""
+    folder_of = {r.file_path: str(Path(r.file_path).parent) for r in rows}
+    unreadable = {f for f in set(folder_of.values()) if folder_unreadable(f)}
+    return frozenset(path for path, folder in folder_of.items() if folder in unreadable)
+
+
+def _missing_under(root: str, file_repo: LibraryFileRepository) -> list[LibraryFile]:
+    """Every missing row beneath *root*."""
+    under_root = {
+        path
+        for path, status in file_repo.get_path_statuses_under(root).items()
+        if status == FileStatus.MISSING
+    }
+    return [m for m in file_repo.get_missing() if m.file_path in under_root]
 
 
 def purge_unmatched_missing(
     root: str,
     repos: ReconciliationRepos,
     identities: BroadcastTrackIdentityRepository,
-) -> MissingFileDeletion:
-    """Delete the missing rows under *root* that no present file replaces."""
-    under_root = {
-        path
-        for path, status in repos.files.get_path_statuses_under(root).items()
-        if status == FileStatus.MISSING
-    }
-    rows = [m for m in repos.files.get_missing() if m.file_path in under_root]
-    ids = purgeable_ids(rows, lambda m: successor_candidates(m, repos.files))
-    if not ids:
-        return MissingFileDeletion(deleted=0, matches_released=0, skipped=0)
-    return delete_missing_files(MissingFileSelection(ids=ids), repos, identities)
+) -> MissingFilePurge:
+    """Delete the missing rows under *root* that no present file replaces.
+
+    Runs inside the caller's transaction and commits nothing. Holds back rows the
+    hash backfill may still fold, and rows in a folder the walk could not list.
+    """
+    unreplaced = unreplaced_rows(
+        _missing_under(root, repos.files), lambda m: successor_candidates(m, repos.files)
+    )
+    selection = select_purge(
+        unreplaced, repos.files.count_audio_unhashed() > 0, _in_unreadable_folders(unreplaced)
+    )
+    deletion = (
+        delete_missing_files(MissingFileSelection(ids=selection.ids), repos, identities)
+        if selection.ids
+        else MissingFileDeletion(deleted=0, matches_released=0, skipped=0)
+    )
+    return MissingFilePurge(
+        deleted=deletion.deleted,
+        matches_released=deletion.matches_released,
+        skipped=deletion.skipped,
+        awaiting_fingerprint=selection.awaiting_fingerprint,
+        unreadable_folder=selection.unreadable_folder,
+    )

@@ -27,8 +27,8 @@ from backend.domain.library import (
     LibraryFile,
     LibraryQuarantine,
     MissingFileChangedError,
-    MissingFileDeletion,
     MissingFilePlan,
+    MissingFilePurge,
     MissingFileReconciliation,
 )
 from backend.domain.system import SystemLog, TaskProgress
@@ -130,23 +130,30 @@ def reconcile_missing_after_scan(
     return result
 
 
+def _purge_policy(repos: RepositoryFactory) -> PurgeMissingPolicy:
+    """The library.purge_missing setting; NEVER when unset or unknown."""
+    setting = repos.user_settings.get(PURGE_MISSING_SETTING)
+    return PurgeMissingPolicy.from_setting(setting.value if setting else None)
+
+
 def purge_missing_after_scan(
     library_conn: psycopg.Connection[Any],
     repos: RepositoryFactory,
     root: Path,
     walk_saw_files: bool,
-) -> MissingFileDeletion | None:
+) -> MissingFilePurge | None:
     """With library.purge_missing = after_scan, delete missing rows nothing replaces.
 
     Skipped when the walk saw no files (probably an unmounted drive), as
-    mark_unseen_missing is. Its own transaction: a refusal, or a row a concurrent
-    scan restored, rolls back only the purge.
+    mark_unseen_missing is. Its own transaction, setting read included: a
+    refusal, or a row a concurrent scan restored, rolls back only the purge and
+    never fails the scan it follows.
     """
-    setting = repos.user_settings.get(PURGE_MISSING_SETTING)
-    policy = PurgeMissingPolicy.from_setting(setting.value if setting else None)
-    if not walk_saw_files or policy != PurgeMissingPolicy.AFTER_SCAN:
+    if not walk_saw_files:
         return None
     try:
+        if _purge_policy(repos) != PurgeMissingPolicy.AFTER_SCAN:
+            return None
         result = purge_unmatched_missing(
             str(root), reconciliation_repos(repos), repos.broadcast_identities
         )
@@ -159,6 +166,8 @@ def purge_missing_after_scan(
         "missing_files_purged",
         deleted=result.deleted,
         matches_released=result.matches_released,
+        awaiting_fingerprint=result.awaiting_fingerprint,
+        unreadable_folder=result.unreadable_folder,
     )
     return result
 
