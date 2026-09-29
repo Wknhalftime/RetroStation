@@ -28,8 +28,7 @@ from uuid import uuid4
 
 import pytest
 
-from backend.db.repositories.system_logs import PgSystemLogRepository
-from backend.domain.enums import TaskStatus
+from backend.domain.enums import LogCategory, LogLevel, TaskStatus
 from backend.services.ingestion_service import IngestionResult
 from backend.services.library_scan_service import FolderScanResult
 from tests.fakes.system_logs import FakeSystemLogRepository
@@ -267,22 +266,23 @@ class TestWatcherScanTaskEnqueueFailureOwnership:
 
 
 # ---------------------------------------------------------------------------
-# Decision 2 (not yet implemented): neither the watcher nor ingestion write
-# their own started/completed/failed SystemLogs yet. Only a decision-1
-# enqueue-failure log can exist so far, and only on the success path (a
-# body-level failure never reaches the enqueue call at all).
+# AUD-R011 decision 2: the watcher and ingestion_task now write their own
+# started/completed/failed SystemLogs, like their peers (library_scan_task,
+# library_enrichment_task, mb_enrichment_task).
 # ---------------------------------------------------------------------------
 
 
-class TestWatcherAndIngestionLifecycleLogsNotYetAdded:
+class TestWatcherLifecycleLogs:
     @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_watcher_tasks.scan_folder_incrementally")
     @patch("backend.tasks.library_watcher_tasks.RepositoryFactory")
     @patch("backend.tasks.library_watcher_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.library_watcher_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_watcher_tasks.connect_sync")
-    def test_watcher_success_writes_no_system_log(
+    def test_watcher_success_writes_started_and_completed(
         self,
         mock_connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
         mock_progress_cls: MagicMock,
         mock_repo_factory: MagicMock,
         mock_scan_folder: MagicMock,
@@ -291,27 +291,39 @@ class TestWatcherAndIngestionLifecycleLogsNotYetAdded:
         progress_conn, library_conn = _watcher_harness()
         mock_connect.side_effect = [progress_conn, library_conn]
         mock_repo_factory.return_value.library_files.get_by_folder_path.return_value = []
-        mock_scan_folder.return_value = FolderScanResult(files_written=0)
+        mock_scan_folder.return_value = FolderScanResult(files_written=3)
         mock_progress_cls.return_value = FakeTaskProgressRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
 
-        with (
-            patch.object(PgSystemLogRepository, "create") as create,
-            patch("backend.tasks.library_enrichment_tasks.library_enrichment_task"),
-        ):
+        with patch("backend.tasks.library_enrichment_tasks.library_enrichment_task"):
             from backend.tasks.library_watcher_tasks import library_scan_files_task
 
             library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
 
-        create.assert_not_called()
+        messages = [log.message for log in fake_sys_log.all]
+        assert messages == ["watcher_scan_started", "watcher_scan_completed"]
+
+        started = fake_sys_log.all[0]
+        assert started.level == LogLevel.INFO
+        assert started.category == LogCategory.SCAN
+        assert started.details == {"folder_count": 1}
+
+        completed = fake_sys_log.all[1]
+        assert completed.level == LogLevel.INFO
+        assert completed.trace_id == started.trace_id
+        assert completed.details == {"processed": 1, "total": 1, "files_written": 3}
 
     @patch("backend.tasks.library_scan_tasks.reconcile_missing_after_scan")
     @patch("backend.tasks.library_watcher_tasks.scan_folder_incrementally")
     @patch("backend.tasks.library_watcher_tasks.RepositoryFactory")
     @patch("backend.tasks.library_watcher_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.library_watcher_tasks.PgSystemLogRepository")
     @patch("backend.tasks.library_watcher_tasks.connect_sync")
-    def test_watcher_body_failure_writes_no_system_log(
+    def test_watcher_body_failure_writes_started_and_failed_with_traceback(
         self,
         mock_connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
         mock_progress_cls: MagicMock,
         mock_repo_factory: MagicMock,
         mock_scan_folder: MagicMock,
@@ -321,27 +333,43 @@ class TestWatcherAndIngestionLifecycleLogsNotYetAdded:
         mock_connect.side_effect = [progress_conn, library_conn]
         mock_scan_folder.side_effect = RuntimeError("folder scan boom")
         mock_progress_cls.return_value = FakeTaskProgressRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
 
-        with patch.object(PgSystemLogRepository, "create") as create:
-            from backend.tasks.library_watcher_tasks import library_scan_files_task
+        from backend.tasks.library_watcher_tasks import library_scan_files_task
 
-            with pytest.raises(RuntimeError, match="folder scan boom"):
-                library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
+        with pytest.raises(RuntimeError, match="folder scan boom"):
+            library_scan_files_task.call_local(["/music/jazz"], uuid4().hex)
 
-        create.assert_not_called()
+        messages = [log.message for log in fake_sys_log.all]
+        assert messages == ["watcher_scan_started", "watcher_scan_failed"]
 
+        failed = fake_sys_log.all[1]
+        assert failed.level == LogLevel.ERROR
+        assert failed.category == LogCategory.SCAN
+        assert failed.details is not None
+        assert failed.details["error"] == "folder scan boom"
+        assert failed.details["traceback"].strip() != ""
+        assert "RuntimeError: folder scan boom" in failed.details["traceback"]
+
+
+class TestIngestionLifecycleLogs:
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
     @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
     @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
-    def test_ingestion_success_writes_no_system_log(
+    def test_ingestion_success_writes_started_and_completed(
         self,
         _connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
         mock_progress_cls: MagicMock,
         mock_run_ingest: MagicMock,
         _count: MagicMock,
     ) -> None:
         mock_progress_cls.return_value = FakeTaskProgressRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
         mock_run_ingest.return_value = IngestionResult(
             playlist_id="pl-1",
             rows_processed=1,
@@ -352,37 +380,59 @@ class TestWatcherAndIngestionLifecycleLogsNotYetAdded:
             broadcast_days_created=1,
         )
 
-        with (
-            patch.object(PgSystemLogRepository, "create") as create,
-            patch("backend.tasks.embedding_tasks.embedding_task"),
-        ):
+        with patch("backend.tasks.embedding_tasks.embedding_task"):
             from backend.tasks.ingestion_tasks import ingestion_task
 
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-1")
 
-        create.assert_not_called()
+        messages = [log.message for log in fake_sys_log.all]
+        assert messages == ["ingestion_started", "ingestion_completed"]
+
+        started = fake_sys_log.all[0]
+        assert started.level == LogLevel.INFO
+        assert started.category == LogCategory.INGESTION
+        assert started.trace_id == "tid-1"
+        assert started.details == {"filename": "f.csv", "total_rows": 1}
+
+        completed = fake_sys_log.all[1]
+        assert completed.level == LogLevel.INFO
+        assert completed.details is not None
+        assert completed.details["playlist_id"] == "pl-1"
+        assert completed.details["processed"] == 1
 
     @patch("backend.tasks.ingestion_tasks.count_csv_rows", return_value=1)
     @patch("backend.tasks.ingestion_tasks._run_ingest")
     @patch("backend.tasks.ingestion_tasks.PgTaskProgressRepository")
+    @patch("backend.tasks.ingestion_tasks.PgSystemLogRepository")
     @patch("backend.tasks.ingestion_tasks.connect_sync", side_effect=_fake_connect_sync)
-    def test_ingestion_body_failure_writes_no_system_log(
+    def test_ingestion_body_failure_writes_started_and_failed_with_traceback(
         self,
         _connect: MagicMock,
+        mock_sys_log_cls: MagicMock,
         mock_progress_cls: MagicMock,
         mock_run_ingest: MagicMock,
         _count: MagicMock,
     ) -> None:
         mock_progress_cls.return_value = FakeTaskProgressRepository()
+        fake_sys_log = FakeSystemLogRepository()
+        mock_sys_log_cls.return_value = fake_sys_log
         mock_run_ingest.side_effect = RuntimeError("ingest boom")
 
-        with patch.object(PgSystemLogRepository, "create") as create:
-            from backend.tasks.ingestion_tasks import ingestion_task
+        from backend.tasks.ingestion_tasks import ingestion_task
 
-            with pytest.raises(RuntimeError, match="ingest boom"):
-                ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-2")
+        with pytest.raises(RuntimeError, match="ingest boom"):
+            ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-2")
 
-        create.assert_not_called()
+        messages = [log.message for log in fake_sys_log.all]
+        assert messages == ["ingestion_started", "ingestion_failed"]
+
+        failed = fake_sys_log.all[1]
+        assert failed.level == LogLevel.ERROR
+        assert failed.category == LogCategory.INGESTION
+        assert failed.trace_id == "tid-2"
+        assert failed.details is not None
+        assert failed.details["error"] == "ingest boom"
+        assert "RuntimeError: ingest boom" in failed.details["traceback"]
 
 
 # ---------------------------------------------------------------------------

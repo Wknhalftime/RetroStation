@@ -9,6 +9,7 @@ using smart per-folder diffing and chains into enrichment.
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,8 +23,8 @@ from backend.config import get_settings
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import EnrichmentStatus, LogCategory, TaskStatus, TaskType
-from backend.domain.system import TaskProgress
+from backend.domain.enums import EnrichmentStatus, LogCategory, LogLevel, TaskStatus, TaskType
+from backend.domain.system import SystemLog, TaskProgress
 from backend.repositories.library_folder_staging import LibraryFolderHashStaging
 from backend.repositories.library_folders import LibraryFolderRepository
 from backend.services.folder_hash_service import diff_tree
@@ -160,6 +161,16 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
             )
         )
 
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="watcher_scan_started",
+                trace_id=scan_task_id,
+                details={"folder_count": len(folder_paths)},
+            )
+        )
+
         for idx, folder_path in enumerate(folder_paths, start=1):
             result = scan_folder_incrementally(
                 folder_path=Path(folder_path),
@@ -273,6 +284,20 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
             )
         )
 
+        sys_log_repo.create(
+            SystemLog(
+                category=LogCategory.SCAN,
+                level=LogLevel.INFO,
+                message="watcher_scan_completed",
+                trace_id=scan_task_id,
+                details={
+                    "processed": len(folder_paths),
+                    "total": len(folder_paths),
+                    "files_written": total_written,
+                },
+            )
+        )
+
         logger.info(
             "watcher_scan_complete",
             folders=len(folder_paths),
@@ -318,6 +343,16 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                         started_at=task_started_at,
                         updated_at=datetime.now(UTC),
                         completed_at=datetime.now(UTC),
+                    )
+                )
+            with contextlib.suppress(Exception):
+                PgSystemLogRepository(progress_conn).create(
+                    SystemLog(
+                        category=LogCategory.SCAN,
+                        level=LogLevel.ERROR,
+                        message="watcher_scan_failed",
+                        trace_id=scan_task_id,
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
                     )
                 )
 

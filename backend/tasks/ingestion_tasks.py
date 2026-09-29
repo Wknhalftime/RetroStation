@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -14,8 +15,8 @@ from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.retry import retry_on_deadlock
 from backend.db.sync_conn import connect_sync
-from backend.domain.enums import LogCategory, TaskStatus, TaskType
-from backend.domain.system import TaskProgress
+from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
+from backend.domain.system import SystemLog, TaskProgress
 from backend.services.ingestion_service import (
     CsvDecodeError,
     CsvSchemaError,
@@ -139,6 +140,29 @@ def _safe_progress_upsert(
         return False
 
 
+def _safe_system_log_create(
+    repo: PgSystemLogRepository,
+    log: SystemLog,
+    *,
+    task_id: str,
+    lifecycle: str,
+) -> None:
+    """Best-effort SystemLog write. Mirrors `_safe_progress_upsert`'s guard:
+    a telemetry fault here must never change the ingest outcome.
+    """
+    try:
+        repo.create(log)
+    except _PROGRESS_DROP_ERRORS as telemetry_exc:
+        logger.warning(
+            "ingestion_system_log_create_dropped",
+            task_id=task_id,
+            lifecycle=lifecycle,
+            error=str(telemetry_exc),
+            error_type=type(telemetry_exc).__name__,
+            exc_info=True,
+        )
+
+
 @retry_on_deadlock(max_attempts=3, backoff_seconds=0.5)
 def _run_ingest(
     file_bytes: bytes,
@@ -205,10 +229,12 @@ def ingestion_task(
 
     progress_conn: psycopg.Connection | None = None
     progress_repo: PgTaskProgressRepository | None = None
+    sys_log_repo: PgSystemLogRepository | None = None
 
     try:
         progress_conn = connect_sync(settings.database_url, autocommit=True)
         progress_repo = PgTaskProgressRepository(progress_conn)
+        sys_log_repo = PgSystemLogRepository(progress_conn)
         # Non-optional alias so the row-callback closure doesn't need assert-narrowing.
         repo = progress_repo
 
@@ -223,6 +249,19 @@ def ingestion_task(
                 started_at=task_started_at,
                 updated_at=task_started_at,
             )
+        )
+
+        _safe_system_log_create(
+            sys_log_repo,
+            SystemLog(
+                category=LogCategory.INGESTION,
+                level=LogLevel.INFO,
+                message="ingestion_started",
+                trace_id=task_id,
+                details={"filename": file_name, "total_rows": total_rows},
+            ),
+            task_id=task_id,
+            lifecycle="started",
         )
 
         def on_row_processed(rows_processed: int) -> None:
@@ -294,6 +333,19 @@ def ingestion_task(
             playlist_id=result.playlist_id,
         )
 
+        _safe_system_log_create(
+            sys_log_repo,
+            SystemLog(
+                category=LogCategory.INGESTION,
+                level=LogLevel.INFO,
+                message="ingestion_completed",
+                trace_id=task_id,
+                details=_build_completed_progress(result, total_rows, file_name),
+            ),
+            task_id=task_id,
+            lifecycle="completed",
+        )
+
         # Embedding dispatch is decoupled from ingestion COMPLETED: the DB
         # commit has already happened, so a broker hiccup here is a separate
         # operational concern, not an ingestion failure. Guarded (AUD-R011
@@ -307,7 +359,7 @@ def ingestion_task(
             task_name="embedding_task",
             caller_task_id=task_id,
             log_category=LogCategory.INGESTION,
-            sys_log_repo=PgSystemLogRepository(progress_conn),
+            sys_log_repo=sys_log_repo,
         )
 
         return task_id
@@ -349,6 +401,33 @@ def ingestion_task(
             except Exception as shadow_exc:  # noqa: BLE001
                 logger.warning(
                     "ingestion_progress_upsert_shadow_prevented",
+                    task_id=task_id,
+                    original_error=str(exc),
+                    shadow_error=str(shadow_exc),
+                    shadow_error_type=type(shadow_exc).__name__,
+                    exc_info=True,
+                )
+
+        if sys_log_repo is not None:
+            # Same shadow guard as the FAILED progress upsert above: `exc`
+            # is what must propagate, so a fault writing this log must not
+            # replace it.
+            try:
+                _safe_system_log_create(
+                    sys_log_repo,
+                    SystemLog(
+                        category=LogCategory.INGESTION,
+                        level=LogLevel.ERROR,
+                        message="ingestion_failed",
+                        trace_id=task_id,
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
+                    ),
+                    task_id=task_id,
+                    lifecycle="failed",
+                )
+            except Exception as shadow_exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion_system_log_create_shadow_prevented",
                     task_id=task_id,
                     original_error=str(exc),
                     shadow_error=str(shadow_exc),
