@@ -187,3 +187,13 @@ class LibraryFileRepository(ABC):
         is left alone. Its references must be gone first (FKs).
         """
         ...
+
+    @abstractmethod
+    def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
+        """Lock both rows until the transaction ends; True if the fold may go ahead.
+
+        True only while *missing_id* is MISSING and *successor_id* is PRESENT.
+        The locks keep a concurrent scan from restoring the one, or marking the
+        other missing, between this check and the fold's writes.
+        """
+        ...

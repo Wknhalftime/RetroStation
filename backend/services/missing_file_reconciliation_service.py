@@ -246,18 +246,6 @@ class ReconciliationRepos:
     format_overrides: FormatOverrideRepository
 
 
-def _has_status(file_repo: LibraryFileRepository, file_id: UUID, status: FileStatus) -> bool:
-    row = file_repo.get_by_id(file_id)
-    return row is not None and row.file_status == status
-
-
-def _still_foldable(move: MissingFileMove, file_repo: LibraryFileRepository) -> bool:
-    """Whether the missing row is still missing and its successor still present."""
-    return _has_status(file_repo, move.missing_id, FileStatus.MISSING) and _has_status(
-        file_repo, move.successor_id, FileStatus.PRESENT
-    )
-
-
 def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> bool:
     """Move every reference to the missing row onto its successor, then delete it.
 
@@ -266,8 +254,11 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     master from its own present files and is deleted once nothing references
     it. A move the library has overtaken since planning (the missing row came
     back, or the successor went missing) is skipped. Returns whether it folded.
+
+    Both rows stay locked until the caller's transaction ends, so a concurrent
+    scan cannot change either between the check and the writes.
     """
-    if not _still_foldable(move, repos.files):
+    if not repos.files.lock_fold_pair(move.missing_id, move.successor_id):
         return False
     repos.files.merge_into(move.missing_id, move.successor_id)
     if not move.crosses_work:
@@ -395,10 +386,16 @@ def _remap_target(target_id: UUID, file_repo: LibraryFileRepository) -> LibraryF
 
 
 def remap_missing_file(missing_id: UUID, target_id: UUID, repos: ReconciliationRepos) -> None:
-    """Fold a missing row into the present file the user chose, as reconciliation does."""
+    """Fold a missing row into the present file the user chose, as reconciliation does.
+
+    Runs inside the caller's transaction and commits nothing. A fold a
+    concurrent scan overtook raises the target's error if the target changed,
+    else MissingFileNotFoundError; nothing was written either way.
+    """
     missing = repos.files.get_by_id(missing_id)
     if missing is None or missing.file_status != FileStatus.MISSING:
         raise MissingFileNotFoundError(f"No missing file {missing_id}")
     move = _move(missing, _remap_target(target_id, repos.files))
     if not apply_missing_file_move(move, repos):
+        _remap_target(target_id, repos.files)
         raise MissingFileNotFoundError(f"No missing file {missing_id}")

@@ -500,6 +500,19 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         )
         return result.rowcount == 1
 
+    def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
+        # ORDER BY id: every fold takes the two row locks in the same order.
+        rows = self._conn.execute(
+            """SELECT id, file_status FROM library_files
+               WHERE id = ANY(%s) ORDER BY id FOR UPDATE""",
+            ([missing_id, successor_id],),
+        ).fetchall()
+        status = {str(r["id"]): r["file_status"] for r in rows}
+        return (
+            status.get(str(missing_id)) == FileStatus.MISSING
+            and status.get(str(successor_id)) == FileStatus.PRESENT
+        )
+
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.
 
