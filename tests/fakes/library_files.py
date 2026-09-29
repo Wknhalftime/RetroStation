@@ -292,6 +292,13 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def has_any(self) -> bool:
         return bool(self._data)
 
+    def delete_missing(self, file_id: UUID) -> bool:
+        row = self._data.get(file_id)
+        if row is None or row.file_status != FileStatus.MISSING:
+            return False
+        del self._data[file_id]
+        return True
+
     def reset_failed_enrichments(self) -> int:
         count = 0
         for f in self._data.values():

@@ -18,6 +18,11 @@ class MatchRepository(ABC):
     def delete_for_identity(self, identity_id: UUID) -> None: ...
 
     @abstractmethod
+    def delete_for_file(self, file_id: UUID) -> list[UUID]:
+        """Delete every match naming the file; the identity id of each identity match deleted."""
+        ...
+
+    @abstractmethod
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         """Point every match on the file at the work the file now belongs to.
 

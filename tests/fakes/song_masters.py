@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from backend.domain.curation import SongMaster
 from backend.domain.enums import FileStatus, SelectionMethod
 from backend.repositories.library_files import LibraryFileRepository
@@ -24,6 +26,12 @@ class FakeSongMasterRepository(SongMasterRepository):
 
     def delete_by_work(self, work_id: str) -> None:
         self._data.pop(work_id, None)
+
+    def delete_for_file(self, file_id: UUID) -> list[str]:
+        doomed = [w for w, m in self._data.items() if m.preferred_file_id == file_id]
+        for work_id in doomed:
+            del self._data[work_id]
+        return doomed
 
     def get_by_work(self, work_id: str) -> SongMaster | None:
         return self._data.get(work_id)

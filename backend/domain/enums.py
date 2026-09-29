@@ -146,3 +146,6 @@ class ReasonCode(StrEnum):
     MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
     ORPHANED_IDENTITY = "ORPHANED_IDENTITY"
     USER_UNMATCHED = "USER_UNMATCHED"
+    # The matched library file was deleted from the Missing Files page (or by
+    # the after-scan purge); the identity is back in review.
+    LIBRARY_FILE_REMOVED = "LIBRARY_FILE_REMOVED"

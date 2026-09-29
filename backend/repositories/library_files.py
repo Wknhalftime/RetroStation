@@ -178,3 +178,12 @@ class LibraryFileRepository(ABC):
     def has_any(self) -> bool:
         """Whether the table has any row at all, of any status."""
         ...
+
+    @abstractmethod
+    def delete_missing(self, file_id: UUID) -> bool:
+        """Delete the row only while it is MISSING; True if it was deleted.
+
+        A row a scan restored, or reconciliation folded, since it was listed
+        is left alone. Its references must be gone first (FKs).
+        """
+        ...

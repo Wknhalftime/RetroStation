@@ -28,3 +28,9 @@ class FakeMatchRepository(MatchRepository):
         to_delete = [id for id, m in self._data.items() if m.identity_id == identity_id]
         for id in to_delete:
             del self._data[id]
+
+    def delete_for_file(self, file_id: UUID) -> list[UUID]:
+        doomed = [m for m in self._data.values() if m.library_file_id == file_id]
+        for m in doomed:
+            del self._data[m.id]
+        return [m.identity_id for m in doomed if m.identity_id is not None]

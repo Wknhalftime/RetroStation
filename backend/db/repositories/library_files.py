@@ -493,6 +493,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         ).fetchone()
         return bool(row and row["has_rows"])
 
+    def delete_missing(self, file_id: UUID) -> bool:
+        result = self._conn.execute(
+            "DELETE FROM library_files WHERE id = %s AND file_status = %s",
+            (str(file_id), FileStatus.MISSING),
+        )
+        return result.rowcount == 1
+
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.
 
