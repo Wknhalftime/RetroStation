@@ -6,12 +6,30 @@ Takes primitives only. ``start_session`` does not know about job objects: the ca
 
 from __future__ import annotations
 
+import os
 import re
+import socket
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from backend.playout.errors import EngineStartError
+
+__all__ = [
+    "SESSION_SCRIPT",
+    "EngineConfig",
+    "EngineStartError",
+    "ScriptCacheError",
+    "SessionEndpoint",
+    "free_port",
+    "launch_env",
+    "long_path",
+    "session_base_env",
+    "start_session",
+    "warm_script_cache",
+]
 
 SESSION_SCRIPT = Path(__file__).with_name("session.liq")
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
@@ -22,11 +40,39 @@ else:
 _CACHE_VARS = ("LIQ_CACHE_DIR", "LIQ_CACHE_USER_DIR", "LIQ_CACHE_SYSTEM_DIR")
 _CACHE_BUILD_TIMEOUT_S = 120
 _KILL_WAIT_S = 10
+_LONG_PREFIX = "\\\\?\\"
+_UNC_PREFIX = _LONG_PREFIX + "UNC\\"
+# What the engine needs from the API's environment, and nothing else: PATH for DLL lookup,
+# SYSTEMROOT/WINDIR for Winsock, TEMP/TMP for temporary files. Secrets never reach it.
+_ENGINE_ENV_VARS = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
 
 
 def long_path(path: Path) -> str:
-    """Absolute path with the ``\\\\?\\`` prefix (Liquidsoap needs it past 260 chars)."""
-    return "\\\\?\\" + str(path.resolve())
+    """The path with the ``\\\\?\\`` prefix (Liquidsoap needs it past 260 chars).
+
+    A relative path is resolved; an absolute one is only normalised, because resolving a
+    network path touches the network. A share (``\\\\host\\share``) takes the
+    ``\\\\?\\UNC\\`` form; an already prefixed path is returned unchanged.
+    """
+    text = str(path) if path.is_absolute() else str(path.resolve())
+    if text.startswith(_LONG_PREFIX):
+        return text
+    text = os.path.normpath(text)
+    if text.startswith("\\\\"):
+        return _UNC_PREFIX + text[2:]
+    return _LONG_PREFIX + text
+
+
+def session_base_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The allow-listed part of ``environ`` a session engine is started with."""
+    return {name: environ[name] for name in _ENGINE_ENV_VARS if name in environ}
+
+
+def free_port() -> int:
+    """A loopback TCP port that was free a moment ago (the OS picks it)."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
 
 
 @dataclass(frozen=True)
