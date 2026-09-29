@@ -292,15 +292,17 @@ class MissingFilePurge:
 
     ``deleted``, ``matches_released`` and ``skipped`` as in MissingFileDeletion.
     ``awaiting_fingerprint``: rows with an audio fingerprint, kept while a present
-    file still waits for one (the backfill may yet fold them). ``unreadable_folder``:
-    rows whose folder is there but could not be listed (the walk may have skipped
-    them, not lost them).
+    file still waits for one (the backfill may yet fold them). ``still_on_disk``: rows
+    whose file exists after all, or whose check the disk refused (the walk missed
+    them). ``unreadable_folder``: rows whose folder is there but could not be listed
+    (the walk may have skipped them, not lost them).
     """
 
     deleted: int
     matches_released: int
     skipped: int
     awaiting_fingerprint: int
+    still_on_disk: int
     unreadable_folder: int
 
 

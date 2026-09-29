@@ -167,6 +167,7 @@ def purge_missing_after_scan(
         deleted=result.deleted,
         matches_released=result.matches_released,
         awaiting_fingerprint=result.awaiting_fingerprint,
+        still_on_disk=result.still_on_disk,
         unreadable_folder=result.unreadable_folder,
     )
     return result

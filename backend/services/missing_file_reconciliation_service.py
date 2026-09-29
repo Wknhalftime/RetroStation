@@ -474,28 +474,58 @@ def _awaits_fingerprint(missing: LibraryFile, fingerprints_pending: bool) -> boo
 
 
 @dataclass(frozen=True)
+class DiskCheck:
+    """What the disk says about missing rows' paths right now."""
+
+    still_on_disk: frozenset[str]
+    in_unreadable_folders: frozenset[str]
+
+
+@dataclass(frozen=True)
 class PurgeSelection:
     """The unreplaced rows a purge deletes, and how many it holds back and why."""
 
     ids: tuple[UUID, ...]
     awaiting_fingerprint: int
+    still_on_disk: int
     unreadable_folder: int
 
 
 def select_purge(
     unreplaced: list[LibraryFile],
     fingerprints_pending: bool,
-    in_unreadable_folders: frozenset[str],
+    disk: DiskCheck,
 ) -> PurgeSelection:
-    """Hold back rows the backfill may fold and rows the walk may have skipped. Pure."""
-    waiting = [m for m in unreplaced if _awaits_fingerprint(m, fingerprints_pending)]
-    rest = [m for m in unreplaced if not _awaits_fingerprint(m, fingerprints_pending)]
-    unreadable = [m for m in rest if m.file_path in in_unreadable_folders]
+    """Hold back rows the backfill may fold, and rows the walk may have missed. Pure.
+
+    Each held-back row is counted once, under the first reason that holds it.
+    """
+    waiting = {m.id for m in unreplaced if _awaits_fingerprint(m, fingerprints_pending)}
+    rest = [m for m in unreplaced if m.id not in waiting]
+    on_disk = [m for m in rest if m.file_path in disk.still_on_disk]
+    rest = [m for m in rest if m.file_path not in disk.still_on_disk]
+    unreadable = [m for m in rest if m.file_path in disk.in_unreadable_folders]
     return PurgeSelection(
-        ids=tuple(m.id for m in rest if m.file_path not in in_unreadable_folders),
+        ids=tuple(m.id for m in rest if m.file_path not in disk.in_unreadable_folders),
         awaiting_fingerprint=len(waiting),
+        still_on_disk=len(on_disk),
         unreadable_folder=len(unreadable),
     )
+
+
+def file_on_disk(file_path: str) -> bool:
+    """Whether *file_path* is on disk, or the disk will not say it is gone.
+
+    A file that exists is not missing, whatever the walk saw (an unreadable
+    folder above it, or any other gap). A check the disk refuses keeps the row.
+    """
+    try:
+        os.stat(file_path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def folder_unreadable(folder: str) -> bool:
@@ -519,6 +549,14 @@ def _in_unreadable_folders(rows: list[LibraryFile]) -> frozenset[str]:
     return frozenset(path for path, folder in folder_of.items() if folder in unreadable)
 
 
+def _check_disk(rows: list[LibraryFile]) -> DiskCheck:
+    """What the disk says about *rows* now. Reads the disk."""
+    return DiskCheck(
+        still_on_disk=frozenset(r.file_path for r in rows if file_on_disk(r.file_path)),
+        in_unreadable_folders=_in_unreadable_folders(rows),
+    )
+
+
 def _missing_under(root: str, file_repo: LibraryFileRepository) -> list[LibraryFile]:
     """Every missing row beneath *root*."""
     under_root = {
@@ -537,13 +575,14 @@ def purge_unmatched_missing(
     """Delete the missing rows under *root* that no present file replaces.
 
     Runs inside the caller's transaction and commits nothing. Holds back rows the
-    hash backfill may still fold, and rows in a folder the walk could not list.
+    hash backfill may still fold, rows whose file is on disk after all, and rows in
+    a folder the walk could not list.
     """
     unreplaced = unreplaced_rows(
         _missing_under(root, repos.files), lambda m: successor_candidates(m, repos.files)
     )
     selection = select_purge(
-        unreplaced, repos.files.count_audio_unhashed() > 0, _in_unreadable_folders(unreplaced)
+        unreplaced, repos.files.count_audio_unhashed() > 0, _check_disk(unreplaced)
     )
     deletion = (
         delete_missing_files(MissingFileSelection(ids=selection.ids), repos, identities)
@@ -555,5 +594,6 @@ def purge_unmatched_missing(
         matches_released=deletion.matches_released,
         skipped=deletion.skipped,
         awaiting_fingerprint=selection.awaiting_fingerprint,
+        still_on_disk=selection.still_on_disk,
         unreadable_folder=selection.unreadable_folder,
     )
