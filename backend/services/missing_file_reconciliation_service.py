@@ -26,6 +26,7 @@ from backend.domain.enums import FileStatus, MatchStatus, ReasonCode
 from backend.domain.library import (
     AUDIO_HASHABLE_FORMATS,
     LibraryFile,
+    MissingFileChangedError,
     MissingFileDeletion,
     MissingFileMove,
     MissingFilePlan,
@@ -329,13 +330,17 @@ def _delete_missing_row(
     repos: ReconciliationRepos,
     identities: BroadcastTrackIdentityRepository,
 ) -> int | None:
-    """Delete one missing row; the matches it released, or None if it is not missing."""
+    """Delete one missing row; the matches it released, or None if it is not missing.
+
+    Raises MissingFileChangedError when the row was restored after it was read.
+    """
     row = repos.files.get_by_id(file_id)
     if row is None or row.file_status != FileStatus.MISSING:
         return None
     released = _release_matches(row.id, repos.matches, identities)
     _detach_curation(row.id, repos)
-    repos.files.delete_missing(row.id)
+    if not repos.files.delete_missing(row.id):
+        raise MissingFileChangedError(f"library file {row.id} is no longer missing")
     if row.work_id is not None:
         repos.works.delete_if_empty(row.work_id)
     return released
@@ -345,6 +350,7 @@ def _selected_ids(
     selection: MissingFileSelection,
     file_repo: LibraryFileRepository,
 ) -> tuple[UUID, ...]:
+    """The ids *selection* names: its own ids, or every row missing now."""
     if selection.every_row:
         return tuple(f.id for f in file_repo.get_missing())
     return selection.ids
@@ -355,7 +361,12 @@ def delete_missing_files(
     repos: ReconciliationRepos,
     identities: BroadcastTrackIdentityRepository,
 ) -> MissingFileDeletion:
-    """Delete the selected missing rows, releasing their matches back to review."""
+    """Delete the selected missing rows, releasing their matches back to review.
+
+    Runs inside the caller's transaction and commits nothing. A row restored
+    meanwhile (by a concurrent scan) raises MissingFileChangedError, and the
+    caller rolls back the whole call.
+    """
     deleted = released = skipped = 0
     for file_id in _selected_ids(selection, repos.files):
         outcome = _delete_missing_row(file_id, repos, identities)

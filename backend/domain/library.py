@@ -227,6 +227,14 @@ class InvalidMissingFileSelectionError(MissingFileError):
     """A deletion must name either some rows or every row, not both or neither."""
 
 
+class MissingFileChangedError(MissingFileError):
+    """A row read as missing was no longer missing when its delete ran.
+
+    A concurrent scan restored it after its references were detached, so the
+    caller must roll back everything the deletion did.
+    """
+
+
 @dataclass(frozen=True)
 class MissingFileSelection:
     """Which missing rows to delete: these ids, or every missing row."""
