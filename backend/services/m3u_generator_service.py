@@ -1,118 +1,93 @@
 """M3U playlist export service.
 
-Resolves the preferred audio file for each play event using the priority chain
-defined in the design spec (Section 3.4):
-
-    format_override > song_master > direct match (match.library_file_id)
-
-Only events whose identity has a match_status of AUTO_MATCHED or MANUAL_MATCHED
-are emitted; all others are silently skipped.
+Which file plays for each play event is curation's view ``play_file_resolution`` (spec D17):
+the override for the station's format, else the song master of the matched file's work, else
+no file (D22). The export adds no resolution rules of its own. It writes a play only when
+that final file is ``present`` (D21), in the order the caller gives the events.
 """
 
 from __future__ import annotations
 
-from uuid import UUID
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from backend.domain.broadcast import BroadcastPlayEvent
-from backend.domain.enums import FileStatus, MatchStatus
+from backend.domain.curation import PlayFileResolution
+from backend.domain.enums import FileStatus
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
-from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
-from backend.repositories.matches import MatchRepository
-from backend.repositories.recordings import RecordingRepository
-from backend.repositories.song_masters import SongMasterRepository
+from backend.repositories.play_file_resolution import PlayFileResolutionRepository
 from backend.repositories.user_settings import UserSettingRepository
 
-_MATCHED_STATUSES: frozenset[MatchStatus] = frozenset(
-    {MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED}
-)
+
+@dataclass(frozen=True)
+class M3uRepos:
+    """The repositories the M3U export reads."""
+
+    track_identities: BroadcastTrackIdentityRepository
+    play_file_resolution: PlayFileResolutionRepository
+    library_files: LibraryFileRepository
+    user_settings: UserSettingRepository
 
 
-def generate_m3u(
-    *,
-    events: list[BroadcastPlayEvent],
-    track_identity_repo: BroadcastTrackIdentityRepository,
-    match_repo: MatchRepository,
-    library_file_repo: LibraryFileRepository,
-    recording_repo: RecordingRepository,
-    song_master_repo: SongMasterRepository,
-    format_override_repo: FormatOverrideRepository,
-    user_settings_repo: UserSettingRepository,
-    station_format: str | None = None,
-) -> str:
+@dataclass(frozen=True)
+class _PathRewrite:
+    """Maps a local library path to the path Navidrome sees."""
+
+    local_prefix: str
+    navidrome_prefix: str
+
+    def apply(self, file_path: str) -> str:
+        if self.local_prefix and self.navidrome_prefix and file_path.startswith(self.local_prefix):
+            return self.navidrome_prefix + file_path[len(self.local_prefix) :]
+        return file_path
+
+
+def generate_m3u(events: Sequence[BroadcastPlayEvent], repos: M3uRepos) -> str:
     """Generate an M3U playlist string for the given events.
 
     Args:
-        events: Pre-fetched list of play events to export.
-        track_identity_repo: Repository for broadcast track identities.
-        match_repo: Repository for identity matches.
-        library_file_repo: Repository for library files.
-        recording_repo: Repository for MusicBrainz recordings.
-        song_master_repo: Repository for song masters.
-        format_override_repo: Repository for format overrides.
-        user_settings_repo: Repository for user settings.
-        station_format: Optional station format string used for format_override
-            lookup (e.g. ``"CHR"``).
+        events: Play events to export, in the order they are to be written.
+        repos: The repositories the export reads.
 
     Returns:
         A UTF-8 M3U string beginning with ``#EXTM3U``.
     """
-    local_path_setting = user_settings_repo.get("local_path_prefix")
-    local_prefix: str = local_path_setting.value if local_path_setting is not None else ""
-    navidrome_path_setting = user_settings_repo.get("navidrome_path_prefix")
-    navidrome_prefix: str = (
-        navidrome_path_setting.value if navidrome_path_setting is not None else ""
-    )
-
-    sorted_events = sorted(events, key=lambda e: e.played_at)
+    rewrite = _path_rewrite(repos.user_settings)
+    resolutions = repos.play_file_resolution.get_for_plays([event.id for event in events])
 
     lines: list[str] = ["#EXTM3U"]
-
-    for event in sorted_events:
-        identity = track_identity_repo.get_by_id(event.identity_id)
-        if identity is None or identity.match_status not in _MATCHED_STATUSES:
-            continue
-
-        match = match_repo.get_by_identity(identity.id)
-        if match is None or match.library_file_id is None:
-            continue
-
-        resolved_file_id: UUID = match.library_file_id
-
-        direct_file = library_file_repo.get_by_id(match.library_file_id)
-        if direct_file is not None and direct_file.recording_id is not None:
-            recording = recording_repo.get_by_id(direct_file.recording_id)
-            if recording is not None and recording.work_id is not None:
-                work_id: str = recording.work_id
-
-                # Priority 1 (lowest): song_master
-                master = song_master_repo.get_by_work(work_id)
-                if master is not None:
-                    resolved_file_id = master.preferred_file_id
-
-                # Priority 2 (highest): format_override
-                if station_format is not None:
-                    override = format_override_repo.get(work_id, station_format)
-                    if override is not None:
-                        resolved_file_id = override.preferred_file_id
-
-        resolved_file = library_file_repo.get_by_id(resolved_file_id)
-        # A missing file's path would be a dead entry in the player.
-        if resolved_file is None or resolved_file.file_status == FileStatus.MISSING:
-            continue
-
-        file_path = resolved_file.file_path
-        if local_prefix and navidrome_prefix and file_path.startswith(local_prefix):
-            file_path = navidrome_prefix + file_path[len(local_prefix) :]
-
-        duration_secs: int = (
-            resolved_file.audio.duration_ms // 1000
-            if resolved_file.audio.duration_ms is not None
-            else -1
-        )
-        title: str = identity.original_title
-
-        lines.append(f"#EXTINF:{duration_secs},{title}")
-        lines.append(file_path)
-
+    for event in events:
+        lines.extend(_entry(event, resolutions[event.id], repos, rewrite))
     return "\n".join(lines) + "\n"
+
+
+def _path_rewrite(user_settings: UserSettingRepository) -> _PathRewrite:
+    local_setting = user_settings.get("local_path_prefix")
+    navidrome_setting = user_settings.get("navidrome_path_prefix")
+    return _PathRewrite(
+        local_prefix=local_setting.value if local_setting is not None else "",
+        navidrome_prefix=navidrome_setting.value if navidrome_setting is not None else "",
+    )
+
+
+def _entry(
+    event: BroadcastPlayEvent,
+    resolution: PlayFileResolution,
+    repos: M3uRepos,
+    rewrite: _PathRewrite,
+) -> list[str]:
+    """The EXTINF and path lines for one play, or none when it has no playable file."""
+    # A missing or deleted file's path would be a dead entry in the player (D21).
+    if resolution.file_id is None or resolution.file_status != FileStatus.PRESENT:
+        return []
+    identity = repos.track_identities.get_by_id(event.identity_id)
+    library_file = repos.library_files.get_by_id(resolution.file_id)
+    if identity is None or library_file is None:
+        return []
+    duration_ms = library_file.audio.duration_ms
+    duration_secs = duration_ms // 1000 if duration_ms is not None else -1
+    return [
+        f"#EXTINF:{duration_secs},{identity.original_title}",
+        rewrite.apply(library_file.file_path),
+    ]

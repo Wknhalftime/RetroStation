@@ -72,11 +72,13 @@ class PgBroadcastPlayEventRepository(BroadcastPlayEventRepository):
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
     ) -> list[BroadcastPlayEvent]:
+        # "A station's plays on a date" is broadcast's view station_day_plays (D19): the
+        # stored wall-clock date whatever the session TimeZone, in position order.
         rows = self._conn.execute(
-            """SELECT le.* FROM play_events le
-               JOIN playlists p ON p.id = le.playlist_id
-               WHERE p.station_id = %s AND le.played_at::date = %s
-               ORDER BY le.played_at""",
+            """SELECT pe.* FROM station_day_plays dp
+               JOIN play_events pe ON pe.id = dp.play_event_id
+               WHERE dp.station_id = %s AND dp.play_date = %s
+               ORDER BY dp.position""",
             (station_id, broadcast_date),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]

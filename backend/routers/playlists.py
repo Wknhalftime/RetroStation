@@ -27,12 +27,6 @@ Token = Annotated[str, Depends(get_current_token)]
 # ---------------------------------------------------------------------------
 
 
-class ExportM3uBody(BaseModel):
-    """Optional body for the M3U export endpoint."""
-
-    station_format: str | None = None
-
-
 class PlaylistSummary(BaseModel):
     """Playlist list item with aggregate event count."""
 
@@ -296,17 +290,12 @@ async def get_broadcast_days(
 # ---------------------------------------------------------------------------
 
 
-def _generate_m3u_sync(
-    playlist_id_str: str,
-    database_url: str,
-    station_format: str | None,
-) -> str:
+def _generate_m3u_sync(playlist_id_str: str, database_url: str) -> str:
     """Run M3U generation on a sync psycopg connection (for use with to_thread).
 
     Args:
         playlist_id_str: String representation of the playlist UUID.
         database_url: PostgreSQL connection string.
-        station_format: Optional station format for format_override lookup.
 
     Returns:
         The M3U text.
@@ -315,17 +304,7 @@ def _generate_m3u_sync(
     with psycopg.connect(database_url, row_factory=dict_row) as sync_conn:
         repos = RepositoryFactory(sync_conn)
         events = repos.broadcast_events.get_by_playlist(pid)
-        return generate_m3u(
-            events=events,
-            track_identity_repo=repos.broadcast_identities,
-            match_repo=repos.matches,
-            library_file_repo=repos.library_files,
-            recording_repo=repos.recordings,
-            song_master_repo=repos.song_masters,
-            format_override_repo=repos.format_overrides,
-            user_settings_repo=repos.user_settings,
-            station_format=station_format,
-        )
+        return generate_m3u(events, repos.m3u_repos())
 
 
 @router.post("/{playlist_id}/export-m3u")
@@ -333,18 +312,16 @@ async def export_m3u(
     playlist_id: UUID,
     conn: DbConn,
     _token: Token,
-    body: ExportM3uBody | None = None,
 ) -> Response:
     """Generate and return an M3U file for the given playlist.
 
-    Resolves the priority chain: format_override > song_master > direct match.
-    Only AUTO_MATCHED / MANUAL_MATCHED events are included.
+    Each play's file is its ``play_file_resolution`` row: the override for the format of the
+    playlist's station, else the song master; plays with no present file are left out.
 
     Args:
         playlist_id: UUID of the playlist to export.
         conn: Async database connection (used for existence check).
         _token: Bearer token (auth check only).
-        body: Optional request body containing station_format.
 
     Returns:
         An M3U file response with Content-Disposition attachment header.
@@ -362,15 +339,9 @@ async def export_m3u(
             detail=f"Playlist {playlist_id} not found",
         )
 
-    station_format = body.station_format if body is not None else None
     database_url = get_settings().database_url
 
-    m3u_content = await asyncio.to_thread(
-        _generate_m3u_sync,
-        str(playlist_id),
-        database_url,
-        station_format,
-    )
+    m3u_content = await asyncio.to_thread(_generate_m3u_sync, str(playlist_id), database_url)
 
     filename = f"playlist-{playlist_id}.m3u"
     return Response(

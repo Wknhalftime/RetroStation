@@ -20,4 +20,7 @@ class BroadcastPlayEventRepository(ABC):
     @abstractmethod
     def get_by_station_date(
         self, station_id: UUID, broadcast_date: date
-    ) -> list[BroadcastPlayEvent]: ...
+    ) -> list[BroadcastPlayEvent]:
+        """The station's plays logged on ``broadcast_date`` (the stored wall-clock date), in
+        ``played_at``, identity id, event id order (spec D4, D19)."""
+        ...

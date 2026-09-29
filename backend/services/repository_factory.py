@@ -21,6 +21,7 @@ from backend.db.repositories.library_quarantine import PgLibraryQuarantineReposi
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
@@ -31,6 +32,7 @@ from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
+from backend.services.m3u_generator_service import M3uRepos
 
 
 @dataclass
@@ -57,13 +59,17 @@ class LibraryRepos:
 
 @dataclass
 class CatalogRepos:
-    """Catalog-domain repositories (artists, works, recordings, masters)."""
+    """Catalog-domain repositories (artists, works, recordings, masters).
+
+    ``play_file_resolution`` reads curation's view of which file plays for a play (D17).
+    """
 
     artists: PgArtistRepository
     works: PgWorkRepository
     recordings: PgRecordingRepository
     matches: PgMatchRepository
     song_masters: PgSongMasterRepository
+    play_file_resolution: PgPlayFileResolutionRepository
 
 
 @dataclass
@@ -118,6 +124,7 @@ class RepositoryFactory:
             recordings=PgRecordingRepository(conn),
             matches=PgMatchRepository(conn),
             song_masters=PgSongMasterRepository(conn),
+            play_file_resolution=PgPlayFileResolutionRepository(conn),
         )
         self.system = SystemRepos(
             mapping_rules=PgMappingRuleRepository(conn),
@@ -143,6 +150,7 @@ class RepositoryFactory:
         self.recordings = self.catalog.recordings
         self.matches = self.catalog.matches
         self.song_masters = self.catalog.song_masters
+        self.play_file_resolution = self.catalog.play_file_resolution
         self.library_files = self.library.files
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -152,6 +160,15 @@ class RepositoryFactory:
         self.musicbrainz_cache = self.system.musicbrainz_cache
         self.user_settings = self.system.user_settings
         self.system_logs = self.system.system_logs
+
+    def m3u_repos(self) -> M3uRepos:
+        """The repositories both M3U exports read."""
+        return M3uRepos(
+            track_identities=self.broadcast.identities,
+            play_file_resolution=self.catalog.play_file_resolution,
+            library_files=self.library.files,
+            user_settings=self.system.user_settings,
+        )
 
 
 @contextmanager
