@@ -240,3 +240,49 @@ def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_reco
         "the downstream mb_enrichment_task failure is not its FAILED"
     )
     assert normalized == snapshot
+
+
+# ---------------------------------------------------------------------------
+# AUD-025 gate-2 mutation-kill test — a narrow, plain-assertion test (no
+# snapshot) pinning the pre-count-failure fallback defaults a cosmic-ray
+# baseline run found under-covered (mirrors the mb_enrichment_tasks.py
+# `total = 0` gap).
+# ---------------------------------------------------------------------------
+
+
+@_Patched.apply
+def test_exception_before_total_is_computed_reports_failed_with_zero_processed_and_total(
+    mock_connect: MagicMock,
+    _enrich_recording: MagicMock,
+    _enrich_release: MagicMock,
+    mock_progress_cls: MagicMock,
+    mock_sys_log_cls: MagicMock,
+    _cache_cls: MagicMock,
+    mock_repo_cls: MagicMock,
+    _mb_cls: MagicMock,
+) -> None:
+    """An exception fetching the first pending-work queue (before `total`
+    is computed from chunk/release/recording counts) must report FAILED
+    with `processed=0, total=0` — the fallback defaults on what becomes
+    `config.read_progress()` after the `task_run` extraction. Kills a
+    cosmic-ray survivor that mutated the `total = 0` initializer.
+    """
+    events: list[LifecycleEvent] = []
+    mock_connect.side_effect = _fake_connect_factory()
+    mock_repo_cls.return_value.library_files.get_pending_enrichment_with_release.side_effect = (
+        RuntimeError("pre-count boom")
+    )
+    mock_progress_cls.return_value = OrderedProgressRepo(events)
+    mock_sys_log_cls.return_value = OrderedSystemLogRepo(events)
+
+    with patch("backend.tasks.mb_enrichment_tasks.mb_enrichment_task", MagicMock()):
+        from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
+        with pytest.raises(RuntimeError, match="pre-count boom"):
+            library_enrichment_task.call_local()
+
+    normalized = normalize_events(events)
+    failed_rows = [e for e in normalized if e["kind"] == "progress" and e["status"] == "failed"]
+    assert len(failed_rows) == 1
+    assert failed_rows[0]["progress_data"]["processed"] == 0
+    assert failed_rows[0]["progress_data"]["total"] == 0

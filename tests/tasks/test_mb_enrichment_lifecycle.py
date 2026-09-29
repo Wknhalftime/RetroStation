@@ -221,3 +221,83 @@ def test_telemetry_write_failure_on_periodic_upsert_still_reraises_and_records_f
     assert failed_rows[0]["progress_data"]["error"] == "simulated telemetry write failure"
 
     assert normalized == snapshot
+
+
+# ---------------------------------------------------------------------------
+# AUD-025 gate-2 mutation-kill tests — narrow, plain-assertion tests (no
+# snapshot) pinning two envelope-contract details a cosmic-ray baseline run
+# found under-covered: the pre-count-failure fallback defaults, and the
+# progress connection's `autocommit=True` requirement.
+# ---------------------------------------------------------------------------
+
+
+@_Patched.apply
+def test_exception_before_precount_reports_failed_with_zero_processed_and_total(
+    mock_connect: MagicMock,
+    mock_progress_cls: MagicMock,
+    mock_sys_log_cls: MagicMock,
+    mock_factory_cls: MagicMock,
+    _cache_cls: MagicMock,
+    _mb_cls: MagicMock,
+) -> None:
+    """An exception during pre-count (before `ctx` exists and before `total`
+    is computed) must report FAILED with `processed=0, total=0` — the
+    fallback defaults on what becomes `config.read_progress()` after the
+    `task_run` extraction. Kills a cosmic-ray survivor that mutated both the
+    `total = 0` initializer and the `else 0` fallback in the FAILED payload.
+    """
+    events: list[LifecycleEvent] = []
+    call_log = {"n": 0}
+
+    def failing_connect(_url: str, *, autocommit: bool = False) -> MagicMock:
+        call_log["n"] += 1
+        if call_log["n"] == 1:
+            return _mk_conn()  # progress_conn (autocommit=True)
+        raise RuntimeError("pre-count boom")  # counting_conn
+
+    mock_connect.side_effect = failing_connect
+    mock_factory_cls.side_effect = _stub_repo_factory([], [], [])
+    mock_progress_cls.return_value = OrderedProgressRepo(events)
+    mock_sys_log_cls.return_value = OrderedSystemLogRepo(events)
+
+    from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+    with pytest.raises(RuntimeError, match="pre-count boom"):
+        mb_enrichment_task.call_local()
+
+    normalized = normalize_events(events)
+    failed_rows = [e for e in normalized if e["kind"] == "progress" and e["status"] == "failed"]
+    assert len(failed_rows) == 1
+    assert failed_rows[0]["progress_data"]["processed"] == 0
+    assert failed_rows[0]["progress_data"]["total"] == 0
+
+
+@_Patched.apply
+def test_progress_connection_is_opened_autocommit(
+    mock_connect: MagicMock,
+    mock_progress_cls: MagicMock,
+    mock_sys_log_cls: MagicMock,
+    mock_factory_cls: MagicMock,
+    _cache_cls: MagicMock,
+    mock_mb_cls: MagicMock,
+) -> None:
+    """The FIRST `connect_sync` call — the dedicated progress/SystemLog
+    connection — must be opened with `autocommit=True`. Losing this
+    silently re-introduces the WS-empty-during-mb_enrichment bug (see the
+    module's connection-comment). Kills a cosmic-ray survivor that flipped
+    this to `autocommit=False`.
+    """
+    events: list[LifecycleEvent] = []
+    mock_connect.side_effect = _fake_connect
+    mock_factory_cls.side_effect = _stub_repo_factory([], [], [])
+    mock_progress_cls.return_value = OrderedProgressRepo(events)
+    mock_sys_log_cls.return_value = OrderedSystemLogRepo(events)
+    mock_mb_cls.return_value.__enter__ = lambda self: self
+    mock_mb_cls.return_value.__exit__ = lambda self, *exc: False
+
+    from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
+
+    mb_enrichment_task.call_local()
+
+    first_call = mock_connect.call_args_list[0]
+    assert first_call.kwargs.get("autocommit") is True
