@@ -8,6 +8,7 @@ global constraints: "Only the day memo is touched off the event loop").
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import threading
 from collections.abc import Sequence
@@ -67,7 +68,10 @@ class StreamSession:
     compared, with ``secrets.compare_digest``, against every ``item``/``started``/``failed``
     call. ``bookmark_key`` is ``None`` for a keyless (D28) tune-in. ``landing`` and
     ``clock_offset`` come from placement, which runs after admission (R1), so they start
-    ``None`` and are set once placement finishes. ``assigned`` maps seq to what was handed
+    ``None`` and are set as soon as placement returns, while the engine may still be
+    starting; ``placed`` is set once placement has ended either way, so the engine's first
+    ``item`` request (seq 0, often before its start is confirmed) can wait for the landing
+    instead of being told to retry. ``assigned`` maps seq to what was handed
     out for it — an item, or the final clip — so "the same seq always returns the same
     item"; ``end_seq`` is the end-of-schedule marker. ``stopped`` marks a session the
     watchdog (or ``close``) has already stopped, so it is not frozen twice. ``now_playing``
@@ -81,6 +85,7 @@ class StreamSession:
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     landing: Landing | None = None
     clock_offset: timedelta | None = None
+    placed: asyncio.Event = field(default_factory=asyncio.Event)
     assigned: dict[int, Assigned | FinalClip] = field(default_factory=dict)
     committed: Committed | None = None
     end_seq: int | None = None

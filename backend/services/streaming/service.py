@@ -82,6 +82,8 @@ __all__ = [
 logger = structlog.get_logger()
 
 _INTERNAL_PATH = "/internal/stream/sessions"
+_PLACEMENT_WAIT_S = 5.0
+"""How long seq 0 waits for placement: below Liquidsoap's 10 s ``http.get`` timeout."""
 
 
 @dataclass(frozen=True)
@@ -176,30 +178,33 @@ def _day_loader(repos: ReposFactory, station_id: UUID) -> DayLoader:
     return memoised_day_loader(read_day)
 
 
-def _place(
-    load_day: DayLoader,
-    year: int,
-    saved: SavedBookmark | None,
-    now: datetime,
-    timing: StreamTiming,
-    forget: Callable[[], None],
-) -> TuneIn:
+@dataclass(frozen=True)
+class _Schedule:
+    """What a placement reads: the session's days, its year, the moment and the rules."""
+
+    load_day: DayLoader
+    year: int
+    now: datetime
+    timing: StreamTiming
+
+
+def _place(schedule: _Schedule, saved: SavedBookmark | None, forget: Callable[[], None]) -> TuneIn:
     """Resume a still-valid bookmark, else tune in by the clock (D11, D28).
 
     ``forget`` drops the bookmark: when it is no longer valid, and when the resume walked
     past the end of the log (D26 with D39, D43).
     """
-    if saved is None:
-        return tune_in(load_day, year, now, timing)
-    if not bookmark_still_valid(load_day, saved, now):
-        forget()
-        return tune_in(load_day, year, now, timing)
-    try:
-        landing = resume(load_day, saved.bookmark, now, timing)
-    except EndOfScheduleError:
-        forget()  # the station has signed off since the listener left
-        raise
-    return TuneIn(landing, saved.bookmark.clock_offset)
+    load_day, now, timing = schedule.load_day, schedule.now, schedule.timing
+    if saved is not None and bookmark_still_valid(load_day, saved, now):
+        try:
+            landing = resume(load_day, saved.bookmark, now, timing)
+        except EndOfScheduleError:
+            forget()  # the station has signed off since the listener left
+            raise
+        return TuneIn(landing, saved.bookmark.clock_offset)
+    if saved is not None:
+        forget()  # no longer worth resuming from
+    return tune_in(load_day, schedule.year, now, timing)
 
 
 def _item_at(load_day: DayLoader, ref: ItemRef) -> ScheduleItem:
@@ -255,8 +260,9 @@ def _playing_span(committed: Committed | None) -> PlayingSpan | None:
 
 def _left_at(session: StreamSession, now: datetime) -> SavedBookmark | None:
     """Where the listener was at ``now``: the committed item plus the time it has played
-    (D11), or the landing when nothing has started (D30); ``None`` if never placed."""
-    if session.clock_offset is None or session.landing is None:
+    (D11), or the landing when nothing has started (D30); ``None`` if the session never
+    finished opening (no engine), so a close during ``open`` bookmarks nothing."""
+    if session.engine is None or session.clock_offset is None or session.landing is None:
         return None
     committed = session.committed
     if committed is not None and isinstance(committed.assigned, Assigned):
@@ -265,9 +271,18 @@ def _left_at(session: StreamSession, now: datetime) -> SavedBookmark | None:
         item = playing.item
     else:
         landing = session.landing
-        item = _item_at(session.load_day, landing.ref)  # read by placement: a memo hit
+        item = _landing_item(session, landing)
     bookmark = Bookmark(landing, item.logged_at, now, session.clock_offset)
     return SavedBookmark(bookmark, item.event_id)
+
+
+def _landing_item(session: StreamSession, landing: Landing) -> ScheduleItem:
+    """The landing's play: seq 0's item once it was sent, else the memo (placement read the
+    day, so this is a hit; it still takes the memo's lock, hence the preference)."""
+    first = session.assigned.get(0)
+    if isinstance(first, Assigned):
+        return first.item
+    return _item_at(session.load_day, landing.ref)
 
 
 def _schedule_finished(session: StreamSession) -> bool:
@@ -284,6 +299,21 @@ def _halt(engine: RunningEngine) -> None:
     """Kill the engine without waiting (D1) and close its upstream (``stop`` does not)."""
     engine.stop()
     engine.upstream.close()
+
+
+def _halt_if_started(starting: asyncio.Future[RunningEngine]) -> None:
+    """Halt the engine a finished start produced (a done-callback, like D1's
+    ``_abandon_started``); a cancelled or failed start left nothing running."""
+    if not starting.cancelled() and starting.exception() is None:
+        _halt(starting.result())
+
+
+def _abandon_start(starting: asyncio.Future[RunningEngine]) -> None:
+    """An open that will not keep its engine: halt it now if ready, else once it is."""
+    if starting.done():
+        _halt_if_started(starting)
+    else:
+        starting.add_done_callback(_halt_if_started)
 
 
 class StreamService:
@@ -342,6 +372,7 @@ class StreamService:
         finally:
             if not opened:
                 self._sessions.pop(session_id, None)
+                session.placed.set()  # wake a waiting seq 0 request: the session is gone
         return OpenedStream(session_id, app)
 
     def _listener_limit(self, raw: str | None) -> int:
@@ -380,15 +411,35 @@ class StreamService:
     async def _place_while_starting(
         self, session_id: str, session: StreamSession, year: int
     ) -> RunningEngine:
-        """Place the listener in a worker thread while the engine starts (R1)."""
+        """Place the listener in a worker thread while the engine starts (R1).
+
+        An engine this open does not keep, because placement failed, the start failed, the
+        session was closed, or the open was cancelled, is halted whenever it becomes ready.
+        """
+        endpoint = self._endpoint(session_id, session.token)
+        starting = asyncio.ensure_future(self._ports.start_engine(endpoint))
+        placing = self._publish_placement(session, year)
+        kept = False
+        try:
+            placed, started = await asyncio.gather(placing, starting, return_exceptions=True)
+            engine = self._settle(session_id, session, placed, started)
+            kept = True
+        finally:
+            if not kept:
+                _abandon_start(starting)
+        return engine
+
+    async def _publish_placement(self, session: StreamSession, year: int) -> None:
+        """Place the listener and publish the landing at once, so the engine's seq 0 request
+        need not wait for the engine start to be confirmed; ``placed`` is set either way."""
         key = session.bookmark_key
         saved = None if key is None else self._bookmarks.get(key)
-        forget = self._forgetter(key, saved)
-        now, timing = self._ports.clock(), self._config.timing
-        placing = asyncio.to_thread(_place, session.load_day, year, saved, now, timing, forget)
-        starting = self._ports.start_engine(self._endpoint(session_id, session.token))
-        placed, started = await asyncio.gather(placing, starting, return_exceptions=True)
-        return self._settle(session_id, session, placed, started)
+        schedule = _Schedule(session.load_day, year, self._ports.clock(), self._config.timing)
+        try:
+            tuned = await asyncio.to_thread(_place, schedule, saved, self._forgetter(key, saved))
+            session.landing, session.clock_offset = tuned.landing, tuned.clock_offset
+        finally:
+            session.placed.set()
 
     def _forgetter(
         self, key: BookmarkKey | None, saved: SavedBookmark | None
@@ -410,13 +461,12 @@ class StreamService:
         self,
         session_id: str,
         session: StreamSession,
-        placed: TuneIn | BaseException,
+        placed: None | BaseException,
         started: RunningEngine | BaseException,
     ) -> RunningEngine:
-        """Keep the placement and the engine, or fail: a placement failure wins."""
+        """Keep the engine, or fail: a placement failure wins. The caller halts an engine
+        that is not kept."""
         if isinstance(placed, BaseException):
-            if isinstance(started, RunningEngine):
-                _halt(started)
             raise placed
         if isinstance(started, EngineStartError):
             raise StreamUnavailableError(
@@ -425,9 +475,7 @@ class StreamService:
         if isinstance(started, BaseException):
             raise started
         if self._sessions.get(session_id) is not session:  # closed (close_all) while opening
-            _halt(started)
             raise StreamUnavailableError(f"session {session_id}: closed while opening")
-        session.landing, session.clock_offset = placed.landing, placed.clock_offset
         session.engine = started
         return started
 
@@ -448,6 +496,8 @@ class StreamService:
         if served is not None:
             return served
         if call.seq == 0:
+            await self._await_placement(call, session)
+            session = self._authorised(call)  # a failed open has removed the session
             landing = await asyncio.to_thread(
                 _landing_assigned, session.load_day, self._placed(call, session)
             )
@@ -485,10 +535,21 @@ class StreamService:
             raise UnknownItemError(f"item {seq} is not next; {len(session.assigned)} assigned")
         return None
 
+    async def _await_placement(self, call: ItemCall, session: StreamSession) -> None:
+        """Hold the engine's seq 0 request until placement ends (it usually arrives while the
+        day is still being read); past the wait, the engine is told to retry later."""
+        try:
+            async with asyncio.timeout(_PLACEMENT_WAIT_S):
+                await session.placed.wait()
+        except TimeoutError as timed_out:
+            raise UnknownItemError(
+                f"session {call.session_id}: not placed after {_PLACEMENT_WAIT_S} s"
+            ) from timed_out
+
     def _placed(self, call: ItemCall, session: StreamSession) -> Landing:
-        """seq 0 is the landing; until placement finishes, the engine must retry later."""
+        """seq 0 is the landing; a session whose placement failed has none."""
         if session.landing is None:
-            raise UnknownItemError(f"session {call.session_id}: not placed yet")
+            raise UnknownItemError(f"session {call.session_id}: not placed")
         return session.landing
 
     def _assign(self, session: StreamSession, seq: int, assigned: Assigned) -> ItemPayload:
