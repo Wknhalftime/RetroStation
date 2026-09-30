@@ -2,10 +2,11 @@
 
 Spec: Cue pre-computation; D20 (needs analysis; an analyser change purges its old rows);
 D52/D55 (the fallback row; no duration, retried); D57 (an unreadable or changed file stores
-nothing); D59 (no progress rows: one summary log); D61 (a stalled file gets a fallback row);
-D62 (today's and tomorrow's playlists first); D63 (batches of 8, a bounded run); D64 (an
-unknown stored stat trusts the hash); D67 (each file's duration reaches the analyser); D68 (a
-rejected result line fails only its file).
+nothing); D59 (no progress rows: one summary log); D61 (the first file with no outcome is
+the stall and gets a fallback row; the files after it go back, untried); D62 (today's and
+tomorrow's playlists first); D63 (batches of 8, a bounded run); D64 (an unknown stored stat
+trusts the hash); D67 (each file's duration reaches the analyser); D68 (a rejected result
+line fails only its file).
 
 The pipeline, one function per step:
 
@@ -53,6 +54,7 @@ _UNREADABLE = "unreadable"
 
 _STORED = frozenset({CueRecord.ANALYSED, CueRecord.FAILED})
 _NOTHING_READY = BatchAnalysis(metadata={}, stalled=None)
+_STALLED = Unusable("analyser stalled or died on this file (D61)")
 
 
 @dataclass(frozen=True)
@@ -183,35 +185,41 @@ def _analyse(analyse: Analyse, ready: Sequence[CueCandidate]) -> BatchAnalysis:
     return analyse([CueFile(c.path, c.duration_ms) for c in ready])
 
 
-def _reached(ready: Sequence[CueCandidate], analysis: BatchAnalysis) -> list[CueCandidate]:
-    """The files the analyser reached: all of them, or up to and including a stalled one."""
-    if analysis.stalled is None:
-        return list(ready)
-    return list(ready[: analysis.stalled + 1])
+def _stalled_at(count: int, analysis: BatchAnalysis) -> int | None:
+    """The first of ``count`` files with no outcome: the file the analyser stalled or died
+    on (D61), whether or not it reported the stall; every later file is untried. None when
+    every file has an outcome."""
+    for index in range(count):
+        if index == analysis.stalled:
+            return index
+        if index not in analysis.metadata and index not in analysis.rejected:
+            return index
+    return None
 
 
 def _autocued(analysis: BatchAnalysis, index: int, candidate: CueCandidate) -> Autocued:
-    """What autocue said about one reached file: a rejected line's reason (D68), or its
-    metadata, empty for the stalled file (D61)."""
+    """What autocue said about one file with an outcome: a rejected line's reason (D68), or
+    its metadata."""
     if index in analysis.rejected:
         return Autocued(candidate, Unusable(analysis.rejected[index]))
-    return Autocued(candidate, analysis.metadata.get(index, {}))
+    return Autocued(candidate, analysis.metadata[index])
 
 
-def _outcome(ports: CueRunPorts, config: CueRunConfig, autocued: Autocued) -> str:
-    """The post-check's problem, or what recording the analysis did."""
+def _record_one(store: StreamCueRepository, timing: StreamTiming, autocued: Autocued) -> str:
+    """Store one analysed file's cues if its stat still matches; the post-check's problem,
+    or what recording the analysis did."""
     problem = _stat_problem(autocued.candidate)
     if problem is not None:
         return problem
-    return record_analysis(ports.store, config.timing, autocued)
+    return record_analysis(store, timing, autocued)
 
 
-def _record(
-    ports: CueRunPorts, config: CueRunConfig, run: _Run, reached: Sequence[Autocued]
+def _record_batch(
+    store: StreamCueRepository, timing: StreamTiming, run: _Run, analysed: Sequence[Autocued]
 ) -> None:
     """Post-check each analysed file's stat, then store what is still current."""
-    for autocued in reached:
-        outcome = _outcome(ports, config, autocued)
+    for autocued in analysed:
+        outcome = _record_one(store, timing, autocued)
         run.count([outcome])
         if outcome in _STORED:
             run.recorded.add(autocued.candidate.audio_hash)
@@ -227,12 +235,15 @@ def _run_batch(
     run.count(problems.values())
     ready = [c for c in unseen if c.file_id not in problems]
     analysis = _analyse(ports.analyse, ready)
-    reached = _reached(ready, analysis)
-    if analysis.stalled is not None:
-        untried = ready[len(reached) :]
-        run.backlog.put_back(reached[-1], untried)
+    stalled = _stalled_at(len(ready), analysis)
+    settled = ready if stalled is None else ready[:stalled]
+    analysed = [_autocued(analysis, i, c) for i, c in enumerate(settled)]
+    if stalled is not None:
+        analysed.append(Autocued(ready[stalled], _STALLED))
+        untried = ready[stalled + 1 :]
+        run.backlog.put_back(ready[stalled], untried)
         run.tried.difference_update(c.file_id for c in untried)
-    _record(ports, config, run, [_autocued(analysis, i, c) for i, c in enumerate(reached)])
+    _record_batch(ports.store, config.timing, run, analysed)
     ports.commit()
 
 
