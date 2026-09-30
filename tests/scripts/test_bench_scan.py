@@ -37,15 +37,15 @@ def test_hash_coverage_counts_rows_carrying_a_fingerprint(
 ) -> None:
     with psycopg.connect(migrated_db) as conn:
         conn.execute(
-            "INSERT INTO library_files (file_path, file_hash, format) VALUES (%s, %s, %s)",
-            ("/m/a.flac", "h" * 64, "flac"),
+            "INSERT INTO library_files (file_path, audio_hash, format) VALUES (%s, %s, %s)",
+            ("/m/a.flac", "flac-md5:" + "a" * 32, "flac"),
         )
         conn.execute(
             "INSERT INTO library_files (file_path, format) VALUES (%s, %s)",
             ("/m/b.flac", "flac"),
         )
 
-    assert bench_scan.hash_coverage(migrated_db)["file_hash"] == 1
+    assert bench_scan.hash_coverage(migrated_db) == {"flac-md5": 1}
 
 
 def test_the_audio_sha256_hot_spot_exists() -> None:

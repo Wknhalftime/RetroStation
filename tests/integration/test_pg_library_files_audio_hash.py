@@ -170,20 +170,3 @@ def test_has_any_reports_whether_the_table_has_rows(migrated_db: str) -> None:
         repo.upsert(_row("/m/a.flac"))
         after = repo.has_any()
     assert (before, after) == (False, True)
-
-
-def test_upsert_no_longer_writes_the_whole_file_hash(migrated_db: str) -> None:
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        conn.execute(
-            "INSERT INTO library_files (file_path, file_hash, format) VALUES (%s, %s, %s)",
-            ("/m/old.flac", "h" * 64, "flac"),
-        )
-        repo = PgLibraryFileRepository(conn)
-        repo.upsert(_row("/m/old.flac"))
-        repo.upsert(_row("/m/new.flac"))
-        stored = {
-            r["file_path"]: r["file_hash"]
-            for r in conn.execute("SELECT file_path, file_hash FROM library_files").fetchall()
-        }
-
-    assert stored == {"/m/old.flac": "h" * 64, "/m/new.flac": None}

@@ -59,11 +59,10 @@ def test_normalize_backfill_failure_writes_failed_progress_and_reraises(
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         conn.execute(
             """INSERT INTO library_files
-               (id, file_path, file_hash, format, file_status, raw_metadata)
-               VALUES (gen_random_uuid(), %s, %s, %s, 'present', %s::jsonb)""",
+               (id, file_path, format, file_status, raw_metadata)
+               VALUES (gen_random_uuid(), %s, %s, 'present', %s::jsonb)""",
             (
                 "/music/test.flac",
-                "hash-" + "a" * 32,
                 "flac",
                 '{"artist": "Prince", "title": "Purple Rain"}',
             ),
@@ -125,20 +124,17 @@ def test_normalize_backfill_terminates_on_rows_without_artist(
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         conn.execute(
             """INSERT INTO library_files
-               (id, file_path, file_hash, format, file_status, raw_metadata)
+               (id, file_path, format, file_status, raw_metadata)
                VALUES
-                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb),
-                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb),
-                 (gen_random_uuid(), %s, %s, 'flac', 'present', %s::jsonb)""",
+                 (gen_random_uuid(), %s, 'flac', 'present', %s::jsonb),
+                 (gen_random_uuid(), %s, 'flac', 'present', %s::jsonb),
+                 (gen_random_uuid(), %s, 'flac', 'present', %s::jsonb)""",
             (
                 "/music/a.flac",
-                "hash-a-" + "a" * 30,
                 '{"artist": "Prince"}',
                 "/music/b.flac",
-                "hash-b-" + "b" * 30,
                 "{}",  # no artist / title
                 "/music/c.flac",
-                "hash-c-" + "c" * 30,
                 '{"something_else": "x"}',  # unrecognized keys
             ),
         )

@@ -1,4 +1,5 @@
 -- Rollback for 0029_audio_hash.sql. Run by hand with the app stopped.
+-- Since 0032 the file_hash column is gone: run rollback_0032_drop_file_hash.sql first.
 -- Code from before PR B reads file_hash, which PR B stopped writing: the
 -- upsert leaves it untouched, so a row retagged under PR B keeps a stale
 -- file_hash and a row added under PR B has none. After rolling back, run

@@ -1,4 +1,5 @@
 -- Rollback for 0026_deferred_file_hash.sql
+-- Since 0032 the file_hash column is gone: run rollback_0032_drop_file_hash.sql first.
 -- Precondition: the hash backfill must have finished (no library_files row
 -- with file_hash IS NULL) before this runs. SET NOT NULL below fails
 -- otherwise, since a still-unhashed row would violate the constraint.
