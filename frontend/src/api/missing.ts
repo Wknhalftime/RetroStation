@@ -22,11 +22,22 @@ export function useMissingFiles(offset: number, limit: number) {
 
 export type DeleteMissingFilesBody = { ids: string[] } | { all: true };
 
+// What a delete or a remap can change besides the missing list: the library counts,
+// the matching queue (a delete sends identities back to review), and the works and
+// artists that show the rows' works (masters re-picked, matches moved, empty works gone).
+const AFFECTED_KEYS = [
+  MISSING_FILES_KEY,
+  ["library", "status"],
+  ["matching"],
+  ["works"],
+  ["artists"],
+] as const;
+
+/** Refetches what a delete or remap may have changed, whether it succeeded or was refused. */
 function useRefreshLibrary(): () => void {
   const queryClient = useQueryClient();
   return () => {
-    void queryClient.invalidateQueries({ queryKey: MISSING_FILES_KEY });
-    void queryClient.invalidateQueries({ queryKey: ["library", "status"] });
+    for (const queryKey of AFFECTED_KEYS) void queryClient.invalidateQueries({ queryKey });
   };
 }
 
@@ -37,7 +48,7 @@ export function useDeleteMissingFiles() {
       MissingFileDeletionSchema.parse(
         await apiFetch<unknown>(BASE, { method: "DELETE", body: JSON.stringify(body) })
       ),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
@@ -54,6 +65,6 @@ export function useRemapMissingFile() {
         method: "POST",
         body: JSON.stringify({ target_file_id: targetFileId }),
       }),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
