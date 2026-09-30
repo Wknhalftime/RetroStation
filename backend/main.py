@@ -2,6 +2,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -133,10 +134,20 @@ def _stream_repos(database_url: str) -> ReposFactory:
     return opened
 
 
+def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> StreamPorts:
+    """What the stream service is wired to: PostgreSQL, the engine start and two clocks.
+
+    D47: the wall clock only places listeners; the monotonic clock times everything else.
+    """
+    return StreamPorts(
+        _stream_repos(settings.database_url), start_engine, datetime.now, time.monotonic
+    )
+
+
 def _stream_service(settings: Settings, start_engine: EngineStarter, logs: Path) -> StreamService:
     """The stream service, reading PostgreSQL and calling back on the API's own bind (D24)."""
     return StreamService(
-        StreamPorts(_stream_repos(settings.database_url), start_engine, datetime.now),
+        build_stream_ports(settings, start_engine),
         BookmarkStore(),
         StreamServiceConfig(callback_base_url(settings.server_host, settings.server_port), logs),
     )
