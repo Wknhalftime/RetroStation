@@ -56,6 +56,10 @@ from backend.tasks.huey_app import huey
 logger = structlog.get_logger()
 
 COMMIT_CHUNK_SIZE = 100
+# The missing_files_purged log names this many deleted paths and counts the rest.
+PURGE_LOG_PATH_LIMIT = 50
+# Keys under which a scan's COMPLETED progress and scan_completed log carry purge counts.
+PURGE_COUNT_KEYS = ("missing_purged", "purge_matches_released", "purge_held_back")
 
 
 def apply_missing_file_moves(
@@ -162,6 +166,12 @@ def purge_missing_after_scan(
         library_conn.rollback()
         logger.warning("missing_purge_failed", exc_info=True)
         return None
+    _log_purge(result)
+    return result
+
+
+def _log_purge(result: MissingFilePurge) -> None:
+    """Log what the purge did: its counts, and the first deleted paths as an audit trail."""
     logger.info(
         "missing_files_purged",
         deleted=result.deleted,
@@ -169,8 +179,23 @@ def purge_missing_after_scan(
         awaiting_fingerprint=result.awaiting_fingerprint,
         still_on_disk=result.still_on_disk,
         unreadable_folder=result.unreadable_folder,
+        deleted_paths=list(result.deleted_paths[:PURGE_LOG_PATH_LIMIT]),
+        deleted_paths_not_logged=max(0, len(result.deleted_paths) - PURGE_LOG_PATH_LIMIT),
     )
-    return result
+
+
+def purge_counts(result: MissingFilePurge) -> dict[str, int]:
+    """The purge's counts under the keys a scan reports them with (PURGE_COUNT_KEYS)."""
+    return {
+        "missing_purged": result.deleted,
+        "purge_matches_released": result.matches_released,
+        "purge_held_back": result.held_back,
+    }
+
+
+def _purge_details(progress: dict[str, object]) -> dict[str, object]:
+    """The purge counts a scan's final progress carries, for its scan_completed log."""
+    return {key: progress[key] for key in PURGE_COUNT_KEYS if key in progress}
 
 
 def _row_to_group(
@@ -393,7 +418,9 @@ def _run_scan(
     # Successors need their work (grouping above) before rows fold into them.
     if reconcile_missing_after_scan(library_conn, repos) is not None:
         # Only after a reconciliation that ran: what it could not fold may be purged.
-        purge_missing_after_scan(library_conn, repos, root, walk_saw_files=bool(seen_paths))
+        purge = purge_missing_after_scan(library_conn, repos, root, walk_saw_files=bool(seen_paths))
+        if purge is not None:
+            last_progress.update(purge_counts(purge))
 
     return files_written, quarantine_written, last_progress
 
@@ -485,7 +512,11 @@ def library_scan_task(root_path: str) -> str:
                 level=LogLevel.INFO,
                 message="scan_completed",
                 trace_id=task_id,
-                details={"files_indexed": files_written, "quarantined": quarantine_written},
+                details={
+                    "files_indexed": files_written,
+                    "quarantined": quarantine_written,
+                    **_purge_details(last_progress),
+                },
             )
         )
 

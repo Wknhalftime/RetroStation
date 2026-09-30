@@ -299,6 +299,11 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         del self._data[file_id]
         return True
 
+    def lock_missing(self, file_id: UUID) -> bool:
+        # No concurrency in the fake: only the status check.
+        row = self._data.get(file_id)
+        return row is not None and row.file_status == FileStatus.MISSING
+
     def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
         # No concurrency in the fake: only the status check.
         missing, successor = self._data.get(missing_id), self._data.get(successor_id)

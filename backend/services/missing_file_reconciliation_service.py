@@ -333,10 +333,13 @@ def _delete_missing_row(
 ) -> int | None:
     """Delete one missing row; the matches it released, or None if it is not missing.
 
-    Raises MissingFileChangedError when the row was restored after it was read.
+    The row is locked before anything else is touched, so a concurrent fold or
+    restore of it either finished first (the row is skipped) or waits for this
+    transaction; neither can deadlock with the match release. Raises
+    MissingFileChangedError if the delete still finds the row no longer missing.
     """
-    row = repos.files.get_by_id(file_id)
-    if row is None or row.file_status != FileStatus.MISSING:
+    row = repos.files.get_by_id(file_id) if repos.files.lock_missing(file_id) else None
+    if row is None:
         return None
     released = _release_matches(row.id, repos.matches, identities)
     _detach_curation(row.id, repos)
@@ -368,15 +371,27 @@ def delete_missing_files(
     meanwhile (by a concurrent scan) raises MissingFileChangedError, and the
     caller rolls back the whole call.
     """
-    deleted = released = skipped = 0
-    for file_id in _selected_ids(selection, repos.files):
+    ids = _selected_ids(selection, repos.files)
+    released = _delete_rows(ids, repos, identities)
+    return MissingFileDeletion(
+        deleted=len(released),
+        matches_released=sum(released.values()),
+        skipped=len(ids) - len(released),
+    )
+
+
+def _delete_rows(
+    ids: tuple[UUID, ...],
+    repos: ReconciliationRepos,
+    identities: BroadcastTrackIdentityRepository,
+) -> dict[UUID, int]:
+    """Delete each missing row of *ids*; the matches each deleted row released, by id."""
+    released: dict[UUID, int] = {}
+    for file_id in ids:
         outcome = _delete_missing_row(file_id, repos, identities)
-        if outcome is None:
-            skipped += 1
-        else:
-            deleted += 1
-            released += outcome
-    return MissingFileDeletion(deleted=deleted, matches_released=released, skipped=skipped)
+        if outcome is not None:
+            released[file_id] = outcome
+    return released
 
 
 def _remap_target(target_id: UUID, file_repo: LibraryFileRepository) -> LibraryFile:
@@ -584,16 +599,14 @@ def purge_unmatched_missing(
     selection = select_purge(
         unreplaced, repos.files.count_audio_unhashed() > 0, _check_disk(unreplaced)
     )
-    deletion = (
-        delete_missing_files(MissingFileSelection(ids=selection.ids), repos, identities)
-        if selection.ids
-        else MissingFileDeletion(deleted=0, matches_released=0, skipped=0)
-    )
+    released = _delete_rows(selection.ids, repos, identities)
+    path_of = {m.id: m.file_path for m in unreplaced}
     return MissingFilePurge(
-        deleted=deletion.deleted,
-        matches_released=deletion.matches_released,
-        skipped=deletion.skipped,
+        deleted=len(released),
+        matches_released=sum(released.values()),
+        skipped=len(selection.ids) - len(released),
         awaiting_fingerprint=selection.awaiting_fingerprint,
         still_on_disk=selection.still_on_disk,
         unreadable_folder=selection.unreadable_folder,
+        deleted_paths=tuple(sorted(path_of[i] for i in released)),
     )

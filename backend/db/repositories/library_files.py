@@ -500,6 +500,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         )
         return result.rowcount == 1
 
+    def lock_missing(self, file_id: UUID) -> bool:
+        row = self._conn.execute(
+            "SELECT id FROM library_files WHERE id = %s AND file_status = %s FOR UPDATE",
+            (str(file_id), FileStatus.MISSING),
+        ).fetchone()
+        return row is not None
+
     def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
         # ORDER BY id: every fold takes the two row locks in the same order.
         rows = self._conn.execute(

@@ -295,7 +295,8 @@ class MissingFilePurge:
     file still waits for one (the backfill may yet fold them). ``still_on_disk``: rows
     whose file exists after all, or whose check the disk refused (the walk missed
     them). ``unreadable_folder``: rows whose folder is there but could not be listed
-    (the walk may have skipped them, not lost them).
+    (the walk may have skipped them, not lost them). ``deleted_paths``: the deleted
+    rows' paths, in path order, for the audit log.
     """
 
     deleted: int
@@ -304,6 +305,12 @@ class MissingFilePurge:
     awaiting_fingerprint: int
     still_on_disk: int
     unreadable_folder: int
+    deleted_paths: tuple[str, ...] = ()
+
+    @property
+    def held_back(self) -> int:
+        """Unreplaced rows the purge kept, for any of its reasons."""
+        return self.awaiting_fingerprint + self.still_on_disk + self.unreadable_folder
 
 
 class MissingFileNotFoundError(MissingFileError):

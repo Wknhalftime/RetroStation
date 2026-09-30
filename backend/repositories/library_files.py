@@ -189,6 +189,16 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
+    def lock_missing(self, file_id: UUID) -> bool:
+        """Lock the row until the transaction ends; True if it is MISSING.
+
+        Taken before a deletion touches the row's references, so a concurrent
+        fold or restore of the same row either finishes first (and this returns
+        False) or waits for the deletion.
+        """
+        ...
+
+    @abstractmethod
     def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
         """Lock both rows until the transaction ends; True if the fold may go ahead.
 

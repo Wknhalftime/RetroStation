@@ -7,7 +7,7 @@ from typing import Annotated, Self
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from backend.dependencies import SyncRepos, get_current_token, get_reconciliation_repos
 from backend.domain.library import (
@@ -89,8 +89,12 @@ class RemapIn(BaseModel):
     target_file_id: UUID
 
 
+# A selection larger than this is sent as {all: true}, or split.
+MAX_DELETE_IDS = 1000
+
+
 class DeleteIn(BaseModel):
-    ids: list[UUID] | None = None
+    ids: Annotated[list[UUID], Field(max_length=MAX_DELETE_IDS)] | None = None
     all: bool = False
 
     @model_validator(mode="after")
