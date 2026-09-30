@@ -26,7 +26,6 @@ import pytest
 from backend.config import Settings
 from backend.domain.broadcast import BroadcastStation
 from backend.domain.streaming import ItemRef, Landing, ScheduleItem
-from backend.main import _stream_service
 from backend.services.streaming.bookmarks import BookmarkKey, BookmarkStore
 from backend.services.streaming.service import (
     StreamPorts,
@@ -107,13 +106,15 @@ def morning(rig: Rig) -> list[ScheduleItem]:
     return items
 
 
-# ---- spring-forward: live sessions are not stopped, bookmarks do not jump an hour ----------
+# ---- the time heard: live sessions are not stopped, bookmarks do not jump an hour ----------
 
 
-async def test_spring_forward_mid_song_neither_stops_the_session_nor_jumps_the_bookmark(
+async def test_spring_forward_mid_song_keeps_the_session_and_times_what_was_heard_steadily(
     steady_rig: SteadyRig,
 ) -> None:
-    # D47 with D31 and D11: 5 s pass while the wall clock jumps an hour ahead.
+    # D47 with D31 and D11: 5 s pass while the wall clock jumps an hour ahead. The bookmark
+    # records 5 s heard, not an hour. (It is already behind the station clock, so under the
+    # expiry ruling the next tune-in goes by the clock; this test only checks what it records.)
     rig = steady_rig.rig
     morning(rig)
     sid = await rig.open("car")
@@ -128,6 +129,23 @@ async def test_spring_forward_mid_song_neither_stops_the_session_nor_jumps_the_b
     kept = rig.bookmarks.get(KEY)
     assert kept is not None
     assert kept.bookmark.landing == Landing(ItemRef(DAY, 0), 65_000)  # 60 s in + 5 s heard
+
+
+async def test_fall_back_during_play_still_bookmarks_the_time_heard(
+    steady_rig: SteadyRig,
+) -> None:
+    # D47 with D11: 20 s are heard while the wall clock goes back an hour.
+    rig = steady_rig.rig
+    morning(rig)
+    sid = await rig.open("car")
+    await rig.item(sid, 0)
+    rig.started(sid, 0)  # 60 s into the song
+    steady_rig.jump_wall(FALL_BACK)
+    steady_rig.elapse(20)
+    rig.service.close(sid)
+    kept = rig.bookmarks.get(KEY)
+    assert kept is not None
+    assert kept.bookmark.landing == Landing(ItemRef(DAY, 0), 80_000)  # 60 s in + 20 s heard
 
 
 # ---- fall-back: the watchdog is not blind ---------------------------------------------------
@@ -258,13 +276,13 @@ async def test_a_fresh_tune_in_lands_at_the_wall_clocks_time_of_day(
 # ---- the composition root wires the steady clock -------------------------------------------
 
 
-def test_the_app_times_sessions_on_the_steady_clock(tmp_path: Path) -> None:
+def test_the_app_times_sessions_on_the_steady_clock() -> None:
     # D47: "The steady clock is injected at the composition root (time.monotonic); a test
     # locks that wiring." ``start_streaming`` needs an installed Liquidsoap to warm its script
-    # cache, so this builds the service the way it does, through the root's own builder,
-    # with a fake engine start and no database access (repositories open per use). The
-    # wiring is only observable on the service's ports: no session can be opened here
-    # without PostgreSQL and the wall clock is the real one, so nothing can move it apart.
+    # cache, so this reads the ports the root builds for it, with a fake engine start and no
+    # database access (repositories open per use). Imported here so that a rename in the
+    # composition root fails this test alone, not the whole file.
+    from backend.main import build_stream_ports
+
     settings = Settings(_env_file=None)  # type: ignore[call-arg]  # pydantic-settings init arg
-    service = _stream_service(settings, EngineStarts(), tmp_path / "logs")
-    assert service._ports.steady is time.monotonic
+    assert build_stream_ports(settings, EngineStarts()).steady is time.monotonic
