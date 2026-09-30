@@ -8,7 +8,7 @@ points at is still the one that was logged there.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -36,6 +36,10 @@ class SavedBookmark:
 
     bookmark: Bookmark
     event_id: UUID
+    left_elapsed: datetime | None = field(default=None, compare=False)
+    """When the listener left, on the service's elapsed-time clock (D47), so the time away is
+    measured on it; ``None`` measures it from ``bookmark.left_at`` on the wall clock. Not
+    compared: it is a clock reading, not part of where the listener is."""
 
 
 class BookmarkStore:
