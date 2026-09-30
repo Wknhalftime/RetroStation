@@ -26,6 +26,7 @@ from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRep
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
+from backend.db.repositories.stream_cue_work import PgCueWorkRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
@@ -96,6 +97,7 @@ class StreamingRepos:
 
     cues: PgStreamCueRepository
     schedule: PgPlayableScheduleRepository
+    cue_work: PgCueWorkRepository
 
 
 class RepositoryFactory:
@@ -140,6 +142,7 @@ class RepositoryFactory:
         self.streaming = StreamingRepos(
             cues=PgStreamCueRepository(conn),
             schedule=PgPlayableScheduleRepository(conn),
+            cue_work=PgCueWorkRepository(conn),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility
