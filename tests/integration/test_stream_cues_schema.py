@@ -5,7 +5,8 @@ foreign key (a hash is not unique in the library, and a row may outlive its file
 identity or stat columns. No migration number appears here: the migration and its rollback
 are found by name.
 
-Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``. Re-locked under
+D66 (PR E1): the nullable ``orphaned_at`` column of the two-strike prune (D56).
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ def test_columns_types_and_nullability(conn: Conn) -> None:
         "analyser_version": ("integer", "NO"),
         "analysis_failed": ("boolean", "NO"),
         "analysed_at": ("timestamp with time zone", "NO"),
+        "orphaned_at": ("timestamp with time zone", "YES"),
     }
 
 

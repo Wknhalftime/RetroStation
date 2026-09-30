@@ -3,7 +3,8 @@
 One row per audio hash. An upsert needs no library file to exist: a row for audio no
 longer (or not yet) in the library is harmless.
 
-Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``. Re-locked under
+D66 (PR E1): an upsert leaves ``orphaned_at`` NULL.
 """
 
 from __future__ import annotations
@@ -60,7 +61,8 @@ def stored(conn: Conn, audio: AudioHash) -> dict[str, Any]:
 
 
 def as_row(a: CueAnalysis) -> dict[str, Any]:
-    """The columns an upsert of ``a`` must store (all but ``analysed_at``)."""
+    """The columns an upsert of ``a`` must store (all but ``analysed_at``); an upsert leaves
+    ``orphaned_at`` NULL (D66)."""
     return {
         "audio_hash": str(a.audio_hash),
         "cue_in_ms": a.cues.cue_in_ms,
@@ -72,6 +74,7 @@ def as_row(a: CueAnalysis) -> dict[str, Any]:
         "gain_db": a.cues.gain_db,
         "analyser_version": a.analyser_version,
         "analysis_failed": a.analysis_failed,
+        "orphaned_at": None,
     }
 
 
