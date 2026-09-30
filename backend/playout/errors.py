@@ -8,3 +8,10 @@ class EngineStartError(Exception):
 
     The message says which and why.
     """
+
+
+class AnalyserError(Exception):
+    """The cue analyser could not run a batch, or broke its output protocol.
+
+    The message says which, with the exit code or the offending line and field.
+    """
