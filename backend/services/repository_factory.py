@@ -20,6 +20,7 @@ from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.missing_files import PgMissingFileListingRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
@@ -33,6 +34,7 @@ from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
+from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 
 
 @dataclass
@@ -55,6 +57,7 @@ class LibraryRepos:
     folders: PgLibraryFolderRepository
     quarantine: PgLibraryQuarantineRepository
     format_overrides: PgFormatOverrideRepository
+    missing_files: PgMissingFileListingRepository
 
 
 @dataclass
@@ -117,6 +120,7 @@ class RepositoryFactory:
             folders=PgLibraryFolderRepository(conn),
             quarantine=PgLibraryQuarantineRepository(conn),
             format_overrides=PgFormatOverrideRepository(conn),
+            missing_files=PgMissingFileListingRepository(conn),
         )
         self.catalog = CatalogRepos(
             artists=PgArtistRepository(conn),
@@ -155,6 +159,7 @@ class RepositoryFactory:
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
         self.format_overrides = self.library.format_overrides
+        self.missing_files = self.library.missing_files
         self.mapping_rules = self.system.mapping_rules
         self.task_progress = self.system.task_progress
         self.musicbrainz_cache = self.system.musicbrainz_cache
@@ -187,3 +192,18 @@ def recalc_repos(db_url: str) -> Iterator[RecalcRepos]:
             library_files=PgLibraryFileRepository(conn),
             commit=conn.commit,
         )
+
+
+def reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
+    """The port bundle missing-file folds and deletes write through, on *repos*' connection.
+
+    Composition root, beside recalc_repos (AUD-054): the scan task and the Missing
+    Files endpoints build it here instead of each wiring it by hand.
+    """
+    return ReconciliationRepos(
+        files=repos.library_files,
+        matches=repos.matches,
+        works=repos.works,
+        song_masters=repos.song_masters,
+        format_overrides=repos.format_overrides,
+    )

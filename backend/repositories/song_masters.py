@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from backend.domain.curation import SongMaster
 
@@ -21,6 +22,11 @@ class SongMasterRepository(ABC):
     @abstractmethod
     def delete_by_work(self, work_id: str) -> None:
         """Remove the work's song master, if it has one."""
+        ...
+
+    @abstractmethod
+    def delete_for_file(self, file_id: UUID) -> list[str]:
+        """Delete every master whose preferred file this is; the works they belonged to."""
         ...
 
     @abstractmethod

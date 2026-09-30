@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
+import { MISSING_FILES_KEY } from "@/api/missing";
 import { useProgressStore } from "@/store/progressStore";
 import type { LibraryStatus } from "@/lib/schemas/library";
 
@@ -20,13 +21,16 @@ export function useLibraryStatus() {
 
   useEffect(() => {
     if (!isScanning) return;
-    void queryClient.invalidateQueries({ queryKey: LIBRARY_STATUS_KEY });
-    const id = setInterval(() => {
+    // The missing count shown beside the status changes as the scan marks files missing.
+    const refresh = () => {
       void queryClient.invalidateQueries({ queryKey: LIBRARY_STATUS_KEY });
-    }, 2000);
+      void queryClient.invalidateQueries({ queryKey: MISSING_FILES_KEY });
+    };
+    refresh();
+    const id = setInterval(refresh, 2000);
     return () => {
       clearInterval(id);
-      void queryClient.invalidateQueries({ queryKey: LIBRARY_STATUS_KEY });
+      refresh();
     };
   }, [isScanning, queryClient]);
 

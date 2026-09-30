@@ -8,6 +8,7 @@ import structlog
 
 from backend.config import get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import LogCategory, TaskType
 from backend.services.library_enrichment_service import (
@@ -18,6 +19,7 @@ from backend.services.library_enrichment_service import (
 )
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
 
@@ -73,6 +75,7 @@ def library_enrichment_task() -> dict[str, int]:
     total_failed = 0
     processed = 0
     total = 0
+    task_id = ""
 
     config = TaskRunConfig(
         task_type=TaskType.LIBRARY_ENRICHMENT,
@@ -86,6 +89,7 @@ def library_enrichment_task() -> dict[str, int]:
     )
 
     with task_run(settings.database_url, config) as handle:
+        task_id = handle.task_id
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
             cache_repo = PgMusicBrainzCacheRepository(conn)
@@ -227,9 +231,23 @@ def library_enrichment_task() -> dict[str, int]:
         failed=total_failed,
     )
 
-    # Fire-and-forget: trigger MB enhancement pass
+    # Fire-and-forget: trigger MB enhancement pass. Guarded (AUD-R011
+    # decision 1): this task's own run already reported COMPLETED above (by
+    # `task_run` on `with`-block exit), so a downstream enqueue failure must
+    # not escape unreported. `task_run`'s progress_conn is already closed at
+    # this point, so a fresh short-lived autocommit connection is opened
+    # just for this guarded enqueue's failure log — kept separate from (and
+    # after) the envelope on purpose, so `_task_run.py`'s contract is
+    # untouched and today's COMPLETED-before-enqueue order is preserved.
     from backend.tasks.mb_enrichment_tasks import mb_enrichment_task
 
-    mb_enrichment_task()
+    with connect_sync(settings.database_url, autocommit=True) as log_conn:
+        enqueue_or_log(
+            mb_enrichment_task,
+            task_name="mb_enrichment_task",
+            caller_task_id=task_id,
+            log_category=LogCategory.ENRICHMENT,
+            sys_log_repo=PgSystemLogRepository(log_conn),
+        )
 
     return {"enriched": total_enriched, "failed": total_failed}

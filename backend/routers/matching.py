@@ -82,6 +82,7 @@ _MAX_FAILED_PLAYLIST_IDS_IN_RESPONSE: int = 50
 
 
 _USER_UNMATCHED: str = ReasonCode.USER_UNMATCHED.value
+_LIBRARY_FILE_REMOVED: str = ReasonCode.LIBRARY_FILE_REMOVED.value
 
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
 # bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
@@ -146,11 +147,13 @@ artist_bucket AS (
                ELSE 'blocked'
            END AS bucket,
            -- Likely = worth a curator's time by default: a review item with a
-           -- guess at the presentation floor, or something the curator
-           -- unmatched (unmatch deletes the match rows, so it has no score,
-           -- and the artist must not vanish from under them).
+           -- guess at the presentation floor, or one whose match was taken away:
+           -- by the curator (unmatch) or by deleting its missing library file.
+           -- Both delete the match rows, so it has no score, and the artist must
+           -- not vanish from the default queue.
            COALESCE(bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
-                            OR ib.reason_code = '{_USER_UNMATCHED}'), FALSE)
+                            OR ib.reason_code IN ('{_USER_UNMATCHED}',
+                                                  '{_LIBRARY_FILE_REMOVED}')), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
                AS likely
     FROM artist_base a

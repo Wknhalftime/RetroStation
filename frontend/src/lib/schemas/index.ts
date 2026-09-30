@@ -1,6 +1,7 @@
 export * from "./stations";
 export * from "./playlists";
 export * from "./library";
+export * from "./missing";
 export * from "./artists";
 export * from "./works";
 export * from "./matches";

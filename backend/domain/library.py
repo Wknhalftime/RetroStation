@@ -105,6 +105,9 @@ class LibraryFile:
     # stored MD5; library_hash_backfill_task fills the rest. None until then,
     # and for formats that have none.
     audio_hash: AudioHash | None = None
+    # When the file went missing: set by mark_missing, cleared whenever the row is
+    # PRESENT again (the upsert, relocate). None while the file is on disk.
+    missing_since: datetime | None = None
     audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 
@@ -187,3 +190,144 @@ class MissingFileReconciliation:
     ambiguous: int
     unmatched: int
     masters_repicked: int
+
+
+@dataclass(frozen=True)
+class MissingFileRow:
+    """One missing row as the Missing Files page lists it."""
+
+    id: UUID
+    file_path: str
+    artist_name: str | None
+    track_title: str | None
+    release_title: str | None
+    missing_since: datetime | None
+    work_id: str | None
+    work_title: str | None
+    # Identity matches that still name this row: deleting it releases them.
+    match_count: int
+    # Whether the row's work still has a file on disk.
+    work_has_present_file: bool
+
+
+@dataclass(frozen=True)
+class MissingFileListing:
+    """A page of missing rows, with totals over every missing row."""
+
+    rows: tuple[MissingFileRow, ...]
+    total: int
+    total_match_count: int
+
+
+@dataclass(frozen=True)
+class MissingFileCandidate:
+    """A present file that could take over a missing row."""
+
+    id: UUID
+    file_path: str
+
+
+@dataclass(frozen=True)
+class MissingFileEntry:
+    """A listed missing row and the present files reconciliation would accept for it."""
+
+    row: MissingFileRow
+    candidates: tuple[MissingFileCandidate, ...]
+
+
+@dataclass(frozen=True)
+class MissingFilePage:
+    """A page of the Missing Files list, with totals over every missing row."""
+
+    entries: tuple[MissingFileEntry, ...]
+    total: int
+    total_match_count: int
+
+
+class MissingFileError(LibraryError):
+    """Base class for errors about missing library rows."""
+
+
+class InvalidMissingFileSelectionError(MissingFileError):
+    """A deletion must name either some rows or every row, not both or neither."""
+
+
+class MissingFileChangedError(MissingFileError):
+    """A row read as missing was no longer missing when its delete ran.
+
+    A concurrent scan restored it after its references were detached, so the
+    caller must roll back everything the deletion did.
+    """
+
+
+@dataclass(frozen=True)
+class MissingFileSelection:
+    """Which missing rows to delete: these ids, or every missing row."""
+
+    ids: tuple[UUID, ...] = ()
+    every_row: bool = False
+
+    def __post_init__(self) -> None:
+        if self.every_row == bool(self.ids):
+            raise InvalidMissingFileSelectionError("give either ids or every_row")
+
+
+@dataclass(frozen=True)
+class MissingFileDeletion:
+    """What a deletion did.
+
+    ``matches_released``: identity matches deleted with the rows; each identity
+    left with no match went back to review. ``skipped``: ids no longer missing
+    (restored or folded since they were listed) or unknown.
+    """
+
+    deleted: int
+    matches_released: int
+    skipped: int
+
+
+@dataclass(frozen=True)
+class MissingFilePurge:
+    """What an after-scan purge deleted, and the unreplaced rows it held back.
+
+    ``deleted``, ``matches_released`` and ``skipped`` as in MissingFileDeletion.
+    ``awaiting_fingerprint``: rows with an audio fingerprint, kept while a present
+    file still waits for one (the backfill may yet fold them). ``still_on_disk``: rows
+    whose file exists after all, or whose check the disk refused (the walk missed
+    them). ``unreadable_folder``: rows whose folder is there but could not be listed
+    (the walk may have skipped them, not lost them). ``deleted_paths``: the deleted
+    rows' paths, in path order, for the audit log.
+    """
+
+    deleted: int
+    matches_released: int
+    skipped: int
+    awaiting_fingerprint: int
+    still_on_disk: int
+    unreadable_folder: int
+    deleted_paths: tuple[str, ...] = ()
+
+    @property
+    def held_back(self) -> int:
+        """Unreplaced rows the purge kept, for any of its reasons."""
+        return self.awaiting_fingerprint + self.still_on_disk + self.unreadable_folder
+
+
+class MissingFileNotFoundError(MissingFileError):
+    """No missing row has this id (it came back, or was folded or deleted)."""
+
+
+class RemapTargetNotFoundError(MissingFileError):
+    """The chosen target file does not exist."""
+
+
+class RemapTargetNotPresentError(MissingFileError):
+    """The chosen target file is itself missing from disk."""
+
+
+class RemapTargetUngroupedError(MissingFileError):
+    """The chosen target has no work yet, so the moved matches would lose theirs."""
+
+
+# User setting holding a PurgeMissingPolicy value.
+PURGE_MISSING_SETTING = "library.purge_missing"

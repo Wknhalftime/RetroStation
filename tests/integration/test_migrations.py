@@ -3,12 +3,17 @@ import pytest
 
 
 def test_all_migrations_applied(migrated_db: str) -> None:
+    """Every migration file is applied, in order. Each PR checks its own migration in its own
+    test file, so adding a migration never needs an edit here."""
+    from backend.db.migrations import MIGRATIONS_DIR
+
     with psycopg.connect(migrated_db) as conn:
-        rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-    versions = [r[0] for r in rows]
-    assert len(versions) == 30
-    assert versions[0].startswith("0001")
-    assert versions[-1].startswith("0030")
+        rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+    versions = sorted(r[0] for r in rows)
+    stems = sorted(p.stem for p in MIGRATIONS_DIR.glob("*.sql"))
+
+    assert stems, f"no migration files in {MIGRATIONS_DIR}"
+    assert versions == stems
 
 
 def test_path_lower_index_exists(migrated_db: str) -> None:

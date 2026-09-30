@@ -16,6 +16,7 @@ capture the full interleaved row sequence for snapshotting.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +24,7 @@ import httpx
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
+from tests.fakes.system_logs import FakeSystemLogRepository
 from tests.tasks._lifecycle_recording import (
     FlakyProgressRepo,
     LifecycleEvent,
@@ -226,11 +228,15 @@ def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_reco
     _mb_cls: MagicMock,
     snapshot: SnapshotAssertion,
 ) -> None:
-    """`mb_enrichment_task()` is called unguarded AFTER library_enrichment's
-    own try/except/finally has exited (progress_conn already closed). An
-    exception from it must propagate out of `library_enrichment_task`
-    uncaught, WITHOUT library_enrichment ever writing a FAILED row for its
-    own (successfully completed) envelope.
+    """`mb_enrichment_task()` is called AFTER library_enrichment's own
+    try/except/finally has exited (progress_conn already closed). Since
+    AUD-R011 decision 1, that call is guarded by `enqueue_or_log`, but only
+    for the real SqliteHuey enqueue-failure type (`sqlite3.Error`) — see
+    `test_mb_enrichment_enqueue_failure_is_logged_and_does_not_propagate`
+    for that case. An `httpx.HTTPError` (a pipeline-stage failure, not an
+    enqueue failure) is NOT one of those, so it still propagates out of
+    `library_enrichment_task` uncaught, WITHOUT library_enrichment ever
+    writing a FAILED row for its own (successfully completed) envelope.
     """
     events: list[LifecycleEvent] = []
     mock_connect.side_effect = _fake_connect_factory()  # zero pending work
@@ -253,6 +259,62 @@ def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_reco
         "the downstream mb_enrichment_task failure is not its FAILED"
     )
     assert normalized == snapshot
+
+
+@_Patched.apply
+def test_mb_enrichment_enqueue_failure_is_logged_and_does_not_propagate(
+    _task_run_connect: MagicMock,
+    mock_connect: MagicMock,
+    _enrich_recording: MagicMock,
+    _enrich_release: MagicMock,
+    mock_progress_cls: MagicMock,
+    mock_sys_log_cls: MagicMock,
+    _cache_cls: MagicMock,
+    _repo_cls: MagicMock,
+    _mb_cls: MagicMock,
+) -> None:
+    """AUD-R011 decision 1: a real SqliteHuey enqueue failure (`sqlite3.Error`)
+    calling `mb_enrichment_task()` is the caller's own problem to report. It
+    must be logged as an ERROR SystemLog on library_enrichment's own
+    task_id, and must NOT propagate out of `library_enrichment_task` —
+    unlike the non-enqueue `httpx.HTTPError` case above, which still does.
+    """
+    events: list[LifecycleEvent] = []
+    mock_connect.side_effect = _fake_connect_factory()  # zero pending work
+    mock_progress_cls.return_value = OrderedProgressRepo(events)
+    mock_sys_log_cls.return_value = OrderedSystemLogRepo(events)
+
+    enqueue_failure_log = FakeSystemLogRepository()
+
+    with (
+        patch(
+            "backend.tasks.mb_enrichment_tasks.mb_enrichment_task",
+            MagicMock(side_effect=sqlite3.OperationalError("database is locked")),
+        ),
+        patch(
+            "backend.tasks.library_enrichment_tasks.PgSystemLogRepository",
+            return_value=enqueue_failure_log,
+        ),
+    ):
+        from backend.tasks.library_enrichment_tasks import library_enrichment_task
+
+        # Must NOT raise: the caller owns the handoff and keeps COMPLETED.
+        result = library_enrichment_task.call_local()
+
+    assert result == {"enriched": 0, "failed": 0}
+    normalized = normalize_events(events)
+    statuses = [e["status"] for e in normalized if e["kind"] == "progress"]
+    assert statuses == ["running", "completed"], (
+        "library_enrichment's own envelope must show a clean COMPLETED even "
+        "though the downstream enqueue failed"
+    )
+
+    enqueue_failed_logs = [
+        log for log in enqueue_failure_log.all if log.message == "mb_enrichment_task_enqueue_failed"
+    ]
+    assert len(enqueue_failed_logs) == 1
+    assert enqueue_failed_logs[0].details is not None
+    assert enqueue_failed_logs[0].details["error"] == "database is locked"
 
 
 # ---------------------------------------------------------------------------

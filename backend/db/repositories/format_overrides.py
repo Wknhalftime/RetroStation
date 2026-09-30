@@ -94,6 +94,11 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
         """
         self._conn.execute("DELETE FROM format_overrides WHERE id = %s", (override_id,))
 
+    def delete_for_file(self, file_id: UUID) -> None:
+        self._conn.execute(
+            "DELETE FROM format_overrides WHERE preferred_file_id = %s", (str(file_id),)
+        )
+
     def move_to_work(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
         """Re-key *from_work_id*'s overrides of *file_id* onto *to_work_id*.
 

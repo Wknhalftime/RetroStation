@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,13 +18,17 @@ from backend.domain.enums import (
     EnrichmentStatus,
     LogCategory,
     LogLevel,
+    PurgeMissingPolicy,
     TaskStatus,
     TaskType,
 )
 from backend.domain.library import (
+    PURGE_MISSING_SETTING,
     LibraryFile,
     LibraryQuarantine,
+    MissingFileChangedError,
     MissingFilePlan,
+    MissingFilePurge,
     MissingFileReconciliation,
 )
 from backend.domain.system import SystemLog, TaskProgress
@@ -41,14 +46,20 @@ from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
     apply_missing_file_move,
     plan_for_library,
+    purge_unmatched_missing,
     repick_stranded_masters,
 )
-from backend.services.repository_factory import RepositoryFactory
+from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
 
 COMMIT_CHUNK_SIZE = 100
+# The missing_files_purged log names this many deleted paths and counts the rest.
+PURGE_LOG_PATH_LIMIT = 50
+# Keys under which a scan's COMPLETED progress and scan_completed log carry purge counts.
+PURGE_COUNT_KEYS = ("missing_purged", "purge_matches_released", "purge_held_back")
 
 
 def apply_missing_file_moves(
@@ -83,16 +94,6 @@ def apply_missing_file_moves(
     return folded, failed, stale
 
 
-def _reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
-    return ReconciliationRepos(
-        files=repos.library_files,
-        matches=repos.matches,
-        works=repos.works,
-        song_masters=repos.song_masters,
-        format_overrides=repos.format_overrides,
-    )
-
-
 def reconcile_missing_after_scan(
     library_conn: psycopg.Connection[Any],
     repos: RepositoryFactory,
@@ -104,7 +105,7 @@ def reconcile_missing_after_scan(
     skipped on its own; a failure outside one fold (planning, the master
     sweep, the commit) rolls back the whole run and returns None.
     """
-    recon_repos = _reconciliation_repos(repos)
+    recon_repos = reconciliation_repos(repos)
     try:
         plan = plan_for_library(recon_repos.files)
         folded, failed, stale = apply_missing_file_moves(plan, library_conn, recon_repos)
@@ -131,6 +132,70 @@ def reconcile_missing_after_scan(
         masters_repicked=result.masters_repicked,
     )
     return result
+
+
+def _purge_policy(repos: RepositoryFactory) -> PurgeMissingPolicy:
+    """The library.purge_missing setting; NEVER when unset or unknown."""
+    setting = repos.user_settings.get(PURGE_MISSING_SETTING)
+    return PurgeMissingPolicy.from_setting(setting.value if setting else None)
+
+
+def purge_missing_after_scan(
+    library_conn: psycopg.Connection[Any],
+    repos: RepositoryFactory,
+    root: Path,
+    walk_saw_files: bool,
+) -> MissingFilePurge | None:
+    """With library.purge_missing = after_scan, delete missing rows nothing replaces.
+
+    Skipped when the walk saw no files (probably an unmounted drive), as
+    mark_unseen_missing is. Its own transaction, setting read included: a
+    refusal, or a row a concurrent scan restored, rolls back only the purge and
+    never fails the scan it follows.
+    """
+    if not walk_saw_files:
+        return None
+    try:
+        if _purge_policy(repos) != PurgeMissingPolicy.AFTER_SCAN:
+            return None
+        result = purge_unmatched_missing(
+            str(root), reconciliation_repos(repos), repos.broadcast_identities
+        )
+        library_conn.commit()
+    except (psycopg.Error, MissingFileChangedError):
+        library_conn.rollback()
+        logger.warning("missing_purge_failed", exc_info=True)
+        return None
+    _log_purge(result)
+    return result
+
+
+def _log_purge(result: MissingFilePurge) -> None:
+    """Log what the purge did: its counts, and the first deleted paths as an audit trail."""
+    logger.info(
+        "missing_files_purged",
+        deleted=result.deleted,
+        matches_released=result.matches_released,
+        awaiting_fingerprint=result.awaiting_fingerprint,
+        still_on_disk=result.still_on_disk,
+        unreadable_folder=result.unreadable_folder,
+        deleted_paths=list(result.deleted_paths[:PURGE_LOG_PATH_LIMIT]),
+        deleted_paths_not_logged=max(0, len(result.deleted_paths) - PURGE_LOG_PATH_LIMIT),
+    )
+
+
+def purge_counts(result: MissingFilePurge) -> dict[str, int]:
+    """The purge's counts under the keys a scan reports them with (PURGE_COUNT_KEYS)."""
+    return {
+        "missing_purged": result.deleted,
+        "purge_matches_released": result.matches_released,
+        "purge_held_back": result.held_back,
+    }
+
+
+def _purge_details(progress: dict[str, object]) -> dict[str, object]:
+    """The purge counts a scan's final progress carries, for its scan_completed log."""
+    return {key: progress[key] for key in PURGE_COUNT_KEYS if key in progress}
 
 
 def _row_to_group(
@@ -351,7 +416,11 @@ def _run_scan(
         logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
 
     # Successors need their work (grouping above) before rows fold into them.
-    reconcile_missing_after_scan(library_conn, repos)
+    if reconcile_missing_after_scan(library_conn, repos) is not None:
+        # Only after a reconciliation that ran: what it could not fold may be purged.
+        purge = purge_missing_after_scan(library_conn, repos, root, walk_saw_files=bool(seen_paths))
+        if purge is not None:
+            last_progress.update(purge_counts(purge))
 
     return files_written, quarantine_written, last_progress
 
@@ -443,7 +512,11 @@ def library_scan_task(root_path: str) -> str:
                 level=LogLevel.INFO,
                 message="scan_completed",
                 trace_id=task_id,
-                details={"files_indexed": files_written, "quarantined": quarantine_written},
+                details={
+                    "files_indexed": files_written,
+                    "quarantined": quarantine_written,
+                    **_purge_details(last_progress),
+                },
             )
         )
 
@@ -454,7 +527,13 @@ def library_scan_task(root_path: str) -> str:
             quarantined=quarantine_written,
         )
 
-        # Fire-and-forget: chain into enrichment if any files were written
+        # Fire-and-forget: chain into enrichment if any files were written.
+        # Each enqueue is guarded independently (AUD-R011 decision 1): this
+        # scan's own run already reported COMPLETED above, so a downstream
+        # enqueue failure must not retroactively flip it to FAILED. The
+        # caller owns the handoff — an enqueue failure is logged on this
+        # scan's own task_id and the second enqueue is still attempted even
+        # if the first one failed.
         if files_written > 0:
             from backend.tasks.library_enrichment_tasks import library_enrichment_task
             from backend.tasks.library_hash_backfill_tasks import library_hash_backfill_task
@@ -463,8 +542,20 @@ def library_scan_task(root_path: str) -> str:
             # short next to enrichment's MusicBrainz lookups. Until it finishes,
             # move detection falls back to size + mtime for MP3s and FLACs
             # without a stored MD5. A no-op when nothing is waiting.
-            library_hash_backfill_task()
-            library_enrichment_task()
+            enqueue_or_log(
+                library_hash_backfill_task,
+                task_name="library_hash_backfill_task",
+                caller_task_id=task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=sys_log_repo,
+            )
+            enqueue_or_log(
+                library_enrichment_task,
+                task_name="library_enrichment_task",
+                caller_task_id=task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=sys_log_repo,
+            )
 
     except Exception as exc:
         if library_conn is not None:
@@ -492,7 +583,7 @@ def library_scan_task(root_path: str) -> str:
                         level=LogLevel.ERROR,
                         message="scan_failed",
                         trace_id=task_id,
-                        details={"error": str(exc)},
+                        details={"error": str(exc), "traceback": traceback.format_exc()},
                     )
                 )
         raise
