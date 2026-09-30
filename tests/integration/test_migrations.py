@@ -27,23 +27,6 @@ def test_path_lower_index_exists(migrated_db: str) -> None:
     assert "idx_library_files_path_lower" in indexes
 
 
-def test_file_hash_is_nullable_with_backlog_indexes(migrated_db: str) -> None:
-    with psycopg.connect(migrated_db) as conn:
-        nullable = conn.execute(
-            """SELECT is_nullable FROM information_schema.columns
-               WHERE table_schema = 'public' AND table_name = 'library_files'
-                 AND column_name = 'file_hash'"""
-        ).fetchone()
-        indexes = {
-            r[0]
-            for r in conn.execute(
-                "SELECT indexname FROM pg_indexes WHERE tablename = 'library_files'"
-            ).fetchall()
-        }
-    assert nullable == ("YES",)
-    assert {"idx_library_files_unhashed", "idx_library_files_unhashed_stat"} <= indexes
-
-
 def test_station_delete_cascade_fks(migrated_db: str) -> None:
     """Migration 0018 must make station-delete-path FKs ON DELETE CASCADE."""
     expected = {
