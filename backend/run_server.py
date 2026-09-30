@@ -6,16 +6,28 @@ loop *policy* is not enough because uvicorn passes a ``loop_factory`` to
 ``asyncio.run()``, bypassing the policy entirely.
 
 Fix: pass ``loop="none"`` so uvicorn defers to the policy, then set the policy
-to WindowsSelectorEventLoopPolicy.
+to WindowsSelectorEventLoopPolicy. The host and port come from the settings (D24).
 """
 
 import asyncio
 import sys
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+import uvicorn
 
-import uvicorn  # noqa: E402
+from backend.config import get_settings
+
+
+def main() -> None:
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    settings = get_settings()
+    uvicorn.run(
+        "backend.main:app",
+        host=str(settings.server_host),
+        port=settings.server_port,
+        loop="none",
+    )
+
 
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="127.0.0.1", port=8010, loop="none")
+    main()
