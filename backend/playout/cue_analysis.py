@@ -80,11 +80,11 @@ class AnalyserConfig:
                 "AnalyserConfig.exe must not contain a backslash followed by a digit "
                 f"(Liquidsoap 2.4.5 crashes at startup): {self.exe}"
             )
-        if self.startup_timeout_s <= 0:
+        if not self.startup_timeout_s > 0:  # NaN included
             raise ValueError(
                 f"AnalyserConfig.startup_timeout_s must be > 0, got {self.startup_timeout_s}"
             )
-        if self.per_file_timeout_s <= 0:
+        if not self.per_file_timeout_s > 0:  # NaN included
             raise ValueError(
                 f"AnalyserConfig.per_file_timeout_s must be > 0, got {self.per_file_timeout_s}"
             )
@@ -225,6 +225,16 @@ class _Reader:
         return 0 if self.begun is None else self.begun + 1
 
     def _begin(self, body: str, expected: int) -> None:
+        """Record that file ``expected`` has begun; the one before it must have settled.
+
+        A begin that skips a file, repeats one, or comes before the previous file's result
+        breaks the protocol: that file would otherwise be in no outcome at all.
+        """
+        if self.begun is not None and not self.settled(self.begun):
+            raise AnalyserError(
+                f"{_BEGIN} on output line {self._line_no} before a result for file "
+                f"{self.begun}: {body!r}"
+            )
         if body != str(expected) or expected >= len(self._files):
             raise AnalyserError(
                 f"{_BEGIN} on output line {self._line_no} must be {expected} "
@@ -297,12 +307,14 @@ def analyse_batch(
     listing = _write_listing(files, config.cache_dir)
     try:
         process = _start(listing, base_env, config)
-        assert process.stdout is not None  # stdout=PIPE
-        reader = _Reader(process.stdout, files, config)
+        reader: _Reader | None = None
         try:
+            assert process.stdout is not None  # stdout=PIPE
+            reader = _Reader(process.stdout, files, config)  # starts the pump thread
             reader.run()
         finally:
-            code = _reap(process, _EXIT_WAIT_S if reader.ended else 0.0)
+            output_ended = reader is not None and reader.ended
+            code = _reap(process, _EXIT_WAIT_S if output_ended else 0.0)
     finally:
         listing.unlink(missing_ok=True)
     if reader.begun is None:
