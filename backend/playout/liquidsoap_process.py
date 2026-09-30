@@ -244,7 +244,8 @@ class RunningEngine:
     """A session engine whose harbor answered 200: its pid, port, stop and audio.
 
     ``stop`` kills the process if it is still alive and returns at once; it never waits,
-    because it is called from the event loop.
+    because it is called from the event loop. It does not close ``upstream``: callers must
+    call ``upstream.close()`` as well.
     """
 
     pid: int
@@ -262,12 +263,19 @@ def _stopper(process: subprocess.Popen[bytes]) -> Callable[[], None]:
 
 
 def _reap(process: subprocess.Popen[bytes]) -> str:
-    """Kill ``process`` and wait for its exit code (blocking: run it in a worker thread)."""
-    process.kill()
+    """Kill ``process`` if alive and wait for its exit code (blocking: use a worker thread).
+
+    The text says whether we killed it (``engine killed (exit code N)``) or it had exited by
+    itself (``engine exit code N``).
+    """
+    killed = process.poll() is None
+    if killed:
+        process.kill()
     try:
-        return f"engine exit code {process.wait(timeout=_KILL_WAIT_S)}"
+        code = process.wait(timeout=_KILL_WAIT_S)
     except subprocess.TimeoutExpired:
         return f"engine process {process.pid} was killed but had not exited after {_KILL_WAIT_S} s"
+    return f"engine killed (exit code {code})" if killed else f"engine exit code {code}"
 
 
 def _abandon(process: subprocess.Popen[bytes]) -> None:
@@ -365,13 +373,20 @@ async def start_ready_engine(
     """Start a session engine and wait until its harbor serves audio (D37).
 
     An attempt that fails to start, exits, or is not ready within ``engine.ready_timeout_s``
-    is killed, reaped in a worker thread, and retried once on another port. Raises
-    ``EngineStartError`` naming both failures.
+    is killed, reaped in a worker thread, and retried once on another port. Apart from
+    cancellation, only ``EngineStartError`` escapes: it names both failures, or the first
+    failure and why no port was found for the retry.
     """
     first = await _attempt(assign, base_env, endpoint, engine)
     if isinstance(first, RunningEngine):
         return first
-    retry = replace(endpoint, harbor_port=_another_port(endpoint.harbor_port))
+    try:
+        retry_port = _another_port(endpoint.harbor_port)
+    except OSError as no_port:
+        raise EngineStartError(
+            f"session {endpoint.session_id}: {first}; no port to retry on: {no_port}"
+        ) from no_port
+    retry = replace(endpoint, harbor_port=retry_port)
     second = await _attempt(assign, base_env, retry, engine)
     if isinstance(second, RunningEngine):
         return second

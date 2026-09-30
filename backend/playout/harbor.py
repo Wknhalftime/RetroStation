@@ -15,7 +15,7 @@ from backend.playout.errors import EngineStartError
 _READ_CHUNK = 16 * 1024
 _RETRY_S = 0.05  # loopback answers in about 1 ms; the deadline bounds the attempts
 _HEAD_END = b"\r\n\r\n"
-_MAX_HEAD = 64 * 1024
+_MAX_HEAD = 64 * 1024  # the reader's limit: a longer head is LimitOverrunError
 
 
 @dataclass(frozen=True)
@@ -36,20 +36,21 @@ def _status_of(head: bytes) -> int | None:
 async def _answer(port: int) -> Upstream | None:
     """One ``GET /stream``: the upstream if the harbor answers 200, else ``None``.
 
-    A refused or reset connect, a dropped connection or any other status is ``None``. The
-    connection is closed on every path but a 200, including when the caller's deadline
-    cancels us.
+    A connect that fails (refused, reset, or any other ``OSError`` such as a transient
+    WSAENOBUFS), a dropped connection or any other status is ``None``: the caller's deadline
+    and ``alive()`` bound the retries. The connection is closed on every path but a 200,
+    including when the caller's deadline cancels us.
     """
     try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    except ConnectionError:  # refused, reset or aborted: not listening yet, or dying
+        reader, writer = await asyncio.open_connection("127.0.0.1", port, limit=_MAX_HEAD)
+    except OSError:  # not listening yet, dying, or a transient socket failure
         return None
     upstream: Upstream | None = None
     try:
         writer.write(b"GET /stream HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         await writer.drain()
         head = await reader.readuntil(_HEAD_END)
-        if _status_of(head[:_MAX_HEAD]) == 200:
+        if _status_of(head) == 200:
             upstream = Upstream(read=lambda: reader.read(_READ_CHUNK), close=writer.close)
     except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
         return None
