@@ -1,20 +1,23 @@
 """Per-session state: a memoised day loader, and the mutable ``StreamSession`` it belongs to.
 
 Every later read of a session's day is served from this memo (carried item C9), so the day
-is read at most once per session; the load happens under a lock because session state is
-otherwise only ever touched on the event loop (this is the one exception, per the global
-constraints: "Only the day memo is touched off the event loop").
+is read at most once per day per session; the load happens under a lock because session
+state is otherwise only ever touched on the event loop (this is the one exception, per the
+global constraints: "Only the day memo is touched off the event loop").
 """
 
 from __future__ import annotations
 
+import secrets
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from backend.domain.streaming import DayLoader, ItemRef, ScheduleItem
+from backend.domain.streaming import DayLoader, ItemRef, Landing, ScheduleItem
 from backend.playout.liquidsoap_process import RunningEngine
+from backend.services.streaming.bookmarks import BookmarkKey
+from backend.services.streaming.payload import FinalClip
 
 __all__ = ["Assigned", "Committed", "StreamSession", "memoised_day_loader"]
 
@@ -44,25 +47,43 @@ class Assigned:
 
 @dataclass(frozen=True)
 class Committed:
-    """The position a ``started`` report has confirmed, with when it started."""
+    """The position a ``started`` report has confirmed, with when it started.
+
+    ``assigned`` is a regular item, or the sign-off clip (D26) once the schedule has
+    ended with one configured — a clip has no ``ItemRef``/``ScheduleItem`` to offer.
+    """
 
     seq: int
-    assigned: Assigned
+    assigned: Assigned | FinalClip
     started_at: datetime
 
 
 @dataclass
 class StreamSession:
-    """One listener's mutable state: assignments, the committed position, engine and end.
+    """One listener's mutable state: no behaviour, just the fields ``StreamService`` reads
+    and writes.
 
-    ``load_day`` is expected to already be memoised (``memoised_day_loader``). ``assigned``
-    maps seq to the item handed out for it, so "the same seq always returns the same item".
-    ``now_playing`` is the current now-playing text, once the started delay has elapsed.
+    ``load_day`` is expected to already be memoised (``memoised_day_loader``). ``token`` is
+    compared, with ``secrets.compare_digest``, against every ``item``/``started``/``failed``
+    call. ``bookmark_key`` is ``None`` for a keyless (D28) tune-in. ``landing`` and
+    ``clock_offset`` come from placement, which runs after admission (R1), so they start
+    ``None`` and are set once placement finishes. ``assigned`` maps seq to what was handed
+    out for it — an item, or the final clip — so "the same seq always returns the same
+    item"; ``end_seq`` is the end-of-schedule marker. ``stopped`` marks a session the
+    watchdog (or ``close``) has already stopped, so it is not frozen twice. ``now_playing``
+    is ``(shows_at, text)``: the query compares ``shows_at`` to the clock rather than the
+    record flipping itself, per CQRS.
     """
 
     load_day: DayLoader
-    assigned: dict[int, Assigned] = field(default_factory=dict)
+    opened_at: datetime
+    bookmark_key: BookmarkKey | None
+    token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    landing: Landing | None = None
+    clock_offset: timedelta | None = None
+    assigned: dict[int, Assigned | FinalClip] = field(default_factory=dict)
     committed: Committed | None = None
     end_seq: int | None = None
     engine: RunningEngine | None = None
-    now_playing: str = ""
+    now_playing: tuple[datetime, str] | None = None
+    stopped: bool = False

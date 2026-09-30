@@ -61,12 +61,26 @@ def item_payload(seq: int, item: ScheduleItem, offset_ms: int, timing: StreamTim
     if file is None:
         raise InvalidStreamValueError(f"item_payload: item {item.event_id} has no resolved file")
     cues = file.cues
-    cue_in_ms = (cues.cue_in_ms if cues is not None else 0) + offset_ms
-    cue_out_ms = cues.cue_out_ms if cues is not None else (file.duration_ms or 0)
-    fade_in_ms = cues.fade_in_ms if cues is not None else timing.default_fade_in_ms
-    fade_out_ms = cues.fade_out_ms if cues is not None else timing.default_fade_out_ms
-    start_next_ms = cues.start_next_ms if cues is not None else NO_CUES_START_NEXT_MS
-    gain_db = cues.gain_db if cues is not None else NO_CUES_GAIN_DB
+    if cues is None:
+        cue_in_ms = offset_ms
+        cue_out_ms = file.duration_ms or 0
+        fade_in_ms = timing.default_fade_in_ms
+        fade_out_ms = timing.default_fade_out_ms
+        start_next_ms = NO_CUES_START_NEXT_MS
+        gain_db = NO_CUES_GAIN_DB
+    else:
+        cue_in_ms = cues.cue_in_ms + offset_ms
+        cue_out_ms = cues.cue_out_ms
+        fade_in_ms = cues.fade_in_ms
+        fade_out_ms = cues.fade_out_ms
+        start_next_ms = cues.start_next_ms
+        gain_db = cues.gain_db
+    if cue_out_ms <= cue_in_ms:
+        raise InvalidStreamValueError(
+            f"item_payload: liq_cue_out ({cue_out_ms}) must be greater than liq_cue_in "
+            f"({cue_in_ms}); check file.duration_ms ({file.duration_ms!r}) against "
+            f"offset_ms ({offset_ms}) for item {item.event_id}"
+        )
     annotations = {
         "item_seq": str(seq),
         "liq_cue_in": _seconds(cue_in_ms),

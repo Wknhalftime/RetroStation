@@ -48,14 +48,11 @@ class BookmarkStore:
         return self._saved.get(key)
 
     def put(self, key: BookmarkKey, saved: SavedBookmark, now: datetime) -> None:
-        """Save ``saved`` under ``key``, dropping any other bookmark already past its clock."""
-        stale = [
-            other
-            for other, existing in self._saved.items()
-            if other != key and existing.bookmark.is_expired(now)
-        ]
-        for other in stale:
-            del self._saved[other]
+        """Save ``saved`` under ``key``.
+
+        ``now`` is currently unused (the audit cut prune-on-put as untraced behaviour); it
+        stays in the signature because the locked tests call ``put`` with it.
+        """
         self._saved[key] = saved
 
     def delete(self, key: BookmarkKey) -> None:
