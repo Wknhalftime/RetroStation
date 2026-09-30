@@ -9,11 +9,13 @@ and resuming (D11).
 Every test here moves the two clocks apart: ``elapse`` is real time passing (both clocks
 advance together), ``jump_wall`` is a DST change or a clock adjustment (only the wall clock
 moves). The one seam these tests name is the steady clock the service is given
-(``StreamPorts.steady``): without it the two clocks cannot be moved apart.
+(``StreamPorts.steady``): without it the two clocks cannot be moved apart. Bookmark expiry
+is placement, so it stays on the station (wall) clock (D47, user ruling 2026-09-30).
 """
 
 from __future__ import annotations
 
+import time
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,8 +23,10 @@ from pathlib import Path
 
 import pytest
 
+from backend.config import Settings
 from backend.domain.broadcast import BroadcastStation
 from backend.domain.streaming import ItemRef, Landing, ScheduleItem
+from backend.main import _stream_service
 from backend.services.streaming.bookmarks import BookmarkKey, BookmarkStore
 from backend.services.streaming.service import (
     StreamPorts,
@@ -205,6 +209,31 @@ async def test_a_resume_moves_forward_by_the_steady_time_away(
     assert landed.annotations["liq_cue_in"] == "70.000"  # 10 s heard + 60 s away
 
 
+async def test_spring_forward_expires_a_bookmark_less_than_an_hour_ahead(
+    steady_rig: SteadyRig,
+) -> None:
+    # D47 (user, 2026-09-30): bookmark expiry is placement, so it stays on the station (wall)
+    # clock. The landing song (06:35) is 30 min ahead of the clock (06:05, D15); 10 s heard
+    # puts expiry at station 06:35:10. The wall clock jumps an hour while 60 s pass: station
+    # 07:06:10 is past it, so the next tune-in goes by the clock instead of resuming.
+    rig = steady_rig.rig
+    items = [song("06:00:00"), song("06:35:00"), song("06:38:20"), song("07:06:00")]
+    rig.schedule.set_day(STATION, DAY, items)
+    rig.clock.now = datetime(2026, 3, 14, 6, 5)
+    first = await rig.open("car")
+    await rig.item(first, 0)
+    rig.started(first, 0)  # the 06:35 song, from the top
+    steady_rig.elapse(10)
+    rig.service.close(first)
+    steady_rig.jump_wall(SPRING_FORWARD)
+    steady_rig.elapse(60)
+    second = await rig.open("car")
+    landed = await rig.item(second, 0)
+    # A resume would be the 06:35 song at 70 s; the clock (07:06:10) is 10 s into 07:06.
+    assert landed.path == sent_path(items[3])
+    assert landed.annotations["liq_cue_in"] == "10.000"
+
+
 # ---- the wall clock still places the listener (guard against over-correcting) -------------
 
 
@@ -224,3 +253,18 @@ async def test_a_fresh_tune_in_lands_at_the_wall_clocks_time_of_day(
     landed = await rig.item(sid, 0)
     assert landed.path == sent_path(items[lands_on])
     assert landed.annotations["liq_cue_in"] == "60.000"
+
+
+# ---- the composition root wires the steady clock -------------------------------------------
+
+
+def test_the_app_times_sessions_on_the_steady_clock(tmp_path: Path) -> None:
+    # D47: "The steady clock is injected at the composition root (time.monotonic); a test
+    # locks that wiring." ``start_streaming`` needs an installed Liquidsoap to warm its script
+    # cache, so this builds the service the way it does, through the root's own builder,
+    # with a fake engine start and no database access (repositories open per use). The
+    # wiring is only observable on the service's ports: no session can be opened here
+    # without PostgreSQL and the wall clock is the real one, so nothing can move it apart.
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]  # pydantic-settings init arg
+    service = _stream_service(settings, EngineStarts(), tmp_path / "logs")
+    assert service._ports.steady is time.monotonic
