@@ -25,6 +25,7 @@ __all__ = [
     "SESSION_SCRIPT",
     "EngineConfig",
     "EngineStartError",
+    "PruneFailure",
     "RunningEngine",
     "ScriptCacheError",
     "SessionEndpoint",
@@ -83,19 +84,56 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def prune_session_logs(log_dir: Path, keep: int = SESSION_LOG_KEEP) -> None:
-    """Delete every ``*.log`` in ``log_dir`` past the newest ``keep`` (D35).
+type PruneFailure = Callable[[Path, OSError], None]
+"""Told about a log the prune had to leave: its path, and why."""
+
+
+def _leave_quietly(log: Path, error: OSError) -> None:
+    return None
+
+
+def prune_session_logs(
+    log_dir: Path, keep: int = SESSION_LOG_KEEP, on_error: PruneFailure = _leave_quietly
+) -> None:
+    """Delete every ``*.log`` in ``log_dir`` past the newest ``keep`` (D35, D46).
 
     A missing folder is a no-op. Files are ordered by ``(mtime, name)``, newest first;
     only ``*.log`` files are considered, so unrelated files in the folder are untouched.
+    The folder may change meanwhile: a log that vanishes (another pruner got there first,
+    or a link whose target is gone) is skipped, and a log that cannot be read or deleted
+    (in use elsewhere, or already pending deletion) is passed to ``on_error`` and left.
     """
     if not log_dir.is_dir():
         return
-    logs = sorted(
-        log_dir.glob("*.log"), key=lambda log: (log.stat().st_mtime, log.name), reverse=True
-    )
-    for stale in logs[keep:]:
-        stale.unlink()
+    aged: list[tuple[float, str, Path]] = []
+    with os.scandir(log_dir) as entries:
+        for entry in entries:
+            if not entry.name.endswith(".log"):
+                continue
+            mtime = _log_mtime(entry, on_error)
+            if mtime is not None:
+                aged.append((mtime, entry.name, Path(entry.path)))
+    aged.sort(reverse=True)
+    for _, _, stale in aged[keep:]:
+        _delete_log(stale, on_error)
+
+
+def _log_mtime(entry: os.DirEntry[str], on_error: PruneFailure) -> float | None:
+    """The log's modification time; None if it is gone or cannot be read now."""
+    try:
+        return entry.stat().st_mtime
+    except FileNotFoundError:  # vanished, or a link whose target is gone
+        return None
+    except PermissionError as unreadable:  # pending deletion
+        on_error(Path(entry.path), unreadable)
+        return None
+
+
+def _delete_log(log: Path, on_error: PruneFailure) -> None:
+    try:
+        log.unlink(missing_ok=True)  # another pruner may have deleted it first
+    except PermissionError as in_use:  # open elsewhere, or already pending deletion
+        on_error(log, in_use)
 
 
 @dataclass(frozen=True)

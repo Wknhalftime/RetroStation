@@ -1,7 +1,13 @@
+import asyncio
 import os
+import subprocess
 import sys
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from functools import partial
+from pathlib import Path
 
 import psycopg
 import structlog
@@ -10,14 +16,192 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout, TooManyRequests
 
-from backend.config import get_settings
+from backend.config import Settings, callback_base_url, get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
+from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
+from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
+from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.db.sync_conn import connect_sync
 from backend.logging_config import configure_logging
+from backend.playout.assets import ensure_stream_assets
+from backend.playout.liquidsoap_process import (
+    SESSION_SCRIPT,
+    EngineConfig,
+    RunningEngine,
+    ScriptCacheError,
+    SessionEndpoint,
+    prune_session_logs,
+    session_base_env,
+    start_ready_engine,
+    warm_script_cache,
+)
+from backend.routers import listen, stream_internal
 from backend.routers.v1 import router as v1_router
+from backend.services.streaming.bookmarks import BookmarkStore
+from backend.services.streaming.service import (
+    ReposFactory,
+    StreamPorts,
+    StreamRepos,
+    StreamService,
+    StreamServiceConfig,
+)
+from backend.services.streaming.watchdog import run_freeze_watchdog
 from backend.websocket import websocket_endpoint
 
 logger = structlog.get_logger()
+
+_WATCHDOG_INTERVAL_S = 5.0
+
+type EngineStarter = Callable[[SessionEndpoint], Awaitable[RunningEngine]]
+
+
+@dataclass(frozen=True)
+class StreamingRuntime:
+    """What the lifespan holds while streaming is on, and releases at shutdown."""
+
+    service: StreamService
+    close_job: Callable[[], None]
+    watchdog: asyncio.Task[None]
+
+
+def _engine_unavailable(reason: str, output: str = "") -> None:
+    """Streaming stays off; /listen answers 503 ``unavailable`` (D34)."""
+    logger.error("stream_engine_unavailable", reason=reason, output=output)
+
+
+def _log_prune_failure(path: Path, error: OSError) -> None:
+    logger.warning("stream_log_prune_failed", path=str(path), error=str(error))
+
+
+def _prune_logs(logs: Path) -> None:
+    """Keep the newest session logs (D35); a pruning error is logged, never raised (D46)."""
+    try:
+        prune_session_logs(logs, on_error=_log_prune_failure)
+    except OSError as error:  # the folder could not be listed, or a log failed otherwise
+        _log_prune_failure(logs, error)
+
+
+def _make_work_folders(work: Path) -> bool:
+    """Create the assets, cache and logs folders; False (logged) if one cannot be made."""
+    try:
+        for folder in (work / "assets", work / "cache", work / "logs"):
+            folder.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        _engine_unavailable("the streaming work folders could not be created", str(error))
+        return False
+    return True
+
+
+async def _prepared_engine(
+    ffmpeg: str, exe: Path, work: Path, base_env: dict[str, str]
+) -> EngineConfig | None:
+    """The engine, its filler and intro made and its script cache warm; None (logged) if
+    either cannot be prepared (spec: Engine "the app must warm it at startup"; D34)."""
+    try:
+        assets = ensure_stream_assets(ffmpeg, work / "assets")
+    except (subprocess.SubprocessError, OSError) as error:
+        _engine_unavailable("the filler and intro could not be generated", str(error))
+        return None
+    engine = EngineConfig(
+        exe=exe,
+        script=SESSION_SCRIPT,
+        cache_dir=work / "cache",
+        filler=assets.filler,
+        intro_sfx=assets.static_intro,
+    )
+    try:
+        await asyncio.to_thread(warm_script_cache, base_env, engine)
+    except (ScriptCacheError, subprocess.TimeoutExpired, OSError) as error:
+        _engine_unavailable("Liquidsoap's script cache could not be built", str(error))
+        return None
+    return engine
+
+
+def _stream_repos(database_url: str) -> ReposFactory:
+    """One connection per use, holding the repositories the stream service reads."""
+
+    @contextmanager
+    def opened() -> Iterator[StreamRepos]:
+        with connect_sync(database_url) as conn:
+            yield StreamRepos(
+                stations=PgBroadcastStationRepository(conn),
+                settings=PgUserSettingRepository(conn),
+                schedule=PgPlayableScheduleRepository(conn),
+            )
+
+    return opened
+
+
+def _stream_service(settings: Settings, start_engine: EngineStarter, logs: Path) -> StreamService:
+    """The stream service, reading PostgreSQL and calling back on the API's own bind (D24)."""
+    return StreamService(
+        StreamPorts(_stream_repos(settings.database_url), start_engine, datetime.now),
+        BookmarkStore(),
+        StreamServiceConfig(callback_base_url(settings.server_host, settings.server_port), logs),
+    )
+
+
+def _report_watchdog_end(watchdog: asyncio.Task[None]) -> None:
+    """The watchdog only ends by cancellation at shutdown; any other end is an error."""
+    if watchdog.cancelled():
+        return
+    error = watchdog.exception()
+    logger.error(
+        "stream_watchdog_died",
+        message="frozen sessions are no longer stopped",
+        error=repr(error),
+        exc_info=error,
+    )
+
+
+def _start_watchdog(service: StreamService) -> asyncio.Task[None]:
+    watchdog = asyncio.create_task(run_freeze_watchdog(service.stop_frozen, _WATCHDOG_INTERVAL_S))
+    watchdog.add_done_callback(_report_watchdog_end)
+    return watchdog
+
+
+async def start_streaming(settings: Settings) -> StreamingRuntime | None:
+    """Streaming when enabled and able; None, streaming off, otherwise (I5, D34, D35)."""
+    if not settings.stream_enabled:
+        return None
+    if sys.platform != "win32":
+        _engine_unavailable("streaming runs on Windows only (D5)")
+        return None
+    if settings.liquidsoap_path is None:
+        _engine_unavailable("LIQUIDSOAP_PATH (.env) is not set")
+        return None
+    work = settings.stream_work_dir
+    if not _make_work_folders(work):
+        return None
+    _prune_logs(work / "logs")
+    base_env = session_base_env(os.environ)
+    engine = await _prepared_engine(settings.ffmpeg_path, settings.liquidsoap_path, work, base_env)
+    if engine is None:
+        return None
+    # Lazy: windows_job raises ImportError off Windows, and this line is reached only on win32.
+    from backend.playout.windows_job import KillOnCloseJob
+
+    try:
+        job = KillOnCloseJob()
+    except OSError as error:
+        _engine_unavailable("the job that ends engines with the app was refused", str(error))
+        return None
+    start_engine = partial(start_ready_engine, job.assign, base_env, engine=engine)
+    service = _stream_service(settings, start_engine, work / "logs")
+    return StreamingRuntime(service, job.close, _start_watchdog(service))
+
+
+async def stop_streaming(runtime: StreamingRuntime | None) -> None:
+    """Stop the watchdog, close every session, then the job (its children die with it)."""
+    if runtime is None:
+        return
+    runtime.watchdog.cancel()
+    await asyncio.wait({runtime.watchdog})
+    try:
+        runtime.service.close_all()
+    finally:
+        runtime.close_job()
 
 
 @asynccontextmanager
@@ -62,9 +246,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             run_migrations(conn)
             conn.commit()
 
-    yield
+    app.state.server_host = settings.server_host
+    streaming = await start_streaming(settings)
+    app.state.stream_service = None if streaming is None else streaming.service
 
-    await close_pool()
+    try:
+        yield
+    finally:
+        await stop_streaming(streaming)
+        await close_pool()
 
 
 app = FastAPI(title="RetroStation", lifespan=lifespan)
@@ -104,6 +294,8 @@ app.add_exception_handler(PoolTimeout, _pool_saturation_handler)
 app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 
 app.include_router(v1_router)
+app.include_router(stream_internal.router)
+app.include_router(listen.router)
 
 
 @app.get("/health")
