@@ -200,14 +200,15 @@ def _day_loader(repos: ReposFactory, station_id: UUID) -> DayLoader:
 class _Schedule:
     """What a placement reads: the session's days, its year, the moment and the rules.
 
-    ``now`` is the wall clock, which places the listener; ``resumed_at`` is the bookmark's
-    ``left_at`` plus the steady time away (D47), the moment a resume walks forward to.
+    ``now`` is the wall clock, which places the listener; ``resume_to`` is the bookmark's
+    ``left_at`` plus the steady time away (D47), the moment a resume walks forward to,
+    or ``None`` when there is no bookmark or it has no elapsed-clock reading.
     """
 
     load_day: DayLoader
     year: int
     now: datetime
-    resumed_at: datetime
+    resume_to: datetime | None
     timing: StreamTiming
 
 
@@ -220,7 +221,8 @@ def _place(schedule: _Schedule, saved: SavedBookmark | None, forget: Callable[[]
     load_day, now, timing = schedule.load_day, schedule.now, schedule.timing
     if saved is not None and bookmark_still_valid(load_day, saved, now):
         try:
-            landing = resume(load_day, saved.bookmark, schedule.resumed_at, timing)
+            walk_to = now if schedule.resume_to is None else schedule.resume_to
+            landing = resume(load_day, saved.bookmark, walk_to, timing)
         except EndOfScheduleError:
             forget()  # the station has signed off since the listener left
             raise
@@ -281,8 +283,10 @@ def _playing_span(committed: Committed | None) -> PlayingSpan | None:
     return PlayingSpan(committed.started_at, span_ms - playing.offset_ms)
 
 
-def _left_at(session: StreamSession, now: datetime, elapsed_now: datetime) -> SavedBookmark | None:
-    """Where the listener was at ``now``: the committed item plus the time it has played
+def _left_at(
+    session: StreamSession, *, wall_now: datetime, elapsed_now: datetime
+) -> SavedBookmark | None:
+    """Where the listener was at ``wall_now``: the committed item plus the time it has played
     (D11, measured on the elapsed clock: D47), or the landing when nothing has started
     (D30); ``None`` if the session never finished opening (no engine), so a close during
     ``open`` bookmarks nothing."""
@@ -297,7 +301,7 @@ def _left_at(session: StreamSession, now: datetime, elapsed_now: datetime) -> Sa
     else:
         landing = session.landing
         item = _landing_item(session, landing)
-    bookmark = Bookmark(landing, item.logged_at, now, session.clock_offset)
+    bookmark = Bookmark(landing, item.logged_at, wall_now, session.clock_offset)
     return SavedBookmark(bookmark, item.event_id, left_elapsed=elapsed_now)
 
 
@@ -384,14 +388,15 @@ class StreamService:
 
     def frozen_sessions(self) -> list[str]:
         """Running sessions whose next ``started`` report is overdue (D31)."""
-        now = self._elapsed()
+        elapsed_now = self._elapsed()
         grace = self._config.freeze_grace
         return [
             session_id
             for session_id, session in self._sessions.items()
             if session.engine is not None
             and not session.stopped
-            and now >= freeze_deadline(session.opened_at, _playing_span(session.committed), grace)
+            and elapsed_now
+            >= freeze_deadline(session.opened_at, _playing_span(session.committed), grace)
         ]
 
     # ---- open ------------------------------------------------------------------------------
@@ -480,7 +485,7 @@ class StreamService:
             session.load_day,
             year,
             self._ports.clock(),
-            self._resumed_at(saved),
+            self._resume_to(saved),
             self._config.timing,
         )
         try:
@@ -489,11 +494,13 @@ class StreamService:
         finally:
             session.placed.set()
 
-    def _resumed_at(self, saved: SavedBookmark | None) -> datetime:
-        """The bookmark's ``left_at`` plus the steady time away (D11, D47); the wall clock
-        when there is no bookmark, or it carries no elapsed-clock reading."""
+    def _resume_to(self, saved: SavedBookmark | None) -> datetime | None:
+        """The bookmark's ``left_at`` plus the steady time away (D11, D47), the moment a
+        resume walks to; ``None`` with no bookmark. A bookmark with no elapsed-clock
+        reading is only ever hand-built (the service always records one): it gets
+        ``None`` too, and the placement walks it to the wall clock."""
         if saved is None or saved.left_elapsed is None:
-            return self._ports.clock()
+            return None
         return saved.bookmark.left_at + (self._elapsed() - saved.left_elapsed)
 
     def _forgetter(
@@ -637,11 +644,11 @@ class StreamService:
         assigned = self._reported(call, session)
         committed = session.committed
         if committed is None or call.seq > committed.seq:
-            now = self._elapsed()
-            session.committed = Committed(call.seq, assigned, now)
+            elapsed_now = self._elapsed()
+            session.committed = Committed(call.seq, assigned, elapsed_now)
             if isinstance(assigned, Assigned):  # the final clip has no title
                 title = f"{assigned.item.artist} - {assigned.item.title}"
-                session.now_playing = (now + self._config.now_playing_delay, title)
+                session.now_playing = (elapsed_now + self._config.now_playing_delay, title)
         self.stop_frozen()  # spec: the watchdog runs "on each started"
 
     def failed(self, call: ItemCall) -> None:
@@ -672,7 +679,7 @@ class StreamService:
             self._bookmarks.delete(key)  # D26
             return
         now = self._ports.clock()
-        saved = _left_at(session, now, self._elapsed())
+        saved = _left_at(session, wall_now=now, elapsed_now=self._elapsed())
         if saved is not None:
             self._bookmarks.put(key, saved, now)
 

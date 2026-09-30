@@ -39,7 +39,7 @@ class SavedBookmark:
     left_elapsed: datetime | None = field(default=None, compare=False)
     """When the listener left, on the service's elapsed-time clock (D47), so the time away is
     measured on it; ``None`` measures it from ``bookmark.left_at`` on the wall clock. Not
-    compared: it is a clock reading, not part of where the listener is."""
+    compared: equality describes the saved position, and this only times the away period."""
 
 
 class BookmarkStore:

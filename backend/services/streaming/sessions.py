@@ -52,6 +52,8 @@ class Committed:
 
     ``assigned`` is a regular item, or the sign-off clip (D26) once the schedule has
     ended with one configured — a clip has no ``ItemRef``/``ScheduleItem`` to offer.
+    ``started_at`` is an elapsed-clock reading (D47), comparable only with other readings of
+    that clock, never with the wall clock or the domain's station times.
     """
 
     seq: int
@@ -77,6 +79,10 @@ class StreamSession:
     watchdog (or ``close``) has already stopped, so it is not frozen twice. ``now_playing``
     is ``(shows_at, text)``: the query compares ``shows_at`` to the clock rather than the
     record flipping itself, per CQRS.
+
+    ``opened_at`` and ``now_playing[0]`` (``shows_at``) are elapsed-clock readings (D47), like
+    ``Committed.started_at``: comparable only with each other, never with the wall clock or
+    the domain's station times.
     """
 
     load_day: DayLoader
