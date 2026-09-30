@@ -14,7 +14,7 @@ from backend.config import get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
 from backend.logging_config import configure_logging
-from backend.routers import stream_internal
+from backend.routers import listen, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.websocket import websocket_endpoint
 
@@ -106,6 +106,7 @@ app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 
 app.include_router(v1_router)
 app.include_router(stream_internal.router)
+app.include_router(listen.router)
 
 
 @app.get("/health")
