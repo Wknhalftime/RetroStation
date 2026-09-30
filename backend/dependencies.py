@@ -1,14 +1,34 @@
 from collections.abc import AsyncGenerator, Generator
+from ipaddress import IPv4Address
 from typing import Annotated, Any
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from psycopg import AsyncConnection
 
-from backend.config import get_settings
+from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.streaming.service import StreamService
+
+_LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
+
+
+def require_internal_client(request: Request) -> None:
+    """403 unless the request comes from this machine, as the API is bound (D24, D45)."""
+    client = "" if request.client is None else request.client.host
+    bind: BindHost = getattr(request.app.state, "server_host", _LOOPBACK_BIND)
+    if not is_internal_client(client, bind):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="internal clients only")
+
+
+def get_stream_service(request: Request) -> StreamService:
+    """The app's stream service; 503 ``unavailable`` while streaming is off (D34)."""
+    service: StreamService | None = getattr(request.app.state, "stream_service", None)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="unavailable")
+    return service
 
 
 async def get_current_token(
