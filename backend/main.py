@@ -179,6 +179,7 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
     engine = await _prepared_engine(settings.ffmpeg_path, settings.liquidsoap_path, work, base_env)
     if engine is None:
         return None
+    # Lazy: windows_job raises ImportError off Windows, and this line is reached only on win32.
     from backend.playout.windows_job import KillOnCloseJob
 
     try:

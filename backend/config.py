@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
 _DEV_TOKEN = "dev-token"
+_EXAMPLE_TOKEN = "change-me-before-use"  # the placeholder in .env.example
+_PLACEHOLDER_TOKENS = frozenset({_DEV_TOKEN, _EXAMPLE_TOKEN})
 _LOOPBACK_CLIENTS = ("127.0.0.1", "::1")
 
 type BindHost = IPv4Address | IPv6Address | Literal["localhost"]
@@ -66,9 +68,16 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    @field_validator("server_port")
+    @classmethod
+    def _server_port_in_range(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError(f"SERVER_PORT (.env): must be 1..65535, got {value}")
+        return value
+
     @model_validator(mode="after")
     def _lan_bind_needs_a_real_token(self) -> Self:
-        if not _is_loopback(self.server_host) and self.airwave_token == _DEV_TOKEN:
+        if not _is_loopback(self.server_host) and self.airwave_token in _PLACEHOLDER_TOKENS:
             raise ValueError(
                 f"SERVER_HOST (.env): binding {self.server_host} exposes the API beyond this "
                 "machine; set AIRWAVE_TOKEN (.env) to a secret first"

@@ -387,6 +387,7 @@ class StreamService:
             opened = True
         finally:
             if not opened:
+                self._stop(session)  # an engine settled before _relay_app raised is halted
                 self._sessions.pop(session_id, None)
                 session.placed.set()  # wake a waiting seq 0 request: the session is gone
         return OpenedStream(session_id, app)

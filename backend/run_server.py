@@ -16,6 +16,8 @@ import uvicorn
 
 from backend.config import get_settings
 
+_GRACEFUL_SHUTDOWN_S = 3  # then open streams are cancelled and the lifespan shuts down
+
 
 def main() -> None:
     if sys.platform == "win32":
@@ -26,6 +28,9 @@ def main() -> None:
         host=str(settings.server_host),
         port=settings.server_port,
         loop="none",
+        # An open /listen stream never ends by itself; without a bound, shutdown waits on it
+        # forever, and a second Ctrl+C skips the lifespan shutdown that stops the engines.
+        timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_S,
     )
 
 
