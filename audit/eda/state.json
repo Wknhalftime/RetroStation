@@ -1,0 +1,188 @@
+{
+  "session": "A",
+  "phase": "gate-A",
+  "branch": "audit/event-graph",
+  "base": "master c79dce2",
+  "steps_done": [
+    "P0.1 branch audit/event-graph created from master c79dce2; audit/eda/ and state.json created",
+    "P0.2 rulings in force filtered -> audit/eda/rulings-in-scope.txt",
+    "P0.3 inventory by search -> audit/eda/inv-decorators.txt, audit/eda/inv-callsites.txt",
+    "P0.4 prediction written",
+    "P1 contract -> audit/eda/contract.md (adds --guard-fn; see open question)",
+    "P1 fixtures -> tests/scripts/fixtures/event_graph/{main,alt} (17 files, ruff check + format --check clean)",
+    "P1 spec tests -> tests/scripts/test_event_graph.py (51 tests)",
+    "P1 red run: all 51 fail because scripts/audit/event_graph.py does not exist",
+    "P1 review.1 audit/eda/spec-expectations.jsonl written: 68 rows, case ids match the # case comments in the tests (checked by script)",
+    "P1 review.2 prep: neutral ids K01-K68 -> audit/eda/case-key.json; anchors list in scratchpad",
+    "P1 review.2 independent derivation -> audit/eda/spec-expectations-independent.jsonl (68 rows, 43 ambiguity flags)",
+    "P1 review.3 diff -> audit/eda/spec-diff.md: 8 disagreements D1-D8, not resolved",
+    "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)"
+  ],
+  "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
+  "open_stops": [
+    "GATE A reached: user rules --publish-fn/--subscribe-fn/--ev01-scope/--guard-fn, corrects expectations, locks spec files"
+  ],
+  "rulings_in_scope": {
+    "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
+    "count": 13,
+    "load_bearing": {
+      "AUD-R012": "ACTIVE. (1) Chained task calls are Huey enqueues; caller owns only the handoff: enqueue failure -> ERROR SystemLog <next_task>_enqueue_failed, caller keeps COMPLETED. Applies to library_scan_task, the watcher (library_scan_files_task), library_enrichment_task and ingestion_task. (2) watcher + ingestion_task write started/completed/failed SystemLogs. (3) failed-run SystemLogs carry a traceback: library_scan_task and _error_boundary.task_failure_telemetry (artist matching, identity matching, embedding, normalize backfill, hash backfill).",
+      "AUD-R011": "ACTIVE. Only mb_enrichment_task and library_enrichment_task share task_run; library_scan_task, library_scan_files_task, ingestion_task, library_hash_backfill_task keep their own envelopes; task_failure_telemetry keeps FAILED-only contract.",
+      "others": "AUD-R008 (MB artist enrichment rule, keyword hit only), AUD-057/015/040/025/021/051 ACTIVE-fixed, AUD-024/035/050/053 ACTIVE-no-change: none rules on messaging shape."
+    }
+  },
+  "inventory": {
+    "command_decorators": "rg -n -A3 '@huey\\.(task|periodic_task|signal|on_startup|pre_execute|post_execute)' backend scripts --glob '*.py'",
+    "huey_task": 10,
+    "huey_periodic_task": 2,
+    "huey_signal": 0,
+    "huey_on_startup": 1,
+    "tasks": {
+      "library_scan_task": "backend/tasks/library_scan_tasks.py:429",
+      "library_watcher_poll": "backend/tasks/library_watcher_tasks.py:60 (periodic */4)",
+      "library_scan_files_task": "backend/tasks/library_watcher_tasks.py:106",
+      "ingestion_task": "backend/tasks/ingestion_tasks.py:202",
+      "mb_enrichment_task": "backend/tasks/mb_enrichment_tasks.py:755",
+      "library_hash_backfill_task": "backend/tasks/library_hash_backfill_tasks.py:164",
+      "library_hash_backfill_resume": "backend/tasks/library_hash_backfill_tasks.py:180 (periodic */5)",
+      "identity_matching_task": "backend/tasks/identity_matching_tasks.py:34",
+      "normalize_backfill_task": "backend/tasks/normalize_backfill_tasks.py:50",
+      "library_enrichment_task": "backend/tasks/library_enrichment_tasks.py:63",
+      "artist_matching_task": "backend/tasks/artist_matching_tasks.py:29",
+      "embedding_task": "backend/tasks/embedding_tasks.py:20"
+    },
+    "huey_app_import_list": 10,
+    "command_callsites": "uv run python <scratchpad>/inv.py '<12 task names>' (AST walk of backend/ and scripts/, enclosing qualname)",
+    "direct_enqueue_callsites": {
+      "count": 8,
+      "router": [
+        "backend/routers/ingestion.py:37 upload_playlist -> ingestion_task",
+        "backend/routers/library/scan.py:39 scan_library -> library_scan_task",
+        "backend/routers/matching.py:734 resolve_artist -> identity_matching_task",
+        "backend/routers/matching.py:1315 _enqueue_playlists -> artist_matching_task",
+        "backend/routers/tasks.py:131 retry_enrichment -> library_enrichment_task (import alias _library_enrichment_task)"
+      ],
+      "task_unguarded": [
+        "backend/tasks/artist_matching_tasks.py:110 artist_matching_task -> identity_matching_task",
+        "backend/tasks/embedding_tasks.py:68 embedding_task -> artist_matching_task",
+        "backend/tasks/library_watcher_tasks.py:102 library_watcher_poll -> library_scan_files_task"
+      ]
+    },
+    "enqueue_or_log_callsites": {
+      "command": "rg -n 'enqueue_or_log\\(' backend scripts --glob '*.py'",
+      "count": 5,
+      "sites": [
+        "backend/tasks/ingestion_tasks.py:357 ingestion_task -> embedding_task (lambda)",
+        "backend/tasks/library_enrichment_tasks.py:245 library_enrichment_task -> mb_enrichment_task (task as value)",
+        "backend/tasks/library_scan_tasks.py:545 library_scan_task -> library_hash_backfill_task (task as value)",
+        "backend/tasks/library_scan_tasks.py:552 library_scan_task -> library_enrichment_task (task as value)",
+        "backend/tasks/library_watcher_tasks.py:317 library_scan_files_task -> library_enrichment_task (task as value)"
+      ]
+    },
+    "schedule_calls": 0,
+    "call_local": {
+      "command": "rg -n '\\.call_local\\(|\\.schedule\\(|\\.func\\b' backend scripts --glob '*.py'",
+      "count_backend": 1,
+      "count_scripts": 2,
+      "sites": [
+        "backend/tasks/library_hash_backfill_tasks.py:182 library_hash_backfill_resume -> library_hash_backfill_task.call_local()",
+        "scripts/bench_enrich.py:449 cmd_run -> library_enrichment_task.call_local()",
+        "scripts/bench_enrich.py:223 stub -> original.call_local() (original = met.mb_enrichment_task: task bound to a local name)"
+      ]
+    },
+    "result_get_calls": 0,
+    "task_attr_rebinding": "scripts/bench_enrich.py:227,231 met.mb_enrichment_task = stub/original (monkeypatch, not a dispatch)",
+    "tasks_with_no_producer_and_no_schedule": [
+      "normalize_backfill_task (only tests call it, via call_local)"
+    ],
+    "sleep_in_loop": {
+      "command": "rg -n 'sleep\\(' backend scripts --glob '*.py' (+ enclosing loop check)",
+      "backend": [
+        "backend/websocket.py:103 while True around SELECT/UPDATE progress_tracking (poll)",
+        "backend/playout/harbor.py:85 while True around _answer(port) probe (no query)",
+        "backend/db/retry.py:53 for-attempt retry around func() (no query)"
+      ],
+      "scripts": [
+        "scripts/stream_stub.py:218,223",
+        "scripts/bench_stream.py:256"
+      ],
+      "not_in_loop": [
+        "backend/services/mb_client.py:42 rate limit",
+        "scripts/bench_stream.py:249"
+      ]
+    },
+    "notify_listen_pg_notify": 0,
+    "publish_subscribe_candidates": {
+      "command": "rg -n -w -i 'def (\\w*(publish|emit|post_event|notify|dispatch|subscribe|broadcast|on_event|register|listener|handler)\\w*)' backend scripts; rg -i 'observer|callback|on_progress|_HANDLERS|_REGISTRY|_STRATEG' backend",
+      "registries_iterated_and_called": 0,
+      "found": [
+        "on_progress callback params: backend/tasks/mb_enrichment_tasks.py:174,212,278 (+ call sites 505,675); backend/services/library_scan_service.py scan_directory(on_progress, on_file, on_quarantine). One optional callable injected by the caller: the caller names the one reactor.",
+        "strategy lists iterated: backend/services/artist_matching_service.py:404, identity_matching_service.py:495. First-match chain whose result the caller uses: the publisher's outcome depends on them.",
+        "name-only hits, not mechanisms: mb_enrichment_tasks._emit_pre_pass_heartbeat:358, scripts/bench_stream.emit:369, audio_tags._dispatch_id3/_dispatch_wav, routers *broadcast_days (domain word)"
+      ]
+    },
+    "websocket": "backend/websocket.py:30 websocket_endpoint polls progress_tracking every 0.5 s (POLL_INTERVAL_SECONDS) and pushes JSON; no message feeds it",
+    "note": "inv-*.txt scratch listings removed; every count and location is in this file with its command"
+  },
+  "prediction": {
+    "written_before_tool_exists": true,
+    "EVENT": "0 edges (0%): no Huey signal, no NOTIFY/LISTEN, no pub/sub registry; --summary should print 'no publish mechanism found'",
+    "COMMAND": "13 edges (100% of ENQUEUE): 5 router->task, 3 task->task unguarded, 5 guarded by enqueue_or_log",
+    "QUERY": "0 edges (0%): results=False and no .get( on a task result",
+    "INLINE": "backend 1 (library_hash_backfill_resume), scripts 1 resolved + 1 to unresolved_dispatch (bench_enrich original.call_local)",
+    "POLL": "1 (backend/websocket.py)"
+  },
+  "numbers": {
+    "spec_red_run": {
+      "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q -p no:randomly --junitxml=audit/eda/_junit.xml (classified by a one-liner: failure text contains can't open file / FileNotFoundError + event_graph.py)",
+      "result": "10 failed, 41 errors (module fixtures), 0 passed; 51/51 cause = analyzer script missing",
+      "output": "audit/eda/spec-red-run.txt",
+      "fixed_before_final_run": "test_missing_root_is_an_analysis_error passed vacuously (python exits 2 when the script is missing); now also requires the root name in stderr"
+    },
+    "spec_expectation_rows": {
+      "command": "wc -l audit/eda/spec-expectations.jsonl",
+      "value": 68
+    },
+    "independent_rows": {
+      "command": "wc -l audit/eda/spec-expectations-independent.jsonl",
+      "value": 68
+    },
+    "disagreements": {
+      "source": "audit/eda/spec-diff.md",
+      "value": 8
+    },
+    "spec_tests": {
+      "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q -p no:randomly",
+      "value": "51 tests: 10 failed + 41 errors, all 'can't open file ... event_graph.py'"
+    }
+  },
+  "proposed_options": {
+    "--publish-fn": {
+      "value": [],
+      "evidence": "inventory.publish_subscribe_candidates: no registry of callables is iterated and called; on_progress (mb_enrichment_tasks.py:174/212/278, library_scan_service.scan_directory) is one optional callable the caller injects, so the caller names its one reactor; strategy lists (artist_matching_service.py:404, identity_matching_service.py:495) are first-match chains whose result the caller uses; other hits are names only"
+    },
+    "--subscribe-fn": {
+      "value": [],
+      "evidence": "same search; no subscribe/register call exists"
+    },
+    "--ev01-scope": {
+      "value": [
+        "library_scan_task",
+        "library_scan_files_task",
+        "library_enrichment_task",
+        "ingestion_task"
+      ],
+      "evidence": "AUD-R012 (1): 'Applies to library_scan_task, the watcher (library_scan_files_task), library_enrichment_task and ingestion_task.'"
+    },
+    "--guard-fn": {
+      "value": "backend.tasks._enqueue_chain:enqueue_or_log (default)",
+      "evidence": "ADDED option: the fixture guard lives in another module and a same-named function must not count (a name is never evidence)"
+    }
+  },
+  "open_questions": [
+    "EV01 ruling_scope on real code: the 3 unguarded task-to-task hand-offs have producers AUD-R012 does not name: artist_matching_task -> identity_matching_task (artist_matching_tasks.py:110), embedding_task -> artist_matching_task (embedding_tasks.py:68), library_watcher_poll -> library_scan_files_task (library_watcher_tasks.py:102). All will carry ruling_scope: unstated. Reasoning: R012(1)'s first sentence ('Chained task calls are Huey enqueues; a chained task's run failure is its own') reads general, but its scope sentence lists four producers, none of these three. Does R012 extend to them, and is the periodic poll part of 'the watcher'?",
+    "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
+    "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text."
+  ],
+  "rules_added_dropped": "none added, none dropped, none marked not implemented"
+}
