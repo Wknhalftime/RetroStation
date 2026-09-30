@@ -29,6 +29,10 @@ class FakeFormatOverrideRepository(FormatOverrideRepository):
     def delete(self, override_id: UUID) -> None:
         self._data.pop(override_id, None)
 
+    def delete_for_file(self, file_id: UUID) -> None:
+        for override_id in [i for i, o in self._data.items() if o.preferred_file_id == file_id]:
+            del self._data[override_id]
+
     def move_to_work(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
         to_work_formats = {o.format_name for o in self._data.values() if o.work_id == to_work_id}
         for override_id, override in list(self._data.items()):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import StrEnum
 
 
@@ -146,3 +148,18 @@ class ReasonCode(StrEnum):
     MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
     ORPHANED_IDENTITY = "ORPHANED_IDENTITY"
     USER_UNMATCHED = "USER_UNMATCHED"
+    # The matched library file was deleted from the Missing Files page (or by
+    # the after-scan purge); the identity is back in review.
+    LIBRARY_FILE_REMOVED = "LIBRARY_FILE_REMOVED"
+
+
+class PurgeMissingPolicy(StrEnum):
+    """Setting library.purge_missing: whether a full scan deletes missing rows nothing replaces."""
+
+    NEVER = "never"
+    AFTER_SCAN = "after_scan"
+
+    @classmethod
+    def from_setting(cls, value: str | None) -> PurgeMissingPolicy:
+        """The policy a stored value names; NEVER when unset or unknown (the safe default)."""
+        return cls.AFTER_SCAN if value == cls.AFTER_SCAN.value else cls.NEVER

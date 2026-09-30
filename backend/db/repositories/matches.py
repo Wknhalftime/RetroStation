@@ -79,3 +79,10 @@ class PgMatchRepository(MatchRepository):
 
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
+
+    def delete_for_file(self, file_id: UUID) -> list[UUID]:
+        rows = self._conn.execute(
+            "DELETE FROM matches WHERE library_file_id = %s RETURNING identity_id",
+            (str(file_id),),
+        ).fetchall()
+        return [r["identity_id"] for r in rows if r["identity_id"] is not None]

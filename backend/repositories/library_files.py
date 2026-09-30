@@ -178,3 +178,32 @@ class LibraryFileRepository(ABC):
     def has_any(self) -> bool:
         """Whether the table has any row at all, of any status."""
         ...
+
+    @abstractmethod
+    def delete_missing(self, file_id: UUID) -> bool:
+        """Delete the row only while it is MISSING; True if it was deleted.
+
+        A row a scan restored, or reconciliation folded, since it was listed
+        is left alone. Its references must be gone first (FKs).
+        """
+        ...
+
+    @abstractmethod
+    def lock_missing(self, file_id: UUID) -> bool:
+        """Lock the row until the transaction ends; True if it is MISSING.
+
+        Taken before a deletion touches the row's references, so a concurrent
+        fold or restore of the same row either finishes first (and this returns
+        False) or waits for the deletion.
+        """
+        ...
+
+    @abstractmethod
+    def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
+        """Lock both rows until the transaction ends; True if the fold may go ahead.
+
+        True only while *missing_id* is MISSING and *successor_id* is PRESENT.
+        The locks keep a concurrent scan from restoring the one, or marking the
+        other missing, between this check and the fold's writes.
+        """
+        ...

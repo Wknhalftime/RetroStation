@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import psycopg
 
@@ -72,6 +73,13 @@ class PgSongMasterRepository(SongMasterRepository):
 
     def delete_by_work(self, work_id: str) -> None:
         self._conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
+
+    def delete_for_file(self, file_id: UUID) -> list[str]:
+        rows = self._conn.execute(
+            "DELETE FROM song_masters WHERE preferred_file_id = %s RETURNING work_id",
+            (str(file_id),),
+        ).fetchall()
+        return [r["work_id"] for r in rows]
 
     def get_by_work(self, work_id: str) -> SongMaster | None:
         row = self._conn.execute(

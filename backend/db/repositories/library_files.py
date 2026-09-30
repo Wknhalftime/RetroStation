@@ -54,6 +54,7 @@ _UPSERT_SQL = """
             THEN library_files.audio_hash
         END,
         file_status            = 'present',
+        missing_since          = NULL,
         trace_id               = EXCLUDED.trace_id,
         -- A fresh tag extraction carries no links. Keep the ones grouping
         -- and enrichment already built, even across a content change: a
@@ -173,6 +174,7 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             file_size=row.get("file_size"),
             file_mtime_ns=row.get("file_mtime_ns"),
             audio_hash=_audio_hash_of(row.get("audio_hash")),
+            missing_since=row.get("missing_since"),
             audio=audio,
         )
 
@@ -322,14 +324,21 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         return {r["file_path"]: FileStatus(r["file_status"]) for r in rows}
 
     def mark_missing(self, file_path: str) -> None:
+        # A row already missing keeps the time it first went missing.
         self._conn.execute(
-            "UPDATE library_files SET file_status = %s WHERE file_path = %s",
-            (FileStatus.MISSING, file_path),
+            """UPDATE library_files
+               SET missing_since = CASE WHEN file_status = %s THEN missing_since
+                                        ELSE now() END,
+                   file_status = %s
+               WHERE file_path = %s""",
+            (FileStatus.MISSING, FileStatus.MISSING, file_path),
         )
 
     def relocate(self, file_id: UUID, new_path: str) -> None:
         self._conn.execute(
-            "UPDATE library_files SET file_path = %s, file_status = %s WHERE id = %s",
+            """UPDATE library_files
+               SET file_path = %s, file_status = %s, missing_since = NULL
+               WHERE id = %s""",
             (new_path, FileStatus.PRESENT, str(file_id)),
         )
 
@@ -483,6 +492,33 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             "SELECT EXISTS (SELECT 1 FROM library_files) AS has_rows"
         ).fetchone()
         return bool(row and row["has_rows"])
+
+    def delete_missing(self, file_id: UUID) -> bool:
+        result = self._conn.execute(
+            "DELETE FROM library_files WHERE id = %s AND file_status = %s",
+            (str(file_id), FileStatus.MISSING),
+        )
+        return result.rowcount == 1
+
+    def lock_missing(self, file_id: UUID) -> bool:
+        row = self._conn.execute(
+            "SELECT id FROM library_files WHERE id = %s AND file_status = %s FOR UPDATE",
+            (str(file_id), FileStatus.MISSING),
+        ).fetchone()
+        return row is not None
+
+    def lock_fold_pair(self, missing_id: UUID, successor_id: UUID) -> bool:
+        # ORDER BY id: every fold takes the two row locks in the same order.
+        rows = self._conn.execute(
+            """SELECT id, file_status FROM library_files
+               WHERE id = ANY(%s) ORDER BY id FOR UPDATE""",
+            ([missing_id, successor_id],),
+        ).fetchall()
+        status = {str(r["id"]): r["file_status"] for r in rows}
+        return (
+            status.get(str(missing_id)) == FileStatus.MISSING
+            and status.get(str(successor_id)) == FileStatus.PRESENT
+        )
 
     def reset_failed_enrichments(self) -> int:
         """Reset all files in 'failed' enrichment status back to 'pending'.

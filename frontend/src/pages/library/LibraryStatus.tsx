@@ -1,12 +1,14 @@
 import { Link } from "react-router-dom";
-import { Database, AlertTriangle, Users } from "lucide-react";
+import { Database, AlertTriangle, FileX, Users } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useLibraryStatus } from "@/api/library";
+import { useMissingFiles } from "@/api/missing";
 import { ScanLibraryButton } from "@/components/domain/library/ScanLibraryButton";
 
 export function LibraryStatus() {
   const { data, isLoading, isError } = useLibraryStatus();
+  const missing = useMissingFiles(0, 1);
 
   if (isLoading) {
     return (
@@ -24,6 +26,7 @@ export function LibraryStatus() {
     );
   }
 
+  const missingCount = missing.data?.total ?? 0;
   const enrichedCount = data.by_enrichment["enriched"] ?? 0;
   const enrichedPct =
     data.total_files > 0 ? Math.round((enrichedCount / data.total_files) * 100) : 0;
@@ -92,6 +95,21 @@ export function LibraryStatus() {
               </p>
             </div>
           </div>
+        )}
+
+        {missingCount > 0 && (
+          <Link
+            to="/library/missing"
+            className="flex items-start gap-4 rounded-xl border border-red-200 bg-red-50 p-5 shadow-sm hover:bg-red-100"
+          >
+            <div className="rounded-lg bg-red-100 p-2">
+              <FileX className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-red-700">Missing files</p>
+              <p className="text-2xl font-semibold text-red-900">{missingCount.toLocaleString()}</p>
+            </div>
+          </Link>
         )}
       </div>
 
