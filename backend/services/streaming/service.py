@@ -14,7 +14,7 @@ import asyncio
 import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -33,6 +33,7 @@ from backend.domain.streaming import (
     TuneIn,
 )
 from backend.domain.tune_in import next_item, resume, tune_in
+from backend.playout.harbor import Upstream
 from backend.playout.liquidsoap_process import (
     EngineStartError,
     RunningEngine,
@@ -301,6 +302,21 @@ def _halt(engine: RunningEngine) -> None:
     engine.upstream.close()
 
 
+def _closing_once(engine: RunningEngine) -> RunningEngine:
+    """``engine`` with an upstream whose ``close`` runs once: the relay closes it when the
+    response ends, and the halt of the session's close that follows must not close it again."""
+    upstream = engine.upstream
+    closed = False
+
+    def close_once() -> None:
+        nonlocal closed
+        if not closed:
+            closed = True
+            upstream.close()
+
+    return replace(engine, upstream=Upstream(read=upstream.read, close=close_once))
+
+
 def _halt_if_started(starting: asyncio.Future[RunningEngine]) -> None:
     """Halt the engine a finished start produced (a done-callback, like D1's
     ``_abandon_started``); a cancelled or failed start left nothing running."""
@@ -476,8 +492,9 @@ class StreamService:
             raise started
         if self._sessions.get(session_id) is not session:  # closed (close_all) while opening
             raise StreamUnavailableError(f"session {session_id}: closed while opening")
-        session.engine = started
-        return started
+        kept = _closing_once(started)  # the relay and every halt share its one close
+        session.engine = kept
+        return kept
 
     def _relay_app(
         self, session_id: str, engine: RunningEngine, icy_metadata: str | None
