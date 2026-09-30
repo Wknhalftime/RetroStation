@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -24,6 +24,7 @@ __all__ = [
     "Receive",
     "RelayConfig",
     "RelayEnd",
+    "Scope",
     "Send",
     "client_framing",
     "icy_block",
@@ -31,10 +32,12 @@ __all__ = [
     "relay_asgi",
 ]
 
+# Incoming ASGI data is read-only here, so any server's mapping fits; what we send is a dict.
+type Scope = Mapping[str, object]
 type Message = dict[str, object]
-type Receive = Callable[[], Awaitable[Message]]
+type Receive = Callable[[], Awaitable[Mapping[str, object]]]
 type Send = Callable[[Message], Awaitable[None]]
-type AsgiApp = Callable[[Message, Receive, Send], Awaitable[None]]
+type AsgiApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 _ICY_MAX_BLOCKS = 255
 _ICY_BLOCK = 16
@@ -83,18 +86,29 @@ async def _finished_first[T](
     return work in done and gone not in done
 
 
+async def _cancel_and_settle(*tasks: asyncio.Task[object] | None) -> None:
+    """Cancel each unfinished task, then wait until every one of them has ended."""
+    unfinished = {task for task in tasks if task is not None and not task.done()}
+    for task in unfinished:
+        task.cancel()
+    if unfinished:
+        await asyncio.wait(unfinished)
+
+
 async def relay(upstream: Upstream, client: Client, config: RelayConfig) -> RelayEnd:
     """Copy the upstream to the client until either ends or one write outlasts ``stall_s``.
 
     The stall limit applies to each write, so a slow client that keeps reading is kept.
-    The upstream is closed on every way out.
+    On every way out, cancellation from outside included, the upstream is closed and the
+    in-flight read or write is cancelled and awaited.
     """
     gone = asyncio.ensure_future(client.gone.wait())
+    in_flight: asyncio.Task[object] | None = None
     try:
         while True:
             read = asyncio.ensure_future(upstream.read())
+            in_flight = read
             if not await _finished_first(read, gone, None):
-                read.cancel()
                 return RelayEnd.CLIENT_GONE
             lost = read.exception()
             if isinstance(lost, OSError):  # the harbor's connection dropped: nothing more
@@ -105,8 +119,8 @@ async def relay(upstream: Upstream, client: Client, config: RelayConfig) -> Rela
             if not chunk:
                 return RelayEnd.UPSTREAM_ENDED
             write = asyncio.ensure_future(client.write(client.frame(chunk)))
+            in_flight = write
             if not await _finished_first(write, gone, config.stall_s):
-                write.cancel()
                 return RelayEnd.CLIENT_GONE if gone.done() else RelayEnd.CLIENT_STALLED
             failure = write.exception()
             if isinstance(failure, OSError):  # reset, aborted or broken: the listener left
@@ -114,16 +128,17 @@ async def relay(upstream: Upstream, client: Client, config: RelayConfig) -> Rela
             if failure is not None:
                 raise failure
     finally:
-        gone.cancel()
-        upstream.close()
+        upstream.close()  # first, so a second cancellation during the settle cannot skip it
+        await _cancel_and_settle(gone, in_flight)
 
 
 def icy_block(title: str) -> bytes:
     """One ICY metadata block: a length byte, then ``StreamTitle='...';`` NUL-padded to 16.
 
-    The title is UTF-8, cut at a character boundary so the block fits 255 x 16 bytes.
+    The title is UTF-8 (an unencodable character, such as a lone surrogate, becomes ``?``),
+    cut at a character boundary so the block fits 255 x 16 bytes.
     """
-    fitted = title.encode()[:_TITLE_ROOM].decode(errors="ignore").encode()
+    fitted = title.encode(errors="replace")[:_TITLE_ROOM].decode(errors="ignore").encode()
     payload = _TITLE_OPEN + fitted + _TITLE_CLOSE
     blocks = math.ceil(len(payload) / _ICY_BLOCK)
     return bytes([blocks]) + payload.ljust(blocks * _ICY_BLOCK, b"\x00")
@@ -134,6 +149,8 @@ class IcyFramer:
     (always the first time), else an empty block."""
 
     def __init__(self, metaint: int, title: Callable[[], str]) -> None:
+        if metaint <= 0:
+            raise ValueError(f"IcyFramer.metaint must be > 0, got {metaint}")
         self._metaint = metaint
         self._title = title
         self._until_block = metaint
@@ -183,15 +200,22 @@ def client_framing(
 
 
 async def _watch_for_disconnect(receive: Receive, gone: asyncio.Event) -> None:
-    while (await receive())["type"] != "http.disconnect":
-        pass
-    gone.set()
+    """Set ``gone`` on ``http.disconnect``, and on any other exit: a watcher that can no
+    longer see the listener must not keep the stream (and its engine) running."""
+    try:
+        while (await receive())["type"] != "http.disconnect":
+            pass
+    finally:
+        gone.set()
 
 
 async def _relay_response(
     upstream: Upstream, framing: Framing, config: RelayConfig, receive: Receive, send: Send
 ) -> None:
-    """Relay the body while a watcher marks the client gone on ``http.disconnect``."""
+    """Relay the body while a watcher marks the client gone on ``http.disconnect``.
+
+    A watcher that failed is re-raised once the relay has ended.
+    """
     gone = asyncio.Event()
 
     async def write(chunk: bytes) -> None:
@@ -203,16 +227,24 @@ async def _relay_response(
         if end is RelayEnd.UPSTREAM_ENDED:
             await send({"type": "http.response.body", "body": b"", "more_body": False})
     finally:
-        watcher.cancel()
+        await _cancel_and_settle(watcher)
+    failure = None if watcher.cancelled() else watcher.exception()
+    if failure is not None:
+        raise failure
 
 
 def relay_asgi(
     upstream: Upstream, framing: Framing, on_end: Callable[[], None], config: RelayConfig
 ) -> AsgiApp:
     """An ASGI app that relays ``upstream`` to the requesting client; ``on_end`` runs once
-    when the response ends, however it ends."""
+    when the response ends, however it ends.
 
-    async def app(scope: Message, receive: Receive, send: Send) -> None:
+    Only ``UPSTREAM_ENDED`` completes the response (a final empty body). On
+    ``CLIENT_STALLED`` or ``CLIENT_GONE`` the app returns with the response unfinished:
+    the server then closes the transport, and that is what drops a stalled client.
+    """
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
         relayed = False  # the relay closes the upstream; before it starts, we must
         try:
             await send(
