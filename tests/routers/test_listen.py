@@ -1,6 +1,6 @@
 """The public stream (spec: "GET /listen/{call_letters}/{year}?key= returns the MP3 stream
 through playout.relay", unauthenticated; Errors and edge cases; D14 plain HTTP errors; D25
-ICY; D27; D36)."""
+ICY; D27; D72)."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ async def test_the_listener_key_reaches_the_bookmarks(rig: Rig) -> None:
     assert rig.bookmarks.get(BookmarkKey("car", STATION, YEAR)) is not None  # D30
 
 
-@pytest.mark.parametrize("path", ["/listen/kioa/1995", "/listen/KXXX/1995", "/listen/KIOA/1996"])
+@pytest.mark.parametrize("path", ["/listen/KXXX/1995", "/listen/KIOA/1996"])
 async def test_nothing_to_play_is_404_no_broadcast(rig: Rig, path: str) -> None:
     response = await get(rig.service, path)
     assert (response.status_code, response.json()) == (404, {"detail": "no broadcast"})
