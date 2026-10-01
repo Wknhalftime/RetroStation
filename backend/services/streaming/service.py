@@ -449,7 +449,7 @@ class StreamService:
         self._sessions: dict[str, StreamSession] = {}
         self._feed = ListenerFeed(self._elapsed, ports.sleep)
         self._no_cues = NoCueMemory(config.no_cue_memory)
-        reread_repos = ports.cue_reread_repos or ports.repos
+        reread_repos = ports.repos if ports.cue_reread_repos is None else ports.cue_reread_repos
         self._rereads = CueRereads(partial(_stored_cues, reread_repos), config.cue_reread)
 
     # ---- queries ---------------------------------------------------------------------------
@@ -801,7 +801,8 @@ class StreamService:
         return payload
 
     def _notice(self, call: ItemCall, assigned: Assigned) -> None:
-        """Log an item sent without its cues: none stored (D78), or a landing's dropped (D80)."""
+        """Log an item sent without its cues: none stored (D78, reported to the cue owner,
+        D79), or a landing's dropped (D80)."""
         file = assigned.item.file
         if file is None:
             return  # unreachable for an assigned item; keeps mypy honest
