@@ -156,6 +156,22 @@ class ListenRequest:
 
 
 @dataclass(frozen=True)
+class EventsRequest:
+    """One page's now-playing subscription: a station-year and the listener's key (D28: no
+    key, no events)."""
+
+    call_letters: str
+    year: int
+    listener_key: str
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.year <= 9999:
+            raise InvalidStreamValueError(f"EventsRequest.year must be 1..9999, got {self.year}")
+        if self.listener_key == "":
+            raise InvalidStreamValueError("EventsRequest.listener_key must not be empty")
+
+
+@dataclass(frozen=True)
 class ItemCall:
     """One call from a session engine: which session, the token it sent, which item."""
 

@@ -31,3 +31,7 @@ class SessionTokenError(StreamingError):
 
 class UnknownItemError(StreamingError):
     """The seq is not assigned and is not the next one: the engine must retry later."""
+
+
+class SubscriptionLimitError(StreamingError):
+    """Every now-playing subscription is taken (D78b)."""
