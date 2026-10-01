@@ -23,7 +23,7 @@ from backend.db.pool import close_pool, init_pool
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
-from backend.db.sync_conn import connect_sync
+from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.logging_config import configure_logging
 from backend.playout.assets import ensure_stream_assets
 from backend.playout.liquidsoap_process import (
@@ -53,6 +53,12 @@ from backend.websocket import websocket_endpoint
 logger = structlog.get_logger()
 
 _WATCHDOG_INTERVAL_S = 5.0
+STREAM_READ_BOUNDS = ReadBounds(
+    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
+)
+"""D88: the stream service's reads give up on a lock after 2 s (the realistic cause), on any
+statement after 10 s (a backstop far above a cold day read's ~1.7 s, D40) and on connecting
+after 5 s; a tune-in then answers 503 unavailable rather than hanging."""
 
 type EngineStarter = Callable[[SessionEndpoint], Awaitable[RunningEngine]]
 
@@ -120,11 +126,12 @@ async def _prepared_engine(
 
 
 def _stream_repos(database_url: str) -> ReposFactory:
-    """One connection per use, holding the repositories the stream service reads."""
+    """One connection per use, holding the repositories the stream service reads; each read
+    is bounded (D88), so a locked or unreachable database fails it with ``StreamReadError``."""
 
     @contextmanager
     def opened() -> Iterator[StreamRepos]:
-        with connect_sync(database_url) as conn:
+        with bounded_connection(database_url, STREAM_READ_BOUNDS) as conn:
             yield StreamRepos(
                 stations=PgBroadcastStationRepository(conn),
                 settings=PgUserSettingRepository(conn),
