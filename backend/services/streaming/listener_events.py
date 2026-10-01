@@ -1,7 +1,10 @@
 """The listener feed: who is told what, per channel (D13: now-playing goes backend -> browser;
 D73: a title carries artist and title only; D74: the channel is the bookmark key and the newest
 stream owns it; D78a: the stream's status kinds; D78b: the subscription cap, 16 pending events
-per subscription, and a refusal never replaces the owner's pending title).
+per subscription, and a refusal never replaces the owner's pending title; D78c: when the newest
+stream ends while an older one is still playing, the next newest still-playing stream takes the
+channel back — nothing is told at the hand-back, then its own next title and its close are told
+again).
 
 A title is told ``now_playing_delay`` after its item starts (the contract's "~1 s delay"). The
 wait is the injected ``sleep`` and the time is read on the injected elapsed clock, so the delay
@@ -212,22 +215,33 @@ class ListenerEvents(AsyncIterator[ListenerEvent]):
 
 @dataclass
 class _Channel:
-    """One channel's state: the stream that owns it, its title, and its subscriptions."""
+    """One channel's state: its still-playing streams, its title, and its subscriptions.
 
-    owner: str | None = None
+    ``still_playing`` holds every session admitted to this channel that has not yet been told
+    ``ended``, oldest first. The newest owns the channel (D74); when it ends, the next newest
+    still-playing stream takes the channel back at once (D78c)."""
+
+    still_playing: list[str] = field(default_factory=list)
     current: _Held | None = None
     mailboxes: list[_Mailbox] = field(default_factory=list)
 
     @property
+    def owner(self) -> str | None:
+        """The newest still-playing stream, or ``None`` if none is playing (D74, D78c)."""
+        return self.still_playing[-1] if self.still_playing else None
+
+    @property
     def idle(self) -> bool:
-        return self.owner is None and not self.mailboxes
+        return not self.still_playing and not self.mailboxes
 
 
 class ListenerFeed:
     """Who is told what, per channel: the newest stream's events, fanned out to the channel's
-    subscriptions. Event-loop only: every method must be called on the loop (the internal
-    routes are ``async def``; ``close`` runs from the relay, the lifespan and the watchdog
-    task)."""
+    subscriptions. When the newest stream ends while an older one is still playing, the next
+    newest still-playing stream takes the channel back — its own next title, and its close,
+    are told again (D78c). Event-loop only: every method must be called on the loop (the
+    internal routes are ``async def``; ``close`` runs from the relay, the lifespan and the
+    watchdog task)."""
 
     def __init__(self, elapsed: Callable[[], datetime], sleep: Sleep) -> None:
         self._elapsed = elapsed
@@ -244,7 +258,7 @@ class ListenerFeed:
         """The session becomes the channel's stream (the newest wins, D74): its title is
         cleared, and ``tuning`` is told."""
         state = self._channels.setdefault(channel, _Channel())
-        state.owner = session_id
+        state.still_playing.append(session_id)
         state.current = None
         self._tell(channel, lambda mailbox: mailbox.supersede(_TUNING))
 
@@ -265,14 +279,22 @@ class ListenerFeed:
         self._tell(channel, lambda mailbox: mailbox.hold(held))
 
     def ended(self, channel: BookmarkKey, session_id: str, kind: StatusKind) -> None:
-        """If the session owns the channel, ``kind`` is told and the owner and title clear."""
+        """The session has ended: it stops being tracked as still playing. A session the feed
+        has already been told ``ended`` for is ignored and never takes the channel back.
+
+        If the session owned the channel, ``kind`` is told and the title clears; the next
+        newest still-playing stream, if any, takes the channel back at once. Nothing is told
+        for that hand-back — its own next title, and its close, are told when they happen
+        (D78c)."""
         state = self._channels.get(channel)
-        if state is None or state.owner != session_id:
+        if state is None or session_id not in state.still_playing:
             return
-        state.owner = None
-        state.current = None
-        status = Status(kind)
-        self._tell(channel, lambda mailbox: mailbox.supersede(status))
+        was_owner = state.owner == session_id
+        state.still_playing.remove(session_id)
+        if was_owner:
+            state.current = None
+            status = Status(kind)
+            self._tell(channel, lambda mailbox: mailbox.supersede(status))
         self._prune(channel, state)
 
     def subscribe(self, channel: BookmarkKey, limit: int) -> ListenerEvents:
