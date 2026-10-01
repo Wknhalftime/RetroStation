@@ -16,18 +16,23 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
+from uuid import UUID
 
+import psycopg
 import structlog
 from huey import crontab  # type: ignore[import-untyped]
+from psycopg.rows import DictRow
 
-from backend.config import get_settings
+from backend.config import Settings, get_settings
 from backend.db.sync_conn import connect_sync
+from backend.domain.streaming import StreamTiming
 from backend.playout.cue_analysis import AnalyserConfig, analyse_batch, remove_listings
 from backend.playout.liquidsoap_process import session_base_env
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.streaming.cue_precompute import (
     CueRunConfig,
     CueRunPorts,
+    analyse_reported,
     run_cue_analysis,
 )
 from backend.tasks.cue_huey_app import cue_huey
@@ -37,6 +42,8 @@ logger = structlog.get_logger()
 ORPHAN_GRACE = timedelta(hours=24)  # D56: a second strike at least a day after the first
 REPEAT_REPORT_AFTER = timedelta(hours=24)  # a lasting failure is reported once a day
 RESUME_EXPIRES_S = 280  # a resume that waited behind an over-long run is dropped, not stacked
+REQUEST_PRIORITY = 10  # above the resume, which has none: a waiting report runs first
+REQUEST_EXPIRES_S = 3600  # a report older than an hour is dropped; the backlog covers it
 
 _LOG_TIMESTAMP = re.compile(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} ")  # Liquidsoap's log lines
 _OUTPUT_LINE = re.compile(r"output line \d+")  # where a protocol error was seen
@@ -54,6 +61,21 @@ def utc_now() -> datetime:
 def _cue_cache_dir(stream_work_dir: Path) -> Path:
     """The analyser's own cache folder: its script cache and each batch's file list."""
     return stream_work_dir / "cue-cache"
+
+
+def _run_ports(conn: psycopg.Connection[DictRow], settings: Settings) -> CueRunPorts:
+    """The repositories, the connection's commit and the analyser callable, for one run or
+    one report. ``analyse_batch`` is looked up at call time, not bound at import, so the
+    locked E1 tests' monkeypatch of it still takes effect. The caller narrows
+    ``settings.liquidsoap_path`` to non-None (D51) before reaching here."""
+    liquidsoap_path = settings.liquidsoap_path
+    assert liquidsoap_path is not None  # narrowed by the caller before this call
+    repos = RepositoryFactory(conn)
+    analyser = AnalyserConfig(
+        exe=liquidsoap_path, cache_dir=_cue_cache_dir(settings.stream_work_dir)
+    )
+    analyse = partial(analyse_batch, base_env=session_base_env(os.environ), config=analyser)
+    return CueRunPorts(repos.streaming.cue_work, repos.streaming.cues, conn.commit, analyse)
 
 
 @dataclass(frozen=True)
@@ -152,16 +174,33 @@ def stream_cue_analysis_task() -> None:
         reported_failures("stream_cue_analysis_task"),
         connect_sync(settings.database_url, autocommit=False) as conn,
     ):
-        repos = RepositoryFactory(conn)
-        analyser = AnalyserConfig(
-            exe=settings.liquidsoap_path,
-            cache_dir=_cue_cache_dir(settings.stream_work_dir),
-        )
-        analyse = partial(analyse_batch, base_env=session_base_env(os.environ), config=analyser)
         run_cue_analysis(
-            CueRunPorts(repos.streaming.cue_work, repos.streaming.cues, conn.commit, analyse),
+            _run_ports(conn, settings),
             CueRunConfig(today=local_today(), steady=time.monotonic),
         )
+
+
+@cue_huey.task(  # type: ignore[untyped-decorator]
+    priority=REQUEST_PRIORITY, expires=REQUEST_EXPIRES_S
+)
+def stream_cue_request_task(file_id: str) -> None:
+    """D79: analyse one reported song's audio ahead of the backlog, on the cue consumer (D50:
+    never beside a run)."""
+    settings = get_settings()
+    if settings.liquidsoap_path is None:
+        logger.debug("stream_cue_analysis_off")
+        return
+    with (
+        reported_failures("stream_cue_request_task"),
+        connect_sync(settings.database_url, autocommit=False) as conn,
+    ):
+        analyse_reported(_run_ports(conn, settings), StreamTiming(), UUID(file_id))
+
+
+def request_cue_analysis(file_id: UUID) -> None:
+    """The stream service's way to the cue owner (D79): queue one report on the cue
+    consumer. A short SQLite write: call it off the event loop."""
+    stream_cue_request_task(str(file_id))
 
 
 @cue_huey.periodic_task(  # type: ignore[untyped-decorator]
