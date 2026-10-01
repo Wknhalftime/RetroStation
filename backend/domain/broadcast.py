@@ -1,11 +1,42 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+
+_STATION_CHANGE_FIELDS = frozenset({"call_letters", "name", "city", "format_name"})
+
+
+class BroadcastError(Exception):
+    """Base class for broadcast (stations, playlists, logs) failures."""
+
+
+class DuplicateCallLettersError(BroadcastError):
+    """Another station already has these call letters, in any case (D72)."""
+
+
+class UnknownStationError(BroadcastError):
+    """No station has this id."""
+
+
+@dataclass(frozen=True)
+class StationChanges:
+    """The fields a partial update sets; unset fields keep their values."""
+
+    values: Mapping[str, str | None]
+
+    def __post_init__(self) -> None:
+        for key in self.values:
+            if key not in _STATION_CHANGE_FIELDS:
+                raise ValueError(f"StationChanges.{key} is not a field a station can change")
+        if "call_letters" in self.values:
+            call_letters = self.values["call_letters"]
+            if not isinstance(call_letters, str) or call_letters == "":
+                raise ValueError("StationChanges.call_letters must be a non-empty str")
 
 
 @dataclass

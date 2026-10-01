@@ -6,7 +6,7 @@ from backend.domain.streaming import StreamingError
 
 
 class StationNotFoundError(StreamingError):
-    """No station has exactly these call letters (D36)."""
+    """No station has these call letters, in any case (D72)."""
 
 
 class StationBusyError(StreamingError):

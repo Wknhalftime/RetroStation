@@ -1,6 +1,6 @@
 """The stream service: admission, placement, the internal item contract, bookmarks and the
 freeze watchdog (spec: Service and routes; Errors and edge cases; the Backend <-> Liquidsoap
-contract; D10, D11, D15, D22-D32, D36, D39, D42, D43; R1: the day read overlaps the engine
+contract; D10, D11, D15, D22-D32, D39, D42, D43, D72; R1: the day read overlaps the engine
 start).
 
 One instance per app, built at the composition root. Repository reads run in worker threads;
@@ -176,7 +176,7 @@ class OpenedStream:
 
 
 def _station_and_limit(repos: ReposFactory, call_letters: str) -> tuple[UUID | None, str | None]:
-    """The station with exactly these call letters (D36), and the raw listener limit."""
+    """The station with these call letters, in any case (D72), and the raw listener limit."""
     with repos() as opened:
         station = opened.stations.get_by_call_letters(call_letters)
         setting = opened.settings.get(MAX_SESSIONS_KEY)
