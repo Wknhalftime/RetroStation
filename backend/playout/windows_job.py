@@ -29,6 +29,8 @@ _kernel32.OpenProcess.restype = wintypes.HANDLE
 _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
 _kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+_kernel32.TerminateJobObject.restype = wintypes.BOOL
+_kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
 _kernel32.CloseHandle.restype = wintypes.BOOL
 _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
@@ -118,6 +120,15 @@ class KillOnCloseJob:
             )
         finally:
             _kernel32.CloseHandle(process)
+
+    def terminate(self, exit_code: int) -> None:
+        """End every assigned process now with ``exit_code``, the caller too if assigned.
+
+        Unlike ``close``, this sets the code the processes exit with; the job stays open.
+        """
+        if self._handle is None:
+            raise OSError("KillOnCloseJob is closed")
+        _check(_kernel32.TerminateJobObject(self._handle, exit_code), "TerminateJobObject")
 
     def close(self) -> None:
         """Close the handle, killing every assigned process; closing twice is harmless."""
