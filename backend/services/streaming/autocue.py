@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from backend.domain.streaming import CuePoints, InvalidStreamValueError
+from backend.playout.cue_analysis import echo
 
 AUTOCUE_KEYS = (
     "liq_cue_in",
@@ -50,10 +51,10 @@ def _seconds_to_ms(key: str, value: str) -> int | Unusable:
 def _gain_db(value: str) -> float | Unusable:
     """``liq_amplify`` (e.g. ``"-6.2 dB"``) as a finite gain, or why not."""
     if _GAIN_PATTERN.fullmatch(value) is None:
-        return Unusable(f"liq_amplify is not a gain in dB: {value!r}")
+        return Unusable(f"liq_amplify is not a gain in dB: {echo(value)}")
     gain = float(value.removesuffix(" dB"))
     if not math.isfinite(gain):
-        return Unusable(f"liq_amplify is not a gain in dB: {value!r}")
+        return Unusable(f"liq_amplify is not a gain in dB: {echo(value)}")
     return gain
 
 

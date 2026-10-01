@@ -35,11 +35,13 @@ from backend.playout.liquidsoap_process import NO_WINDOW, cache_env, long_path
 __all__ = [
     "ANALYSER_SCRIPT",
     "AUTOCUE_SETTINGS",
+    "ECHO_CHARS",
     "AnalyserConfig",
     "AnalyserError",
     "BatchAnalysis",
     "CueFile",
     "analyse_batch",
+    "echo",
     "remove_listings",
 ]
 
@@ -50,7 +52,7 @@ _BEGIN = "RS_CUE_BEGIN"
 _RESULT = "RS_CUE_RESULT"
 _TAIL_CHARS = 2_000  # of the output, carried by an AnalyserError
 _TAIL_LINES = 200  # enough lines to fill _TAIL_CHARS with Liquidsoap's log
-_ECHO_CHARS = 200  # of an offending value, quoted in a rejection
+ECHO_CHARS = 200  # of an offending value, quoted in a rejection; shared with autocue.py
 _EXIT_WAIT_S = 10.0  # for a child whose output ended to exit by itself, before a kill
 _KILL_WAIT_S = 10.0
 _AUDIO_S_PER_DEADLINE_S = 40  # D67: autocue runs at about 65x real time; 40x leaves margin
@@ -138,22 +140,23 @@ def _reap(process: subprocess.Popen[str], exit_wait_s: float) -> int | None:
     return None
 
 
-def _echo(value: object) -> str:
-    return repr(value)[:_ECHO_CHARS]
+def echo(value: object) -> str:
+    """``value``'s repr, truncated to ``ECHO_CHARS`` for a rejection or warning message."""
+    return repr(value)[:ECHO_CHARS]
 
 
 def _result_problem(parsed: object, begun: int, line_no: int) -> str | None:
     """Why a parsed result line breaks the protocol, naming the field; None if it is valid."""
     if not isinstance(parsed, dict):
-        return f"{_RESULT} on output line {line_no} is JSON but not an object: {_echo(parsed)}"
+        return f"{_RESULT} on output line {line_no} is JSON but not an object: {echo(parsed)}"
     index = parsed.get("index")
     if type(index) is not int or index != begun:
-        return f"index on output line {line_no} must be {begun}, the file begun: {_echo(index)}"
+        return f"index on output line {line_no} must be {begun}, the file begun: {echo(index)}"
     metadata = parsed.get("metadata")
     if not isinstance(metadata, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in metadata.items()
     ):
-        return f"metadata on output line {line_no} must map strings to strings: {_echo(metadata)}"
+        return f"metadata on output line {line_no} must map strings to strings: {echo(metadata)}"
     return None
 
 
@@ -254,7 +257,7 @@ class _Reader:
             parsed: object = json.loads(body)
         except json.JSONDecodeError:
             self.rejected[begun] = (  # D68: this file fails; the batch goes on
-                f"{_RESULT} on output line {self._line_no} is not JSON: {_echo(body)}"
+                f"{_RESULT} on output line {self._line_no} is not JSON: {echo(body)}"
             )
             return
         problem = _result_problem(parsed, begun, self._line_no)
@@ -270,7 +273,11 @@ def _write_listing(files: Sequence[CueFile], cache_dir: Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
     handle, name = tempfile.mkstemp(prefix=_LISTING_PREFIX, suffix=".json", dir=cache_dir)
     with os.fdopen(handle, "w", encoding="utf-8") as listing:
-        json.dump([long_path(Path(cue_file.path)) for cue_file in files], listing)
+        json.dump(
+            [long_path(Path(cue_file.path)) for cue_file in files],
+            listing,
+            ensure_ascii=False,
+        )
     return Path(name)
 
 
