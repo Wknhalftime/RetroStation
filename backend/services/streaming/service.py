@@ -3,6 +3,12 @@ freeze watchdog (spec: Service and routes; Errors and edge cases; the Backend <-
 contract; D10, D11, D15, D22-D32, D39, D42, D43, D72; R1: the day read overlaps the engine
 start); and what it tells the listener feed (D13, D28, D74, D78a, D78b).
 
+Songs without cues (D78-D80, D85): each song after the landing has its stored cues re-read
+just before it is handed out, within a time limit, and keeps what was read at tune-in when
+that read fails (D85). A song handed out without cues plays D23's values, is warned about
+and reported to the cue owner once per app run (D78, D79, D82); a landing whose tail is
+too short for its cues plays D23's values with a warning (D80).
+
 One instance per app, built at the composition root. Repository reads run in worker threads;
 all session state is mutated on the event loop (the day memo is the one exception, and it
 carries its own lock).
@@ -16,6 +22,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -23,12 +30,14 @@ import structlog
 
 from backend.domain.streaming import (
     Bookmark,
+    CuePoints,
     DayLoader,
     EndOfScheduleError,
     InvalidStreamValueError,
     ItemRef,
     Landing,
     NoBroadcastError,
+    PlayableFile,
     ScheduleItem,
     StreamTiming,
     TuneIn,
@@ -51,6 +60,8 @@ from backend.services.streaming.bookmarks import (
     SavedBookmark,
     bookmark_still_valid,
 )
+from backend.services.streaming.cue_reports import IgnoredReports, NoCueMemory, NoCueReports
+from backend.services.streaming.cue_reread import CueRereadLimits, CueRereads, Unread
 from backend.services.streaming.errors import (
     InvalidStreamSettingError,
     SessionTokenError,
@@ -68,7 +79,12 @@ from backend.services.streaming.listener_events import (
     StatusKind,
 )
 from backend.services.streaming.max_sessions import MAX_SESSIONS_KEY, parse_max_sessions
-from backend.services.streaming.payload import FinalClip, ItemPayload, final_payload, item_payload
+from backend.services.streaming.payload import (
+    FinalClip,
+    ItemPayload,
+    final_payload,
+    landing_payload,
+)
 from backend.services.streaming.sessions import (
     Assigned,
     Committed,
@@ -122,9 +138,14 @@ class StreamPorts:
     """Seconds on a monotonic clock (``time.monotonic``) for everything that measures elapsed
     time (D47); ``clock`` then only places listeners. ``None`` measures elapsed time on
     ``clock`` too, which is how the D2 rigs drive every duration with one clock."""
+    cue_reread_repos: ReposFactory | None = None
+    """The re-read's own connections (D85), with short lock and statement limits; ``None``
+    re-reads through ``repos``, as the D2 rigs do."""
     sleep: Sleep = asyncio.sleep
     """Waits on the loop's monotonic clock (D47); the 1 s now-playing delay uses it. Tests
     inject a gate."""
+    cue_reports: NoCueReports = field(default_factory=IgnoredReports)
+    """Where a song sent without cues is reported (D79); ``IgnoredReports`` in the D2 rigs."""
 
 
 _STEADY_EPOCH = datetime(2000, 1, 1)
@@ -151,6 +172,16 @@ class StreamServiceConfig:
     relay: RelayConfig = field(default_factory=RelayConfig)
     freeze_grace: timedelta = timedelta(seconds=30)  # D31
     now_playing_delay: timedelta = timedelta(seconds=1)  # contract: "~1 s delay"
+    no_cue_memory: int = 4096
+    """How many files a run of the app remembers having reported (D82, D87(c))."""
+    cue_reread: CueRereadLimits = field(default_factory=CueRereadLimits)
+    """How long a song's stored-cue re-read may take and how many run at once (D85, D86(c))."""
+
+    def __post_init__(self) -> None:
+        if self.no_cue_memory < 1:
+            raise InvalidStreamValueError(
+                f"StreamServiceConfig.no_cue_memory must be >= 1, got {self.no_cue_memory}"
+            )
 
 
 @dataclass(frozen=True)
@@ -233,6 +264,12 @@ def _day_loader(repos: ReposFactory, station_id: UUID) -> DayLoader:
     return memoised_day_loader(read_day)
 
 
+def _stored_cues(repos: ReposFactory, file_id: UUID) -> CuePoints | None:
+    """The cues stored for the file's audio now (D85); one connection per use."""
+    with repos() as opened:
+        return opened.schedule.file_cues(file_id)
+
+
 @dataclass(frozen=True)
 class _Schedule:
     """What a placement reads: the session's days, its year, the moment and the rules.
@@ -287,9 +324,11 @@ def _following(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> Ass
 
 
 def _payload(seq: int, assigned: Assigned | FinalClip, timing: StreamTiming) -> ItemPayload:
+    """The item's annotations; an item's cues are dropped when its tail is too short for
+    them (D80; a later item starts at offset 0, so only a landing can be affected)."""
     if isinstance(assigned, FinalClip):
         return final_payload(seq, assigned)
-    return item_payload(seq, assigned.item, assigned.offset_ms, timing)
+    return landing_payload(seq, assigned.item, assigned.offset_ms, timing)
 
 
 def _flagged(assigned: Assigned | FinalClip) -> dict[str, str | None]:
@@ -309,15 +348,26 @@ def _token_matches(sent: str | None, expected: str) -> bool:
     return sent is not None and secrets.compare_digest(sent.encode(), expected.encode())
 
 
-def _playing_span(committed: Committed | None) -> PlayingSpan | None:
+def _playing_span(committed: Committed | None, timing: StreamTiming) -> PlayingSpan | None:
     """What is playing now and how long it has left, for the freeze deadline."""
     if committed is None:
         return None
     playing = committed.assigned
     if isinstance(playing, FinalClip):
         return PlayingSpan(committed.started_at, playing.span_ms)
-    span_ms = 0 if playing.item.file is None else playing.item.file.span_ms()
-    return PlayingSpan(committed.started_at, span_ms - playing.offset_ms)
+    return PlayingSpan(committed.started_at, _sent_span_ms(playing, timing))
+
+
+def _sent_span_ms(assigned: Assigned, timing: StreamTiming) -> int:
+    """How long an item plays as sent (``landing_payload``): its span from ``offset_ms``, or,
+    when D80 drops a landing's cues, D23's from ``offset_ms + cue_in`` to the file's end."""
+    file = assigned.item.file
+    if file is None:
+        return 0 - assigned.offset_ms  # unreachable for an assigned item; as before E2
+    cues = file.cues
+    if cues is not None and file.cues_to_play(assigned.offset_ms, timing) is None:
+        return (file.duration_ms or 0) - cues.cue_in_ms - assigned.offset_ms
+    return file.span_ms() - assigned.offset_ms
 
 
 def _left_at(
@@ -409,6 +459,9 @@ class StreamService:
         self._elapsed = _elapsed_clock(ports)
         self._sessions: dict[str, StreamSession] = {}
         self._feed = ListenerFeed(self._elapsed, ports.sleep)
+        self._no_cues = NoCueMemory(config.no_cue_memory)
+        reread_repos = ports.repos if ports.cue_reread_repos is None else ports.cue_reread_repos
+        self._rereads = CueRereads(partial(_stored_cues, reread_repos), config.cue_reread)
 
     # ---- queries ---------------------------------------------------------------------------
 
@@ -433,13 +486,14 @@ class StreamService:
         """Running sessions whose next ``started`` report is overdue (D31)."""
         elapsed_now = self._elapsed()
         grace = self._config.freeze_grace
+        timing = self._config.timing
         return [
             session_id
             for session_id, session in self._sessions.items()
             if session.engine is not None
             and not session.stopped
             and elapsed_now
-            >= freeze_deadline(session.opened_at, _playing_span(session.committed), grace)
+            >= freeze_deadline(session.opened_at, _playing_span(session.committed, timing), grace)
         ]
 
     # ---- open ------------------------------------------------------------------------------
@@ -679,7 +733,7 @@ class StreamService:
             landing = await asyncio.to_thread(
                 _landing_assigned, session.load_day, self._placed(call, session)
             )
-            return self._assign(self._authorised(call), 0, landing)
+            return self._assign(call, self._authorised(call), landing)
         previous = session.assigned[call.seq - 1]
         if isinstance(previous, FinalClip):  # the end marker already follows the clip
             raise EndOfScheduleError(f"session {call.session_id}: the final clip was the last")
@@ -692,7 +746,25 @@ class StreamService:
             if clip is None:
                 raise
             return clip
-        return self._assign(self._authorised(call), call.seq, following)
+        following = await self._with_stored_cues(following)  # D85; never seq 0 (D86c)
+        return self._assign(call, self._authorised(call), following)
+
+    async def _with_stored_cues(self, assigned: Assigned) -> Assigned:
+        """D85: the song as stored now, or as read at tune-in when the read fails. Stored
+        cues that would leave it unplayable are ignored (D86b, from D9): the walk chose it
+        as playable. Only the assignment changes; the day memo stays as read."""
+        file = assigned.item.file
+        if file is None:
+            return assigned
+        answer = await self._rereads.stored_cues(file.file_id)
+        if isinstance(answer, Unread):
+            return assigned
+        fresh = file.with_stored_cues(answer, self._config.timing)
+        if fresh == file:
+            if answer != file.cues:
+                logger.debug("stream_cue_reread_ignored", file_id=str(file.file_id))
+            return assigned
+        return replace(assigned, item=replace(assigned.item, file=fresh))
 
     def _authorised(self, call: ItemCall) -> StreamSession:
         session = self._sessions.get(call.session_id)
@@ -730,13 +802,52 @@ class StreamService:
             raise UnknownItemError(f"session {call.session_id}: not placed")
         return session.landing
 
-    def _assign(self, session: StreamSession, seq: int, assigned: Assigned) -> ItemPayload:
-        served = self._served(session, seq)  # a concurrent request may have assigned it
+    def _assign(self, call: ItemCall, session: StreamSession, assigned: Assigned) -> ItemPayload:
+        """Store ``call.seq``'s assignment and answer its payload; a new one is noticed once."""
+        served = self._served(session, call.seq)  # a concurrent request may have assigned it
         if served is not None:
             return served
-        payload = _payload(seq, assigned, self._config.timing)
-        session.assigned[seq] = assigned
+        payload = _payload(call.seq, assigned, self._config.timing)
+        session.assigned[call.seq] = assigned
+        self._notice(call, assigned)
         return payload
+
+    def _notice(self, call: ItemCall, assigned: Assigned) -> None:
+        """Log an item sent without its cues: none stored (D78, reported to the cue owner,
+        D79), or a landing's dropped (D80)."""
+        file = assigned.item.file
+        if file is None:
+            return  # unreachable for an assigned item; keeps mypy honest
+        timing = self._config.timing
+        if file.cues is None:
+            self._notice_no_cues(call, assigned.item, file)
+        elif file.cues_to_play(assigned.offset_ms, timing) is None:
+            logger.warning(
+                "stream_landing_tail_short",
+                session_id=call.session_id,
+                seq=call.seq,
+                event_id=str(assigned.item.event_id),
+                file_id=str(file.file_id),
+                offset_ms=assigned.offset_ms,
+                span_ms=file.span_ms(),
+                min_span_ms=file.min_span_ms(timing),
+            )
+
+    def _notice_no_cues(self, call: ItemCall, item: ScheduleItem, file: PlayableFile) -> None:
+        """Warn about and report a file sent without cues once per app run, then debug (D82)."""
+        fields = {
+            "session_id": call.session_id,
+            "seq": call.seq,
+            "event_id": str(item.event_id),
+            "file_id": str(file.file_id),
+            "path": file.path,
+        }
+        if self._no_cues.seen(file.file_id):
+            logger.debug("stream_item_no_cues", **fields)
+            return
+        logger.warning("stream_item_no_cues", **fields)
+        self._no_cues.remember(file.file_id)
+        self._ports.cue_reports.report(file.file_id)
 
     def _end_schedule(self, session: StreamSession, seq: int) -> ItemPayload | None:
         """Record the end at ``seq``: the final clip's payload, or ``None`` with no clip."""
