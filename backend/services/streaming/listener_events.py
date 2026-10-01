@@ -18,6 +18,7 @@ from datetime import datetime
 from enum import StrEnum
 from functools import partial
 
+from backend.domain.streaming import InvalidStreamValueError
 from backend.services.streaming.bookmarks import BookmarkKey
 from backend.services.streaming.errors import SubscriptionLimitError
 
@@ -65,7 +66,7 @@ class Status:
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, StatusKind):
-            raise ValueError(f"Status.kind must be a StatusKind, got {self.kind!r}")
+            raise InvalidStreamValueError(f"Status.kind must be a StatusKind, got {self.kind!r}")
 
 
 type ListenerEvent = NowPlaying | Status
@@ -189,7 +190,8 @@ class ListenerEvents(AsyncIterator[ListenerEvent]):
 
     Reading is cancellation-safe: an event is taken only as it is returned, so a read that is
     cancelled loses nothing. The iterator ends once the subscription is closed or disconnected
-    (more than ``PENDING_LIMIT`` events held unread, D78b)."""
+    (more than ``PENDING_LIMIT`` events held unread, D78b). One reader per subscription: a
+    second concurrent reader is unsupported."""
 
     def __init__(self, mailbox: _Mailbox, leave: Callable[[], None]) -> None:
         self._mailbox = mailbox
