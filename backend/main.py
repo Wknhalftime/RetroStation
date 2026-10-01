@@ -37,7 +37,7 @@ from backend.playout.liquidsoap_process import (
     start_ready_engine,
     warm_script_cache,
 )
-from backend.routers import listen, stream_internal
+from backend.routers import listen, radio, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
 from backend.services.streaming.service import (
@@ -137,10 +137,15 @@ def _stream_repos(database_url: str) -> ReposFactory:
 def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> StreamPorts:
     """What the stream service is wired to: PostgreSQL, the engine start and two clocks.
 
-    D47: the wall clock only places listeners; the monotonic clock times everything else.
+    D47: the wall clock only places listeners; the monotonic clock times everything else,
+    and the now-playing delay waits on the loop's monotonic clock.
     """
     return StreamPorts(
-        _stream_repos(settings.database_url), start_engine, datetime.now, time.monotonic
+        _stream_repos(settings.database_url),
+        start_engine,
+        datetime.now,
+        time.monotonic,
+        sleep=asyncio.sleep,
     )
 
 
@@ -307,6 +312,7 @@ app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 app.include_router(v1_router)
 app.include_router(stream_internal.router)
 app.include_router(listen.router)
+app.include_router(radio.router)
 
 
 @app.get("/health")

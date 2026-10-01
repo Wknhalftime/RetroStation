@@ -1,6 +1,6 @@
 """StreamService: admission, placement, the item contract, bookmarks, reports and the freeze
 watchdog (spec: Service and routes; Errors and edge cases; the contract; D10, D11, D15,
-D23-D32, D36; carried: memoised DayLoader, event_id with the committed ItemRef,
+D23-D32, D72; carried: memoised DayLoader, event_id with the committed ItemRef,
 EngineStartError translated by the service)."""
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from backend.services.streaming.errors import (
     InvalidStreamSettingError,
     SessionTokenError,
     StationBusyError,
-    StationNotFoundError,
     StreamUnavailableError,
     UnknownItemError,
     UnknownSessionError,
@@ -105,15 +104,7 @@ async def leave_after_hearing(rig: Rig, key: str, seconds: float) -> None:
     rig.service.close(sid)
 
 
-# ---- admission (D10, D27, D36; Errors: "All slots taken -> 503 station busy") ---------------
-
-
-async def test_call_letters_are_matched_exactly(rig: Rig) -> None:
-    morning(rig)
-    with pytest.raises(StationNotFoundError):
-        await rig.open(call="kioa")
-    assert rig.engines.endpoints == []
-    assert rig.service.open_sessions == 0
+# ---- admission (D10, D27, D72; Errors: "All slots taken -> 503 station busy") ---------------
 
 
 async def test_by_default_three_listeners_are_admitted(rig: Rig) -> None:

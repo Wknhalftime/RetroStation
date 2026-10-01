@@ -9,12 +9,20 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from backend.config import get_settings
-from backend.dependencies import get_current_token, get_db_connection
+from backend.dependencies import SyncRepos, get_current_token, get_db_connection
+from backend.domain.broadcast import (
+    BroadcastStation,
+    DuplicateCallLettersError,
+    StationChanges,
+    UnknownStationError,
+)
 from backend.services.m3u_generator_service import generate_m3u
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.stations import create_station as svc_create_station
+from backend.services.stations import update_station as svc_update_station
 
 router = APIRouter()
 
@@ -28,17 +36,28 @@ Token = Annotated[str, Depends(get_current_token)]
 
 
 class StationCreate(BaseModel):
-    call_letters: str
+    call_letters: str = Field(min_length=1)
     name: str | None = None
     city: str | None = None
     format_name: str | None = None
 
 
 class StationUpdate(BaseModel):
-    call_letters: str | None = None
+    call_letters: str | None = Field(default=None, min_length=1)
     name: str | None = None
     city: str | None = None
     format_name: str | None = None
+
+    @field_validator("call_letters")
+    @classmethod
+    def _call_letters_not_null(cls, value: str | None) -> str | None:
+        """Refuse an explicit ``null`` (I1): under ``exclude_unset``, a null field is still
+        "set", so it would otherwise reach `StationChanges` and leak as a 500. This validator
+        only runs when the field is present in the body (pydantic skips it for an omitted
+        field), so a partial update that never mentions call_letters is unaffected."""
+        if value is None:
+            raise ValueError("call_letters must not be null")
+        return value
 
 
 class StationResponse(BaseModel):
@@ -173,27 +192,23 @@ async def list_stations(conn: DbConn, _token: Token) -> list[StationSummary]:
 
 
 @router.post("", response_model=StationResponse, status_code=status.HTTP_201_CREATED)
-async def create_station(body: StationCreate, conn: DbConn, _token: Token) -> StationResponse:
+def create_station(body: StationCreate, repos: SyncRepos, _token: Token) -> StationResponse:
     """Create a new station."""
-    station_id = uuid4()
+    draft = BroadcastStation(
+        id=uuid4(),
+        call_letters=body.call_letters,
+        name=body.name,
+        city=body.city,
+        format_name=body.format_name,
+    )
     try:
-        await conn.execute(
-            """
-            INSERT INTO stations (id, call_letters, name, city, format_name)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (station_id, body.call_letters, body.name, body.city, body.format_name),
-        )
-    except psycopg.errors.UniqueViolation as exc:
+        created = svc_create_station(repos.broadcast_stations, draft)
+    except DuplicateCallLettersError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Station with call_letters '{body.call_letters}' already exists",
         ) from exc
-    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
-    row = await cur.fetchone()
-    if row is None:
-        raise RuntimeError("Expected row after INSERT")
-    return _row_to_response(row)
+    return StationResponse.model_validate(created)
 
 
 @router.get("/{station_id}", response_model=StationResponse)
@@ -210,38 +225,25 @@ async def get_station(station_id: UUID, conn: DbConn, _token: Token) -> StationR
 
 
 @router.put("/{station_id}", response_model=StationResponse)
-async def update_station(
-    station_id: UUID, body: StationUpdate, conn: DbConn, _token: Token
+def update_station(
+    station_id: UUID, body: StationUpdate, repos: SyncRepos, _token: Token
 ) -> StationResponse:
     """Partially update a station (only provided fields are changed)."""
-    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
-    existing = await cur.fetchone()
-    if existing is None:
+    changes = StationChanges(body.model_dump(exclude_unset=True))
+    try:
+        updated = svc_update_station(repos.broadcast_stations, station_id, changes)
+    except UnknownStationError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Station {station_id} not found",
-        )
-
-    # Merge: only overwrite fields explicitly set in the request body
-    updated = body.model_dump(exclude_unset=True)
-    new_call_letters = updated.get("call_letters", existing["call_letters"])
-    new_name = updated.get("name", existing.get("name"))
-    new_city = updated.get("city", existing.get("city"))
-    new_format_name = updated.get("format_name", existing.get("format_name"))
-
-    await conn.execute(
-        """
-        UPDATE stations
-        SET call_letters = %s, name = %s, city = %s, format_name = %s
-        WHERE id = %s
-        """,
-        (new_call_letters, new_name, new_city, new_format_name, station_id),
-    )
-    cur = await conn.execute("SELECT * FROM stations WHERE id = %s", (station_id,))
-    row = await cur.fetchone()
-    if row is None:
-        raise RuntimeError("Expected row after INSERT")
-    return _row_to_response(row)
+        ) from exc
+    except DuplicateCallLettersError as exc:
+        call_letters = changes.values.get("call_letters")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Station with call_letters '{call_letters}' already exists",
+        ) from exc
+    return StationResponse.model_validate(updated)
 
 
 @router.delete("/{station_id}", status_code=status.HTTP_204_NO_CONTENT)

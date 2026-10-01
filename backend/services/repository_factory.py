@@ -36,6 +36,7 @@ from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
+from backend.services.streaming.station_years import StationYearRepos
 
 
 @dataclass
@@ -178,6 +179,10 @@ class RepositoryFactory:
             library_files=self.library.files,
             user_settings=self.system.user_settings,
         )
+
+    def station_year_repos(self) -> StationYearRepos:
+        """The repositories the station-year list reads (D70)."""
+        return StationYearRepos(stations=self.broadcast.stations, days=self.broadcast.days)
 
 
 @contextmanager

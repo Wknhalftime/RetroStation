@@ -11,6 +11,7 @@ from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientPr
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 from backend.services.streaming.service import StreamService
+from backend.services.streaming.station_years import StationYearRepos
 
 _LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
 
@@ -108,3 +109,11 @@ SyncRepos = Annotated[RepositoryFactory, Depends(get_sync_repos, scope="function
 def get_reconciliation_repos(repos: SyncRepos) -> ReconciliationRepos:
     """The fold repositories for one request, on the request's connection."""
     return reconciliation_repos(repos)
+
+
+def get_station_year_repos(repos: SyncRepos) -> StationYearRepos:
+    """The repositories the station-year list reads, on the request's connection (D70).
+
+    No dependency on ``stream_service``: the list works while streaming is off.
+    """
+    return repos.station_year_repos()

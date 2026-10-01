@@ -1,7 +1,7 @@
 """The stream service: admission, placement, the internal item contract, bookmarks and the
 freeze watchdog (spec: Service and routes; Errors and edge cases; the Backend <-> Liquidsoap
-contract; D10, D11, D15, D22-D32, D36, D39, D42, D43; R1: the day read overlaps the engine
-start).
+contract; D10, D11, D15, D22-D32, D39, D42, D43, D72; R1: the day read overlaps the engine
+start); and what it tells the listener feed (D13, D28, D74, D78a, D78b).
 
 One instance per app, built at the composition root. Repository reads run in worker threads;
 all session state is mutated on the event loop (the day memo is the one exception, and it
@@ -28,6 +28,7 @@ from backend.domain.streaming import (
     InvalidStreamValueError,
     ItemRef,
     Landing,
+    NoBroadcastError,
     ScheduleItem,
     StreamTiming,
     TuneIn,
@@ -59,6 +60,13 @@ from backend.services.streaming.errors import (
     UnknownItemError,
     UnknownSessionError,
 )
+from backend.services.streaming.listener_events import (
+    ListenerEvents,
+    ListenerFeed,
+    NowPlaying,
+    Sleep,
+    StatusKind,
+)
 from backend.services.streaming.max_sessions import MAX_SESSIONS_KEY, parse_max_sessions
 from backend.services.streaming.payload import FinalClip, ItemPayload, final_payload, item_payload
 from backend.services.streaming.sessions import (
@@ -70,6 +78,7 @@ from backend.services.streaming.sessions import (
 from backend.services.streaming.watchdog import PlayingSpan, freeze_deadline
 
 __all__ = [
+    "EventsRequest",
     "ItemCall",
     "ListenRequest",
     "OpenedStream",
@@ -83,6 +92,8 @@ __all__ = [
 logger = structlog.get_logger()
 
 _INTERNAL_PATH = "/internal/stream/sessions"
+_SUBSCRIPTIONS_PER_SLOT = 2
+"""Now-playing subscriptions allowed per listener slot, app-wide (D78b with D42)."""
 _PLACEMENT_WAIT_S = 5.0
 """How long seq 0 waits for placement: below Liquidsoap's 10 s ``http.get`` timeout."""
 
@@ -111,6 +122,9 @@ class StreamPorts:
     """Seconds on a monotonic clock (``time.monotonic``) for everything that measures elapsed
     time (D47); ``clock`` then only places listeners. ``None`` measures elapsed time on
     ``clock`` too, which is how the D2 rigs drive every duration with one clock."""
+    sleep: Sleep = asyncio.sleep
+    """Waits on the loop's monotonic clock (D47); the 1 s now-playing delay uses it. Tests
+    inject a gate."""
 
 
 _STEADY_EPOCH = datetime(2000, 1, 1)
@@ -156,6 +170,22 @@ class ListenRequest:
 
 
 @dataclass(frozen=True)
+class EventsRequest:
+    """One page's now-playing subscription: a station-year and the listener's key (D28: no
+    key, no events)."""
+
+    call_letters: str
+    year: int
+    listener_key: str
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.year <= 9999:
+            raise InvalidStreamValueError(f"EventsRequest.year must be 1..9999, got {self.year}")
+        if self.listener_key == "":
+            raise InvalidStreamValueError("EventsRequest.listener_key must not be empty")
+
+
+@dataclass(frozen=True)
 class ItemCall:
     """One call from a session engine: which session, the token it sent, which item."""
 
@@ -176,7 +206,7 @@ class OpenedStream:
 
 
 def _station_and_limit(repos: ReposFactory, call_letters: str) -> tuple[UUID | None, str | None]:
-    """The station with exactly these call letters (D36), and the raw listener limit."""
+    """The station with these call letters, in any case (D72), and the raw listener limit."""
     with repos() as opened:
         station = opened.stations.get_by_call_letters(call_letters)
         setting = opened.settings.get(MAX_SESSIONS_KEY)
@@ -184,6 +214,13 @@ def _station_and_limit(repos: ReposFactory, call_letters: str) -> tuple[UUID | N
         None if station is None else station.id,
         None if setting is None else setting.value,
     )
+
+
+def _channel(request: ListenRequest, station_id: UUID) -> BookmarkKey | None:
+    """The tune-in's bookmark key, which is also its listener channel (D74); keyless, none
+    (D28)."""
+    key = request.listener_key
+    return None if key is None else BookmarkKey(key, station_id, request.year)
 
 
 def _day_loader(repos: ReposFactory, station_id: UUID) -> DayLoader:
@@ -371,12 +408,18 @@ class StreamService:
         self._config = config
         self._elapsed = _elapsed_clock(ports)
         self._sessions: dict[str, StreamSession] = {}
+        self._feed = ListenerFeed(self._elapsed, ports.sleep)
 
     # ---- queries ---------------------------------------------------------------------------
 
     @property
     def open_sessions(self) -> int:
         return len(self._sessions)
+
+    @property
+    def event_channels(self) -> int:
+        """Listener channels with a stream or a subscription."""
+        return self._feed.channels
 
     def now_playing(self, session_id: str) -> str:
         """``artist - title`` once its delay has passed; ``""`` before that, or if unknown."""
@@ -402,25 +445,81 @@ class StreamService:
     # ---- open ------------------------------------------------------------------------------
 
     async def open(self, request: ListenRequest) -> OpenedStream:
-        """Admit, place and start one listener's session; the handle relays its audio."""
+        """Admit, place and start one listener's session; the handle relays its audio. A
+        keyed tune-in is told on its channel as it goes (D78a)."""
         station_id, raw_limit = await asyncio.to_thread(
             _station_and_limit, self._ports.repos, request.call_letters
         )
         if station_id is None:
             raise StationNotFoundError(f"no station has the call letters {request.call_letters!r}")
-        limit = self._listener_limit(raw_limit)
-        session_id, session = self._admit(station_id, limit, request)  # no await before this
+        channel, session_id, session = self._admit_told(
+            station_id, raw_limit, request
+        )  # no await before
         opened = False
+        # D78b: an unexpected failure, including StreamUnavailableError, is never "stopped".
+        failure = StatusKind.UNAVAILABLE
         try:
+            if channel is not None:
+                self._feed.opened(channel, session_id)  # D42: every exit from here frees the slot
             engine = await self._place_while_starting(session_id, session, request.year)
             app = self._relay_app(session_id, engine, request.icy_metadata)
             opened = True
+        except (NoBroadcastError, EndOfScheduleError):
+            failure = StatusKind.NO_BROADCAST
+            raise
+        except asyncio.CancelledError:
+            failure = StatusKind.STOPPED  # the listener left mid-start (D6)
+            raise
         finally:
             if not opened:
-                self._stop(session)  # an engine settled before _relay_app raised is halted
-                self._sessions.pop(session_id, None)
-                session.placed.set()  # wake a waiting seq 0 request: the session is gone
+                self._abandon_open(session_id, session, failure)
         return OpenedStream(session_id, app)
+
+    def _abandon_open(self, session_id: str, session: StreamSession, failure: StatusKind) -> None:
+        """A session that never finished opening: told and forgotten before the halt, so a
+        stop that raises (D78c review M1) can't leave it stuck in the feed or its waiter
+        hanging. The halt's own failure is logged, not raised (D78c review M2): the error
+        that failed the open is always the one the caller sees, never a secondary one from
+        an engine that also would not stop."""
+        self._sessions.pop(session_id, None)
+        session.placed.set()  # wake a waiting seq 0 request: the session is gone
+        self._tell_failure(session_id, session, failure)
+        try:
+            self._stop(session)  # an engine settled before _relay_app raised is halted
+        except OSError:
+            logger.exception("stream_open_abandon_stop_failed", session_id=session_id)
+
+    def _admit_told(
+        self, station_id: UUID, raw_limit: str | None, request: ListenRequest
+    ) -> tuple[BookmarkKey | None, str, StreamSession]:
+        """Take a slot under the parsed limit, telling the refusal (D27: a bad limit setting
+        is ``unavailable``; D10: ``busy``) before it is raised. The caller tells ``tuning`` on
+        the returned channel, inside its own try/finally, so the slot is freed if that fails."""
+        channel = _channel(request, station_id)
+        try:
+            limit = self._listener_limit(raw_limit)
+            session_id, session = self._admit(station_id, limit, request)
+        except InvalidStreamSettingError:
+            self._refuse(channel, StatusKind.UNAVAILABLE)
+            raise
+        except StationBusyError:
+            self._refuse(channel, StatusKind.BUSY)
+            raise
+        return channel, session_id, session
+
+    def _refuse(self, channel: BookmarkKey | None, kind: StatusKind) -> None:
+        """Tell a refused tune-in on its channel; a keyless one tells no one (D28)."""
+        if channel is not None:
+            self._feed.refused(channel, kind)
+
+    def _tell_failure(self, session_id: str, session: StreamSession, kind: StatusKind) -> None:
+        """Tell why an admitted session failed to open; the feed tells ``kind`` only if the
+        session still owns its channel (a newer stream, or a close that was already told,
+        means it doesn't). Either way this ``ended`` call also forgets the session as a
+        still-playing stream (D78c), which matters for pruning an idle channel and for which
+        stream the next hand-back reaches."""
+        if session.bookmark_key is not None:
+            self._feed.ended(session.bookmark_key, session_id, kind)
 
     def _listener_limit(self, raw: str | None) -> int:
         try:
@@ -435,11 +534,10 @@ class StreamService:
         """Take a slot, atomically: nothing awaits between the check and the insert (D42)."""
         if len(self._sessions) >= limit:
             raise StationBusyError(f"all {limit} listener slots are taken")
-        key = request.listener_key
         session = StreamSession(
             load_day=_day_loader(self._ports.repos, station_id),
             opened_at=self._elapsed(),
-            bookmark_key=None if key is None else BookmarkKey(key, station_id, request.year),
+            bookmark_key=_channel(request, station_id),
             token=secrets.token_urlsafe(32),
         )
         session_id = uuid4().hex
@@ -549,6 +647,23 @@ class StreamService:
         framing = client_framing(icy_metadata, lambda: self.now_playing(session_id), relay)
         return relay_asgi(engine.upstream, framing, lambda: self.close(session_id), relay)
 
+    # ---- the listener feed ------------------------------------------------------------------
+
+    async def listener_events(self, request: EventsRequest) -> ListenerEvents:
+        """One page's subscription to its channel (D74), up to twice the listener cap app-wide
+        (D78b); it reads the station and the limit, never the schedule.
+
+        Raises ``StationNotFoundError``, ``InvalidStreamSettingError`` (D27, logged) or
+        ``SubscriptionLimitError``."""
+        station_id, raw_limit = await asyncio.to_thread(
+            _station_and_limit, self._ports.repos, request.call_letters
+        )
+        if station_id is None:
+            raise StationNotFoundError(f"no station has the call letters {request.call_letters!r}")
+        limit = self._listener_limit(raw_limit)
+        channel = BookmarkKey(request.listener_key, station_id, request.year)
+        return self._feed.subscribe(channel, _SUBSCRIPTIONS_PER_SLOT * limit)
+
     # ---- the item contract -------------------------------------------------------------------
 
     async def item(self, call: ItemCall) -> ItemPayload:
@@ -647,9 +762,18 @@ class StreamService:
             elapsed_now = self._elapsed()
             session.committed = Committed(call.seq, assigned, elapsed_now)
             if isinstance(assigned, Assigned):  # the final clip has no title
-                title = f"{assigned.item.artist} - {assigned.item.title}"
-                session.now_playing = (elapsed_now + self._config.now_playing_delay, title)
+                shows_at = elapsed_now + self._config.now_playing_delay
+                self._show_title(call.session_id, session, assigned.item, shows_at)
         self.stop_frozen()  # spec: the watchdog runs "on each started"
+
+    def _show_title(
+        self, session_id: str, session: StreamSession, item: ScheduleItem, shows_at: datetime
+    ) -> None:
+        """Time the item's title to show at ``shows_at``, on ICY (D25) and on the channel."""
+        session.now_playing = (shows_at, f"{item.artist} - {item.title}")
+        if session.bookmark_key is not None:
+            told = NowPlaying(artist=item.artist, title=item.title)
+            self._feed.title(session.bookmark_key, session_id, told, shows_at)
 
     def failed(self, call: ItemCall) -> None:
         """Flag an item the engine could not play (D32); the engine plays the next one."""
@@ -667,15 +791,23 @@ class StreamService:
     # ---- close and the watchdog --------------------------------------------------------------
 
     def close(self, session_id: str) -> None:
-        """Free the slot, stop the engine without waiting, and keep or clear the bookmark."""
+        """Free the slot and tell the channel ``ended`` (signed off) or ``stopped`` (D78a)
+        before stopping the engine, so a stop that raises (D78c review M1) still frees the
+        feed's hold on this session; the engine is stopped without waiting, and the bookmark
+        is kept or cleared, afterwards. Telling the channel always comes before the bookmark
+        write, so a reconnect can never read a stale one."""
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
-        self._stop(session)
         key = session.bookmark_key
+        finished = False
+        if key is not None:
+            finished = _schedule_finished(session)
+            self._feed.ended(key, session_id, StatusKind.ENDED if finished else StatusKind.STOPPED)
+        self._stop(session)
         if key is None:
             return  # D28
-        if _schedule_finished(session):
+        if finished:
             self._bookmarks.delete(key)  # D26
             return
         now = self._ports.clock()

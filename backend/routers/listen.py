@@ -5,11 +5,12 @@ HTTP errors; D25 ICY titles; D6 a listener who leaves mid-tune-in leaves nothing
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import EventSourceResponse, Response
+from fastapi.sse import ServerSentEvent
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.dependencies import get_stream_service
@@ -19,8 +20,10 @@ from backend.services.streaming.errors import (
     StationBusyError,
     StationNotFoundError,
     StreamUnavailableError,
+    SubscriptionLimitError,
 )
-from backend.services.streaming.service import ListenRequest, StreamService
+from backend.services.streaming.listener_events import ListenerEvent, ListenerEvents, NowPlaying
+from backend.services.streaming.service import EventsRequest, ListenRequest, StreamService
 
 router = APIRouter()
 
@@ -31,8 +34,17 @@ _HTTP_ERRORS: dict[type[StreamingError], tuple[int, str]] = {
     StationBusyError: (status.HTTP_503_SERVICE_UNAVAILABLE, "station busy"),
     StreamUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),
     InvalidStreamSettingError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),  # D27
+    SubscriptionLimitError: (status.HTTP_503_SERVICE_UNAVAILABLE, "station busy"),  # D78b
 }
-_OPEN_ERRORS = tuple(_HTTP_ERRORS)
+_OPEN_ERRORS = (
+    StationNotFoundError,
+    NoBroadcastError,
+    EndOfScheduleError,
+    StationBusyError,
+    StreamUnavailableError,
+    InvalidStreamSettingError,
+)
+_EVENTS_ERRORS = (StationNotFoundError, InvalidStreamSettingError, SubscriptionLimitError)
 
 
 class AsgiResponse(Response):
@@ -93,3 +105,36 @@ async def listen(
     except _OPEN_ERRORS as error:
         raise _http_error(error) from error
     return AsgiResponse(_silence if stream is None else stream.app)
+
+
+async def _subscription(
+    call_letters: str,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    key: Annotated[str, Query(min_length=1, max_length=128)],
+    service: Annotated[StreamService, Depends(get_stream_service)],
+) -> AsyncIterator[ListenerEvents]:
+    """One page's now-playing subscription (X1); its errors are answered before the response
+    starts (D14). The subscription is unsubscribed when the response ends."""
+    try:
+        events = await service.listener_events(EventsRequest(call_letters, year, key))
+    except _EVENTS_ERRORS as error:
+        raise _http_error(error) from error
+    try:
+        yield events
+    finally:
+        await events.aclose()
+
+
+def _sse(event: ListenerEvent) -> ServerSentEvent:
+    if isinstance(event, NowPlaying):
+        data = {"artist": event.artist, "title": event.title}
+        return ServerSentEvent(event="now_playing", data=data)
+    return ServerSentEvent(event="status", data={"kind": event.kind.value})
+
+
+@router.get("/listen/{call_letters}/{year}/events", response_class=EventSourceResponse)
+async def listener_events(
+    events: Annotated[ListenerEvents, Depends(_subscription)],
+) -> AsyncIterator[ServerSentEvent]:
+    async for event in events:
+        yield _sse(event)
