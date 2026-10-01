@@ -39,6 +39,10 @@ class StaleScheduleError(StreamingError):
     """A position points past the end of its day: the day's log changed under the session."""
 
 
+class StreamReadError(StreamingError):
+    """The database could not answer a stream read within its bounds, or at all (D88)."""
+
+
 def to_ms(delta: timedelta) -> int:
     """Whole milliseconds in ``delta``, exactly (no float rounding)."""
     return delta // _ONE_MS

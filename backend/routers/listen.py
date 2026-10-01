@@ -14,7 +14,12 @@ from fastapi.sse import ServerSentEvent
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.dependencies import get_stream_service
-from backend.domain.streaming import EndOfScheduleError, NoBroadcastError, StreamingError
+from backend.domain.streaming import (
+    EndOfScheduleError,
+    NoBroadcastError,
+    StreamingError,
+    StreamReadError,
+)
 from backend.services.streaming.errors import (
     InvalidStreamSettingError,
     StationBusyError,
@@ -34,6 +39,7 @@ _HTTP_ERRORS: dict[type[StreamingError], tuple[int, str]] = {
     StationBusyError: (status.HTTP_503_SERVICE_UNAVAILABLE, "station busy"),
     StreamUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),
     InvalidStreamSettingError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),  # D27
+    StreamReadError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),  # D88
     SubscriptionLimitError: (status.HTTP_503_SERVICE_UNAVAILABLE, "station busy"),  # D78b
 }
 _OPEN_ERRORS = (
@@ -43,8 +49,14 @@ _OPEN_ERRORS = (
     StationBusyError,
     StreamUnavailableError,
     InvalidStreamSettingError,
+    StreamReadError,
 )
-_EVENTS_ERRORS = (StationNotFoundError, InvalidStreamSettingError, SubscriptionLimitError)
+_EVENTS_ERRORS = (
+    StationNotFoundError,
+    InvalidStreamSettingError,
+    SubscriptionLimitError,
+    StreamReadError,
+)
 
 
 class AsgiResponse(Response):

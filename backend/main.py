@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -24,6 +24,7 @@ from backend.db.pool import close_pool, init_pool
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.db.sync_conn import connect_sync
 from backend.logging_config import configure_logging
 from backend.playout.assets import ensure_stream_assets
@@ -58,6 +59,12 @@ logger = structlog.get_logger()
 _WATCHDOG_INTERVAL_S = 5.0
 REPORT_FLUSH_S = 2.0
 """D87(b): shutdown waits this long for the cue reporter's waiting reports to be sent."""
+STREAM_READ_BOUNDS = ReadBounds(
+    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
+)
+"""D88: the stream service's reads give up on a lock after 2 s (the realistic cause), on any
+statement after 10 s (a backstop far above a cold day read's ~1.7 s, D40) and on connecting
+after 5 s; a tune-in then answers 503 unavailable rather than hanging."""
 
 type EngineStarter = Callable[[SessionEndpoint], Awaitable[RunningEngine]]
 
@@ -126,7 +133,9 @@ async def _prepared_engine(
     return engine
 
 
-def _opened_repos(connect: Callable[[], psycopg.Connection[DictRow]]) -> ReposFactory:
+def _opened_repos(
+    connect: Callable[[], AbstractContextManager[psycopg.Connection[DictRow]]],
+) -> ReposFactory:
     """A ``ReposFactory`` over whatever connection ``connect`` opens, one per use."""
 
     @contextmanager
@@ -142,8 +151,9 @@ def _opened_repos(connect: Callable[[], psycopg.Connection[DictRow]]) -> ReposFa
 
 
 def _stream_repos(database_url: str) -> ReposFactory:
-    """One connection per use, holding the repositories the stream service reads."""
-    return _opened_repos(lambda: connect_sync(database_url))
+    """One connection per use, holding the repositories the stream service reads; each read
+    is bounded (D88), so a locked or unreachable database fails it with ``StreamReadError``."""
+    return _opened_repos(lambda: bounded_connection(database_url, STREAM_READ_BOUNDS))
 
 
 def _cue_reread_repos(database_url: str) -> ReposFactory:
