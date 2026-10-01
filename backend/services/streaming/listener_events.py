@@ -256,7 +256,9 @@ class ListenerFeed:
 
     def opened(self, channel: BookmarkKey, session_id: str) -> None:
         """The session becomes the channel's stream (the newest wins, D74): its title is
-        cleared, and ``tuning`` is told."""
+        cleared, and ``tuning`` is told. Older streams already on the channel stay
+        still-playing behind it, so if this one ends later while one of them still plays,
+        the next newest takes the channel back (D78c)."""
         state = self._channels.setdefault(channel, _Channel())
         state.still_playing.append(session_id)
         state.current = None

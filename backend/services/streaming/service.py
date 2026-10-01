@@ -473,10 +473,12 @@ class StreamService:
             raise
         finally:
             if not opened:
-                self._stop(session)  # an engine settled before _relay_app raised is halted
+                # Told and forgotten before the halt: a stop that raises (D78c review M1)
+                # must not leave this session stuck in the feed or the waiter hanging.
                 self._sessions.pop(session_id, None)
                 session.placed.set()  # wake a waiting seq 0 request: the session is gone
                 self._tell_failure(session_id, session, failure)
+                self._stop(session)  # an engine settled before _relay_app raised is halted
         return OpenedStream(session_id, app)
 
     def _admit_told(
@@ -503,8 +505,11 @@ class StreamService:
             self._feed.refused(channel, kind)
 
     def _tell_failure(self, session_id: str, session: StreamSession, kind: StatusKind) -> None:
-        """Tell why an admitted session failed to open; the feed ignores it if the session no
-        longer owns its channel (a newer stream, or a close that was already told)."""
+        """Tell why an admitted session failed to open; the feed tells ``kind`` only if the
+        session still owns its channel (a newer stream, or a close that was already told,
+        means it doesn't). Either way this ``ended`` call also forgets the session as a
+        still-playing stream (D78c), which matters for pruning an idle channel and for which
+        stream the next hand-back reaches."""
         if session.bookmark_key is not None:
             self._feed.ended(session.bookmark_key, session_id, kind)
 
@@ -778,17 +783,22 @@ class StreamService:
     # ---- close and the watchdog --------------------------------------------------------------
 
     def close(self, session_id: str) -> None:
-        """Free the slot, stop the engine without waiting, and keep or clear the bookmark;
-        the channel is told ``ended`` (signed off) or ``stopped`` (D78a)."""
+        """Free the slot and tell the channel ``ended`` (signed off) or ``stopped`` (D78a)
+        before stopping the engine, so a stop that raises (D78c review M1) still frees the
+        feed's hold on this session; the engine is stopped without waiting, and the bookmark
+        is kept or cleared, afterwards. Telling the channel always comes before the bookmark
+        write, so a reconnect can never read a stale one."""
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
-        self._stop(session)
         key = session.bookmark_key
+        finished = False
+        if key is not None:
+            finished = _schedule_finished(session)
+            self._feed.ended(key, session_id, StatusKind.ENDED if finished else StatusKind.STOPPED)
+        self._stop(session)
         if key is None:
             return  # D28
-        finished = _schedule_finished(session)
-        self._feed.ended(key, session_id, StatusKind.ENDED if finished else StatusKind.STOPPED)
         if finished:
             self._bookmarks.delete(key)  # D26
             return
