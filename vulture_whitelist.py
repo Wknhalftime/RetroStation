@@ -54,3 +54,5 @@ retry_enrichment  # backend/routers/tasks.py
 # Huey periodic tasks (scheduled by the consumer, never called directly)
 library_hash_backfill_resume  # backend/tasks/library_hash_backfill_tasks.py
 library_watcher_poll  # backend/tasks/library_watcher_tasks.py
+stream_cue_analysis_resume  # backend/tasks/stream_cue_tasks.py
+stream_cue_prune_task  # backend/tasks/stream_cue_tasks.py

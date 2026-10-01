@@ -40,6 +40,7 @@ __all__ = [
     "BatchAnalysis",
     "CueFile",
     "analyse_batch",
+    "remove_listings",
 ]
 
 ANALYSER_SCRIPT = Path(__file__).with_name("cue_analysis.liq")
@@ -54,6 +55,7 @@ _EXIT_WAIT_S = 10.0  # for a child whose output ended to exit by itself, before 
 _KILL_WAIT_S = 10.0
 _AUDIO_S_PER_DEADLINE_S = 40  # D67: autocue runs at about 65x real time; 40x leaves margin
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
+_LISTING_PREFIX = "cue-files-"  # a batch's file list, in the cache folder
 
 
 @dataclass(frozen=True)
@@ -266,10 +268,19 @@ class _Reader:
 def _write_listing(files: Sequence[CueFile], cache_dir: Path) -> Path:
     """The files' long paths, as a JSON list in a new file in ``cache_dir``."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    handle, name = tempfile.mkstemp(prefix="cue-files-", suffix=".json", dir=cache_dir)
+    handle, name = tempfile.mkstemp(prefix=_LISTING_PREFIX, suffix=".json", dir=cache_dir)
     with os.fdopen(handle, "w", encoding="utf-8") as listing:
         json.dump([long_path(Path(cue_file.path)) for cue_file in files], listing)
     return Path(name)
+
+
+def remove_listings(cache_dir: Path) -> None:
+    """Delete the file listings in ``cache_dir``; call only while no batch is running.
+
+    ``analyse_batch`` deletes its own listing, unless its process is killed hard mid-batch.
+    """
+    for listing in cache_dir.glob(f"{_LISTING_PREFIX}*.json"):
+        listing.unlink(missing_ok=True)
 
 
 def _start(
