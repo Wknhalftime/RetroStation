@@ -36,5 +36,7 @@ class StreamCueRepository(ABC):
         2. delete rows marked at or before ``now - grace``;
         3. mark every other row whose audio no library file carries, with ``now``,
            keeping earlier marks.
+
+        ``now`` must be timezone-aware; a naive value is read in the session's TimeZone.
         """
         ...

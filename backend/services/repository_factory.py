@@ -89,7 +89,8 @@ class SystemRepos:
 
 @dataclass
 class StreamingRepos:
-    """Tune-in streaming repositories: the cue cache and the playable schedule reader.
+    """Tune-in streaming repositories: the cue cache, the playable schedule reader, and the
+    cue pre-computation work reader (``cue_work``).
 
     The reader checks no cue freshness (D20): a cue row for the final file's audio is used as
     it is, whatever its ``analyser_version``.

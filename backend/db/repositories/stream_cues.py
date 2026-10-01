@@ -33,7 +33,8 @@ INSERT INTO stream_cues {_COLUMNS}
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
 {_ON_CONFLICT}"""
 
-# Stored only while the file still carries the hash read before analysing (For PR D and PR E).
+# Stored only while the file still carries the hash read before analysing
+# (spec: Data, "For PR D and PR E").
 _STORE_IF_CURRENT_SQL = f"""
 INSERT INTO stream_cues {_COLUMNS}
 SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
