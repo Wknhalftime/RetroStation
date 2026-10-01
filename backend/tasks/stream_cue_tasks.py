@@ -23,7 +23,7 @@ import structlog
 from huey import crontab  # type: ignore[import-untyped]
 from psycopg.rows import DictRow
 
-from backend.config import Settings, get_settings
+from backend.config import get_settings
 from backend.db.sync_conn import connect_sync
 from backend.domain.streaming import StreamTiming
 from backend.playout.cue_analysis import AnalyserConfig, analyse_batch, remove_listings
@@ -63,17 +63,13 @@ def _cue_cache_dir(stream_work_dir: Path) -> Path:
     return stream_work_dir / "cue-cache"
 
 
-def _run_ports(conn: psycopg.Connection[DictRow], settings: Settings) -> CueRunPorts:
+def _run_ports(conn: psycopg.Connection[DictRow], exe: Path, work_dir: Path) -> CueRunPorts:
     """The repositories, the connection's commit and the analyser callable, for one run or
-    one report. ``analyse_batch`` is looked up at call time, not bound at import, so the
-    locked E1 tests' monkeypatch of it still takes effect. The caller narrows
-    ``settings.liquidsoap_path`` to non-None (D51) before reaching here."""
-    liquidsoap_path = settings.liquidsoap_path
-    assert liquidsoap_path is not None  # narrowed by the caller before this call
+    one report: ``exe`` is the Liquidsoap the caller found set (D51), ``work_dir`` the stream
+    work folder. ``analyse_batch`` is looked up at call time, not bound at import, so the
+    locked E1 tests' monkeypatch of it still takes effect."""
     repos = RepositoryFactory(conn)
-    analyser = AnalyserConfig(
-        exe=liquidsoap_path, cache_dir=_cue_cache_dir(settings.stream_work_dir)
-    )
+    analyser = AnalyserConfig(exe=exe, cache_dir=_cue_cache_dir(work_dir))
     analyse = partial(analyse_batch, base_env=session_base_env(os.environ), config=analyser)
     return CueRunPorts(repos.streaming.cue_work, repos.streaming.cues, conn.commit, analyse)
 
@@ -167,7 +163,8 @@ def remove_stale_cue_listings() -> None:
 def stream_cue_analysis_task() -> None:
     """One bounded cue pre-computation run, whenever LIQUIDSOAP_PATH is set (D51)."""
     settings = get_settings()
-    if settings.liquidsoap_path is None:
+    exe = settings.liquidsoap_path
+    if exe is None:
         logger.debug("stream_cue_analysis_off")
         return
     with (
@@ -175,7 +172,7 @@ def stream_cue_analysis_task() -> None:
         connect_sync(settings.database_url, autocommit=False) as conn,
     ):
         run_cue_analysis(
-            _run_ports(conn, settings),
+            _run_ports(conn, exe, settings.stream_work_dir),
             CueRunConfig(today=local_today(), steady=time.monotonic),
         )
 
@@ -187,14 +184,16 @@ def stream_cue_request_task(file_id: str) -> None:
     """D79: analyse one reported song's audio ahead of the backlog, on the cue consumer (D50:
     never beside a run)."""
     settings = get_settings()
-    if settings.liquidsoap_path is None:
+    exe = settings.liquidsoap_path
+    if exe is None:
         logger.debug("stream_cue_analysis_off")
         return
     with (
         reported_failures("stream_cue_request_task"),
         connect_sync(settings.database_url, autocommit=False) as conn,
     ):
-        analyse_reported(_run_ports(conn, settings), StreamTiming(), UUID(file_id))
+        ports = _run_ports(conn, exe, settings.stream_work_dir)
+        analyse_reported(ports, StreamTiming(), UUID(file_id))
 
 
 def request_cue_analysis(file_id: UUID) -> None:

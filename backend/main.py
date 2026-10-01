@@ -149,9 +149,12 @@ def _stream_repos(database_url: str) -> ReposFactory:
 def _cue_reread_repos(database_url: str) -> ReposFactory:
     """One connection per use, short-lived (D85, review M4): a stuck database frees the
     re-read's slots instead of holding them, so a cold day read (``_stream_repos``, ~1.7 s,
-    D40) keeps its own, longer-lived connections."""
+    D40) keeps its own, longer-lived connections. Autocommit: the re-read is one read, so no
+    COMMIT round trip after ``search_path`` or on exit (review M7)."""
     options = "-c statement_timeout=2000 -c lock_timeout=1000"
-    return _opened_repos(lambda: connect_sync(database_url, connect_timeout=2, options=options))
+    return _opened_repos(
+        lambda: connect_sync(database_url, connect_timeout=2, options=options, autocommit=True)
+    )
 
 
 def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> StreamPorts:

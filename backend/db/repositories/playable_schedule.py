@@ -30,6 +30,31 @@ logger = structlog.get_logger()
 #   The join is LEFT: if the view ever drops a play, the play is returned unresolved
 #   rather than vanishing and shifting every later position (ItemRef.index).
 # - Cues are the final file's audio's row, if any (D20): no stat or version check.
+_DAY_SQL = """
+SELECT dp.play_event_id AS event_id,
+       dp.logged_at,
+       ti.original_title AS title,
+       ba.original_name AS artist,
+       res.matched_file_id, res.work_id, res.file_id, res.file_status, res.source,
+       f.file_path, f.duration_ms,
+       c.audio_hash AS cued_audio,
+       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db
+FROM station_day_plays dp
+JOIN track_identities ti ON ti.id = dp.identity_id
+JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+LEFT JOIN LATERAL (
+    SELECT r.matched_file_id, r.work_id, r.file_id, r.file_status, r.source
+    FROM play_file_resolution r
+    WHERE r.play_event_id = dp.play_event_id
+    OFFSET 0
+) res ON true
+LEFT JOIN library_files f ON f.id = res.file_id
+LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
+WHERE dp.station_id = %(station_id)s
+  AND dp.play_date = %(day)s
+ORDER BY dp.position
+"""
+
 _FILE_CUES_SQL = """
 SELECT c.audio_hash, c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms,
        c.gain_db
@@ -61,32 +86,6 @@ def _log_reread_invalid(file_id: UUID, audio_hash: str, error: InvalidStreamValu
     _warned_re_read_hashes.add(audio_hash)
     log = logger.warning if first_sighting else logger.debug
     log("stream_cue_reread_invalid", file_id=str(file_id), error=str(error))
-
-
-_DAY_SQL = """
-SELECT dp.play_event_id AS event_id,
-       dp.logged_at,
-       ti.original_title AS title,
-       ba.original_name AS artist,
-       res.matched_file_id, res.work_id, res.file_id, res.file_status, res.source,
-       f.file_path, f.duration_ms,
-       c.audio_hash AS cued_audio,
-       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db
-FROM station_day_plays dp
-JOIN track_identities ti ON ti.id = dp.identity_id
-JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
-LEFT JOIN LATERAL (
-    SELECT r.matched_file_id, r.work_id, r.file_id, r.file_status, r.source
-    FROM play_file_resolution r
-    WHERE r.play_event_id = dp.play_event_id
-    OFFSET 0
-) res ON true
-LEFT JOIN library_files f ON f.id = res.file_id
-LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
-WHERE dp.station_id = %(station_id)s
-  AND dp.play_date = %(day)s
-ORDER BY dp.position
-"""
 
 
 class PgPlayableScheduleRepository(PlayableScheduleRepository):
