@@ -51,6 +51,7 @@ PAGE_HEADERS: dict[str, str] = {
 ASSET_HEADERS: dict[str, str] = {
     "Cache-Control": "no-cache",
     "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
 }
 
 router = APIRouter(include_in_schema=False)

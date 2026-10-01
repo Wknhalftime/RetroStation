@@ -2,7 +2,10 @@
 // Stub: typed surface only, filled in later. `playerMachine.js` holds the state machine this
 // module drives; it is private to this file.
 
-/** @typedef {"tuning" | "no_broadcast" | "busy" | "unavailable" | "ended" | "stopped"} StatusKind */
+/**
+ * @typedef {"tuning" | "no_broadcast" | "busy" | "unavailable" | "ended"
+ *   | "stopped"} StatusKind
+ */
 
 /**
  * @typedef {"idle" | "connecting" | "tuning" | "playing" | "retrying" | "needsTap" | "ended"
