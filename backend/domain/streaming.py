@@ -97,9 +97,26 @@ class CuePoints:
 CUE_ANALYSER_VERSION = 1
 """Version of the cue analysis in force, recorded on each row; never checked on read (D20).
 
-Policy (D20): an analyser change purges the old rows once. That purge belongs to a later PR;
-nothing here enforces it.
+Policy (D20): an analyser change purges the old rows once. The purge exists now
+(``StreamCueRepository.purge_other_versions``, PR E1): cue pre-computation runs it at the
+start of every run.
 """
+
+
+@dataclass(frozen=True)
+class CueCandidate:
+    """Audio that needs analysis (D20), and the library file it is read from.
+
+    A read of library data, not validated: an odd ``duration_ms`` means no fallback row
+    (D52, D55), and an unknown stat means the hash is trusted (D64).
+    """
+
+    file_id: UUID
+    path: str
+    audio_hash: AudioHash
+    duration_ms: int | None
+    file_size: int | None
+    file_mtime_ns: int | None
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ from backend.playout.errors import EngineStartError
 from backend.playout.harbor import Upstream, open_upstream
 
 __all__ = [
+    "NO_WINDOW",
     "SESSION_LOG_KEEP",
     "SESSION_SCRIPT",
     "EngineConfig",
@@ -29,6 +30,7 @@ __all__ = [
     "RunningEngine",
     "ScriptCacheError",
     "SessionEndpoint",
+    "cache_env",
     "free_port",
     "launch_env",
     "long_path",
@@ -42,9 +44,9 @@ __all__ = [
 SESSION_SCRIPT = Path(__file__).with_name("session.liq")
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
 if sys.platform == "win32":  # an if-statement, so mypy --platform linux skips the name
-    _NO_WINDOW = subprocess.CREATE_NO_WINDOW
+    NO_WINDOW = subprocess.CREATE_NO_WINDOW
 else:
-    _NO_WINDOW = 0
+    NO_WINDOW = 0
 _CACHE_VARS = ("LIQ_CACHE_DIR", "LIQ_CACHE_USER_DIR", "LIQ_CACHE_SYSTEM_DIR")
 _CACHE_BUILD_TIMEOUT_S = 120
 _KILL_WAIT_S = 10
@@ -186,7 +188,8 @@ class SessionEndpoint:
             )
 
 
-def _cache_env(cache_dir: Path) -> dict[str, str]:
+def cache_env(cache_dir: Path) -> dict[str, str]:
+    """The variables that point Liquidsoap's script cache at ``cache_dir``."""
     cache = str(cache_dir.resolve())
     return {name: cache for name in _CACHE_VARS}
 
@@ -205,7 +208,7 @@ def launch_env(
         "INTRO_SFX": long_path(engine.intro_sfx) if engine.intro_sfx else "",
         "INTRO_FADE_AT": str(engine.intro_fade_at_s),
         "NO_CLIENT_EXIT_S": str(engine.no_client_exit_s),
-        **_cache_env(engine.cache_dir),
+        **cache_env(engine.cache_dir),
     }
 
 
@@ -235,10 +238,10 @@ def warm_script_cache(base_env: Mapping[str, str], engine: EngineConfig) -> None
     command = [str(engine.exe), "--cache-only", str(engine.script)]
     build = subprocess.run(
         command,
-        env={**base_env, **_cache_env(engine.cache_dir)},
+        env={**base_env, **cache_env(engine.cache_dir)},
         capture_output=True,
         timeout=_CACHE_BUILD_TIMEOUT_S,
-        creationflags=_NO_WINDOW,
+        creationflags=NO_WINDOW,
     )
     if build.returncode != 0:
         raise ScriptCacheError(build.returncode, command, build.stdout, build.stderr)
@@ -261,7 +264,7 @@ def start_session(
             env=launch_env(base_env, endpoint, engine),
             stdout=log,
             stderr=subprocess.STDOUT,
-            creationflags=_NO_WINDOW,
+            creationflags=NO_WINDOW,
         )
     try:
         assign(process.pid)

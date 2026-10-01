@@ -37,6 +37,21 @@ def station_wall_clock(year: int, now: datetime) -> datetime:
     return datetime.combine(date(year, now.month, now.day), now.time())
 
 
+def tune_in_days(today: date, years: range) -> list[date]:
+    """The station days a tune-in today or tomorrow can reach, in every year of ``years``.
+
+    For each year: today's month and day when that date exists (29 Feb in a non-leap year
+    is no broadcast), and the calendar day after it, where the walk continues (D62, D29).
+    """
+    days: set[date] = set()
+    for year in years:
+        if today.month == 2 and today.day == 29 and not calendar.isleap(year):
+            continue
+        day = date(year, today.month, today.day)
+        days.update((day, day + timedelta(days=1)))
+    return sorted(days)
+
+
 def _item_at(load_day: DayLoader, ref: ItemRef) -> ScheduleItem:
     items = load_day(ref.day)
     if ref.index >= len(items):
