@@ -1,9 +1,9 @@
 """vulture whitelist: code that is called by a framework, not by our code.
 
 Generated with `vulture backend --make-whitelist`, then limited by hand to
-FastAPI route handlers and Huey periodic tasks, each checked against its decorator
-and against routers/v1.py mounting its router. Anything else vulture reports is a
-finding, not a whitelist entry. Regenerate the same way when routes move.
+FastAPI route handlers, Huey periodic tasks and Huey startup hooks, each checked
+against its decorator and against routers/v1.py mounting its router. Anything else
+vulture reports is a finding, not a whitelist entry. Regenerate the same way when routes move.
 """
 
 # FastAPI route handlers (registered by @app/@router decorators)
@@ -56,3 +56,8 @@ library_hash_backfill_resume  # backend/tasks/library_hash_backfill_tasks.py
 library_watcher_poll  # backend/tasks/library_watcher_tasks.py
 stream_cue_analysis_resume  # backend/tasks/stream_cue_tasks.py
 stream_cue_prune_task  # backend/tasks/stream_cue_tasks.py
+
+# Huey startup hooks (run by each consumer worker before its first task)
+configure_cue_consumer_logging  # backend/tasks/cue_huey_app.py
+join_kill_on_close_job  # backend/tasks/cue_huey_app.py
+remove_stale_cue_listings  # backend/tasks/stream_cue_tasks.py

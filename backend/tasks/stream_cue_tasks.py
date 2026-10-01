@@ -8,6 +8,7 @@ use ``task_failure_telemetry``; ``reported_failures`` is their top boundary inst
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -35,6 +36,10 @@ logger = structlog.get_logger()
 
 ORPHAN_GRACE = timedelta(hours=24)  # D56: a second strike at least a day after the first
 REPEAT_REPORT_AFTER = timedelta(hours=24)  # a lasting failure is reported once a day
+RESUME_EXPIRES_S = 280  # a resume that waited behind an over-long run is dropped, not stacked
+
+_LOG_TIMESTAMP = re.compile(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} ")  # Liquidsoap's log lines
+_OUTPUT_LINE = re.compile(r"output line \d+")  # where a protocol error was seen
 
 
 def local_today() -> date:
@@ -53,7 +58,7 @@ def _cue_cache_dir(stream_work_dir: Path) -> Path:
 
 @dataclass(frozen=True)
 class ReportedFailure:
-    """The last failure written to System Logs: its heading (``failure_heading``), and when."""
+    """The last failure written to System Logs: its key (``failure_key``), and when."""
 
     message: str
     at: datetime
@@ -81,34 +86,51 @@ def failure_is_new(last: ReportedFailure | None, message: str, now: datetime) ->
     return last is None or last.message != message or now - last.at >= REPEAT_REPORT_AFTER
 
 
-def failure_heading(error: BaseException) -> str:
-    """What identifies a failure: its type and its message up to the first ``": "``.
+def failure_notes(error: BaseException) -> list[str]:
+    """The notes ``add_note`` put on ``error`` (why the analyser was killed), oldest first.
 
-    An ``AnalyserError`` carries the tail of Liquidsoap's log, whose lines are timestamped,
-    so the whole message differs every run; its heading ("cue analyser exit code 3") does not.
+    Logged as a field of their own: the log chain does not format ``exc_info``, so a
+    traceback's notes never reach System Logs.
     """
-    return f"{type(error).__name__}: {str(error).partition(': ')[0]}"
+    notes: object = getattr(error, "__notes__", None)
+    return [str(note) for note in notes] if isinstance(notes, list) else []
+
+
+def failure_key(error: BaseException) -> str:
+    """What identifies a failure for the once-a-day rule: its type, message and notes.
+
+    The key ignores what changes between runs of the same failure: Liquidsoap's log
+    timestamps, the protocol's output line numbers, and the rest of a multi-line message's
+    first line, where the analyser's log tail starts mid-line.
+    """
+    first, *rest = str(error).splitlines() or [""]
+    heading = first.partition(": ")[0] if rest else first
+    key = "\n".join([f"{type(error).__name__}: {heading}", *rest, *failure_notes(error)])
+    return _OUTPUT_LINE.sub("output line N", _LOG_TIMESTAMP.sub("", key))
 
 
 @contextmanager
 def reported_failures(task_name: str) -> Iterator[None]:
     """The task's top boundary: one error, with its traceback, per distinct failure a day.
 
-    It never re-raises: Huey would log every raise too, every 5 minutes. A later failure of
-    the same heading goes to debug; a success forgets the last failure.
+    It never re-raises: Huey would log every raise too, every 5 minutes. A later failure with
+    the same key goes to debug; a success forgets the last failure. The notes are a field of
+    their own, so they reach System Logs; ``exc_info`` is for the DEBUG console.
     """
     try:
         yield
     except Exception as error:  # noqa: BLE001 - task top boundary (D59: no progress row)
-        heading = failure_heading(error)
+        key = failure_key(error)
         now = utc_now()
         detail = f"{type(error).__name__}: {error}"
-        if failure_is_new(FAILURES.last, heading, now):
-            # exc_info keeps the notes analyse_batch adds (why the analyser was killed).
-            logger.error("stream_cue_task_failed", task=task_name, error=detail, exc_info=True)
-            FAILURES.last = ReportedFailure(heading, now)
+        notes = failure_notes(error)
+        if failure_is_new(FAILURES.last, key, now):
+            logger.error(
+                "stream_cue_task_failed", task=task_name, error=detail, notes=notes, exc_info=True
+            )
+            FAILURES.last = ReportedFailure(key, now)
         else:
-            logger.debug("stream_cue_task_failed", task=task_name, error=detail)
+            logger.debug("stream_cue_task_failed", task=task_name, error=detail, notes=notes)
     else:
         FAILURES.last = None
 
@@ -142,7 +164,9 @@ def stream_cue_analysis_task() -> None:
         )
 
 
-@cue_huey.periodic_task(crontab(minute="*/5"))  # type: ignore[untyped-decorator]
+@cue_huey.periodic_task(  # type: ignore[untyped-decorator]
+    crontab(minute="*/5"), expires=RESUME_EXPIRES_S
+)
 def stream_cue_analysis_resume() -> None:
     """Continue the backlog in bounded runs (D63)."""
     stream_cue_analysis_task.call_local()
@@ -151,6 +175,7 @@ def stream_cue_analysis_resume() -> None:
 @cue_huey.periodic_task(crontab(minute="0", hour="4"))  # type: ignore[untyped-decorator]
 def stream_cue_prune_task() -> None:
     """The daily two-strike prune of cue rows no library file carries (D56)."""
+    # Not gated on LIQUIDSOAP_PATH (D51): it only tidies existing rows, harmless without it.
     with (
         reported_failures("stream_cue_prune_task"),
         connect_sync(get_settings().database_url, autocommit=False) as conn,
