@@ -17,6 +17,11 @@ The pipeline, one function per step:
 4. stop when both sources are exhausted, or after a batch once the time budget is spent;
 5. log one summary, unless the run tried nothing.
 
+D79: the player reports a no-cue song to the cue owner, which analyses that audio ahead of
+its queue, storing cues or a failed row as a run does. ``analyse_reported`` is a report: one
+file, through the same batch step (``_run_batch``) a run uses. No purge, no priority set, no
+library read; writes nothing else.
+
 ``Analyse`` blocks for as long as a batch takes, so a run belongs on the cue worker, never on
 an event loop. An ``AnalyserError`` ends the run and reaches the task boundary; the batches
 before it are committed.
@@ -51,6 +56,9 @@ goes with its duration)."""
 
 _UNREADABLE = "unreadable"
 """D57: a file that cannot be stat'ed stores nothing and is retried next run."""
+
+_NONE_NEEDED = "none_needed"
+"""D79: the reported file's audio already has a row, or there is nothing to report on."""
 
 _STORED = frozenset({CueRecord.ANALYSED, CueRecord.FAILED})
 _NOTHING_READY = BatchAnalysis(metadata={}, stalled=None)
@@ -240,7 +248,7 @@ def _record_batch(
 
 
 def _run_batch(
-    ports: CueRunPorts, config: CueRunConfig, run: _Run, batch: Sequence[CueCandidate]
+    ports: CueRunPorts, timing: StreamTiming, run: _Run, batch: Sequence[CueCandidate]
 ) -> None:
     """Check, analyse, check again, record and commit one batch."""
     unseen = _unseen(batch, run)
@@ -259,7 +267,7 @@ def _run_batch(
         untried = ready[stalled + 1 :]
         run.backlog.put_back(ready[stalled], untried)
         run.tried.difference_update(c.file_id for c in untried)
-    _record_batch(ports.store, config.timing, run, analysed)
+    _record_batch(ports.store, timing, run, analysed)
     ports.commit()
 
 
@@ -293,8 +301,23 @@ def run_cue_analysis(ports: CueRunPorts, config: CueRunConfig) -> None:
     run = _Run(_Backlog(ports.work, _priority_set(ports.work, config.today), config.batch_size))
     paused = False
     while batch := run.backlog.take():
-        _run_batch(ports, config, run, batch)
+        _run_batch(ports, config.timing, run, batch)
         if config.steady() - started >= config.budget_s:
             paused = True
             break
     _log_summary(run, paused)
+
+
+def analyse_reported(ports: CueRunPorts, timing: StreamTiming, file_id: UUID) -> None:
+    """D79: analyse one reported file's audio ahead of the backlog, exactly as a run's batch
+    would. ``AnalyserError`` propagates, as in a run.
+    """
+    candidate = ports.work.reported(file_id)
+    if candidate is None:
+        logger.debug("stream_cue_request_done", file_id=str(file_id), outcome=_NONE_NEEDED)
+        return
+    run = _Run(_Backlog(ports.work, [], 1))
+    _run_batch(ports, timing, run, [candidate])
+    (outcome,) = run.counts
+    log = logger.info if outcome in _STORED else logger.debug
+    log("stream_cue_request_done", file_id=str(file_id), outcome=outcome)
