@@ -2,7 +2,7 @@
 // state machine in `playerMachine.js` decides; this controller turns the browser objects'
 // events into its inputs and performs its effects. Every browser object is injected.
 
-import { initialState, step } from "./playerMachine.js";
+import { initialState, isResting, step } from "./playerMachine.js";
 import { eventsPath, streamPath } from "./urls.js";
 
 /**
@@ -196,12 +196,11 @@ function sameView(a, b) {
  * The lock screen's play state: `playing` only while the audio plays, `none` at rest.
  *
  * @param {Phase} phase
- * @returns {string}
+ * @returns {"playing" | "paused" | "none"}
  */
 function playbackStateOf(phase) {
   if (phase === "playing") return "playing";
-  if (phase === "idle" || phase === "ended" || phase === "failed") return "none";
-  return "paused";
+  return isResting(phase) ? "none" : "paused";
 }
 
 /**
@@ -256,6 +255,8 @@ export function createPlayer(deps) {
   // Tags each `play()`: a settlement of any earlier one (another try's) is ignored.
   let playTag = 0;
 
+  // Not re-entrant, and needs not be: browsers queue every event `perform` causes as a task
+  // (`pause`, `abort`) or a microtask (`play()` settling), so none fires during `perform`.
   /** @param {PlayerEvent} event */
   function dispatch(event) {
     const next = step(state, event);
@@ -296,6 +297,7 @@ export function createPlayer(deps) {
   }
 
   function openEvents() {
+    closeEvents(); // defensive: the machine always closes first, but never hold two
     const source = deps.openEvents(eventsPath(deps.station, deps.key));
     events = source;
     /**

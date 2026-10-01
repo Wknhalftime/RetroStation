@@ -95,19 +95,33 @@ export function retryDelay(attempt) {
 }
 
 /**
+ * Whether `phase` is a resting one (`idle`, `ended` or `failed`): nothing open, Play shown.
+ *
  * @param {Phase} phase
- * @returns {boolean}
+ * @returns {phase is "idle" | "ended" | "failed"}
  */
-function isResting(phase) {
+export function isResting(phase) {
   return phase === "idle" || phase === "ended" || phase === "failed";
 }
 
 /**
+ * A transition with no effects: `state` as given, which may carry remembered facts.
+ *
  * @param {PlayerState} state
  * @returns {Transition}
  */
-function unchanged(state) {
+function quiet(state) {
   return { state, effects: [] };
+}
+
+/**
+ * Whether the next try may start: waiting between tries, not for a reason (rows 23, I2).
+ *
+ * @param {PlayerState} state
+ * @returns {boolean}
+ */
+function canStartTry(state) {
+  return state.phase === "retrying" && !state.lossPending;
 }
 
 /**
@@ -209,7 +223,7 @@ function onPlay(state) {
       effects: [{ type: "openEvents" }, { type: "setTimer", timer: "open", ms: OPEN_MS }],
     };
   }
-  if (state.phase !== "needsTap") return unchanged(state);
+  if (state.phase !== "needsTap") return quiet(state);
   return {
     state: { ...state, phase: "tuning" },
     effects: [
@@ -244,7 +258,7 @@ function startTry(state) {
  * @returns {Transition}
  */
 function onEventsOpen(state) {
-  if (state.phase !== "connecting") return unchanged(state);
+  if (state.phase !== "connecting") return quiet(state);
   return {
     state: { ...state, phase: "tuning" },
     effects: [
@@ -256,6 +270,19 @@ function onEventsOpen(state) {
 }
 
 /**
+ * Titles lost (row 22): the music carries on, with no song shown (D73).
+ *
+ * @param {PlayerState} state
+ * @returns {Transition}
+ */
+function loseTitles(state) {
+  return {
+    state: { ...state, song: null, titlesLost: true },
+    effects: [{ type: "closeEvents" }],
+  };
+}
+
+/**
  * Rows 3, 4 and 22. A blip (`closed: false`) is left to the browser's own reconnect.
  *
  * @param {PlayerState} state
@@ -263,21 +290,22 @@ function onEventsOpen(state) {
  * @returns {Transition}
  */
 function onEventsFailed(state, closed) {
-  if (!closed) return unchanged(state);
+  if (!closed) return quiet(state);
   switch (state.phase) {
-    case "connecting":
     case "tuning":
+      // Coordinator ruling on the Task 3 review, choice (b): on a first tune-in the audio may
+      // still play, so carry on without titles; the 15 s tune limit and the 2 s grace still
+      // catch a real failure. A reconnect tries again, as before.
+      return state.reconnecting ? tryFailed(state) : loseTitles(state);
+    case "connecting":
     case "needsTap":
       return tryFailed(state);
     case "playing":
-      return {
-        state: { ...state, song: null, titlesLost: true },
-        effects: [{ type: "closeEvents" }],
-      };
+      return loseTitles(state);
     case "retrying":
       return { state, effects: [{ type: "closeEvents" }] };
     default:
-      return unchanged(state);
+      return quiet(state);
   }
 }
 
@@ -300,7 +328,7 @@ function statusWhileTuning(state, kind) {
     case "stopped":
       return retry(state, DEADLINE_MS);
     default:
-      return unchanged(state);
+      return quiet(state);
   }
 }
 
@@ -319,12 +347,12 @@ function onStatus(state, kind) {
       return statusWhileTuning(state, kind);
     case "playing":
       // D78c: while its own audio plays, a status is information only.
-      return unchanged({ ...state, lastStatus: kind });
+      return quiet({ ...state, lastStatus: kind });
     case "retrying":
-      if (!state.lossPending) return unchanged(state);
-      return decideByReason(state, kind, DEADLINE_MS) ?? unchanged(state);
+      if (!state.lossPending) return quiet(state);
+      return decideByReason(state, kind, DEADLINE_MS) ?? quiet(state);
     default:
-      return unchanged(state);
+      return quiet(state);
   }
 }
 
@@ -338,8 +366,8 @@ function onStatus(state, kind) {
 function onNowPlaying(state, song) {
   const connected =
     state.phase === "tuning" || state.phase === "playing" || state.phase === "needsTap";
-  if (!connected) return unchanged(state);
-  return unchanged({ ...state, song, lastStatus: null });
+  if (!connected) return quiet(state);
+  return quiet({ ...state, song, lastStatus: null });
 }
 
 /**
@@ -355,7 +383,7 @@ function onAudioPlaying(state) {
       effects: [{ type: "clearTimer", timer: "stall" }],
     };
   }
-  if (state.phase !== "tuning") return unchanged(state);
+  if (state.phase !== "tuning") return quiet(state);
   return {
     state: {
       ...state,
@@ -366,11 +394,8 @@ function onAudioPlaying(state) {
       lossPending: false,
       stalling: false,
     },
-    effects: [
-      { type: "clearTimer", timer: "tune" },
-      { type: "clearTimer", timer: "grace" },
-      { type: "clearTimer", timer: "deadline" },
-    ],
+    // Playing needs no timer: the tune limit, the grace and the deadline all end here.
+    effects: clearTimers(null),
   };
 }
 
@@ -384,13 +409,13 @@ function onAudioPlaying(state) {
  */
 function onAudioLost(state) {
   if (state.phase === "tuning") {
-    if (state.lossPending) return unchanged(state);
+    if (state.lossPending) return quiet(state);
     return {
       state: { ...state, lossPending: true },
       effects: [{ type: "setTimer", timer: "grace", ms: GRACE_MS }],
     };
   }
-  if (state.phase !== "playing") return unchanged(state);
+  if (state.phase !== "playing") return quiet(state);
   const decided = decideByReason(state, state.lastStatus, DEADLINE_MS);
   if (decided !== null) return decided;
   return {
@@ -418,7 +443,7 @@ function onAudioLost(state) {
  * @returns {Transition}
  */
 function onAudioWaiting(state) {
-  if (state.phase !== "playing" || state.stalling) return unchanged(state);
+  if (state.phase !== "playing" || state.stalling) return quiet(state);
   return {
     state: { ...state, stalling: true },
     effects: [{ type: "setTimer", timer: "stall", ms: STALL_MS }],
@@ -432,7 +457,7 @@ function onAudioWaiting(state) {
  * @returns {Transition}
  */
 function onPlayBlocked(state) {
-  if (state.phase !== "tuning") return unchanged(state);
+  if (state.phase !== "tuning") return quiet(state);
   return {
     state: { ...state, phase: "needsTap", lossPending: false },
     effects: [
@@ -455,26 +480,24 @@ function onTimeout(state, timer) {
   const { phase } = state;
   switch (timer) {
     case "open":
-      return phase === "connecting" ? tryFailed(state) : unchanged(state);
+      return phase === "connecting" ? tryFailed(state) : quiet(state);
     case "tune":
-      return phase === "tuning" ? tryFailed(state) : unchanged(state);
+      return phase === "tuning" ? tryFailed(state) : quiet(state);
     case "grace":
       if (phase === "tuning") return tryFailed(state);
-      return phase === "retrying" && state.lossPending
-        ? retry(state, DEADLINE_MS)
-        : unchanged(state);
+      return phase === "retrying" && state.lossPending ? retry(state, DEADLINE_MS) : quiet(state);
     case "stall": {
-      if (phase !== "playing") return unchanged(state);
+      if (phase !== "playing") return quiet(state);
       // Rule 4: the stall has already waited; the deadline runs from its start.
       const deadlineMs = DEADLINE_MS - STALL_MS;
       return decideByReason(state, state.lastStatus, deadlineMs) ?? retry(state, deadlineMs);
     }
     case "tap":
-      return phase === "needsTap" ? leave("idle", null) : unchanged(state);
+      return phase === "needsTap" ? leave("idle", null) : quiet(state);
     case "deadline":
-      return !isResting(phase) && state.reconnecting ? leave("failed", "lost") : unchanged(state);
+      return !isResting(phase) && state.reconnecting ? leave("failed", "lost") : quiet(state);
     case "wait":
-      return phase === "retrying" && !state.lossPending ? startTry(state) : unchanged(state);
+      return canStartTry(state) ? startTry(state) : quiet(state);
   }
 }
 
@@ -490,10 +513,10 @@ export function step(state, event) {
     case "play":
       return onPlay(state);
     case "stop":
-      return isResting(state.phase) ? unchanged(state) : leave("idle", null);
+      return isResting(state.phase) ? quiet(state) : leave("idle", null);
     case "visible":
       // A hidden tab's timers may be throttled: reconnect at once (design question 3).
-      return state.phase === "retrying" && !state.lossPending ? startTry(state) : unchanged(state);
+      return canStartTry(state) ? startTry(state) : quiet(state);
     case "eventsOpen":
       return onEventsOpen(state);
     case "eventsFailed":
@@ -510,7 +533,7 @@ export function step(state, event) {
       return onAudioWaiting(state);
     case "audioPaused":
       // Row 21: a pause the page did not ask for (a call, unplugged headphones) is a Stop.
-      return state.phase === "playing" ? leave("idle", null) : unchanged(state);
+      return state.phase === "playing" ? leave("idle", null) : quiet(state);
     case "playBlocked":
       return onPlayBlocked(state);
     case "timeout":
