@@ -102,6 +102,12 @@ class CueReporter:
         while self._drain is not None and not self._drain.done():
             await asyncio.wait({self._drain})
 
+    def close(self) -> None:
+        """Shut the worker thread down without waiting (carried from Task 6a): a hung request
+        must never delay the app's exit. A report already running keeps running to completion;
+        one still only queued is dropped (the backlog still covers it, D87(b))."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
     async def _send_waiting(self) -> None:
         """Send the waiting reports, oldest first, one at a time on the worker thread."""
         while self._waiting:
