@@ -45,7 +45,11 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
                 ),
             )
         except psycopg.errors.UniqueViolation as exc:
-            raise self._duplicate_or_reraise(station.call_letters, exc) from exc
+            if not self._is_call_letters_collision(exc):
+                raise
+            raise DuplicateCallLettersError(
+                f"another station already has the call letters {station.call_letters!r}"
+            ) from exc
         row = self._conn.execute("SELECT * FROM stations WHERE id = %s", (station.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
@@ -61,16 +65,11 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def _duplicate_or_reraise(
-        self, call_letters: str, exc: psycopg.errors.UniqueViolation
-    ) -> DuplicateCallLettersError:
-        """`DuplicateCallLettersError` when ``exc`` is a call-letters collision (D72; C1:
-        translation keyed by constraint name); otherwise the original violation, unchanged."""
-        if exc.diag.constraint_name in _CALL_LETTERS_CONSTRAINTS:
-            return DuplicateCallLettersError(
-                f"another station already has the call letters {call_letters!r}"
-            )
-        raise exc
+    def _is_call_letters_collision(self, exc: psycopg.errors.UniqueViolation) -> bool:
+        """True when ``exc`` is a call-letters collision (D72; C1: translation keyed by
+        constraint name); false for any other unique violation, which the caller re-raises
+        unchanged."""
+        return exc.diag.constraint_name in _CALL_LETTERS_CONSTRAINTS
 
     def list_all(self) -> list[BroadcastStation]:
         rows = self._conn.execute("SELECT * FROM stations ORDER BY call_letters").fetchall()
@@ -91,7 +90,11 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
                 ),
             )
         except psycopg.errors.UniqueViolation as exc:
-            raise self._duplicate_or_reraise(station.call_letters, exc) from exc
+            if not self._is_call_letters_collision(exc):
+                raise
+            raise DuplicateCallLettersError(
+                f"another station already has the call letters {station.call_letters!r}"
+            ) from exc
         row = self._conn.execute("SELECT * FROM stations WHERE id = %s", (station.id,)).fetchone()
         if row is None:
             raise RuntimeError("Row not found after INSERT")
