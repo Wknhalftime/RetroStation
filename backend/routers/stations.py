@@ -9,7 +9,7 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from backend.config import get_settings
 from backend.dependencies import SyncRepos, get_current_token, get_db_connection
@@ -36,17 +36,28 @@ Token = Annotated[str, Depends(get_current_token)]
 
 
 class StationCreate(BaseModel):
-    call_letters: str
+    call_letters: str = Field(min_length=1)
     name: str | None = None
     city: str | None = None
     format_name: str | None = None
 
 
 class StationUpdate(BaseModel):
-    call_letters: str | None = None
+    call_letters: str | None = Field(default=None, min_length=1)
     name: str | None = None
     city: str | None = None
     format_name: str | None = None
+
+    @field_validator("call_letters")
+    @classmethod
+    def _call_letters_not_null(cls, value: str | None) -> str | None:
+        """Refuse an explicit ``null`` (I1): under ``exclude_unset``, a null field is still
+        "set", so it would otherwise reach `StationChanges` and leak as a 500. This validator
+        only runs when the field is present in the body (pydantic skips it for an omitted
+        field), so a partial update that never mentions call_letters is unaffected."""
+        if value is None:
+            raise ValueError("call_letters must not be null")
+        return value
 
 
 class StationResponse(BaseModel):
