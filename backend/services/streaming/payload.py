@@ -7,6 +7,7 @@ hook (D26) sends a whole clip the same way, marked ``final``.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ __all__ = [
     "ItemPayload",
     "final_payload",
     "item_payload",
+    "landing_payload",
 ]
 
 NO_CUES_START_NEXT_MS = 0
@@ -93,6 +95,22 @@ def item_payload(seq: int, item: ScheduleItem, offset_ms: int, timing: StreamTim
         "artist": item.artist,
     }
     return ItemPayload(path=long_path(Path(file.path)), annotations=annotations)
+
+
+def landing_payload(
+    seq: int, item: ScheduleItem, offset_ms: int, timing: StreamTiming
+) -> ItemPayload:
+    """The annotations for an item played from ``offset_ms``: ``item_payload``, or, when
+    ``cues_to_play`` drops the cues (D80), ``item_payload`` of the item without cues from
+    ``offset_ms + cues.cue_in_ms``, the same moment of the song on the file's own timeline
+    (coordinator ruling, Revision 2). An item with no file, or with no cues, goes to
+    ``item_payload`` unchanged (no file raises, as today)."""
+    file = item.file
+    if file is None or file.cues is None or file.cues_to_play(offset_ms, timing) is not None:
+        return item_payload(seq, item, offset_ms, timing)
+    no_cue_offset_ms = offset_ms + file.cues.cue_in_ms
+    no_cue_item = dataclasses.replace(item, file=dataclasses.replace(file, cues=None))
+    return item_payload(seq, no_cue_item, no_cue_offset_ms, timing)
 
 
 def final_payload(seq: int, clip: FinalClip) -> ItemPayload:

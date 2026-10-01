@@ -15,6 +15,7 @@ import structlog
 from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from psycopg.rows import DictRow
 from psycopg_pool import PoolTimeout, TooManyRequests
 
 from backend.config import Settings, callback_base_url, get_settings
@@ -40,6 +41,7 @@ from backend.playout.liquidsoap_process import (
 from backend.routers import listen, radio, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
+from backend.services.streaming.cue_reports import CueReporter, NoCueReports
 from backend.services.streaming.service import (
     ReposFactory,
     StreamPorts,
@@ -48,11 +50,14 @@ from backend.services.streaming.service import (
     StreamServiceConfig,
 )
 from backend.services.streaming.watchdog import run_freeze_watchdog
+from backend.tasks.stream_cue_tasks import request_cue_analysis
 from backend.websocket import websocket_endpoint
 
 logger = structlog.get_logger()
 
 _WATCHDOG_INTERVAL_S = 5.0
+REPORT_FLUSH_S = 2.0
+"""D87(b): shutdown waits this long for the cue reporter's waiting reports to be sent."""
 
 type EngineStarter = Callable[[SessionEndpoint], Awaitable[RunningEngine]]
 
@@ -64,6 +69,8 @@ class StreamingRuntime:
     service: StreamService
     close_job: Callable[[], None]
     watchdog: asyncio.Task[None]
+    cue_reports: NoCueReports
+    """Where a song played without cues was reported (D79); flushed at shutdown (D87(b))."""
 
 
 def _engine_unavailable(reason: str, output: str = "") -> None:
@@ -119,12 +126,12 @@ async def _prepared_engine(
     return engine
 
 
-def _stream_repos(database_url: str) -> ReposFactory:
-    """One connection per use, holding the repositories the stream service reads."""
+def _opened_repos(connect: Callable[[], psycopg.Connection[DictRow]]) -> ReposFactory:
+    """A ``ReposFactory`` over whatever connection ``connect`` opens, one per use."""
 
     @contextmanager
     def opened() -> Iterator[StreamRepos]:
-        with connect_sync(database_url) as conn:
+        with connect() as conn:
             yield StreamRepos(
                 stations=PgBroadcastStationRepository(conn),
                 settings=PgUserSettingRepository(conn),
@@ -134,25 +141,46 @@ def _stream_repos(database_url: str) -> ReposFactory:
     return opened
 
 
+def _stream_repos(database_url: str) -> ReposFactory:
+    """One connection per use, holding the repositories the stream service reads."""
+    return _opened_repos(lambda: connect_sync(database_url))
+
+
+def _cue_reread_repos(database_url: str) -> ReposFactory:
+    """One connection per use, short-lived (D85, review M4): a stuck database frees the
+    re-read's slots instead of holding them, so a cold day read (``_stream_repos``, ~1.7 s,
+    D40) keeps its own, longer-lived connections. Autocommit: the re-read is one read, so no
+    COMMIT round trip after ``search_path`` or on exit (review M7)."""
+    options = "-c statement_timeout=2000 -c lock_timeout=1000"
+    return _opened_repos(
+        lambda: connect_sync(database_url, connect_timeout=2, options=options, autocommit=True)
+    )
+
+
 def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> StreamPorts:
-    """What the stream service is wired to: PostgreSQL, the engine start and two clocks.
+    """What the stream service is wired to: PostgreSQL, the engine start, two clocks and the
+    no-cue cue reports port.
 
     D47: the wall clock only places listeners; the monotonic clock times everything else,
     and the now-playing delay waits on the loop's monotonic clock.
+    D79: no-cue reports go to the cue consumer's queue (it runs whenever LIQUIDSOAP_PATH is
+    set, D51; streaming needs it too).
     """
     return StreamPorts(
         _stream_repos(settings.database_url),
         start_engine,
         datetime.now,
         time.monotonic,
+        cue_reread_repos=_cue_reread_repos(settings.database_url),
         sleep=asyncio.sleep,
+        cue_reports=CueReporter(request_cue_analysis),
     )
 
 
-def _stream_service(settings: Settings, start_engine: EngineStarter, logs: Path) -> StreamService:
+def _stream_service(ports: StreamPorts, settings: Settings, logs: Path) -> StreamService:
     """The stream service, reading PostgreSQL and calling back on the API's own bind (D24)."""
     return StreamService(
-        build_stream_ports(settings, start_engine),
+        ports,
         BookmarkStore(),
         StreamServiceConfig(callback_base_url(settings.server_host, settings.server_port), logs),
     )
@@ -204,12 +232,35 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
         _engine_unavailable("the job that ends engines with the app was refused", str(error))
         return None
     start_engine = partial(start_ready_engine, job.assign, base_env, engine=engine)
-    service = _stream_service(settings, start_engine, work / "logs")
-    return StreamingRuntime(service, job.close, _start_watchdog(service))
+    ports = build_stream_ports(settings, start_engine)
+    service = _stream_service(ports, settings, work / "logs")
+    return StreamingRuntime(service, job.close, _start_watchdog(service), ports.cue_reports)
+
+
+async def _flush_cue_reports(reports: NoCueReports) -> None:
+    """Wait at most ``REPORT_FLUSH_S`` for the reports still waiting to be sent (D87(b)); past
+    that, log and move on without cancelling a report in flight (the backlog still covers the
+    rest). Either way, close a wired ``CueReporter`` without waiting (carried from Task 6a,
+    review I1): it drops the reports still waiting and ignores later ones, and its worker is a
+    daemon thread, so a hung request never delays the app's exit. The close runs even when
+    the flush is cancelled (re-review N1).
+    """
+    try:
+        flushing = asyncio.ensure_future(reports.drained())
+        done, _ = await asyncio.wait({flushing}, timeout=REPORT_FLUSH_S)
+        if not done:
+            logger.warning("stream_cue_reports_unflushed")
+            flushing.cancel()
+            await asyncio.wait({flushing})
+    finally:
+        if isinstance(reports, CueReporter):
+            reports.close()
 
 
 async def stop_streaming(runtime: StreamingRuntime | None) -> None:
-    """Stop the watchdog, close every session, then the job (its children die with it)."""
+    """Stop the watchdog, close every session, flush and close the cue reports, then the job
+    (its children die with it). The flush, the reporter's close and the job's close each run
+    even when an earlier step raises, and that error still propagates (re-review N1)."""
     if runtime is None:
         return
     runtime.watchdog.cancel()
@@ -217,7 +268,10 @@ async def stop_streaming(runtime: StreamingRuntime | None) -> None:
     try:
         runtime.service.close_all()
     finally:
-        runtime.close_job()
+        try:
+            await _flush_cue_reports(runtime.cue_reports)
+        finally:
+            runtime.close_job()
 
 
 @asynccontextmanager

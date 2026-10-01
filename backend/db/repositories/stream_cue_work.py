@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from uuid import UUID
 
 import psycopg
 from psycopg.rows import DictRow
@@ -16,6 +17,14 @@ _CANDIDATE = "f.id, f.file_path, f.audio_hash, f.duration_ms, f.file_size, f.fil
 _NEEDS_ANALYSIS = """f.file_status = 'present'
   AND f.audio_hash IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM stream_cues c WHERE c.audio_hash = f.audio_hash)"""
+
+# The player reports one file by id (D79); reuses the module's _NEEDS_ANALYSIS fragment so
+# D20 is defined once.
+_REPORTED_SQL = f"""
+SELECT {_CANDIDATE}
+FROM library_files f
+WHERE f.id = %(id)s AND {_NEEDS_ANALYSIS}
+"""
 
 # file_path is unique, so the keyset is total (as in the hash backfill).
 _LIBRARY_SQL = f"""
@@ -86,3 +95,7 @@ class PgCueWorkRepository(CueWorkRepository):
     def library(self, after_path: str | None, limit: int) -> list[CueCandidate]:
         rows = self._conn.execute(_LIBRARY_SQL, {"after": after_path, "limit": limit}).fetchall()
         return [_candidate(row) for row in rows]
+
+    def reported(self, file_id: UUID) -> CueCandidate | None:
+        row = self._conn.execute(_REPORTED_SQL, {"id": file_id}).fetchone()
+        return _candidate(row) if row is not None else None
