@@ -5,7 +5,6 @@ input, call one service function, and map domain errors)."""
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, cast
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastStation, StationChanges, UnknownStationError
@@ -35,8 +34,18 @@ def update_station(
     existing = stations.get_by_id(station_id)
     if existing is None:
         raise UnknownStationError(f"no station has id {station_id}")
-    # dataclasses.replace's stub checks each kwarg against the field it names, which mypy
-    # cannot do for an arbitrary, dynamically-keyed mapping validated at runtime instead
-    # (StationChanges.__post_init__): the cast says so explicitly, once, here.
-    changed = replace(existing, **cast(dict[str, Any], changes.values))
+    values = changes.values
+    # StationChanges.__post_init__ guarantees a present call_letters is a non-empty str, but
+    # the mapping's value type is `str | None` for every field; narrow it explicitly instead
+    # of a cast, so mypy still sees `BroadcastStation.call_letters: str`.
+    call_letters = values.get("call_letters")
+    if call_letters is None:
+        call_letters = existing.call_letters
+    changed = replace(
+        existing,
+        call_letters=call_letters,
+        name=values.get("name", existing.name),
+        city=values.get("city", existing.city),
+        format_name=values.get("format_name", existing.format_name),
+    )
     return stations.update(changed)
