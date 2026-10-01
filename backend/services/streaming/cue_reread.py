@@ -101,6 +101,8 @@ def _answer(
     """What a read that was waited on answers: its result, or why it is unread."""
     if task not in done:
         return Unread("timeout")
+    if task.cancelled():  # only a shutdown cancels the read's task
+        return Unread("cancelled")
     if (error := task.exception()) is not None:
         return Unread(repr(error))
     return task.result()
