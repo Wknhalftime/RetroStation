@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>RetroStation Radio</title>
+    <link rel="stylesheet" href="/static/radio/radio.css" />
+  </head>
+  <body>
+    <h1 id="station"></h1>
+    <p id="title"></p>
+    <p id="artist"></p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <button id="play" type="button">Play</button>
+    <p id="note" hidden></p>
+    <audio id="audio" preload="none"></audio>
+    <script type="module" src="/static/radio/playerPage.js"></script>
+  </body>
+</html>
