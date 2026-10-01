@@ -203,6 +203,13 @@ class PlayableFile:
     def is_playable(self, timing: StreamTiming) -> bool:
         return self.span_ms() > 0 and self.tail_fits(0, timing)
 
+    def cues_to_play(self, offset_ms: int, timing: StreamTiming) -> CuePoints | None:
+        """The cues to play from ``offset_ms`` after cue-in: the file's own when they leave
+        D9's minimum (``tail_fits``), otherwise none, so D23's values play instead (D80)."""
+        if self.cues is not None and self.tail_fits(offset_ms, timing):
+            return self.cues
+        return None
+
 
 @dataclass(frozen=True)
 class ScheduleItem:
