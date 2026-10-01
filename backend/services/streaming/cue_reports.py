@@ -12,11 +12,16 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict, deque
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
+from functools import partial
+from queue import SimpleQueue
+from threading import Thread
 from typing import Protocol
 from uuid import UUID
 
 import structlog
+
+from backend.domain.streaming import InvalidStreamValueError
 
 logger = structlog.get_logger()
 
@@ -52,7 +57,7 @@ class NoCueMemory:
 
     def __init__(self, limit: int) -> None:
         if limit < 1:
-            raise ValueError(f"NoCueMemory.limit must be >= 1, got {limit}")
+            raise InvalidStreamValueError(f"NoCueMemory.limit must be >= 1, got {limit}")
         self._limit = limit
         self._files: OrderedDict[UUID, None] = OrderedDict()
 
@@ -67,28 +72,75 @@ class NoCueMemory:
             self._files.popitem(last=False)
 
 
+type _Call = tuple[Callable[[], None], Future[None]]
+
+
+class _DaemonWorker:
+    """One daemon thread that runs calls one at a time, oldest first, started on first use.
+
+    A daemon, unlike a ``ThreadPoolExecutor`` worker, which the interpreter joins at exit: a
+    call still running when the app stops never holds the process (review I1).
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._calls: SimpleQueue[_Call | None] = SimpleQueue()
+        self._thread: Thread | None = None
+
+    def submit(self, call: Callable[[], None]) -> Future[None]:
+        """Queue ``call``; the future settles with its outcome once it has run."""
+        done: Future[None] = Future()
+        self._calls.put((call, done))
+        if self._thread is None:
+            self._thread = Thread(target=self._run, name=self._name, daemon=True)
+            self._thread.start()
+        return done
+
+    def stop(self) -> None:
+        """Let the thread end once the call it may be running returns."""
+        self._calls.put(None)
+
+    def _run(self) -> None:
+        """Run the queued calls until ``stop``, handing each outcome to its future."""
+        while (queued := self._calls.get()) is not None:
+            call, done = queued
+            if not done.set_running_or_notify_cancel():
+                continue  # its waiter was cancelled before it ran
+            try:
+                call()
+            except Exception as error:  # noqa: BLE001 - handed to the waiter, which logs it
+                done.set_exception(error)
+            else:
+                done.set_result(None)
+
+
 class CueReporter:
     """Hands no-cue reports to the cue owner one at a time on its own worker thread, so a report
     never slows or fails playback (D79). Event loop only.
 
-    The worker is the reporter's own one-thread executor: one Huey SQLite connection, no thread
-    taken from the default executor the day reads use, one request at a time by construction.
-    No loop is bound at construction, so a sync caller can build it.
+    The worker is the reporter's own daemon thread: one Huey SQLite connection, no thread taken
+    from the default executor the day reads use, one request at a time by construction. No
+    loop is bound and no thread started at construction, so a sync caller can build it.
     """
 
     def __init__(self, request: Callable[[UUID], None], pending: int = 16) -> None:
         if pending < 1:
-            raise ValueError(f"CueReporter.pending must be >= 1, got {pending}")
+            raise InvalidStreamValueError(f"CueReporter.pending must be >= 1, got {pending}")
         self._request = request
         self._pending = pending
         self._waiting: deque[UUID] = deque()
         self._drain: asyncio.Task[None] | None = None
         self._failing = False
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cue-reports")
+        self._closed = False
+        self._worker = _DaemonWorker("cue-reports")
 
     def report(self, file_id: UUID) -> None:
-        """Queue a report for the worker, or drop it when ``pending`` already wait. Never awaits
-        and never raises; E1's backlog still reaches a dropped file."""
+        """Queue a report for the worker, or drop it when ``pending`` already wait or the
+        reporter is closed. Never awaits and never raises; E1's backlog still reaches a dropped
+        file."""
+        if self._closed:
+            logger.debug("stream_cue_request_after_close", file_id=str(file_id))
+            return
         if len(self._waiting) >= self._pending:
             logger.debug("stream_cue_request_dropped", file_id=str(file_id))
             return
@@ -103,21 +155,28 @@ class CueReporter:
             await asyncio.wait({self._drain})
 
     def close(self) -> None:
-        """Shut the worker thread down without waiting (carried from Task 6a): a hung request
-        must never delay the app's exit. A report already running keeps running to completion;
-        one still only queued is dropped (the backlog still covers it, D87(b))."""
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        """Stop sending, without waiting (carried from Task 6a, review I1): the reports still
+        waiting are dropped (the flush already logged them; the backlog covers them, D87(b)),
+        later reports are ignored, and the worker thread ends after the request it may be
+        running. That thread is a daemon, so a hung request never delays the app's exit."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._waiting:
+            logger.debug("stream_cue_requests_dropped_at_close", count=len(self._waiting))
+            self._waiting.clear()
+        self._worker.stop()
 
     async def _send_waiting(self) -> None:
-        """Send the waiting reports, oldest first, one at a time on the worker thread."""
-        while self._waiting:
+        """Send the waiting reports, oldest first, one at a time on the worker thread, until
+        none wait or the reporter is closed."""
+        while self._waiting and not self._closed:
             await self._send(self._waiting.popleft())
 
     async def _send(self, file_id: UUID) -> None:
         """Send one report on the worker thread; a failure is logged, never raised."""
-        loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(self._executor, self._request, file_id)
+            await asyncio.wrap_future(self._worker.submit(partial(self._request, file_id)))
         except Exception as error:  # noqa: BLE001 - fire-and-forget boundary, as _enqueue_playlists
             self._log_failure(file_id, error)
         else:

@@ -237,8 +237,9 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
 async def _flush_cue_reports(reports: NoCueReports) -> None:
     """Wait at most ``REPORT_FLUSH_S`` for the reports still waiting to be sent (D87(b)); past
     that, log and move on without cancelling a report in flight (the backlog still covers the
-    rest). Either way, shut a wired ``CueReporter``'s worker thread down without waiting
-    (carried from Task 6a): a hung request must never delay the app's exit.
+    rest). Either way, close a wired ``CueReporter`` without waiting (carried from Task 6a,
+    review I1): it drops the reports still waiting and ignores later ones, and its worker is a
+    daemon thread, so a hung request never delays the app's exit.
     """
     flushing = asyncio.ensure_future(reports.drained())
     done, _ = await asyncio.wait({flushing}, timeout=REPORT_FLUSH_S)

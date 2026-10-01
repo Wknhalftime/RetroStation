@@ -17,7 +17,7 @@ from uuid import UUID
 
 import structlog
 
-from backend.domain.streaming import CuePoints
+from backend.domain.streaming import CuePoints, InvalidStreamValueError
 
 logger = structlog.get_logger()
 
@@ -33,11 +33,13 @@ class CueRereadLimits:
 
     def __post_init__(self) -> None:
         if not (math.isfinite(self.timeout_s) and self.timeout_s > 0):
-            raise ValueError(
+            raise InvalidStreamValueError(
                 f"CueRereadLimits.timeout_s must be finite and > 0, got {self.timeout_s}"
             )
         if self.in_flight < 1:
-            raise ValueError(f"CueRereadLimits.in_flight must be >= 1, got {self.in_flight}")
+            raise InvalidStreamValueError(
+                f"CueRereadLimits.in_flight must be >= 1, got {self.in_flight}"
+            )
 
 
 @dataclass(frozen=True)
