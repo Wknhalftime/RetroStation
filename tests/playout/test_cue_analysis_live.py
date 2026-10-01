@@ -1,8 +1,8 @@
 """The batch analyser against the real Liquidsoap 2.4.5 (slow; skipped without
 LIQUIDSOAP_PATH or ffmpeg).
 
-Spec: Cue pre-computation ("autocue.internal, lufs_target -18, amplify_behavior "keep",
-timeout 15 s for files over 700 s"); D61 (a bad file is a failed analysis). Generated tones:
+Spec: Cue pre-computation ("autocue.internal, lufs_target -18, amplify_behavior "keep"");
+D69 (autocue's own timeout is 30 s); D61 (a bad file is a failed analysis). Generated tones:
 the assertions are relative (two tones 20 dB apart) and about the trimmed silence. One script
 cache per worker session (review minor).
 """
@@ -79,19 +79,37 @@ def test_analysis_trims_silence_and_levels_to_minus_18(
     assert loud_points.gain_db < 0 < quiet_points.gain_db
 
 
-def test_a_file_over_700_s_is_analysed_within_the_15_s_timeout(
+def test_a_long_file_is_analysed_within_the_autocue_timeout(
     tmp_path: Path, analyser: AnalyserConfig
 ) -> None:
-    """Spec: "timeout 15 s for files over 700 s". At the default 10 s, autocue declines an
-    800 s file (spike: "Estimated processing duration is too long, autocue disabled!"). The
-    process gets a generous 60 s so that only autocue's own timeout decides; its metadata
-    comes back either way, empty when autocue declined."""
+    """D69: autocue's own timeout is 30 s. At the default 10 s, autocue declines an 800 s file
+    (spike: "Estimated processing duration is too long, autocue disabled!"). The process gets
+    a generous 60 s so that only autocue's own timeout decides; its metadata comes back either
+    way, empty when autocue declined."""
     long = tone(tmp_path / "long.flac", amplitude=0.25, lead_s=0.0, tone_s=800.0, tail_s=0.0)
     patient = replace(analyser, per_file_timeout_s=60.0)
     batch = analyse_batch([CueFile(str(long), 800_000)], session_base_env(os.environ), patient)
     assert batch.stalled is None
     assert isinstance(autocue_points(batch.metadata[0]), CuePoints), (
-        "declined: the 15 s autocue timeout is not in force"
+        "declined: the D69 autocue timeout (30 s) is not in force"
+    )
+
+
+@pytest.mark.timeout(360)
+def test_a_twenty_minute_file_is_measured_not_declined(
+    tmp_path: Path, analyser: AnalyserConfig
+) -> None:
+    """D69: autocue's own timeout is 30 s, not 15 s. autocue estimates the analysis as the
+    duration over its 70x ratio and declines a file whose estimate exceeds the timeout: a
+    1200 s file is 17.1 s, over 15 and under 30. The analysis itself takes about 18 s (about
+    65x real time). The process gets a generous 120 s so that only autocue's own timeout
+    decides; its metadata comes back either way, empty when autocue declined."""
+    song = tone(tmp_path / "song.flac", amplitude=0.25, lead_s=0.0, tone_s=1200.0, tail_s=0.0)
+    patient = replace(analyser, per_file_timeout_s=120.0)
+    batch = analyse_batch([CueFile(str(song), 1_200_000)], session_base_env(os.environ), patient)
+    assert batch.stalled is None
+    assert isinstance(autocue_points(batch.metadata[0]), CuePoints), (
+        "declined: the D69 autocue timeout (30 s) is not in force"
     )
 
 

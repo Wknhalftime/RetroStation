@@ -15,11 +15,11 @@ def autocue_lines(text: str) -> set[str]:
 
 
 def test_the_shared_autocue_settings_are_the_specs() -> None:
-    """Cue pre-computation: lufs_target -18, amplify_behavior "keep", timeout 15 s."""
+    """Cue pre-computation: lufs_target -18, amplify_behavior "keep"; D69: timeout 30 s."""
     assert autocue_lines(AUTOCUE_SETTINGS.read_text(encoding="utf-8")) == {
         "settings.autocue.internal.lufs_target := -18.",
         'settings.autocue.amplify_behavior := "keep"',
-        "settings.autocue.internal.timeout := 15.",
+        "settings.autocue.internal.timeout := 30.",
     }
 
 
