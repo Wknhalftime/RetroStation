@@ -456,8 +456,7 @@ class StreamService:
             station_id, raw_limit, request
         )  # no await before
         opened = False
-        # D78b: an unexpected failure is never "stopped"; this default also covers
-        # `StreamUnavailableError` (the plan's table lists it, with no except clause below).
+        # D78b: an unexpected failure, including StreamUnavailableError, is never "stopped".
         failure = StatusKind.UNAVAILABLE
         try:
             if channel is not None:
@@ -473,13 +472,22 @@ class StreamService:
             raise
         finally:
             if not opened:
-                # Told and forgotten before the halt: a stop that raises (D78c review M1)
-                # must not leave this session stuck in the feed or the waiter hanging.
-                self._sessions.pop(session_id, None)
-                session.placed.set()  # wake a waiting seq 0 request: the session is gone
-                self._tell_failure(session_id, session, failure)
-                self._stop(session)  # an engine settled before _relay_app raised is halted
+                self._abandon_open(session_id, session, failure)
         return OpenedStream(session_id, app)
+
+    def _abandon_open(self, session_id: str, session: StreamSession, failure: StatusKind) -> None:
+        """A session that never finished opening: told and forgotten before the halt, so a
+        stop that raises (D78c review M1) can't leave it stuck in the feed or its waiter
+        hanging. The halt's own failure is logged, not raised (D78c review M2): the error
+        that failed the open is always the one the caller sees, never a secondary one from
+        an engine that also would not stop."""
+        self._sessions.pop(session_id, None)
+        session.placed.set()  # wake a waiting seq 0 request: the session is gone
+        self._tell_failure(session_id, session, failure)
+        try:
+            self._stop(session)  # an engine settled before _relay_app raised is halted
+        except OSError:
+            logger.exception("stream_open_abandon_stop_failed", session_id=session_id)
 
     def _admit_told(
         self, station_id: UUID, raw_limit: str | None, request: ListenRequest
