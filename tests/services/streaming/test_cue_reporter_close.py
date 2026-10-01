@@ -4,12 +4,18 @@ report after close is ignored; and a request still running never holds the app's
 
 from __future__ import annotations
 
+import asyncio
 import threading
-from uuid import uuid4
+from types import SimpleNamespace
+from typing import cast
+from uuid import UUID, uuid4
 
+import pytest
 from structlog.testing import capture_logs
 
+from backend.main import StreamingRuntime, stop_streaming
 from backend.services.streaming.cue_reports import CueReporter
+from backend.services.streaming.service import StreamService
 from tests.services.streaming.test_cue_reports import HeldOwner, inside
 
 
@@ -56,3 +62,30 @@ async def test_a_running_request_never_holds_the_apps_exit() -> None:
     await reporter.drained()
     reporter.close()
     assert on_daemon == [True]
+
+
+async def test_stop_streaming_closes_the_reporter_when_closing_the_sessions_raises() -> None:
+    """Re-review N1: a failing ``close_all`` still propagates, and the flush, the reporter's
+    close and the job's close all still run."""
+    owner = HeldOwner()
+    owner.released.set()
+    reporter = CueReporter(owner)
+    sent, after = uuid4(), uuid4()
+    reporter.report(sent)
+    jobs_closed: list[list[UUID]] = []
+
+    def close_all() -> None:
+        raise RuntimeError("close_all failed")
+
+    runtime = StreamingRuntime(
+        service=cast(StreamService, SimpleNamespace(close_all=close_all)),
+        close_job=lambda: jobs_closed.append(list(owner.asked)),
+        watchdog=asyncio.ensure_future(asyncio.Event().wait()),
+        cue_reports=reporter,
+    )
+    with pytest.raises(RuntimeError, match="close_all failed"):
+        await stop_streaming(runtime)
+    assert jobs_closed == [[sent]]  # flushed before the job closed
+    reporter.report(after)  # closed: ignored
+    await reporter.drained()
+    assert owner.asked == [sent]

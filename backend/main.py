@@ -242,30 +242,36 @@ async def _flush_cue_reports(reports: NoCueReports) -> None:
     that, log and move on without cancelling a report in flight (the backlog still covers the
     rest). Either way, close a wired ``CueReporter`` without waiting (carried from Task 6a,
     review I1): it drops the reports still waiting and ignores later ones, and its worker is a
-    daemon thread, so a hung request never delays the app's exit.
+    daemon thread, so a hung request never delays the app's exit. The close runs even when
+    the flush is cancelled (re-review N1).
     """
-    flushing = asyncio.ensure_future(reports.drained())
-    done, _ = await asyncio.wait({flushing}, timeout=REPORT_FLUSH_S)
-    if not done:
-        logger.warning("stream_cue_reports_unflushed")
-        flushing.cancel()
-        await asyncio.wait({flushing})
-    if isinstance(reports, CueReporter):
-        reports.close()
+    try:
+        flushing = asyncio.ensure_future(reports.drained())
+        done, _ = await asyncio.wait({flushing}, timeout=REPORT_FLUSH_S)
+        if not done:
+            logger.warning("stream_cue_reports_unflushed")
+            flushing.cancel()
+            await asyncio.wait({flushing})
+    finally:
+        if isinstance(reports, CueReporter):
+            reports.close()
 
 
 async def stop_streaming(runtime: StreamingRuntime | None) -> None:
-    """Stop the watchdog, close every session, flush the waiting cue reports, then the job
-    (its children die with it)."""
+    """Stop the watchdog, close every session, flush and close the cue reports, then the job
+    (its children die with it). The flush, the reporter's close and the job's close each run
+    even when an earlier step raises, and that error still propagates (re-review N1)."""
     if runtime is None:
         return
     runtime.watchdog.cancel()
     await asyncio.wait({runtime.watchdog})
     try:
         runtime.service.close_all()
-        await _flush_cue_reports(runtime.cue_reports)
     finally:
-        runtime.close_job()
+        try:
+            await _flush_cue_reports(runtime.cue_reports)
+        finally:
+            runtime.close_job()
 
 
 @asynccontextmanager
