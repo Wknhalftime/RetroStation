@@ -10,7 +10,7 @@ from __future__ import annotations
 import calendar
 import math
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
@@ -209,6 +209,13 @@ class PlayableFile:
         if self.cues is not None and self.tail_fits(offset_ms, timing):
             return self.cues
         return None
+
+    def with_stored_cues(self, cues: CuePoints | None, timing: StreamTiming) -> PlayableFile:
+        """This file with the cues stored for its audio now (D85): a row makes it cued, no
+        row makes it uncued, unless the change would leave it unplayable (D9); then it is
+        returned unchanged, with the values read at tune-in."""
+        candidate = replace(self, cues=cues)
+        return candidate if candidate.is_playable(timing) else self
 
 
 @dataclass(frozen=True)
