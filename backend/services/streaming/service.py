@@ -348,15 +348,26 @@ def _token_matches(sent: str | None, expected: str) -> bool:
     return sent is not None and secrets.compare_digest(sent.encode(), expected.encode())
 
 
-def _playing_span(committed: Committed | None) -> PlayingSpan | None:
+def _playing_span(committed: Committed | None, timing: StreamTiming) -> PlayingSpan | None:
     """What is playing now and how long it has left, for the freeze deadline."""
     if committed is None:
         return None
     playing = committed.assigned
     if isinstance(playing, FinalClip):
         return PlayingSpan(committed.started_at, playing.span_ms)
-    span_ms = 0 if playing.item.file is None else playing.item.file.span_ms()
-    return PlayingSpan(committed.started_at, span_ms - playing.offset_ms)
+    return PlayingSpan(committed.started_at, _sent_span_ms(playing, timing))
+
+
+def _sent_span_ms(assigned: Assigned, timing: StreamTiming) -> int:
+    """How long an item plays as sent (``landing_payload``): its span from ``offset_ms``, or,
+    when D80 drops a landing's cues, D23's from ``offset_ms + cue_in`` to the file's end."""
+    file = assigned.item.file
+    if file is None:
+        return 0 - assigned.offset_ms  # unreachable for an assigned item; as before E2
+    cues = file.cues
+    if cues is not None and file.cues_to_play(assigned.offset_ms, timing) is None:
+        return (file.duration_ms or 0) - cues.cue_in_ms - assigned.offset_ms
+    return file.span_ms() - assigned.offset_ms
 
 
 def _left_at(
@@ -475,13 +486,14 @@ class StreamService:
         """Running sessions whose next ``started`` report is overdue (D31)."""
         elapsed_now = self._elapsed()
         grace = self._config.freeze_grace
+        timing = self._config.timing
         return [
             session_id
             for session_id, session in self._sessions.items()
             if session.engine is not None
             and not session.stopped
             and elapsed_now
-            >= freeze_deadline(session.opened_at, _playing_span(session.committed), grace)
+            >= freeze_deadline(session.opened_at, _playing_span(session.committed, timing), grace)
         ]
 
     # ---- open ------------------------------------------------------------------------------
