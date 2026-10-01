@@ -7,6 +7,7 @@ station clock: ``station_time = real_time + clock_offset``.
 
 from __future__ import annotations
 
+import calendar
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -291,3 +292,31 @@ class Bookmark:
         """True once the station clock has passed the bookmarked position."""
         _require_naive("Bookmark.is_expired", now=now)
         return now + self.clock_offset >= self.expires_at
+
+
+@dataclass(frozen=True)
+class StationYear:
+    """A station-year a listener can tune in to, and the days its log covers (D70).
+
+    Coverage is days logged only ("362 of 365 days"): no per-day file check and no
+    whole-year percentage.
+    """
+
+    call_letters: str
+    year: int
+    days_logged: int
+
+    def __post_init__(self) -> None:
+        if not self.call_letters:
+            raise InvalidStreamValueError("StationYear.call_letters must not be empty")
+        if not 1 <= self.year <= 9999:
+            raise InvalidStreamValueError(f"StationYear.year must be 1..9999, got {self.year}")
+        if not 1 <= self.days_logged <= self.days_in_year:
+            raise InvalidStreamValueError(
+                f"StationYear.days_logged must be 1..{self.days_in_year}, got {self.days_logged}"
+            )
+
+    @property
+    def days_in_year(self) -> int:
+        """366 in a leap year, else 365."""
+        return 366 if calendar.isleap(self.year) else 365
