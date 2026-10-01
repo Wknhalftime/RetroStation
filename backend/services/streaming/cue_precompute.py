@@ -149,17 +149,31 @@ def _priority_set(work: CueWorkRepository, today: date) -> list[CueCandidate]:
 
 
 def _unseen(batch: Sequence[CueCandidate], run: _Run) -> list[CueCandidate]:
-    """``batch`` without the files this run tried, the audio it stored (twins), and audio
-    already earlier in the batch."""
+    """``batch`` without the files this run has tried and the audio it has already stored.
+
+    Twins (same audio) are not deduplicated here: M1, each one still needs its own stat
+    pre-check, so an unreadable or changed twin cannot hide a readable one. See
+    ``_dedupe_audio``, which runs after that check.
+    """
+    return [
+        candidate
+        for candidate in batch
+        if candidate.file_id not in run.tried and candidate.audio_hash not in run.recorded
+    ]
+
+
+def _dedupe_audio(candidates: Sequence[CueCandidate]) -> list[CueCandidate]:
+    """``candidates`` keeping only the first file for each audio hash: twins share one cue
+    row, so only one needs analysing. Call only with files that passed the stat pre-check
+    (M1), so a problem on one twin cannot hide a readable one in the same batch."""
     seen: set[AudioHash] = set()
-    unseen: list[CueCandidate] = []
-    for candidate in batch:
-        audio = candidate.audio_hash
-        if candidate.file_id in run.tried or audio in run.recorded or audio in seen:
+    unique: list[CueCandidate] = []
+    for candidate in candidates:
+        if candidate.audio_hash in seen:
             continue
-        seen.add(audio)
-        unseen.append(candidate)
-    return unseen
+        seen.add(candidate.audio_hash)
+        unique.append(candidate)
+    return unique
 
 
 def _stat_problem(candidate: CueCandidate) -> str | None:
@@ -233,7 +247,9 @@ def _run_batch(
     run.tried.update(c.file_id for c in unseen)
     problems = {c.file_id: p for c in unseen if (p := _stat_problem(c)) is not None}
     run.count(problems.values())
-    ready = [c for c in unseen if c.file_id not in problems]
+    passed = [c for c in unseen if c.file_id not in problems]
+    ready = _dedupe_audio(passed)
+    ports.commit()  # M2: no transaction sits idle during analysis
     analysis = _analyse(ports.analyse, ready)
     stalled = _stalled_at(len(ready), analysis)
     settled = ready if stalled is None else ready[:stalled]
@@ -248,10 +264,14 @@ def _run_batch(
 
 
 def _log_summary(run: _Run, paused: bool) -> None:
-    """D59: the run's counts as one event; an idle run leaves no trace."""
+    """D59: the run's counts as one event; an idle run leaves no trace. I2: a run that stores
+    nothing and is not paused logs at debug, not info, so a stuck unreadable or changed file
+    does not spam System Logs every cadence."""
     if not run.tried:
         return
-    logger.info(
+    stored = run.counts[CueRecord.ANALYSED] + run.counts[CueRecord.FAILED]
+    log = logger.info if stored > 0 or paused else logger.debug
+    log(
         "stream_cue_run",
         analysed=run.counts[CueRecord.ANALYSED],
         failed=run.counts[CueRecord.FAILED],
