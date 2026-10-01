@@ -452,10 +452,16 @@ class StreamService:
         )
         if station_id is None:
             raise StationNotFoundError(f"no station has the call letters {request.call_letters!r}")
-        session_id, session = self._admit_told(station_id, raw_limit, request)  # no await before
+        channel, session_id, session = self._admit_told(
+            station_id, raw_limit, request
+        )  # no await before
         opened = False
-        failure = StatusKind.UNAVAILABLE  # D78b: an unexpected failure is never "stopped"
+        # D78b: an unexpected failure is never "stopped"; this default also covers
+        # `StreamUnavailableError` (the plan's table lists it, with no except clause below).
+        failure = StatusKind.UNAVAILABLE
         try:
+            if channel is not None:
+                self._feed.opened(channel, session_id)  # D42: every exit from here frees the slot
             engine = await self._place_while_starting(session_id, session, request.year)
             app = self._relay_app(session_id, engine, request.icy_metadata)
             opened = True
@@ -475,9 +481,10 @@ class StreamService:
 
     def _admit_told(
         self, station_id: UUID, raw_limit: str | None, request: ListenRequest
-    ) -> tuple[str, StreamSession]:
-        """Take a slot under the parsed limit, telling the channel ``tuning``, or the refusal
-        (D27: a bad limit setting is ``unavailable``; D10: ``busy``) before it is raised."""
+    ) -> tuple[BookmarkKey | None, str, StreamSession]:
+        """Take a slot under the parsed limit, telling the refusal (D27: a bad limit setting
+        is ``unavailable``; D10: ``busy``) before it is raised. The caller tells ``tuning`` on
+        the returned channel, inside its own try/finally, so the slot is freed if that fails."""
         channel = _channel(request, station_id)
         try:
             limit = self._listener_limit(raw_limit)
@@ -488,9 +495,7 @@ class StreamService:
         except StationBusyError:
             self._refuse(channel, StatusKind.BUSY)
             raise
-        if channel is not None:
-            self._feed.opened(channel, session_id)
-        return session_id, session
+        return channel, session_id, session
 
     def _refuse(self, channel: BookmarkKey | None, kind: StatusKind) -> None:
         """Tell a refused tune-in on its channel; a keyless one tells no one (D28)."""
