@@ -48,6 +48,9 @@ class FakeCueWorkRepository(CueWorkRepository):
         ordered = _in_path_order([f.candidate for f in self._needing()])
         return [c for c in ordered if after_path is None or c.path > after_path][:limit]
 
+    def reported(self, file_id: UUID) -> CueCandidate | None:
+        return next((f.candidate for f in self._needing() if f.candidate.file_id == file_id), None)
+
     def _needing(self) -> list[_File]:
         return [
             f
