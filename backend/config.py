@@ -8,6 +8,8 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
+# A Windows path whose separators honcho read as escapes: D:\x\y.exe arrives as D:xy.exe.
+_SEPARATORS_STRIPPED = re.compile(r"^[A-Za-z]:[A-Za-z][^/\\]*$")
 _DEV_TOKEN = "dev-token"
 _EXAMPLE_TOKEN = "change-me-before-use"  # the placeholder in .env.example
 _PLACEHOLDER_TOKENS = frozenset({_DEV_TOKEN, _EXAMPLE_TOKEN})
@@ -95,7 +97,13 @@ class Settings(BaseSettings):
                 "Liquidsoap 2.4.5 crashes at startup from such a path"
             )
         if not value.is_file():
-            raise ValueError(f"LIQUIDSOAP_PATH (.env): not an existing file: {value}")
+            hint = ""
+            if _SEPARATORS_STRIPPED.match(str(value)):
+                hint = (
+                    "; looks like the backslashes were removed (honcho reads .env); "
+                    "use forward slashes"
+                )
+            raise ValueError(f"LIQUIDSOAP_PATH (.env): not an existing file: {value}{hint}")
         return value
 
 
