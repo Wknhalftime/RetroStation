@@ -39,7 +39,7 @@ from backend.playout.liquidsoap_process import (
     start_ready_engine,
     warm_script_cache,
 )
-from backend.routers import listen, radio, stream_internal
+from backend.routers import listen, radio, radio_pages, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
 from backend.services.streaming.cue_reports import CueReporter, NoCueReports
@@ -376,6 +376,7 @@ app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 app.include_router(v1_router)
 app.include_router(stream_internal.router)
 app.include_router(listen.router)
+app.include_router(radio_pages.router)
 app.include_router(radio.router)
 
 

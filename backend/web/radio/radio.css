@@ -1,0 +1,56 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  --fg: #111;
+  --bg: #fff;
+  --muted: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #eee;
+    --bg: #111;
+    --muted: #999;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  color: var(--fg);
+  background: var(--bg);
+  max-width: 32rem;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+}
+
+p {
+  margin: 0.25rem 0;
+}
+
+#status {
+  color: var(--muted);
+}
+
+#note {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 1rem;
+}
+
+nav {
+  margin-bottom: 1rem;
+}
+
+nav a,
+main a {
+  color: inherit;
+}

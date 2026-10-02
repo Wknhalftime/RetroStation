@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["backend*"]
 
+[tool.setuptools.package-data]
+backend = ["web/radio/*"]
+
 [project]
 name = "retrostation"
 version = "0.1.0"
