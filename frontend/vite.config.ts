@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -7,6 +8,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
+    // TypeScript before JavaScript (Vite's default puts .js first), so a stray
+    // compiled .js left beside a source by an old `tsc -b` can never shadow it
+    // in dev, build or tests.
+    extensions: [".mts", ".ts", ".tsx", ".mjs", ".js", ".jsx", ".json"],
   },
   server: {
     port: 5173,
@@ -18,6 +23,9 @@ export default defineConfig({
     // via a `// @vitest-environment jsdom` pragma at the top of the file
     // (see api/stations.test.tsx and api/matcher.test.tsx for the pattern).
     environment: "node",
+    // Never collect compiled copies of the tests (src/**/*.js is gitignored
+    // build output, not source).
+    exclude: [...configDefaults.exclude, "src/**/*.js"],
     alias: { "@": path.resolve(__dirname, "./src") },
     coverage: {
       provider: "v8",
