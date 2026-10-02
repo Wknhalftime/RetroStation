@@ -78,7 +78,9 @@ export async function loadStationYears(fetchFn) {
   try {
     data = await response.json();
   } catch (error) {
-    if (error instanceof SyntaxError) return null;
+    // A body that is not JSON (`SyntaxError`), or one cut off while being read (`TypeError`,
+    // as a failed fetch): either way the list could not be loaded.
+    if (error instanceof SyntaxError || error instanceof TypeError) return null;
     throw error;
   }
   return parseStationYears(data);

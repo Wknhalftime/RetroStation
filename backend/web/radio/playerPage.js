@@ -1,6 +1,6 @@
 // Entry point for the player page (D75: only this file and listPage.js read `window` and
 // the other browser globals). It reads its station-year from the URL, binds the browser
-// objects to `createPlayer`, and wires the button and tab-visibility changes.
+// objects to `createPlayer`, and wires the button, tab-visibility changes and leaving the page.
 
 import { listenerKey } from "./listenerKey.js";
 import { createPlayer } from "./player.js";
@@ -125,6 +125,10 @@ function main() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") player.visible();
   });
+
+  // Leaving the page frees the events and the stream (its listener slot) at once, even when
+  // the browser keeps the page for Back/Forward; Play on return resumes from the bookmark.
+  window.addEventListener("pagehide", () => player.stop());
 }
 
 main();

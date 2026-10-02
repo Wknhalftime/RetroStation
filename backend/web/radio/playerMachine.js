@@ -310,7 +310,8 @@ function onEventsFailed(state, closed) {
 }
 
 /**
- * Rows 5-7: a status before the page's own audio plays.
+ * Rows 5-7: a status before the page's own audio plays. `tuning` means a new stream was just
+ * admitted, so any song shown so far came from an older stream and goes (D73: no stale title).
  *
  * @param {PlayerState} state
  * @param {StatusKind} kind
@@ -327,6 +328,8 @@ function statusWhileTuning(state, kind) {
       return state.reconnecting ? retry(state, DEADLINE_MS) : leave("failed", "busy");
     case "stopped":
       return retry(state, DEADLINE_MS);
+    case "tuning":
+      return quiet({ ...state, song: null });
     default:
       return quiet(state);
   }
@@ -493,7 +496,9 @@ function onTimeout(state, timer) {
       return decideByReason(state, state.lastStatus, deadlineMs) ?? retry(state, deadlineMs);
     }
     case "tap":
-      return phase === "needsTap" ? leave("idle", null) : quiet(state);
+      // A reconnect left untapped has lost the station (D79b), not merely stopped.
+      if (phase !== "needsTap") return quiet(state);
+      return state.reconnecting ? leave("failed", "lost") : leave("idle", null);
     case "deadline":
       return !isResting(phase) && state.reconnecting ? leave("failed", "lost") : quiet(state);
     case "wait":
