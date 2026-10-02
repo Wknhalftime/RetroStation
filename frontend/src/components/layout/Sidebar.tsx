@@ -1,7 +1,8 @@
 import { NavLink } from "react-router-dom";
-import { Radio, Library, GitCompare, Settings } from "lucide-react";
+import { Radio, Library, GitCompare, Settings, RadioTower } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProgressStore } from "@/store/progressStore";
+import { API_BASE } from "@/api/client";
 
 interface NavItem {
   to: string;
@@ -64,6 +65,15 @@ export function Sidebar() {
             </NavLink>
           );
         })}
+        <a
+          href={`${API_BASE}/radio`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white"
+        >
+          <RadioTower className="h-5 w-5 flex-shrink-0" />
+          Radio
+        </a>
       </nav>
     </aside>
   );
