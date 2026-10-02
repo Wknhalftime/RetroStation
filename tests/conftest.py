@@ -65,6 +65,53 @@ _TEST_DB_SETTINGS: tuple[tuple[str, str], ...] = (
 )
 
 
+_TEST_DB_PREFIX = "retrostation_test"
+
+# Fast local tablespace for test databases, created by hand on dev machines
+# that have one; falls back to the default tablespace when absent, so CI and
+# other machines still work.
+_TEST_TABLESPACE = "retrostation_test_ts"
+
+
+def _assert_test_dbname(dbname: str) -> None:
+    """Refuse to create or alter any database that isn't a test database.
+
+    Rules out misconfiguration pointing tests at a prod URL.
+    """
+    if not dbname.startswith(_TEST_DB_PREFIX):
+        raise RuntimeError(f"refusing to touch non-test database {dbname!r}")
+
+
+def _test_tablespace_clause(admin_conn: psycopg.Connection[Any]) -> pg_sql.Composable:
+    """Return a ``TABLESPACE`` clause for ``CREATE DATABASE`` when it exists.
+
+    Checks `pg_tablespace` for `retrostation_test_ts` so a machine without the
+    fast tablespace (CI, a fresh dev box) falls back to the default tablespace.
+    """
+    exists = admin_conn.execute(
+        "SELECT 1 FROM pg_tablespace WHERE spcname = %s", (_TEST_TABLESPACE,)
+    ).fetchone()
+    if exists:
+        return pg_sql.SQL(" TABLESPACE {}").format(pg_sql.Identifier(_TEST_TABLESPACE))
+    return pg_sql.SQL("")
+
+
+def _create_test_database(admin_conn: psycopg.Connection[Any], dbname: str) -> None:
+    """CREATE DATABASE dbname, placing it in the fast test tablespace if present.
+
+    Hard safety gate: refuses unless the dbname begins with the test prefix.
+    An existing database is never moved here — `ALTER DATABASE ... SET
+    TABLESPACE` needs no other connections and could disrupt other sessions,
+    so that migration (if ever wanted) must be done by hand, not by this fixture.
+    """
+    _assert_test_dbname(dbname)
+    admin_conn.execute(
+        pg_sql.SQL("CREATE DATABASE {}{}").format(
+            pg_sql.Identifier(dbname), _test_tablespace_clause(admin_conn)
+        )
+    )
+
+
 def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> None:
     """Apply test-only, performance-and-safety settings to a test database.
 
@@ -76,8 +123,7 @@ def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> N
     Hard safety gate: refuses unless the dbname begins with the test prefix.
     Rules out misconfiguration pointing tests at a prod URL.
     """
-    if not dbname.startswith("retrostation_test"):
-        raise RuntimeError(f"refusing to apply test tuning to non-test database {dbname!r}")
+    _assert_test_dbname(dbname)
     for setting, value in _TEST_DB_SETTINGS:
         admin_conn.execute(
             pg_sql.SQL("ALTER DATABASE {} SET {} = {}").format(
@@ -92,12 +138,20 @@ def _apply_test_db_tuning(admin_conn: psycopg.Connection[Any], dbname: str) -> N
 def clean_db(db_url: str, worker_id: str) -> None:
     """Ensure the worker DB exists, then drop and recreate its public schema.
 
+    A missing database is created in `retrostation_test_ts` when that
+    tablespace exists (falling back to the default tablespace otherwise), for
+    both the per-worker (`_gwN`) path and the `-n 0` / master path — the
+    latter used to require the database to already exist, which was a
+    recurring footgun. An existing database is never moved to the tablespace;
+    see `_create_test_database`.
+
     The admin connection to the ``postgres`` maintenance DB is required when
     ``worker_id != "master"`` (to CREATE DATABASE for the per-worker suffix)
-    and optional for ``"master"`` (only used to ALTER DATABASE for tuning).
-    If the test role lacks CONNECT privilege on ``postgres``, the master
-    branch degrades gracefully: a warning is emitted and tuning is skipped,
-    so the suite still runs against an untuned but functional test DB.
+    and optional for ``"master"`` (used to CREATE DATABASE if missing and to
+    ALTER DATABASE for tuning). If the test role lacks CONNECT privilege on
+    ``postgres``, the master branch degrades gracefully: a warning is emitted
+    and creation/tuning is skipped, so the suite still runs as long as the
+    database already exists.
     """
     params = psycopg.conninfo.conninfo_to_dict(db_url)
     dbname = params["dbname"]
@@ -113,21 +167,19 @@ def clean_db(db_url: str, worker_id: str) -> None:
             raise
         warnings.warn(
             f"tests: could not connect to 'postgres' maintenance DB ({exc}); "
-            "skipping per-database tuning (synchronous_commit/statement_timeout/"
+            "skipping database creation/tuning (synchronous_commit/statement_timeout/"
             "lock_timeout/idle_in_transaction_session_timeout). The suite will "
-            "still run but slower and without the runaway-query safety nets.",
+            "still run but slower and without the runaway-query safety nets, "
+            "provided the database already exists.",
             stacklevel=1,
         )
     else:
         with admin_cm as admin_conn:
-            if worker_id != "master":
-                exists = admin_conn.execute(
-                    "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
-                ).fetchone()
-                if not exists:
-                    admin_conn.execute(
-                        pg_sql.SQL("CREATE DATABASE {}").format(pg_sql.Identifier(dbname))
-                    )
+            exists = admin_conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
+            ).fetchone()
+            if not exists:
+                _create_test_database(admin_conn, dbname)
             # Apply unsafe-but-fast settings scoped to this test DB only.
             # Takes effect for connections opened AFTER this runs (which is fine:
             # clean_db runs first in the fixture chain).
