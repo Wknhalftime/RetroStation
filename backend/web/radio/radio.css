@@ -46,6 +46,11 @@ button {
   font-size: 1rem;
 }
 
+nav {
+  margin-bottom: 1rem;
+}
+
+nav a,
 main a {
   color: inherit;
 }

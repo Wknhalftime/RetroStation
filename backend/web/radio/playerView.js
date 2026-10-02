@@ -139,7 +139,5 @@ export function renderStation(elements, station) {
  */
 export function renderKeyNote(elements, saved) {
   elements.note.hidden = saved;
-  elements.note.textContent = saved
-    ? ""
-    : "This browser could not remember your listening key; a new one starts each visit.";
+  elements.note.textContent = saved ? "" : "This browser will not remember where you left off.";
 }
