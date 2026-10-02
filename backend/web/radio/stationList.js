@@ -86,36 +86,39 @@ export async function loadStationYears(fetchFn) {
 
 /**
  * One station-year as a list item: a link to its player, followed by its logged-days text.
- * Every piece of text is a text node (XSS), never markup.
+ * Every piece of text is a text node (XSS), never markup. `doc` is the container's own
+ * document (D75: only `playerPage.js` and `listPage.js` read the global `document`).
  *
+ * @param {Document} doc
  * @param {StationYearRow} row
  * @returns {HTMLLIElement}
  */
-function renderRow(row) {
-  const item = document.createElement("li");
-  const link = document.createElement("a");
+function renderRow(doc, row) {
+  const item = doc.createElement("li");
+  const link = doc.createElement("a");
   link.href = playerPath(row);
   link.textContent = String(row.year);
   item.appendChild(link);
   const days = `${row.daysLogged} of ${row.daysInYear} days`;
-  item.appendChild(document.createTextNode(` — ${days}`));
+  item.appendChild(doc.createTextNode(` — ${days}`));
   return item;
 }
 
 /**
  * One call sign's heading and its years, in the order they arrived.
  *
+ * @param {Document} doc
  * @param {string} callLetters
  * @param {StationYearRow[]} rows
  * @returns {HTMLElement}
  */
-function renderGroup(callLetters, rows) {
-  const section = document.createElement("section");
-  const heading = document.createElement("h2");
+function renderGroup(doc, callLetters, rows) {
+  const section = doc.createElement("section");
+  const heading = doc.createElement("h2");
   heading.textContent = callLetters;
   section.appendChild(heading);
-  const list = document.createElement("ul");
-  for (const row of rows) list.appendChild(renderRow(row));
+  const list = doc.createElement("ul");
+  for (const row of rows) list.appendChild(renderRow(doc, row));
   section.appendChild(list);
   return section;
 }
@@ -153,7 +156,7 @@ function groupByCallSign(rows) {
  * @returns {void}
  */
 function renderMessage(container, text) {
-  const message = document.createElement("p");
+  const message = container.ownerDocument.createElement("p");
   message.textContent = text;
   container.appendChild(message);
 }
@@ -173,7 +176,8 @@ export function renderStationYears(container, rows) {
     renderMessage(container, "No station-years are logged yet.");
     return;
   }
+  const doc = container.ownerDocument;
   for (const group of groupByCallSign(rows)) {
-    container.appendChild(renderGroup(group.callLetters, group.rows));
+    container.appendChild(renderGroup(doc, group.callLetters, group.rows));
   }
 }

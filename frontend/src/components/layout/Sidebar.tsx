@@ -29,6 +29,13 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   // Settings intentionally absent — no tasks route there.
 };
 
+const NAV_LINK_BASE_CLASSES =
+  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors";
+const INACTIVE_NAV_LINK_CLASSES = cn(
+  NAV_LINK_BASE_CLASSES,
+  "text-gray-400 hover:bg-gray-800 hover:text-white"
+);
+
 export function Sidebar() {
   const runningTasks = useProgressStore((s) => s.runningTasks);
 
@@ -49,12 +56,9 @@ export function Sidebar() {
               key={to}
               to={to}
               className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-gray-800 text-white"
-                    : "text-gray-400 hover:bg-gray-800 hover:text-white"
-                )
+                isActive
+                  ? cn(NAV_LINK_BASE_CLASSES, "bg-gray-800 text-white")
+                  : INACTIVE_NAV_LINK_CLASSES
               }
             >
               <Icon className="h-5 w-5 flex-shrink-0" />
@@ -69,7 +73,7 @@ export function Sidebar() {
           href={`${API_BASE}/radio`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white"
+          className={INACTIVE_NAV_LINK_CLASSES}
         >
           <RadioTower className="h-5 w-5 flex-shrink-0" />
           Radio
