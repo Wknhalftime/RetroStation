@@ -17,11 +17,12 @@
     "P1 review.2 independent derivation -> audit/eda/spec-expectations-independent.jsonl (68 rows, 43 ambiguity flags)",
     "P1 review.3 diff -> audit/eda/spec-diff.md: 8 disagreements D1-D8, not resolved",
     "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)",
-    "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py"
+    "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py",
+    "D1-D8 best-practice review -> audit/eda/d1-d8-review.md: D1,D3,D4,D6,D8 best practice; D5,D7 acceptable; D2 concern (framework signals counted as EVENT); 3 whole-spec observations; nothing applied"
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A: best-practice review of D1-D8 pending; Lance still to rule the two-instance question, then lock the spec with the relock hook"
+    "GATE A: Lance to rule on the review suggestions in audit/eda/d1-d8-review.md (D2 framework tag, D1/D4/D7 tweaks, observations 1-3) and the two-instance question, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
