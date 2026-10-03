@@ -28,9 +28,12 @@ export function MaxListenersSetting() {
   const [value, setValue] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);
 
+  // Only a change to the stored limit replaces the field: a refetch for another reason (an
+  // upload or a removal of the sign-off clip) keeps a limit the user is still typing.
+  const storedLimit = data?.max_sessions;
   useEffect(() => {
-    if (data) setValue(data.max_sessions === null ? "" : String(data.max_sessions));
-  }, [data]);
+    if (storedLimit !== undefined) setValue(storedLimit === null ? "" : String(storedLimit));
+  }, [storedLimit]);
 
   if (isError) {
     return (
