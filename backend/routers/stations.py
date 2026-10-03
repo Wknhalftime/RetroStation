@@ -19,6 +19,7 @@ from backend.domain.broadcast import (
     StationChanges,
     UnknownStationError,
 )
+from backend.domain.system import StorageUnavailableError
 from backend.services.m3u_generator_service import generate_m3u
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.stations import create_station as svc_create_station
@@ -208,6 +209,8 @@ def create_station(body: StationCreate, repos: SyncRepos, _token: Token) -> Stat
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Station with call_letters '{body.call_letters}' already exists",
         ) from exc
+    except StorageUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from exc
     return StationResponse.model_validate(created)
 
 
@@ -243,6 +246,8 @@ def update_station(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Station with call_letters '{call_letters}' already exists",
         ) from exc
+    except StorageUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from exc
     return StationResponse.model_validate(updated)
 
 

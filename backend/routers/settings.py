@@ -7,7 +7,7 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel
 
 from backend.dependencies import SyncRepos, get_current_token, get_db_connection
-from backend.domain.system import SettingsError
+from backend.domain.system import SettingsError, StorageUnavailableError
 from backend.services.setting_rules import save_setting
 
 router = APIRouter()
@@ -85,4 +85,6 @@ def put_setting(key: str, body: SettingValue, repos: SyncRepos, _token: Token) -
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=[{"loc": ["body", "value"], "msg": str(refused), "type": "value_error"}],
         ) from refused
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return SettingEntry(key=saved.key, value=saved.value)

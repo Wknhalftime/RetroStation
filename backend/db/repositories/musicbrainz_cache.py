@@ -6,7 +6,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from backend.domain.system import MusicBrainzCache
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.system import MusicBrainzCache, StorageUnavailableError
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 
 _UPSERT_SQL = """
@@ -35,6 +36,7 @@ def _upsert_params(cache: MusicBrainzCache) -> tuple[Any, ...]:
     )
 
 
+@translate_lost_connection(StorageUnavailableError)
 class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

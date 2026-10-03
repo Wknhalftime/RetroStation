@@ -6,10 +6,12 @@ from uuid import UUID, uuid4
 
 import psycopg
 
-from backend.domain.broadcast import BroadcastDay
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.broadcast import BroadcastDay, BroadcastStorageError
 from backend.repositories.broadcast_days import BroadcastDayRepository
 
 
+@translate_lost_connection(BroadcastStorageError)
 class PgBroadcastDayRepository(BroadcastDayRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

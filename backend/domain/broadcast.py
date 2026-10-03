@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.domain.system import StorageUnavailableError
 
 _STATION_CHANGE_FIELDS = frozenset({"call_letters", "name", "city", "format_name"})
 
@@ -21,6 +22,10 @@ class DuplicateCallLettersError(BroadcastError):
 
 class UnknownStationError(BroadcastError):
     """No station has this id."""
+
+
+class BroadcastStorageError(BroadcastError, StorageUnavailableError):
+    """A broadcast repository lost its database connection mid-operation."""
 
 
 @dataclass(frozen=True)

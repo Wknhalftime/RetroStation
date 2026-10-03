@@ -20,6 +20,7 @@ from psycopg.rows import DictRow
 
 from backend.db.sync_conn import connect_sync
 from backend.domain.streaming import InvalidStreamValueError, StreamReadError
+from backend.domain.system import StorageUnavailableError
 
 logger = structlog.get_logger()
 
@@ -64,6 +65,8 @@ def bounded_connection(
     """A connection whose reads end within ``bounds``. The database being unreachable, a lock
     wait or a statement past its bound, or the connection failing mid-read, is re-raised as
     ``StreamReadError`` and logged; any other error, such as a broken query, passes through.
+    A repository that already translated its lost connection (``StorageUnavailableError``)
+    counts as the connection failing mid-read.
 
     ``autocommit`` (PG7): a plain read never needs the extra COMMIT round trip on exit, and
     staying out of a transaction means nothing here can be left idle-in-transaction.
@@ -76,6 +79,6 @@ def bounded_connection(
             autocommit=autocommit,
         ) as conn:
             yield conn
-    except psycopg.OperationalError as error:
+    except (psycopg.OperationalError, StorageUnavailableError) as error:
         logger.warning("stream_read_failed", error=repr(error))
         raise StreamReadError(str(error)) from error

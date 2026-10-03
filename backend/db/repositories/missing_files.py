@@ -4,7 +4,8 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.library import MissingFileListing, MissingFileRow
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.library import LibraryStorageError, MissingFileListing, MissingFileRow
 from backend.repositories.missing_files import MissingFileListingRepository
 
 # Statuses are inlined so the planner can use idx_library_files_missing (0031).
@@ -47,6 +48,7 @@ def _row(r: dict[str, Any]) -> MissingFileRow:
     )
 
 
+@translate_lost_connection(LibraryStorageError)
 class PgMissingFileListingRepository(MissingFileListingRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

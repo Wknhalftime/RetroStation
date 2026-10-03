@@ -4,10 +4,12 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.system import UserSetting
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.system import StorageUnavailableError, UserSetting
 from backend.repositories.user_settings import UserSettingRepository
 
 
+@translate_lost_connection(StorageUnavailableError)
 class PgUserSettingRepository(UserSettingRepository):
     """PostgreSQL-backed implementation of :class:`UserSettingRepository`.
 

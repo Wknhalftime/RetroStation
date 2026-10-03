@@ -119,6 +119,8 @@ def save_sign_off(ports: SignOffPorts, upload: ClipUpload) -> SignOff:
         ClipLengthError: the clip lasts less than 1 second or more than 5 minutes.
         ClipStorageError: the clip or its setting could not be stored; the stored clip and
             its file are unchanged.
+        StorageUnavailableError: the settings connection was lost before the commit; the
+            stored clip is unchanged and the new file is left for the next sweep.
     """
     if len(upload.data) > MAX_CLIP_BYTES:
         raise ClipTooLargeError(
@@ -148,6 +150,8 @@ def remove_sign_off(ports: SignOffPorts) -> None:
 
     Raises:
         ClipStorageError: the commit failed; the stored clip and its file are unchanged.
+        StorageUnavailableError: the settings connection was lost before the commit; the
+            stored clip and its file are unchanged.
     """
     previous = _previous_file_name(ports.settings)
     ports.settings.delete(SIGN_OFF_KEY)

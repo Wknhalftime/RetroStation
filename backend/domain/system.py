@@ -11,6 +11,17 @@ from uuid import UUID, uuid4
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 
 
+class SystemDomainError(Exception):
+    """Base class for system-subdomain failures (settings, caches, logs, task progress).
+
+    Not ``SystemError``: that name is a Python builtin.
+    """
+
+
+class StorageUnavailableError(SystemDomainError):
+    """The database connection was lost mid-operation; a later attempt may succeed."""
+
+
 @dataclass(frozen=True)
 class MusicBrainzCache:
     id: UUID
@@ -40,8 +51,9 @@ class UserSetting:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-class SettingsError(Exception):
-    """Base class for user-settings failures (D27; PR G1)."""
+class SettingsError(SystemDomainError):
+    """Base class for user-settings refusals (D27; PR G1). Not a ``StorageUnavailableError``:
+    a refused value answers 422, a lost connection 503."""
 
 
 class InvalidSettingError(SettingsError):
