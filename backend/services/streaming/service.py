@@ -11,7 +11,7 @@ too short for its cues plays D23's values with a warning (D80).
 
 The end of the schedule (D26): the user's sign-off clip is read when the schedule ends, never
 at tune-in (PG4), and plays after the last song; a clip that cannot play still signs the
-station off (PG5).
+station off once the last song has started, and never cuts that song short (PG5).
 
 One instance per app, built at the composition root. Repository reads run in worker threads;
 all session state is mutated on the event loop (the day memo is the one exception, and it
@@ -423,13 +423,13 @@ def _landing_item(session: StreamSession, landing: Landing) -> ScheduleItem:
 
 
 def _schedule_finished(session: StreamSession) -> bool:
-    """The schedule has ended and its last assigned item has started (D26)."""
+    """The schedule has ended and its last item that can play has started (D26): the last
+    assigned one, or, when the final clip failed (PG5), the song before it."""
     committed = session.committed
-    return (
-        session.end_seq is not None
-        and committed is not None
-        and committed.seq == session.end_seq - 1
-    )
+    if session.end_seq is None or committed is None:
+        return False
+    last_to_play = session.end_seq - (2 if session.final_failed else 1)
+    return committed.seq == last_to_play
 
 
 def _halt(engine: RunningEngine) -> None:
@@ -934,13 +934,13 @@ class StreamService:
 
     def failed(self, call: ItemCall) -> None:
         """Flag an item the engine could not play (D32); the engine plays the next one. A
-        final clip that cannot play is committed as if it had started, so the station still
-        signs off (PG5)."""
+        final clip that cannot play is remembered, not committed, so the station still signs
+        off once the last song has started (PG5) and the watchdog keeps following that song:
+        the engine may fetch, and fail, the clip before the last song starts."""
         session = self._authorised(call)
         assigned = self._reported(call, session)
-        committed = session.committed
-        if isinstance(assigned, FinalClip) and (committed is None or call.seq > committed.seq):
-            session.committed = Committed(call.seq, assigned, self._elapsed())
+        if isinstance(assigned, FinalClip):
+            session.final_failed = True
         logger.warning(
             "stream_item_failed", session_id=call.session_id, seq=call.seq, **_flagged(assigned)
         )
