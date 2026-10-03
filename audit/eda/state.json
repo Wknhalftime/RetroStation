@@ -21,7 +21,7 @@
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A: Lance still to rule D1-D8 in spec-diff.md and the two-instance question, then lock the spec with the relock hook"
+    "GATE A: best-practice review of D1-D8 pending; Lance still to rule the two-instance question, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -230,5 +230,6 @@
     "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text.",
     "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock."
   ],
-  "rules_added_dropped": "none added, none dropped, none marked not implemented"
+  "rules_added_dropped": "none added, none dropped, none marked not implemented",
+  "spec_diff_ruling": "ACCEPTED by Lance 2026-10-03: D1-D8 as written in the spec (mine column of audit/eda/spec-diff.md); best-practice review by subagent requested"
 }
