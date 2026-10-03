@@ -22,6 +22,7 @@ from backend.domain.streaming import (
     ClipStorageError,
     ClipTooLargeError,
     SignOff,
+    StreamReadError,
     UnreadableClipError,
     UnsupportedClipError,
 )
@@ -184,8 +185,16 @@ async def post_sign_off(
 
 @router.get("/cue-coverage", response_model=CueCoverageOut)
 def get_cue_coverage_route(coverage: Coverage, _token: Token) -> CueCoverageOut:
-    """Cues ready X of Y (D77, D89; PG7): works whether streaming is on or off (D51)."""
-    counts = coverage.coverage()
+    """Cues ready X of Y (D77, D89; PG7): works whether streaming is on or off (D51).
+
+    ``coverage.coverage()`` opens its own bounded connection lazily, so a lost or locked
+    database fails here, inside this call, as ``StreamReadError`` (D88) -- not earlier, during
+    dependency resolution, where this except could never see it.
+    """
+    try:
+        counts = coverage.coverage()
+    except StreamReadError as unavailable:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from unavailable
     return CueCoverageOut(
         analysable=counts.analysable,
         ready=counts.ready,

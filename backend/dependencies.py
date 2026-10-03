@@ -10,8 +10,8 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
-from backend.db.repositories.stream_cue_coverage import PgCueCoverageRepository
-from backend.db.stream_reads import ReadBounds, bounded_connection
+from backend.db.repositories.stream_cue_coverage import BoundedCueCoverageRepository
+from backend.db.stream_reads import ReadBounds
 from backend.db.sync_conn import commit_or_unavailable
 from backend.domain.streaming import ClipStorageError
 from backend.domain.system import StorageUnavailableError
@@ -211,10 +211,11 @@ def get_sign_off_ports(
     )
 
 
-def get_cue_coverage() -> Generator[CueCoverageRepository]:
-    """Cue coverage (D77, D89; PG7), on its own bounded connection (``COVERAGE_READ_BOUNDS``),
-    never the request's own: works whether streaming is on or off (D51)."""
-    with bounded_connection(
-        get_settings().database_url, COVERAGE_READ_BOUNDS, autocommit=True
-    ) as conn:
-        yield PgCueCoverageRepository(conn)
+def get_cue_coverage() -> CueCoverageRepository:
+    """Cue coverage (D77, D89; PG7): works whether streaming is on or off (D51).
+
+    Built, not opened: its bounded connection (``COVERAGE_READ_BOUNDS``) opens only inside
+    ``coverage()``, when the route calls it, not here during dependency resolution (where a
+    failure could never reach the route's own try/except; coordinator review, PR G2 Task 6).
+    """
+    return BoundedCueCoverageRepository(get_settings().database_url, COVERAGE_READ_BOUNDS)

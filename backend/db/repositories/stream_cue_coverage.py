@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import psycopg
 from psycopg.rows import DictRow
 
 from backend.db.repositories.stream_cue_work import NEEDS_ANALYSIS, PRESENT_WITH_HASH
-from backend.domain.streaming import CueCoverage
+from backend.db.stream_reads import ReadBounds, bounded_connection
+from backend.domain.streaming import CueCoverage, StreamReadError
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
 
 # D20, H8: "waiting" is read through the one "needs analysis" fragment (NEEDS_ANALYSIS), not
@@ -35,7 +38,10 @@ class PgCueCoverageRepository(CueCoverageRepository):
 
     def coverage(self) -> CueCoverage:
         row = self._conn.execute(_COVERAGE_SQL).fetchone()
-        assert row is not None  # a single-row aggregate query always answers (T6.5)
+        if row is None:
+            # A single-row aggregate query always answers (T6.5); seeing none means the
+            # database did not, in fact, answer at all (D88).
+            raise StreamReadError("the cue coverage query returned no row")
         ready = row["ready"]
         failed = row["failed"]
         return CueCoverage(
@@ -44,3 +50,24 @@ class PgCueCoverageRepository(CueCoverageRepository):
             failed=failed,
             unhashed=row["unhashed"],
         )
+
+
+@dataclass(frozen=True)
+class BoundedCueCoverageRepository(CueCoverageRepository):
+    """Cue coverage read on a fresh, bounded connection opened only when ``coverage()`` runs
+    (PG7, I7), never when this object is built.
+
+    A FastAPI dependency that opened the connection eagerly (e.g. a generator dependency that
+    opens it before yielding) would raise a failed connection during dependency resolution,
+    before the route body runs; the route's own error handling can never catch it there (the
+    coordinator's review on PR G2's Task 6). Opening it lazily, inside ``coverage()``, means
+    the one call the route makes is the one that can fail, so the route's try/except maps the
+    resulting ``StreamReadError`` to 503 like every other stream read (D88).
+    """
+
+    database_url: str
+    bounds: ReadBounds
+
+    def coverage(self) -> CueCoverage:
+        with bounded_connection(self.database_url, self.bounds, autocommit=True) as conn:
+            return PgCueCoverageRepository(conn).coverage()
