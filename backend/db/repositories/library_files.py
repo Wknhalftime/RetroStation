@@ -6,9 +6,10 @@ from uuid import UUID
 
 import psycopg
 
+from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.db.repositories.path_prefix import dir_like_prefix
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
+from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, LibraryStorageError
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
@@ -129,6 +130,7 @@ def _audio_hash_of(value: str | None) -> AudioHash | None:
     return AudioHash.parse(value) if value is not None else None
 
 
+@translate_lost_connection(LibraryStorageError)
 class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

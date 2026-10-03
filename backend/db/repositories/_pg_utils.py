@@ -6,9 +6,10 @@ never needs to import from ``backend.services``.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, Concatenate, Protocol
+from typing import Any, Protocol
 
 import psycopg
 
@@ -19,25 +20,38 @@ class _HoldsConnection(Protocol):
     _conn: psycopg.Connection[Any]
 
 
-def translate_lost_connection[Repo: _HoldsConnection, **P, R](
-    method: Callable[Concatenate[Repo, P], R],
-) -> Callable[Concatenate[Repo, P], R]:
-    """Re-raise an ``OperationalError`` that left the repository's connection closed as the
-    domain's ``StorageUnavailableError``, so callers never handle a psycopg exception.
+def translate_lost_connection[T: _HoldsConnection](
+    error: type[StorageUnavailableError],
+) -> Callable[[type[T]], type[T]]:
+    """Class decorator: each public method re-raises an ``OperationalError`` that left the
+    repository's connection closed as ``error``, its subdomain's ``StorageUnavailableError``,
+    so callers never handle a psycopg exception.
 
     An ``OperationalError`` on a live connection (a lock or statement timeout, a deadlock)
     passes through unchanged: ``retry_on_deadlock`` and the tasks' per-item handlers rely on
     its psycopg type, and the connection is still usable.
     """
 
+    def decorate(cls: type[T]) -> type[T]:
+        for name, attr in list(vars(cls).items()):
+            if not name.startswith("_") and inspect.isfunction(attr):
+                setattr(cls, name, _translating(attr, error))
+        return cls
+
+    return decorate
+
+
+def _translating(
+    method: Callable[..., object], error: type[StorageUnavailableError]
+) -> Callable[..., object]:
     @wraps(method)
-    def wrapper(self: Repo, /, *args: P.args, **kwargs: P.kwargs) -> R:
+    def wrapper(self: _HoldsConnection, /, *args: object, **kwargs: object) -> object:
         try:
             return method(self, *args, **kwargs)
-        except psycopg.OperationalError as error:
+        except psycopg.OperationalError as lost:
             if not self._conn.closed:
                 raise
-            raise StorageUnavailableError(f"the database connection was lost: {error}") from error
+            raise error(f"the database connection was lost: {lost}") from lost
 
     return wrapper
 

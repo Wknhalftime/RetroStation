@@ -7,7 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from backend.db.repositories._pg_utils import translate_lost_connection
-from backend.domain.system import MusicBrainzCache
+from backend.domain.system import MusicBrainzCache, StorageUnavailableError
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 
 _UPSERT_SQL = """
@@ -36,6 +36,7 @@ def _upsert_params(cache: MusicBrainzCache) -> tuple[Any, ...]:
     )
 
 
+@translate_lost_connection(StorageUnavailableError)
 class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
@@ -53,7 +54,6 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
             expires_at=row["expires_at"],
         )
 
-    @translate_lost_connection
     def get(self, cache_key: str) -> MusicBrainzCache | None:
         row = self._conn.execute(
             "SELECT * FROM mb_cache WHERE cache_key = %s AND expires_at > now()",
@@ -61,7 +61,6 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    @translate_lost_connection
     def get_many(self, cache_keys: Sequence[str]) -> dict[str, MusicBrainzCache]:
         if not cache_keys:
             return {}
@@ -71,18 +70,15 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         ).fetchall()
         return {row["cache_key"]: self._row_to_model(row) for row in rows}
 
-    @translate_lost_connection
     def set(self, cache: MusicBrainzCache) -> None:
         self._conn.execute(_UPSERT_SQL, _upsert_params(cache))
 
-    @translate_lost_connection
     def set_many(self, caches: Sequence[MusicBrainzCache]) -> None:
         if not caches:
             return
         with self._conn.cursor() as cur:
             cur.executemany(_UPSERT_SQL, [_upsert_params(c) for c in caches])
 
-    @translate_lost_connection
     def delete_expired(self) -> int:
         result = self._conn.execute("DELETE FROM mb_cache WHERE expires_at < now()")
         return result.rowcount

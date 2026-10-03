@@ -5,11 +5,13 @@ from uuid import UUID
 
 import psycopg
 
+from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.enums import MatchTier, TargetType
-from backend.domain.matching import Match
+from backend.domain.matching import Match, MatchingStorageError
 from backend.repositories.matches import MatchRepository
 
 
+@translate_lost_connection(MatchingStorageError)
 class PgMatchRepository(MatchRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

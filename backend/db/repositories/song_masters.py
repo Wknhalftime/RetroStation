@@ -5,11 +5,13 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.curation import SongMaster
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.curation import CurationStorageError, SongMaster
 from backend.domain.enums import FileStatus, SelectionMethod
 from backend.repositories.song_masters import SongMasterRepository
 
 
+@translate_lost_connection(CurationStorageError)
 class PgSongMasterRepository(SongMasterRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

@@ -6,14 +6,19 @@ from uuid import uuid4
 import psycopg
 import structlog
 
-from backend.db.repositories._pg_utils import format_embedding, parse_embedding
-from backend.domain.catalog import Work, WorkFootprint
+from backend.db.repositories._pg_utils import (
+    format_embedding,
+    parse_embedding,
+    translate_lost_connection,
+)
+from backend.domain.catalog import CatalogStorageError, Work, WorkFootprint
 from backend.domain.enums import CatalogSource, TargetType
 from backend.repositories.works import WorkRepository
 
 logger = structlog.get_logger()
 
 
+@translate_lost_connection(CatalogStorageError)
 class PgWorkRepository(WorkRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
