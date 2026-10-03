@@ -39,3 +39,6 @@ class FakeUserSettingRepository(UserSettingRepository):
 
     def list_all(self) -> list[UserSetting]:
         return sorted(self._data.values(), key=lambda s: s.key)
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
