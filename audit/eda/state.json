@@ -21,7 +21,7 @@
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A: Lance still to rule --guard-fn (added option), D1-D8 in spec-diff.md, the two-instance question, then lock the spec with the relock hook"
+    "GATE A: Lance still to rule D1-D8 in spec-diff.md and the two-instance question, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -220,7 +220,8 @@
     },
     "--guard-fn": {
       "value": "backend.tasks._enqueue_chain:enqueue_or_log (default)",
-      "evidence": "ADDED option: the fixture guard lives in another module and a same-named function must not count (a name is never evidence)"
+      "evidence": "ADDED option: the fixture guard lives in another module and a same-named function must not count (a name is never evidence)",
+      "ruled": "ACCEPTED by Lance 2026-10-03: keep the option; default backend.tasks._enqueue_chain:enqueue_or_log; the real-code run passes nothing"
     }
   },
   "open_questions": [
