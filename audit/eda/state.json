@@ -20,7 +20,7 @@
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A reached: user rules --publish-fn/--subscribe-fn/--ev01-scope/--guard-fn, corrects expectations, locks spec files"
+    "GATE A: Lance still to rule --publish-fn/--subscribe-fn (proposed none), --guard-fn (added option), D1-D8 in spec-diff.md, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -167,12 +167,20 @@
     },
     "--ev01-scope": {
       "value": [
-        "library_scan_task",
-        "library_scan_files_task",
+        "artist_matching_task",
+        "embedding_task",
+        "identity_matching_task",
+        "ingestion_task",
         "library_enrichment_task",
-        "ingestion_task"
+        "library_hash_backfill_resume",
+        "library_hash_backfill_task",
+        "library_scan_files_task",
+        "library_scan_task",
+        "library_watcher_poll",
+        "mb_enrichment_task",
+        "normalize_backfill_task"
       ],
-      "evidence": "AUD-R012 (1): 'Applies to library_scan_task, the watcher (library_scan_files_task), library_enrichment_task and ingestion_task.'"
+      "evidence": "Lance 2026-10-03: the EV01 ruling covers every task-to-task hand-off, so every task (state.json inventory.tasks, 12) is in scope; supersedes the four-task proposal from AUD-R012 (1)"
     },
     "--guard-fn": {
       "value": "backend.tasks._enqueue_chain:enqueue_or_log (default)",
@@ -180,7 +188,7 @@
     }
   },
   "open_questions": [
-    "EV01 ruling_scope on real code: the 3 unguarded task-to-task hand-offs have producers AUD-R012 does not name: artist_matching_task -> identity_matching_task (artist_matching_tasks.py:110), embedding_task -> artist_matching_task (embedding_tasks.py:68), library_watcher_poll -> library_scan_files_task (library_watcher_tasks.py:102). All will carry ruling_scope: unstated. Reasoning: R012(1)'s first sentence ('Chained task calls are Huey enqueues; a chained task's run failure is its own') reads general, but its scope sentence lists four producers, none of these three. Does R012 extend to them, and is the periodic poll part of 'the watcher'?",
+    "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Not yet in audit/rulings.jsonl (outside this job's allowed files): Lance to record it as an AUD-R012 amendment or a new ruling.",
     "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
     "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text."
   ],
