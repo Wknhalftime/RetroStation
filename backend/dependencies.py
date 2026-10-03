@@ -10,9 +10,14 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
+from backend.db.repositories.stream_cue_coverage import (
+    COVERAGE_READ_BOUNDS,
+    BoundedCueCoverageRepository,
+)
 from backend.db.sync_conn import commit_or_unavailable
 from backend.domain.streaming import ClipStorageError
 from backend.domain.system import StorageUnavailableError
+from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
@@ -199,3 +204,13 @@ def get_sign_off_ports(
         probe=probe_clip,
         commit=_sign_off_commit(repos),
     )
+
+
+def get_cue_coverage() -> CueCoverageRepository:
+    """Cue coverage (D77, D89; PG7): works whether streaming is on or off (D51).
+
+    Built, not opened: its bounded connection (``COVERAGE_READ_BOUNDS``) opens only inside
+    ``coverage()``, when the route calls it, not here during dependency resolution (where a
+    failure could never reach the route's own try/except; coordinator review, PR G2 Task 6).
+    """
+    return BoundedCueCoverageRepository(get_settings().database_url, COVERAGE_READ_BOUNDS)

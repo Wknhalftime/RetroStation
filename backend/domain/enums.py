@@ -101,6 +101,8 @@ class TaskType(StrEnum):
     MATCHING = "matching"
     M3U_EXPORT = "m3u_export"
     HASH_BACKFILL = "hash_backfill"
+    CUE_ANALYSIS = "cue_analysis"  # D89: the cue run's "cues ready X of Y"
+    STREAM_RESOURCES = "stream_resources"  # D90: the streaming cost meter's one row
 
 
 class TaskStatus(StrEnum):

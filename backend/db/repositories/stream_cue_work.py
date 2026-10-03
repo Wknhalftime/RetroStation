@@ -13,24 +13,28 @@ from backend.repositories.stream_cue_work import CueWorkRepository
 
 _CANDIDATE = "f.id, f.file_path, f.audio_hash, f.duration_ms, f.file_size, f.file_mtime_ns"
 
+# The analysable baseline (D20, D21): a present file with an audio_hash. Public: shared with
+# CueCoverageRepository (D20: one owner per fact, H8), so coverage never re-derives it.
+PRESENT_WITH_HASH = "f.file_status = 'present' AND f.audio_hash IS NOT NULL"
+
 # Needs analysis (D20): a present file (D21) with an audio_hash whose audio has no cue row.
-_NEEDS_ANALYSIS = """f.file_status = 'present'
-  AND f.audio_hash IS NOT NULL
+# Public for the same reason as PRESENT_WITH_HASH.
+NEEDS_ANALYSIS = f"""{PRESENT_WITH_HASH}
   AND NOT EXISTS (SELECT 1 FROM stream_cues c WHERE c.audio_hash = f.audio_hash)"""
 
-# The player reports one file by id (D79); reuses the module's _NEEDS_ANALYSIS fragment so
+# The player reports one file by id (D79); reuses the module's NEEDS_ANALYSIS fragment so
 # D20 is defined once.
 _REPORTED_SQL = f"""
 SELECT {_CANDIDATE}
 FROM library_files f
-WHERE f.id = %(id)s AND {_NEEDS_ANALYSIS}
+WHERE f.id = %(id)s AND {NEEDS_ANALYSIS}
 """
 
 # file_path is unique, so the keyset is total (as in the hash backfill).
 _LIBRARY_SQL = f"""
 SELECT {_CANDIDATE}
 FROM library_files f
-WHERE {_NEEDS_ANALYSIS}
+WHERE {NEEDS_ANALYSIS}
   AND (%(after)s::text IS NULL OR f.file_path > %(after)s)
 ORDER BY f.file_path
 LIMIT %(limit)s
@@ -52,7 +56,7 @@ CROSS JOIN LATERAL (
 JOIN library_files f ON f.id = res.file_id
 WHERE dp.station_id IN (SELECT id FROM stations)
   AND dp.play_date = ANY(%(days)s)
-  AND {_NEEDS_ANALYSIS}
+  AND {NEEDS_ANALYSIS}
 ORDER BY f.file_path
 """
 

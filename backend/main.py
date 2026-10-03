@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
@@ -21,11 +21,18 @@ from psycopg_pool import PoolTimeout, TooManyRequests
 from backend.config import Settings, callback_base_url, get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
+from backend.db.progress_writer import (
+    Connect,
+    ProgressWriter,
+    progress_repository,
+    writer_options,
+)
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.db.sync_conn import connect_sync
+from backend.domain.system import StorageUnavailableError
 from backend.logging_config import configure_logging
 from backend.playout.assets import ensure_stream_assets
 from backend.playout.liquidsoap_process import (
@@ -39,10 +46,18 @@ from backend.playout.liquidsoap_process import (
     start_ready_engine,
     warm_script_cache,
 )
+from backend.playout.process_meter import PsutilMeter
 from backend.routers import listen, radio, radio_pages, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
 from backend.services.streaming.cue_reports import CueReporter, NoCueReports
+from backend.services.streaming.resource_meter import (
+    MeterPorts,
+    MeterRuntime,
+    end_leftover_meter_row_with,
+    start_meter_task,
+)
+from backend.services.streaming.resource_meter import stop_meter as stop_meter_task
 from backend.services.streaming.service import (
     ReposFactory,
     StreamPorts,
@@ -292,6 +307,81 @@ async def stop_streaming(runtime: StreamingRuntime | None) -> None:
             runtime.close_job()
 
 
+@dataclass(frozen=True)
+class LiveMeter:
+    """What the lifespan holds while the cost meter runs (C1): its task, and the telemetry
+    writer it alone owns, closed when the meter stops."""
+
+    runtime: MeterRuntime
+    writer: ProgressWriter
+
+
+def meter_clock() -> datetime:
+    """The cost meter's clock: UTC-aware, so the ``/ws`` reaper's ``now()`` reads its row as
+    fresh (I5). Never the stream service's naive wall clock."""
+    return datetime.now(UTC)
+
+
+def meter_connect(database_url: str) -> Connect:
+    """Opens the meter's telemetry connection: its own, autocommit, not waiting for the disk,
+    and bounded (D94, ``writer_options()``), as the cue task's writer connection is."""
+    return partial(
+        connect_sync, database_url, autocommit=True, connect_timeout=2, options=writer_options()
+    )
+
+
+async def start_meter(runtime: StreamingRuntime | None, connect: Connect) -> LiveMeter | None:
+    """The audio engine cost meter while streaming runs (D90, D95; C1): the running engines,
+    read with psutil, budgeted by D91, written through ``connect``'s connection. None, and
+    no connection opened, when streaming is off."""
+    if runtime is None:
+        return None
+    writer = ProgressWriter(connect)
+    ports = MeterPorts(
+        pids=runtime.service.engine_pids, meter=PsutilMeter(), writer=writer, clock=meter_clock
+    )
+    return LiveMeter(start_meter_task(ports, asyncio.sleep), writer)
+
+
+async def stop_meter(meter: LiveMeter | None) -> None:
+    """Stop the meter, completing its row (PG13), then close its connection."""
+    if meter is None:
+        return
+    try:
+        await stop_meter_task(meter.runtime)
+    finally:
+        await asyncio.to_thread(meter.writer.close)
+
+
+def end_leftover_meter_row(connect: Connect) -> None:
+    """Complete the meter row a crash left RUNNING (PG13, M10). A database that cannot be
+    reached is logged and start-up goes on (D46's spirit); the reaper then fails the row."""
+    try:
+        with progress_repository(connect) as repo:
+            end_leftover_meter_row_with(repo, meter_clock())
+    except StorageUnavailableError as error:
+        logger.warning("stream_meter_leftover_unended", error=str(error))
+
+
+async def _prepare_meter(
+    settings: Settings, connect: Connect
+) -> tuple[StreamingRuntime | None, LiveMeter | None]:
+    """End a leftover meter row, start streaming, then its meter (C1, M10): the row is
+    ended whether or not streaming is on, before the app serves."""
+    await asyncio.to_thread(end_leftover_meter_row, connect)
+    streaming = await start_streaming(settings)
+    return streaming, await start_meter(streaming, connect)
+
+
+async def _shutdown(meter: LiveMeter | None, streaming: StreamingRuntime | None) -> None:
+    """The meter stops, completing its row while the engines it measures still run, before
+    streaming stops (C1, PG13); streaming stops even when the meter's stop raises."""
+    try:
+        await stop_meter(meter)
+    finally:
+        await stop_streaming(streaming)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
@@ -335,13 +425,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             conn.commit()
 
     app.state.server_host = settings.server_host
-    streaming = await start_streaming(settings)
+    streaming, meter = await _prepare_meter(settings, meter_connect(settings.database_url))
     app.state.stream_service = None if streaming is None else streaming.service
 
     try:
         yield
     finally:
-        await stop_streaming(streaming)
+        await _shutdown(meter, streaming)
         await close_pool()
 
 

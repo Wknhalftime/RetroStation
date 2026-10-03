@@ -3,6 +3,13 @@ import type { TaskInfo } from "@/lib/schemas/tasks";
 
 export type ProgressStatus = "IDLE" | "RUNNING" | "COMPLETED" | "FAILED";
 
+// D90/I8: the audio-engine cost meter travels in one "stream_resources"
+// progress row, but it is a meter, not a task — it never lights the bottom
+// bar, in any status (running, completed or failed), never counts toward
+// "+N more", and never becomes the active task. Only the page that cares
+// about it (ResourceMeter) reads it, through `pageTasks`.
+const PAGE_ONLY_TASK_TYPES = new Set(["stream_resources"]);
+
 interface ProgressState {
   status: ProgressStatus;
   activeTask: TaskInfo | null;
@@ -22,6 +29,9 @@ interface ProgressState {
   // terminal processing until they expire out of the WS grace window, so a
   // dismiss() call is not immediately reversed by the next WebSocket tick.
   dismissedTaskIds: string[];
+  // Page-only rows (D90/I8): kept out of every other field above, in every
+  // status, and surfaced here instead for the one page that shows them.
+  pageTasks: TaskInfo[];
   setTasks: (tasks: TaskInfo[]) => void;
   hasRunningType: (type: string) => boolean;
   dismiss: () => void;
@@ -42,21 +52,31 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
   terminalTaskIds: [],
   dismissTimer: null,
   dismissedTaskIds: [],
+  pageTasks: [],
 
   setTasks: (tasks: TaskInfo[]) => {
+    // D90/I8: page-only rows (the cost meter) never enter the status machine
+    // below, in any status — they are carved off first and surfaced only
+    // through `pageTasks`.
+    const pageTasks = tasks.filter((t) => PAGE_ONLY_TASK_TYPES.has(t.task_type));
+    set({ pageTasks });
+    const tasksForBar = tasks.filter((t) => !PAGE_ONLY_TASK_TYPES.has(t.task_type));
+
     const { dismissTimer, dismissedTaskIds } = get();
 
     // Keep only dismissed IDs still present in the WS payload; the rest have
     // aged out of the grace window and no longer need suppressing.
-    const payloadIds = new Set(tasks.map((t) => t.task_id));
+    const payloadIds = new Set(tasksForBar.map((t) => t.task_id));
     const unexpiredDismissedIds = dismissedTaskIds.filter((id) => payloadIds.has(id));
     const dismissedSet = new Set(unexpiredDismissedIds);
 
-    const runningTasks = tasks.filter((t) => t.status === "running");
+    const runningTasks = tasksForBar.filter((t) => t.status === "running");
     // Exclude user-dismissed tasks from terminal processing so a dismiss()
     // call is not immediately reversed by the next WebSocket tick.
-    const failedTasks = tasks.filter((t) => t.status === "failed" && !dismissedSet.has(t.task_id));
-    const completedTasks = tasks.filter(
+    const failedTasks = tasksForBar.filter(
+      (t) => t.status === "failed" && !dismissedSet.has(t.task_id)
+    );
+    const completedTasks = tasksForBar.filter(
       (t) => t.status === "completed" && !dismissedSet.has(t.task_id)
     );
 
@@ -65,15 +85,15 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
       const active = pickActiveTask(runningTasks);
       // Terminal rows still inside the grace window appear alongside running
       // tasks in the progress bar; track their IDs for dismiss() suppression.
-      const graceWindowTerminalIds = tasks
+      const graceWindowTerminalIds = tasksForBar
         .filter((t) => t.status === "failed" || t.status === "completed")
         .filter((t) => !dismissedSet.has(t.task_id))
         .map((t) => t.task_id);
       set({
         status: "RUNNING",
         activeTask: active,
-        extraCount: Math.max(0, tasks.length - 1),
-        visibleTasks: tasks,
+        extraCount: Math.max(0, tasksForBar.length - 1),
+        visibleTasks: tasksForBar,
         runningTasks,
         terminalTaskIds: graceWindowTerminalIds,
         dismissTimer: null,
