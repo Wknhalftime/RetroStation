@@ -26,7 +26,12 @@ from backend.domain.streaming import (
 )
 from backend.domain.system import SettingsError
 from backend.repositories.user_settings import UserSettingRepository
-from backend.routers.clip_upload import TOO_LARGE, declared_too_large, read_clip_upload
+from backend.routers.clip_upload import (
+    TOO_LARGE,
+    UploadAbortedError,
+    declared_too_large,
+    read_clip_upload,
+)
 from backend.services.streaming.sign_off import SignOffPorts, remove_sign_off, save_sign_off
 from backend.services.streaming.stream_settings import (
     StreamingState,
@@ -132,6 +137,8 @@ async def post_sign_off(request: Request, ports: Ports, _token: Token) -> SignOf
     try:
         upload = await read_clip_upload(request)
         stored = await run_in_threadpool(save_sign_off, ports, upload)
+    except UploadAbortedError as aborted:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(aborted)) from aborted
     except ClipTooLargeError as refused:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(refused)) from refused
     except UnsupportedClipError as refused:
