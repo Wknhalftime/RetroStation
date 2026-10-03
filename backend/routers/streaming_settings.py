@@ -86,6 +86,16 @@ def _sign_off_out(sign_off: SignOff) -> SignOffOut:
     return SignOffOut(name=sign_off.name, seconds=sign_off.span_ms / 1000, format=sign_off.format)
 
 
+def _refuse_declared_too_large(request: Request) -> None:
+    """413 from the ``Content-Length`` alone, before the body is read (M3) and before a
+    database connection opens (M5)."""
+    if declared_too_large(request):
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, TOO_LARGE)
+
+
+DeclaredSize = Annotated[None, Depends(_refuse_declared_too_large)]
+
+
 def _clip_invalid(refused: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -127,13 +137,15 @@ def put_max_sessions(body: MaxSessionsIn, settings: Settings, _token: Token) -> 
 
 
 @router.post("/sign-off", response_model=SignOffOut)
-async def post_sign_off(request: Request, ports: Ports, _token: Token) -> SignOffOut:
+async def post_sign_off(
+    request: Request, _token: Token, _size: DeclaredSize, ports: Ports
+) -> SignOffOut:
     """Store the uploaded clip as the sign-off (D26; PG3, I2, I3, M3).
 
-    The body is read bounded (``read_clip_upload``); the clip is stored in the thread pool.
+    The token and the declared size are checked before ``ports`` opens a database connection
+    (dependencies resolve in signature order). The body is read bounded
+    (``read_clip_upload``); the clip is stored in the thread pool.
     """
-    if declared_too_large(request):
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, TOO_LARGE)
     try:
         upload = await read_clip_upload(request)
         stored = await run_in_threadpool(save_sign_off, ports, upload)
@@ -151,7 +163,7 @@ async def post_sign_off(request: Request, ports: Ports, _token: Token) -> SignOf
 
 
 @router.delete("/sign-off", status_code=status.HTTP_204_NO_CONTENT)
-def delete_sign_off(ports: Ports, _token: Token) -> Response:
+def delete_sign_off(_token: Token, ports: Ports) -> Response:
     """Clear the sign-off clip (D26): the setting, then its file."""
     try:
         remove_sign_off(ports)
