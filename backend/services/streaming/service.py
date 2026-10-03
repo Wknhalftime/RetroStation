@@ -429,7 +429,7 @@ def _schedule_finished(session: StreamSession) -> bool:
     if session.end_seq is None or committed is None:
         return False
     last_to_play = session.end_seq - (2 if session.final_failed else 1)
-    return committed.seq == last_to_play
+    return committed.seq >= last_to_play  # a clip reported started, then failed
 
 
 def _halt(engine: RunningEngine) -> None:

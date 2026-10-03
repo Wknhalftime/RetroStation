@@ -20,7 +20,7 @@ from backend.domain.streaming import ClipFormat, SignOff
 from backend.services.streaming.bookmarks import BookmarkKey
 from backend.services.streaming.listener_events import Status, StatusKind
 from tests.services.streaming.events_rig import drain
-from tests.services.streaming.schedule import STATION, YEAR
+from tests.services.streaming.schedule import STATION, YEAR, sent_path
 from tests.services.streaming.sign_off_rig import SignOffRig, make_sign_off_rig, morning
 
 CLIP = SignOff(
@@ -66,6 +66,8 @@ async def test_a_clip_that_fails_before_the_last_song_lets_the_song_play_out(
         assert rig.service.frozen_sessions() == []
     rig.elapse(GRACE_S - 2)  # 1 s short of the song's own span plus the grace
     assert rig.service.frozen_sessions() == []
+    rig.elapse(1)  # the watchdog follows the last song's span: it fires exactly there
+    assert rig.service.frozen_sessions() == [sid]
     rig.service.close(sid)  # the engine ended the stream after the last song (410)
     told = await drain(events)
     assert told[-1] == Status(StatusKind.ENDED)
@@ -107,3 +109,40 @@ async def test_leaving_before_the_last_song_after_the_clip_failed_keeps_the_book
     kept = rig.bookmarks.get(KEY)
     assert kept is not None
     assert kept.event_id == items[1].event_id
+
+
+async def test_a_resume_onto_the_last_song_with_a_failed_clip_signs_off_once_it_starts(
+    rig: SignOffRig,
+) -> None:
+    # The landing (seq 0) is the last song and the clip (seq 1) fails before seq 0 starts.
+    # The first visit plays straight through (06:01 lands 60 s into the first song), so it
+    # skips the 20 s before 06:07 and is ahead of the station clock: its bookmark is valid.
+    items = morning(rig)
+    first = await rig.open("car")
+    for seq, plays_s in enumerate((SONG_S - 60, SONG_S)):
+        await rig.item(first, seq)
+        rig.started(first, seq)
+        rig.elapse(plays_s)
+    await rig.item(first, LAST_SONG_SEQ)
+    rig.started(first, LAST_SONG_SEQ)
+    rig.elapse(10)
+    rig.service.close(first)  # left 10 s into the last song, before the clip was fetched
+    assert rig.bookmarks.get(KEY) is not None
+    rig.elapse(5)
+    events = await rig.subscribe("car")
+    sid = await rig.open("car")
+    landed = await rig.item(sid, 0)
+    assert landed.path == sent_path(items[3])
+    assert landed.annotations["liq_cue_in"] == "15.000"  # resumed: 10 s heard + 5 s away
+    assert (await rig.item(sid, 1)).annotations["final"] == "true"
+    rig.failed(sid, 1)
+    rig.elapse(GRACE_S - 1)
+    assert rig.service.frozen_sessions() == []  # D31: nothing started, 30 s from open
+    rig.elapse(1)
+    assert rig.service.frozen_sessions() == [sid]  # the failed clip did not move it
+    rig.started(sid, 0)  # the last song starts after all; the watchdog follows it now
+    assert rig.service.open_sessions == 1
+    rig.service.close(sid)
+    told = await drain(events)
+    assert told[-1] == Status(StatusKind.ENDED)
+    assert rig.bookmarks.get(KEY) is None
