@@ -1,19 +1,13 @@
-import os
-
 from huey import SqliteHuey  # type: ignore[import-untyped]
 
 from backend.config import get_settings
 from backend.logging_config import configure_logging
-
-# Per-worker file under pytest-xdist so parallel workers don't collide on the
-# same SQLite lock. In prod PYTEST_XDIST_WORKER is unset → "huey.db" as before.
-_worker = os.environ.get("PYTEST_XDIST_WORKER")
-_huey_filename = f"huey_{_worker}.db" if _worker else "huey.db"
+from backend.tasks.huey_files import huey_db_path
 
 # Single-worker SQLite backend (WAL mode); sufficient for this single-user tool.
 # results=False because all tasks are fire-and-forget (no .get() calls).
 # Replace with RedisHuey for multi-worker or multi-user deployments.
-huey = SqliteHuey(filename=_huey_filename, results=False)
+huey = SqliteHuey(filename=huey_db_path("huey"), results=False)
 
 
 @huey.on_startup()  # type: ignore[untyped-decorator]

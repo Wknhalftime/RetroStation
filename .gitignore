@@ -32,6 +32,8 @@ coverage.xml
 .tox/
 *.log
 huey_gw*.db
+huey_gw*.db-shm
+huey_gw*.db-wal
 huey_cues*.db
 huey_cues*.db-shm
 huey_cues*.db-wal

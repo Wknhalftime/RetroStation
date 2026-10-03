@@ -9,15 +9,12 @@ from huey import SqliteHuey  # type: ignore[import-untyped]
 
 from backend.config import get_settings
 from backend.logging_config import configure_logging
+from backend.tasks.huey_files import huey_db_path
 
 logger = structlog.get_logger()
 
-# Per-worker file under pytest-xdist, as huey_app does.
-_worker = os.environ.get("PYTEST_XDIST_WORKER")
-_cue_huey_filename = f"huey_cues_{_worker}.db" if _worker else "huey_cues.db"
-
 # results=False: the tasks are fire-and-forget, as on the library worker.
-cue_huey = SqliteHuey(filename=_cue_huey_filename, results=False)
+cue_huey = SqliteHuey(filename=huey_db_path("huey_cues"), results=False)
 
 _consumer_jobs: list[object] = []
 """The kill-on-close job this process is in. Never closed: closing it would end this process
