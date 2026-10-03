@@ -6,7 +6,9 @@ Public API:
                                     raises OSError on a file it cannot stat,
                                     MutagenError on an unreadable one)
   probe_clip(path) -> ProbedClip  (a sign-off clip's format and length, from
-                                    its content; raises UnsupportedClipError
+                                    its content; an MP3 with no length header
+                                    is measured by its frames (mpeg_frames);
+                                    raises UnsupportedClipError
                                     or UnreadableClipError, never a mutagen
                                     or OS error)
 
@@ -43,6 +45,7 @@ from backend.domain.streaming import (
     UnsupportedClipError,
 )
 from backend.services.audio_hash import compute_audio_hash
+from backend.services.mpeg_frames import headerless_duration
 from backend.services.normalization import normalize_artist, normalize_title
 
 # ---------------------------------------------------------------------------
@@ -433,6 +436,18 @@ def _clip_span_ms(info: object) -> int:
     return round(length * 1000)
 
 
+def _mp3_span_ms(path: Path, mutagen_span_ms: int) -> int:
+    """An MP3's length in whole milliseconds, measured from its frames when it carries no
+    Xing, VBRI or Info header (PG14): mutagen then estimates a VBR file from its first frame's
+    bitrate, which can be wrong by minutes. With a header, mutagen's exact value is kept."""
+    try:
+        data = path.read_bytes()
+    except OSError as unreadable:
+        raise UnreadableClipError(f"{_NOT_AUDIO} ({unreadable})") from unreadable
+    measured = headerless_duration(data)
+    return mutagen_span_ms if measured is None else round(measured * 1000)
+
+
 def probe_clip(path: Path) -> ProbedClip:
     """A staged sign-off clip's format and length, read from its content only (I2).
 
@@ -449,4 +464,7 @@ def probe_clip(path: Path) -> ProbedClip:
     if audio is None:
         raise UnreadableClipError(_NOT_AUDIO)
     clip_format = _clip_format(audio)
-    return ProbedClip(clip_format, _clip_span_ms(audio.info))
+    span_ms = _clip_span_ms(audio.info)
+    if clip_format is ClipFormat.MP3:
+        span_ms = _mp3_span_ms(path, span_ms)
+    return ProbedClip(clip_format, span_ms)
