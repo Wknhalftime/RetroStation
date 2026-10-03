@@ -23,7 +23,9 @@ function describeError(error: unknown): string {
 
 // ---------------------------------------------------------------------------
 // D91: half the threads, a quarter of the memory — the live meter row's
-// suggestion. With streaming off there is no meter row, so no suggestion.
+// suggestion, computed from the cost averaged over the last 30 seconds (I2),
+// so it holds still between the meter's 2 s ticks. With streaming off there
+// is no meter row, so no suggestion.
 // A limit above it is allowed, with a warning (disk is not counted, so the
 // suggestion is deliberately conservative).
 // ---------------------------------------------------------------------------

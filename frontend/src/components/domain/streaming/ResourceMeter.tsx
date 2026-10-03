@@ -22,6 +22,16 @@ function mb(value: number): string {
   return `${Math.round(value).toLocaleString()} MB`;
 }
 
+/** M5: a running meter row whose data does not match the schema. */
+function UnreadableMeter() {
+  return (
+    <p className="text-sm text-amber-700">
+      The meter&apos;s latest reading could not be read, so no figures are shown. It is written
+      again every few seconds.
+    </p>
+  );
+}
+
 function NoMeter() {
   return (
     <p className="text-sm text-gray-500">
@@ -39,9 +49,12 @@ function MeterFigures({ meter }: { meter: ResourceMeterData }) {
 
   return (
     <div className="space-y-3 text-sm text-gray-700">
+      {/* M3: a stream's processor share is of one thread; the machine's (below) is of
+          the whole machine. */}
       <p>
-        {open_streams} open stream{open_streams === 1 ? "" : "s"}: about {pct(cost.cpu_percent)} CPU
-        and {mb(cost.memory_mb)} memory per stream.
+        {open_streams} open stream{open_streams === 1 ? "" : "s"}: about {pct(cost.cpu_percent)} of
+        one processor thread and {mb(cost.memory_mb)} memory per stream (averaged over up to the
+        last 30 seconds).
       </p>
 
       {cost.source === "reference" && (
@@ -54,7 +67,8 @@ function MeterFigures({ meter }: { meter: ResourceMeterData }) {
         <ul className="space-y-0.5 text-xs text-gray-500">
           {streams.map((stream, index) => (
             <li key={index}>
-              Engine {index + 1}: {stream.warming ? "warming up" : pct(stream.cpu_percent)} CPU,{" "}
+              Engine {index + 1}:{" "}
+              {stream.warming ? "warming up" : `${pct(stream.cpu_percent)} of one thread`},{" "}
               {mb(stream.memory_mb)} memory.
             </li>
           ))}
@@ -66,7 +80,7 @@ function MeterFigures({ meter }: { meter: ResourceMeterData }) {
         {mb(machine.memory_available_mb)} available),{" "}
         {machine.cpu_percent === null
           ? "still measuring its own load."
-          : `currently about ${pct(machine.cpu_percent)} CPU.`}
+          : `currently about ${pct(machine.cpu_percent)} of the whole machine's processor.`}
       </p>
 
       <p className="text-xs text-gray-500">
@@ -86,11 +100,14 @@ export function ResourceMeter() {
   const meterTask = pageTasks.find((t) => t.task_type === "stream_resources") ?? null;
   const parsed =
     meterTask?.status === "running" ? ResourceMeterSchema.safeParse(meterTask.progress_data) : null;
+  let body = <NoMeter />;
+  if (parsed?.success) body = <MeterFigures meter={parsed.data} />;
+  else if (parsed) body = <UnreadableMeter />;
 
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-gray-700">{TITLE}</h3>
-      {parsed?.success ? <MeterFigures meter={parsed.data} /> : <NoMeter />}
+      {body}
     </div>
   );
 }
