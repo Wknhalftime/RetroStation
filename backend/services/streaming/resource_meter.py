@@ -5,6 +5,9 @@
   warning, and one info line when the readings come back);
 - D95: it counts the audio engines only (``scope: "audio_engines"``); D91: it carries the
   suggested listener limit; design note 15: the row's data;
+- I2 (final review): the row's cost, and so the suggestion, is the rolling mean of the last
+  15 samples (30 s, ``CostWindow``), so the page's suggestion holds still between ticks; each
+  engine's own reading stays the raw sample;
 - M17: each tick reads the meter and the machine, builds the row and writes it in a worker
   thread. The pids are read on the event loop first, because the stream service's sessions
   belong to the loop;
@@ -19,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Protocol
 
@@ -29,6 +32,7 @@ from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.stream_capacity import (
     DEFAULT_BUDGET,
     CapacityBudget,
+    CostWindow,
     EngineCost,
     EngineReading,
     MachineTotals,
@@ -117,15 +121,36 @@ def sample_engines(
     streams = meter.read(pids)
     machine = meter.machine()
     cost = measured_cost([EngineReading(s.cpu_percent, s.memory_mb) for s in streams])
-    totals = MachineTotals(threads=machine.threads, memory_mb=machine.memory_total_mb)
     return MeterSample(
         open_streams=len(pids),
         streams=streams,
         machine=machine,
         cost=cost,
-        suggestion=suggest_max(cost.cost, totals, budget),
+        suggestion=suggest_max(cost.cost, _totals(machine), budget),
         budget=budget,
     )
+
+
+def _totals(machine: MachineUsage) -> MachineTotals:
+    return MachineTotals(threads=machine.threads, memory_mb=machine.memory_total_mb)
+
+
+def smoothed(sample: MeterSample, cost: EngineCost) -> MeterSample:
+    """``sample`` costed at ``cost`` (the window's mean, I2), its suggestion recomputed."""
+    suggestion = suggest_max(cost.cost, _totals(sample.machine), sample.budget)
+    return replace(sample, cost=cost, suggestion=suggestion)
+
+
+@dataclass
+class CostHistory:
+    """A running meter's cost window (I2), advanced by each tick in turn: one tick is in
+    flight at a time, so the worker threads never share it."""
+
+    window: CostWindow = field(default_factory=CostWindow)
+
+    def record(self, cost: EngineCost) -> None:
+        """Add one sample's cost to the window."""
+        self.window = self.window.added(cost)
 
 
 def _row_data(sample: MeterSample) -> dict[str, object]:
@@ -197,10 +222,15 @@ def _ended_row(started_at: datetime, now: datetime) -> TaskProgress:
     )
 
 
-def _tick(ports: MeterPorts, pids: Sequence[int], started_at: datetime) -> None:
-    """One sample, read and written (runs in a worker thread, M17)."""
+def _tick(
+    ports: MeterPorts, pids: Sequence[int], started_at: datetime, history: CostHistory
+) -> None:
+    """One sample, read, averaged into ``history`` (I2) and written (in a worker thread,
+    M17). A reading that fails leaves the window as it was."""
     sample = sample_engines(pids, ports.meter, ports.budget)
-    ports.writer.write(meter_row(sample, started_at, ports.clock()))
+    history.record(sample.cost)
+    row = meter_row(smoothed(sample, history.window.mean()), started_at, ports.clock())
+    ports.writer.write(row)
 
 
 async def _land(tick: Awaitable[None]) -> None:
@@ -223,10 +253,11 @@ async def run_meter(ports: MeterPorts, sleep: Sleep, started_at: datetime) -> No
     ``OSError`` skips its sample: the first of a run of failures logs a warning, the first
     sample after it one info line. Any other error ends the meter (I4)."""
     failing = False
+    history = CostHistory()
     while True:
         pids = list(ports.pids())
         try:
-            await _land(asyncio.to_thread(_tick, ports, pids, started_at))
+            await _land(asyncio.to_thread(_tick, ports, pids, started_at, history))
         except OSError as error:
             if not failing:
                 logger.warning("stream_meter_read_failed", error=str(error))
