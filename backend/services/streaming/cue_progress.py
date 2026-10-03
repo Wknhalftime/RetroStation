@@ -12,9 +12,13 @@ is an observer: it never changes what the run stores or logs (I2).
     the count may be slow when cold), so the count includes that committed batch;
   - the row is RUNNING with ``processed`` (settled audio, ready or failed, D20) of ``total``
     (all analysable audio, PG7), and each later storing batch adds what it stored;
-  - when the run ends the row is COMPLETED, or FAILED when the run ended in an error;
+  - when the run ends the row is COMPLETED, or FAILED when the run ended in an error, with a
+    short reason in ``progress_data["error"]`` (M7; the bottom bar shows it, as for a scan);
   - a coverage read that gives None (failed or timed out, I7) means this run writes no row;
   - an idle run, or one that stores nothing, reads nothing and writes nothing (D59, I2).
+- ``end_leftover_cue_rows_with`` (I1): at the cue worker's start, a run's row that a crash or
+  a hard stop left RUNNING is FAILED, with a reason, and ``completed_at = updated_at``: it
+  ended long ago, outside the ``/ws`` feed's grace, so it never flashes in the bottom bar.
 """
 
 from __future__ import annotations
@@ -22,14 +26,28 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.stream_cue_coverage import CoverageRead
-from backend.repositories.task_progress import ProgressWrite
+from backend.repositories.task_progress import ProgressWrite, TaskProgressRepository
 
-__all__ = ["CueProgressPorts", "CueProgressRows", "CueRunProgress", "SilentProgress"]
+__all__ = [
+    "FAILED_REASON",
+    "LEFTOVER_REASON",
+    "CueProgressPorts",
+    "CueProgressRows",
+    "CueRunProgress",
+    "SilentProgress",
+    "end_leftover_cue_rows_with",
+]
+
+FAILED_REASON = "the cue run stopped on an error; System Logs has the details"
+"""M7: why a FAILED cue row failed. The error itself reaches the task's top boundary, which
+logs it (``reported_failures``)."""
+LEFTOVER_REASON = "the cue worker stopped before the run ended"
+"""I1: why a cue row left RUNNING by a crash or a hard stop was failed at the next start."""
 
 
 class CueRunProgress(Protocol):
@@ -91,7 +109,12 @@ class CueProgressRows:
             return
         now = self._ports.clock()
         status = TaskStatus.FAILED if failed else TaskStatus.COMPLETED
-        self._row = replace(self._row, status=status, updated_at=now, completed_at=now)
+        data = self._row.progress_data
+        if failed:
+            data = _with_error(data, FAILED_REASON)
+        self._row = replace(
+            self._row, status=status, progress_data=data, updated_at=now, completed_at=now
+        )
         self._ports.write(self._row)
 
     def _first_row(self) -> TaskProgress | None:
@@ -115,3 +138,23 @@ class CueProgressRows:
         processed: int = row.progress_data["processed"]
         data = {"processed": min(total, processed + count), "total": total}
         return replace(row, progress_data=data, updated_at=self._ports.clock())
+
+
+def _with_error(data: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {**data, "error": reason}
+
+
+def end_leftover_cue_rows_with(repo: TaskProgressRepository) -> None:
+    """Fail each cue run row left RUNNING (I1): call it only while no run is live (the cue
+    worker's start, ``-w 1``). Its ``updated_at`` stays, and ``completed_at`` is set to it."""
+    for row in repo.list_running():
+        if row.task_type != TaskType.CUE_ANALYSIS:
+            continue
+        repo.upsert(
+            replace(
+                row,
+                status=TaskStatus.FAILED,
+                progress_data=_with_error(row.progress_data, LEFTOVER_REASON),
+                completed_at=row.updated_at,
+            )
+        )
