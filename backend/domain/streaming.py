@@ -8,10 +8,13 @@ station clock: ``station_time = real_time + clock_offset``.
 from __future__ import annotations
 
 import calendar
+import json
 import math
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from enum import StrEnum
 from uuid import UUID
 
 from backend.domain.library import AudioHash
@@ -41,6 +44,30 @@ class StaleScheduleError(StreamingError):
 
 class StreamReadError(StreamingError):
     """The database could not answer a stream read within its bounds, or at all (D88)."""
+
+
+class SignOffError(StreamingError):
+    """Base class for the sign-off clip's refusals and storage failures (D26; PG3)."""
+
+
+class UnsupportedClipError(SignOffError):
+    """The clip's content is audio, but not FLAC, MP3 or WAV (I2)."""
+
+
+class ClipTooLargeError(SignOffError):
+    """The clip is larger than ``MAX_CLIP_BYTES`` (PG3, M4)."""
+
+
+class ClipLengthError(SignOffError):
+    """The clip lasts less than 1 second or more than 5 minutes (PG3)."""
+
+
+class UnreadableClipError(SignOffError):
+    """The clip's content is not audio that can be read (I2)."""
+
+
+class ClipStorageError(SignOffError):
+    """The clip or its setting could not be stored (I3): a disk or database failure."""
 
 
 def to_ms(delta: timedelta) -> int:
@@ -338,3 +365,101 @@ class StationYear:
     def days_in_year(self) -> int:
         """366 in a leap year, else 365."""
         return 366 if calendar.isleap(self.year) else 365
+
+
+MAX_CLIP_BYTES = 25 * 2**20
+"""The largest sign-off clip accepted, in bytes: exactly 25 MiB, 26 214 400 (PG3, M4)."""
+
+MIN_CLIP_MS = 1_000
+"""The shortest sign-off clip, in milliseconds: 1 second (PG3)."""
+
+MAX_CLIP_MS = 300_000
+"""The longest sign-off clip, in milliseconds: 5 minutes (PG3)."""
+
+MAX_SIGN_OFF_NAME = 255
+"""The longest name a sign-off clip is shown under, in characters."""
+
+
+class ClipFormat(StrEnum):
+    """Audio container of a sign-off clip (PG3): detected from content, never from a name."""
+
+    FLAC = "flac"
+    MP3 = "mp3"
+    WAV = "wav"
+
+
+@dataclass(frozen=True)
+class ProbedClip:
+    """What probing a candidate sign-off clip's bytes finds (I2): its detected format and
+    length, never read from a file name or extension."""
+
+    format: ClipFormat
+    span_ms: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative("ProbedClip", span_ms=self.span_ms)
+
+
+SIGN_OFF_FILE_NAME = re.compile(r"^[0-9a-f]{16}\.(flac|mp3|wav)$")
+"""A stored sign-off clip's file name: 16 lowercase hex characters, then its format (PG3)."""
+
+
+@dataclass(frozen=True)
+class SignOff:
+    """The user's sign-off clip (D26; PG3): stored content-named, so its file name alone can
+    never escape the sign-off folder.
+
+    ``file_name`` is ``<16 lowercase hex characters>.<format>``, with the extension matching
+    ``format``; ``span_ms`` is the clip's length, 1 s to 5 min; ``name`` is the name shown on
+    the page, 1-255 characters (the upload's own name, trimmed).
+    """
+
+    file_name: str
+    format: ClipFormat
+    span_ms: int
+    name: str
+
+    def __post_init__(self) -> None:
+        match = SIGN_OFF_FILE_NAME.fullmatch(self.file_name)
+        if match is None or match.group(1) != self.format.value:
+            raise InvalidStreamValueError(
+                f"SignOff.file_name must be 16 lowercase hex characters plus "
+                f".{self.format.value}, got {self.file_name!r}"
+            )
+        if not MIN_CLIP_MS <= self.span_ms <= MAX_CLIP_MS:
+            raise InvalidStreamValueError(
+                f"SignOff.span_ms must be {MIN_CLIP_MS}..{MAX_CLIP_MS}, got {self.span_ms}"
+            )
+        if not 1 <= len(self.name) <= MAX_SIGN_OFF_NAME:
+            raise InvalidStreamValueError(
+                f"SignOff.name must be 1..{MAX_SIGN_OFF_NAME} characters, got {len(self.name)}"
+            )
+
+    def to_setting(self) -> str:
+        """This clip as the JSON stored under the ``stream_sign_off`` user setting."""
+        return json.dumps(
+            {
+                "file_name": self.file_name,
+                "format": self.format.value,
+                "span_ms": self.span_ms,
+                "name": self.name,
+            }
+        )
+
+    @classmethod
+    def from_setting(cls, value: str) -> SignOff:
+        """The clip stored under ``stream_sign_off``; refused, never half-read, if malformed."""
+        try:
+            data = json.loads(value)
+            return cls(
+                file_name=data["file_name"],
+                format=ClipFormat(data["format"]),
+                span_ms=data["span_ms"],
+                name=data["name"],
+            )
+        except InvalidStreamValueError:
+            raise
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as bad_setting:
+            raise InvalidStreamValueError(
+                f"SignOff: not a sign-off setting ({bad_setting})"
+            ) from bad_setting

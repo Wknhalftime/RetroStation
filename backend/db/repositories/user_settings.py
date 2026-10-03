@@ -89,3 +89,11 @@ class PgUserSettingRepository(UserSettingRepository):
             )
             for row in rows
         ]
+
+    def delete(self, key: str) -> None:
+        """Remove the setting for *key*; a key with no row is not an error.
+
+        Args:
+            key: Settings key to remove.
+        """
+        self._conn.execute("DELETE FROM user_settings WHERE key = %s", (key,))

@@ -51,6 +51,18 @@ class UserSetting:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+class SettingsError(Exception):
+    """Base class for user-settings failures (D27; PR G1)."""
+
+
+class InvalidSettingError(SettingsError):
+    """A setting's value fails the rule for its key (D27): refused, naming the key."""
+
+
+class ManagedSettingError(SettingsError):
+    """A setting is written only by its own path; the generic save refuses it (PG2)."""
+
+
 @dataclass
 class SystemLog:
     category: LogCategory
