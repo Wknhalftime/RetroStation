@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useStreamSettings, useSetMaxSessions } from "@/api/streaming";
+import { Spinner } from "@/components/ui/Spinner";
 
 // ---------------------------------------------------------------------------
 // Validation — D27: a whole number of 1 or more, checked here before the
@@ -23,7 +24,7 @@ function describeError(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 export function MaxListenersSetting() {
-  const { data, isError, error } = useStreamSettings();
+  const { data, isLoading, isError, error } = useStreamSettings();
   const setMaxSessions = useSetMaxSessions();
   const [value, setValue] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -42,6 +43,24 @@ export function MaxListenersSetting() {
         <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
           {describeError(error)}
         </p>
+      </div>
+    );
+  }
+
+  // Before the stored limit has loaded, the field has nothing real to show. An empty input
+  // looks like "no limit" rather than "still loading", and Save would act on it, so show a
+  // neutral loading state and render neither the input nor Save until the data arrives.
+  if (isLoading || !data) {
+    return (
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700">Max listeners</h3>
+        <div
+          role="status"
+          aria-label="Loading max listeners setting"
+          className="flex justify-center py-6"
+        >
+          <Spinner className="h-5 w-5 text-indigo-500" />
+        </div>
       </div>
     );
   }

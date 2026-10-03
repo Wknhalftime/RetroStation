@@ -2,6 +2,7 @@ import type { ChangeEvent } from "react";
 import { useState } from "react";
 import { ApiError, ValidationError } from "@/api/client";
 import { useStreamSettings, useUploadSignOff, useDeleteSignOff } from "@/api/streaming";
+import { Spinner } from "@/components/ui/Spinner";
 
 // ---------------------------------------------------------------------------
 // Constants — PG3, M4: FLAC, MP3 or WAV, up to 25 MiB, 1 second to 5 minutes.
@@ -43,7 +44,7 @@ function describeLoadError(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 export function SignOffClip() {
-  const { data, isError, error } = useStreamSettings();
+  const { data, isLoading, isError, error } = useStreamSettings();
   const upload = useUploadSignOff();
   const remove = useDeleteSignOff();
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -59,7 +60,25 @@ export function SignOffClip() {
     );
   }
 
-  const signOff = data?.sign_off ?? null;
+  // The real state (a clip, or none) is only known once the settings have loaded. Until then,
+  // show a neutral loading state rather than "No sign-off clip is set" — and keep Remove and
+  // Upload from rendering at all, so neither can act on data that has not arrived yet.
+  if (isLoading || !data) {
+    return (
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-gray-700">Sign-off clip</h3>
+        <div
+          role="status"
+          aria-label="Loading streaming settings"
+          className="flex justify-center py-6"
+        >
+          <Spinner className="h-5 w-5 text-indigo-500" />
+        </div>
+      </div>
+    );
+  }
+
+  const signOff = data.sign_off;
 
   function handleChoose(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
