@@ -77,7 +77,7 @@ export function MaxListenersSetting() {
     });
   }
 
-  const problem = refusal ?? data?.max_sessions_problem ?? null;
+  const problem = refusal ?? data.max_sessions_problem ?? null;
 
   return (
     <div>

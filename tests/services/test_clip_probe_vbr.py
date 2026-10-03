@@ -7,26 +7,29 @@ the ruling measures such a file by its frames and keeps mutagen's exact value wh
 header is present.
 
 The MP3s are made at test time with ffmpeg (pink noise, so the encoder's bitrate varies); the
-module skips when ffmpeg is not on PATH.
+tests that need ffmpeg skip when it is not on PATH. The adversarial
+scan test builds its bytes in-process.
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import mutagen
 import pytest
 
-from backend.domain.streaming import ClipFormat, ClipLengthError
+from backend.domain.streaming import ClipFormat, ClipLengthError, ProbedClip
 from backend.services.audio_tags import probe_clip
+from backend.services.mpeg_frames import headerless_duration
 from backend.services.streaming.sign_off import ClipUpload, SignOffPorts, save_sign_off
 from tests.fakes.user_settings import FakeUserSettingRepository
 
 FFMPEG = shutil.which("ffmpeg")
 
-pytestmark = pytest.mark.skipif(
+needs_ffmpeg = pytest.mark.skipif(
     FFMPEG is None, reason="ffmpeg is not on PATH: these tests encode their MP3s with it"
 )
 
@@ -67,6 +70,7 @@ def mutagen_span_ms(path: Path) -> int:
     return round(length * 1000)
 
 
+@needs_ffmpeg
 @pytest.mark.parametrize(
     ("rate", "channels"),
     [("48000", "2"), ("22050", "2"), ("11025", "1")],
@@ -85,6 +89,7 @@ def test_a_vbr_mp3_without_a_length_header_probes_at_its_true_length(
     assert abs(probed.span_ms - SECONDS * 1000) <= TOLERANCE_MS, probed
 
 
+@needs_ffmpeg
 def test_tags_at_either_end_do_not_count_as_audio(tmp_path: Path) -> None:
     # An ID3v2 tag with a large comment leads the file and an ID3v1 tag ends it; an APE tag
     # is appended before the ID3v1 tag. None of them adds or removes a frame's worth of time.
@@ -127,6 +132,7 @@ def ape_tag() -> bytes:
     return block(has_header | is_header) + item + block(has_header)
 
 
+@needs_ffmpeg
 @pytest.mark.parametrize(
     "options",
     [["-q:a", "2"], ["-b:a", "128k"]],
@@ -141,6 +147,7 @@ def test_an_mp3_with_a_length_header_keeps_mutagens_length(
     assert abs(probed.span_ms - SECONDS * 1000) <= TOLERANCE_MS
 
 
+@needs_ffmpeg
 def test_the_five_minute_limit_applies_to_the_true_length(tmp_path: Path) -> None:
     # 3 s of noise, then silence to 5.5 minutes: the loud first frame makes mutagen's
     # estimate far shorter than the clip (about 42 s), which would pass the limit.
@@ -162,3 +169,42 @@ def test_the_five_minute_limit_applies_to_the_true_length(tmp_path: Path) -> Non
     )
     with pytest.raises(ClipLengthError):
         save_sign_off(ports, ClipUpload(name="long.mp3", data=path.read_bytes()))
+
+
+# MPEG 1 Layer III, 128 kbit/s, 44.1 kHz, no padding: a 417-byte frame.
+FRAME_HEADER = bytes([0xFF, 0xFB, 0x90, 0x00])
+FRAME = FRAME_HEADER + bytes(417 - len(FRAME_HEADER))
+# A valid header every 4 bytes; each one's successor, 417 bytes on, is not a header.
+NEAR_MISS = FRAME_HEADER * 2000
+
+
+def test_a_crafted_stream_of_near_miss_frames_is_scanned_in_bounded_time(
+    tmp_path: Path,
+) -> None:
+    # A real frame pair after each 8 000 bytes of near misses keeps every resync succeeding,
+    # so without an overall budget the scan tests every near miss in the file (2.3 MiB).
+    # With the budget spent the frame count is abandoned and mutagen's estimate stands.
+    data = FRAME * 8 + (NEAR_MISS + FRAME * 2) * 280
+    assert len(data) > 2 * 2**20
+    path = tmp_path / "crafted.partial"
+    path.write_bytes(data)
+
+    started = time.perf_counter()
+    probed = probe_clip(path)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.5, f"the probe took {elapsed:.2f} s"
+    assert probed == ProbedClip(ClipFormat.MP3, mutagen_span_ms(path))
+
+
+def test_leading_near_misses_spend_the_budget_before_the_first_frame() -> None:
+    # 1 MiB of near misses before a real stream: the first-frame search gives up in bounded
+    # time rather than testing every near miss in its window.
+    data = FRAME_HEADER * (2**20 // 4) + FRAME * 8
+
+    started = time.perf_counter()
+    measured = headerless_duration(data)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.5, f"the scan took {elapsed:.2f} s"
+    assert measured is None

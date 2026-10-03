@@ -3,7 +3,8 @@
 Public API:
   headerless_duration(data) -> float | None  (seconds, summed frame by frame; None when the
                                               first frame carries a Xing, Info or VBRI
-                                              header, or no frames are found)
+                                              header, no frames are found, or the sync
+                                              budget runs out)
 
 Why: for a VBR MP3 with no Xing, VBRI or Info header, a tag reader can only estimate the
 length from the first frame's bitrate, and the estimate can be wrong by minutes. With a
@@ -13,7 +14,13 @@ Reads MPEG 1, 2 and 2.5, Layers I, II and III, from bytes only (no mutagen, no I
 ID3v2 tags at the start and an ID3v1 or APEv2 tag at the end are skipped. After the first
 frame, a header that does not parse, or does not match the first frame, is resynced over a
 bounded window; the scan stops there when no frame pair is found. A final frame cut short is
-not counted.
+not counted. Encoder delay and padding are deliberately not subtracted: a headerless file
+records neither, so the result runs about 50 ms long at the end, which is harmless.
+
+Every sync candidate tested (a 0xFF byte checked for a frame pair, while finding the first
+frame or resyncing) spends one unit of a fixed budget shared by the whole scan. A crafted
+file packed with near-miss headers therefore costs a bounded amount of work; when the budget
+runs out the measurement is abandoned (None), and the caller keeps the tag reader's value.
 """
 
 from __future__ import annotations
@@ -53,6 +60,9 @@ _MONO = 0b11
 _HEADER_BYTES = 4
 _FIRST_SYNC_WINDOW = 1024 * 1024  # as far as mutagen looks for the first frame
 _RESYNC_WINDOW = 8 * 1024  # a few of the largest frames (2 881 bytes at MPEG 1 L3 320k 32 kHz)
+# Sync candidates the whole scan may test. Real audio has about one 0xFF byte in 256, so a
+# 1 MiB search before the first frame costs about 4 000; a clean stream needs no resync.
+_SYNC_BUDGET = 20_000
 
 _ID3V2_HEADER_BYTES = 10
 _ID3V2_FOOTER_FLAG = 0x10
@@ -62,6 +72,20 @@ _APE_HAS_HEADER = 0x80000000
 
 _XING_FRAMES_FLAG = 0x1
 _VBRI_OFFSET = 36
+
+
+@dataclass
+class _SyncBudget:
+    """The sync candidates a scan may still test (``_SYNC_BUDGET`` at the start)."""
+
+    remaining: int = _SYNC_BUDGET
+
+    def spend(self) -> None:
+        self.remaining -= 1
+
+    @property
+    def spent(self) -> bool:
+        return self.remaining <= 0
 
 
 @dataclass(frozen=True)
@@ -155,12 +179,25 @@ def _frame_pair_at(data: bytes, pos: int, end: int, first: _Frame | None) -> _Fr
     return frame
 
 
-def _sync(data: bytes, pos: int, end: int, window: int, first: _Frame | None) -> int | None:
-    """The offset of the first frame pair in ``[pos, pos + window)``, or None."""
-    stop = min(end, pos + window)
-    candidate = data.find(b"\xff", pos, stop)
-    while candidate != -1:
-        if _frame_pair_at(data, candidate, end, first) is not None:
+@dataclass(frozen=True)
+class _SyncSearch:
+    """Where a sync search looks: ``[start, start + window)``, never past ``end``."""
+
+    start: int
+    end: int
+    window: int
+
+
+def _sync(
+    data: bytes, search: _SyncSearch, first: _Frame | None, budget: _SyncBudget
+) -> int | None:
+    """The offset of the first frame pair in the search's range, or None when there is none
+    or ``budget`` runs out (the caller tells the two apart with ``budget.spent``)."""
+    stop = min(search.end, search.start + search.window)
+    candidate = data.find(b"\xff", search.start, stop)
+    while candidate != -1 and not budget.spent:
+        budget.spend()
+        if _frame_pair_at(data, candidate, search.end, first) is not None:
             return candidate
         candidate = data.find(b"\xff", candidate + 1, stop)
     return None
@@ -184,15 +221,18 @@ def _carries_length_header(data: bytes, pos: int, frame: _Frame) -> bool:
     return data[vbri_at : vbri_at + 4] == b"VBRI"
 
 
-def _total_samples(data: bytes, pos: int, end: int, first: _Frame) -> int:
-    """The samples in the frames from ``pos`` (the first frame) to ``end``."""
+def _total_samples(
+    data: bytes, pos: int, end: int, first: _Frame, budget: _SyncBudget
+) -> int | None:
+    """The samples in the frames from ``pos`` (the first frame) to ``end``, or None when
+    resyncing spends the budget."""
     samples = 0
     while pos < end:
         frame = _parse_frame(data, pos)
         if frame is None or not frame.continues(first):
-            resynced = _sync(data, pos + 1, end, _RESYNC_WINDOW, first)
+            resynced = _sync(data, _SyncSearch(pos + 1, end, _RESYNC_WINDOW), first, budget)
             if resynced is None:
-                break
+                return None if budget.spent else samples
             pos = resynced
             continue
         if pos + frame.length > end:
@@ -205,15 +245,16 @@ def _total_samples(data: bytes, pos: int, end: int, first: _Frame) -> int:
 def headerless_duration(data: bytes) -> float | None:
     """The duration in seconds of the MPEG audio in ``data``, summed from its frames.
 
-    None when the first frame carries a length header (the tag reader's value is exact) or
-    when no MPEG audio frames are found.
+    None when the first frame carries a length header (the tag reader's value is exact),
+    when no MPEG audio frames are found, or when the sync budget runs out.
     """
     start, end = _audio_bounds(data)
-    pos = _sync(data, start, end, _FIRST_SYNC_WINDOW, None)
+    budget = _SyncBudget()
+    pos = _sync(data, _SyncSearch(start, end, _FIRST_SYNC_WINDOW), None, budget)
     if pos is None:
         return None
     first = _parse_frame(data, pos)
     if first is None or _carries_length_header(data, pos, first):
         return None
-    samples = _total_samples(data, pos, end, first)
+    samples = _total_samples(data, pos, end, first, budget)
     return samples / first.sample_rate if samples else None

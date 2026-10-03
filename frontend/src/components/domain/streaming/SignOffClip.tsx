@@ -130,7 +130,7 @@ export function SignOffClip() {
         </p>
       )}
 
-      {data?.sign_off_problem && (
+      {data.sign_off_problem && (
         <p role="alert" className="mb-3 rounded-md bg-red-50 p-3 text-sm text-red-700">
           {data.sign_off_problem}
         </p>
