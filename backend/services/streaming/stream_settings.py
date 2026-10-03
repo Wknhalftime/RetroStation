@@ -18,7 +18,10 @@ from backend.repositories.user_settings import UserSettingRepository
 from backend.services.setting_rules import save_setting
 from backend.services.streaming.errors import InvalidStreamSettingError
 from backend.services.streaming.max_sessions import MAX_SESSIONS_KEY, parse_max_sessions
-from backend.services.streaming.sign_off import SIGN_OFF_KEY, stored_sign_off
+from backend.services.streaming.sign_off import stored_sign_off
+
+MISSING_CLIP_FILE = "the clip's file is missing; upload it again"  # design note 8 (M2)
+BAD_SIGN_OFF = "the stored sign-off could not be read; upload the clip again"  # H9
 
 
 class StreamingState(StrEnum):
@@ -62,12 +65,12 @@ def _read_sign_off(
 ) -> tuple[SignOff | None, str | None]:
     try:
         sign_off = stored_sign_off(settings)
-    except InvalidStreamValueError as bad_value:
-        return None, f"{SIGN_OFF_KEY}: {bad_value}"
+    except InvalidStreamValueError:
+        return None, BAD_SIGN_OFF
     if sign_off is None:
         return None, None
     if not (folder / sign_off.file_name).exists():
-        return sign_off, f"{SIGN_OFF_KEY}: clip file {sign_off.file_name} is missing"
+        return sign_off, MISSING_CLIP_FILE
     return sign_off, None
 
 
