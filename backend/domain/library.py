@@ -13,6 +13,7 @@ from backend.domain.enums import (
     ReleaseStatus,
     ReleaseType,
 )
+from backend.domain.system import StorageUnavailableError
 
 
 class LibraryError(Exception):
@@ -21,6 +22,10 @@ class LibraryError(Exception):
 
 class InvalidAudioHashError(LibraryError):
     """A value that is not a well-formed audio fingerprint."""
+
+
+class LibraryStorageError(LibraryError, StorageUnavailableError):
+    """A library repository lost its database connection mid-operation."""
 
 
 # Formats an audio fingerprint is defined for (spec B1). Other formats get none.

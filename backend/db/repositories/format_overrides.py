@@ -5,10 +5,12 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.curation import FormatOverride
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.curation import CurationStorageError, FormatOverride
 from backend.repositories.format_overrides import FormatOverrideRepository
 
 
+@translate_lost_connection(CurationStorageError)
 class PgFormatOverrideRepository(FormatOverrideRepository):
     """PostgreSQL implementation of :class:`FormatOverrideRepository`."""
 

@@ -20,6 +20,7 @@ from psycopg.rows import DictRow
 
 from backend.db.sync_conn import connect_sync
 from backend.domain.streaming import InvalidStreamValueError, StreamReadError
+from backend.domain.system import StorageUnavailableError
 
 logger = structlog.get_logger()
 
@@ -61,12 +62,14 @@ class ReadBounds:
 def bounded_connection(dsn: str, bounds: ReadBounds) -> Iterator[psycopg.Connection[DictRow]]:
     """A connection whose reads end within ``bounds``. The database being unreachable, a lock
     wait or a statement past its bound, or the connection failing mid-read, is re-raised as
-    ``StreamReadError`` and logged; any other error, such as a broken query, passes through."""
+    ``StreamReadError`` and logged; any other error, such as a broken query, passes through.
+    A repository that already translated its lost connection (``StorageUnavailableError``)
+    counts as the connection failing mid-read."""
     try:
         with connect_sync(
             dsn, connect_timeout=bounds.connect_timeout_s, options=bounds.options
         ) as conn:
             yield conn
-    except psycopg.OperationalError as error:
+    except (psycopg.OperationalError, StorageUnavailableError) as error:
         logger.warning("stream_read_failed", error=repr(error))
         raise StreamReadError(str(error)) from error

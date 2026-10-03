@@ -11,8 +11,9 @@ Splits the work into two functions with distinct failure semantics:
   connection supplied by its ``repos_factory`` argument (mirrors
   ``backend/tasks/identity_matching_tasks.py:41``, which builds its own).
   This recalc is a best-effort side effect for *database* failures only:
-  a ``psycopg.Error`` (the connection dropping, a constraint violation,
-  etc.) is caught and logged here so the durable match write is never
+  a ``psycopg.Error`` (a constraint violation, etc.) or a repository's
+  ``StorageUnavailableError`` (the connection dropping) is caught and
+  logged here so the durable match write is never
   undone by a recalc problem. Anything else — a bug in scoring, a bad
   work_id, whatever — is a genuine defect, not an expected operational
   failure, so it propagates instead of being silently absorbed. The router
@@ -50,6 +51,7 @@ import structlog
 from psycopg import AsyncConnection
 
 from backend.domain.enums import MatchTier, TargetType
+from backend.domain.system import StorageUnavailableError
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -152,7 +154,8 @@ def recalculate_for_work_sync(
     """Re-run song-master selection for a single work_id, post-commit.
 
     Best-effort, but only for the failure mode this actually expects: a
-    ``psycopg.Error`` is caught and logged here so the already-committed
+    ``psycopg.Error``, or the ``StorageUnavailableError`` a repository raises
+    for a lost connection, is caught and logged here so the already-committed
     manual match is not undone by a transient DB problem. Anything else
     propagates — see the module docstring. ``repos_factory`` opens its own
     connection (the async endpoint connection has already been committed
@@ -168,7 +171,7 @@ def recalculate_for_work_sync(
                 library_file_repo=repos.library_files,
             )
             repos.commit()
-    except psycopg.Error:
+    except (psycopg.Error, StorageUnavailableError):
         # Swallow-and-log: the durable write already committed in the
         # endpoint's async txn, and a DB hiccup here (dropped connection,
         # constraint violation, etc.) is exactly the transient/operational
@@ -176,7 +179,7 @@ def recalculate_for_work_sync(
         # idempotent and will be retried whenever matching is re-run for
         # this work, so it is safe (and intentional) to absorb it here
         # rather than re-raise into the worker thread. Anything that is
-        # NOT a psycopg.Error is a genuine defect (bad scoring logic, a bad
+        # NOT a database error is a genuine defect (bad scoring logic, a bad
         # work_id, ...) and is deliberately left to propagate to the
         # router's outer catch instead of being masked here.
         logger.warning(

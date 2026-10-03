@@ -5,7 +5,12 @@ from uuid import UUID
 
 import psycopg
 
-from backend.domain.broadcast import BroadcastStation, DuplicateCallLettersError
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.broadcast import (
+    BroadcastStation,
+    BroadcastStorageError,
+    DuplicateCallLettersError,
+)
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 
 #: Unique constraints a call-letters collision can violate: the original case-sensitive
@@ -17,6 +22,7 @@ _CALL_LETTERS_CONSTRAINTS = frozenset(
 )
 
 
+@translate_lost_connection(BroadcastStorageError)
 class PgBroadcastStationRepository(BroadcastStationRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
