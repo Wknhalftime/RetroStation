@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.system import StorageUnavailableError
 from backend.services.identity_resolution_service import (
     LibraryFileNotFoundError,
     persist_manual_match,
@@ -1440,6 +1441,13 @@ async def search_mb_artists(
     dispatched to a thread pool via asyncio.to_thread so it does not block the
     event loop.  The dependency itself opens/closes the connection around the
     request lifetime.
+
+    A lost database connection (the cache's ``StorageUnavailableError``) answers 503.
     """
-    items = await asyncio.to_thread(mb_client.search_artist, query)
+    try:
+        items = await asyncio.to_thread(mb_client.search_artist, query)
+    except StorageUnavailableError as lost:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="unavailable"
+        ) from lost
     return {"items": items}

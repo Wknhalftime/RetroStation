@@ -4,6 +4,7 @@ from typing import Any
 
 import psycopg
 
+from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.system import UserSetting
 from backend.repositories.user_settings import UserSettingRepository
 
@@ -19,6 +20,7 @@ class PgUserSettingRepository(UserSettingRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
+    @translate_lost_connection
     def get(self, key: str) -> UserSetting | None:
         """Return the :class:`UserSetting` for *key*, or ``None`` if not found.
 
@@ -40,6 +42,7 @@ class PgUserSettingRepository(UserSettingRepository):
             updated_at=row["updated_at"],
         )
 
+    @translate_lost_connection
     def upsert(self, setting: UserSetting) -> UserSetting:
         """Insert or update *setting*, returning the persisted entity.
 
@@ -70,6 +73,7 @@ class PgUserSettingRepository(UserSettingRepository):
             updated_at=row["updated_at"],
         )
 
+    @translate_lost_connection
     def list_all(self) -> list[UserSetting]:
         """Return all settings as a list of :class:`UserSetting`, ordered by key.
 

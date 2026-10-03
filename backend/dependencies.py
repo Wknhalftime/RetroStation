@@ -59,6 +59,10 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
     successful request handling the connection is committed; on exception
     the connection is rolled back so partial cache writes from a failed
     `/mb-artists` request never persist.
+
+    A connection already lost is not rolled back, as in ``get_sync_repos``: the rollback
+    would raise and replace the route's own answer (a 503 for ``StorageUnavailableError``)
+    with a 500, and a dead connection has nothing left to roll back.
     """
     from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
     from backend.db.sync_conn import connect_sync
@@ -74,7 +78,8 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
         try:
             yield client
         except BaseException:
-            conn.rollback()
+            if not conn.closed:
+                conn.rollback()
             raise
         else:
             conn.commit()
@@ -87,6 +92,10 @@ def get_sync_repos() -> Generator[RepositoryFactory]:
     HTTPException mapped from a domain error included). Depend on it through
     ``SyncRepos``: its "function" scope ends the transaction before the response
     is sent, and one shared scope keeps it to one connection per request.
+
+    A connection already lost (e.g. its commit failed because the server went away) is not
+    rolled back (I1): that rollback would raise and replace the route's own answer, such as
+    a 503 for the failed commit, with a 500. psycopg's ``__exit__`` then skips it too.
     """
     from backend.db.sync_conn import connect_sync
 
@@ -94,7 +103,8 @@ def get_sync_repos() -> Generator[RepositoryFactory]:
         try:
             yield RepositoryFactory(conn)
         except BaseException:
-            conn.rollback()
+            if not conn.closed:
+                conn.rollback()
             raise
         else:
             conn.commit()

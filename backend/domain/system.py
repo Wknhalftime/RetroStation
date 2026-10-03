@@ -11,6 +11,17 @@ from uuid import UUID, uuid4
 from backend.domain.enums import LogCategory, LogLevel, TaskStatus, TaskType
 
 
+class SystemDomainError(Exception):
+    """Base class for system-subdomain failures (settings, caches, logs, task progress).
+
+    Not ``SystemError``: that name is a Python builtin.
+    """
+
+
+class StorageUnavailableError(SystemDomainError):
+    """The database connection was lost mid-operation; a later attempt may succeed."""
+
+
 @dataclass(frozen=True)
 class MusicBrainzCache:
     id: UUID
