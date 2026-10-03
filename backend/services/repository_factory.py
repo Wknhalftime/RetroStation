@@ -111,6 +111,7 @@ class RepositoryFactory:
     """
 
     def __init__(self, conn: psycopg.Connection[DictRow]) -> None:
+        self._conn = conn
         self.broadcast = BroadcastRepos(
             stations=PgBroadcastStationRepository(conn),
             playlists=PgBroadcastPlaylistRepository(conn),
@@ -170,6 +171,11 @@ class RepositoryFactory:
         self.musicbrainz_cache = self.system.musicbrainz_cache
         self.user_settings = self.system.user_settings
         self.system_logs = self.system.system_logs
+
+    def commit(self) -> None:
+        """Commit the request's connection now, ahead of an action that cannot be undone
+        (e.g. the sign-off's old clip file is deleted only after this commit lands, PG3/I1)."""
+        self._conn.commit()
 
     def m3u_repos(self) -> M3uRepos:
         """The repositories both M3U exports read."""

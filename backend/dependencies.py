@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator, Generator
 from ipaddress import IPv4Address
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -7,11 +8,15 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
+from backend.domain.streaming import ProbedClip
+from backend.repositories.user_settings import UserSettingRepository
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 from backend.services.streaming.service import StreamService
+from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
+from backend.services.streaming.stream_settings import StreamingState, streaming_state
 
 _LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
 
@@ -117,3 +122,36 @@ def get_station_year_repos(repos: SyncRepos) -> StationYearRepos:
     No dependency on ``stream_service``: the list works while streaming is off.
     """
     return repos.station_year_repos()
+
+
+def get_user_settings(repos: SyncRepos) -> UserSettingRepository:
+    """The user-settings repository, on the request's connection."""
+    return repos.user_settings
+
+
+def get_streaming_state(request: Request) -> StreamingState:
+    """Streaming's state (D34, PG1): ``STREAM_ENABLED`` and whether the app's stream service
+    started (``app.state.stream_service``, set at startup)."""
+    running = getattr(request.app.state, "stream_service", None) is not None
+    return streaming_state(enabled=get_settings().stream_enabled, running=running)
+
+
+def _sign_off_probe_not_yet_wired(path: Path) -> ProbedClip:
+    """Placeholder until PR G1's Task 3 adds ``backend.services.audio_tags.probe_clip``.
+
+    Unreachable today: no route calls ``SignOffPorts.probe`` before Task 3 adds the upload
+    route that does.
+    """
+    raise NotImplementedError(f"sign-off clip probing is not implemented yet: {path}")
+
+
+def get_sign_off_ports(repos: SyncRepos) -> SignOffPorts:
+    """The sign-off's ports (D26): the folder the shared sign-off store reads and writes,
+    and the request's own settings repository and commit (PR G1's Task 3 wires probing and
+    translates a failed commit into ``ClipStorageError``)."""
+    return SignOffPorts(
+        settings=repos.user_settings,
+        folder=sign_off_folder(get_settings().stream_work_dir),
+        probe=_sign_off_probe_not_yet_wired,
+        commit=repos.commit,
+    )
