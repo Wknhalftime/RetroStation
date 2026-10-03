@@ -2,7 +2,7 @@
   "session": "A",
   "phase": "gate-A",
   "branch": "audit/event-graph",
-  "base": "master c79dce2",
+  "base": "master 9cff8e9 (merged into audit/event-graph as a6a4e27 on 2026-10-03; was c79dce2)",
   "steps_done": [
     "P0.1 branch audit/event-graph created from master c79dce2; audit/eda/ and state.json created",
     "P0.2 rulings in force filtered -> audit/eda/rulings-in-scope.txt",
@@ -16,11 +16,12 @@
     "P1 review.2 prep: neutral ids K01-K68 -> audit/eda/case-key.json; anchors list in scratchpad",
     "P1 review.2 independent derivation -> audit/eda/spec-expectations-independent.jsonl (68 rows, 43 ambiguity flags)",
     "P1 review.3 diff -> audit/eda/spec-diff.md: 8 disagreements D1-D8, not resolved",
-    "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)"
+    "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)",
+    "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py"
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A: Lance still to rule --publish-fn/--subscribe-fn (proposed none), --guard-fn (added option), D1-D8 in spec-diff.md, then lock the spec with the relock hook"
+    "GATE A: Lance still to rule --publish-fn/--subscribe-fn (proposed none), --guard-fn (added option), D1-D8 in spec-diff.md, the two-instance question, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -122,7 +123,40 @@
       ]
     },
     "websocket": "backend/websocket.py:30 websocket_endpoint polls progress_tracking every 0.5 s (POLL_INTERVAL_SECONDS) and pushes JSON; no message feeds it",
-    "note": "inv-*.txt scratch listings removed; every count and location is in this file with its command"
+    "note": "inv-*.txt scratch listings removed; every count and location is in this file with its command",
+    "refresh_2026_10_03": {
+      "command": "git diff --stat c79dce2 9cff8e9 -- backend/tasks backend/websocket.py; rg -n '@\\w+\\.(task|periodic_task|signal)' backend/tasks/stream_cue_tasks.py; rg -n -w <each new task> backend scripts --glob '*.py'",
+      "phase0_search_gap": "Phase 0 searched '@huey\\.' only; the new instance is named cue_huey, so the original pattern misses its tasks. Session B's recall check must use the totals below.",
+      "huey_instances": {
+        "count": 2,
+        "huey": "backend/tasks/huey_app.py:10 SqliteHuey(..., results=False), imports 10 task modules",
+        "cue_huey": "backend/tasks/cue_huey_app.py:17 SqliteHuey(..., results=False), imports backend.tasks.stream_cue_tasks (line 63); 2 on_startup hooks (lines 24, 34)"
+      },
+      "new_tasks": {
+        "stream_cue_analysis_task": "backend/tasks/stream_cue_tasks.py:208 (task)",
+        "stream_cue_request_task": "backend/tasks/stream_cue_tasks.py:231 (task, priority/expires kwargs)",
+        "stream_cue_analysis_resume": "backend/tasks/stream_cue_tasks.py:256 (periodic */5)",
+        "stream_cue_prune_task": "backend/tasks/stream_cue_tasks.py:262 (periodic minute=0 hour=4)"
+      },
+      "totals_now": {
+        "huey_task": 12,
+        "huey_periodic_task": 4,
+        "huey_signal": 0,
+        "on_startup": 3,
+        "tasks": 16,
+        "enqueue_or_log_callsites": 5
+      },
+      "new_callsites": [
+        "backend/tasks/stream_cue_tasks.py:250 request_cue_analysis -> stream_cue_request_task (direct enqueue, plain function in a task module)",
+        "backend/tasks/stream_cue_tasks.py:258 stream_cue_analysis_resume -> stream_cue_analysis_task.call_local() (INLINE)",
+        "backend/main.py:202 CueReporter(request_cue_analysis): the plain wrapper is injected into the stream service; request_cue_analysis is not a task, so it is not unresolved_dispatch"
+      ],
+      "tasks_with_no_producer_and_no_schedule": [
+        "normalize_backfill_task",
+        "stream_cue_analysis_task (only stream_cue_analysis_resume runs it, via call_local; INLINE counts as a producer under contract.md EV06, so no hit expected)"
+      ],
+      "websocket_change": "backend/websocket.py: the stale-row UPDATE moved to a module constant STALE_SQL outside the poll loop; contract.md takes the POLL table name from string literals inside the loop"
+    }
   },
   "prediction": {
     "written_before_tool_exists": true,
@@ -190,7 +224,8 @@
   "open_questions": [
     "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Not yet in audit/rulings.jsonl (outside this job's allowed files): Lance to record it as an AUD-R012 amendment or a new ruling.",
     "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
-    "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text."
+    "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text.",
+    "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock."
   ],
   "rules_added_dropped": "none added, none dropped, none marked not implemented"
 }
