@@ -51,8 +51,9 @@ class UserSetting:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-class SettingsError(Exception):
-    """Base class for user-settings failures (D27; PR G1)."""
+class SettingsError(SystemDomainError):
+    """Base class for user-settings refusals (D27; PR G1). Not a ``StorageUnavailableError``:
+    a refused value answers 422, a lost connection 503."""
 
 
 class InvalidSettingError(SettingsError):

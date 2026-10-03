@@ -24,7 +24,7 @@ from backend.domain.streaming import (
     UnreadableClipError,
     UnsupportedClipError,
 )
-from backend.domain.system import SettingsError
+from backend.domain.system import SettingsError, StorageUnavailableError
 from backend.repositories.user_settings import UserSettingRepository
 from backend.routers.clip_upload import (
     TOO_LARGE,
@@ -112,8 +112,12 @@ def _clip_invalid(refused: Exception) -> HTTPException:
 def get_streaming_settings(
     settings: Settings, state: State, ports: Ports, _token: Token
 ) -> StreamSettingsOut:
-    """The streaming settings page's five keys (D10, D27, D34; H2)."""
-    read = read_stream_settings(settings, state, ports.folder)
+    """The streaming settings page's five keys (D10, D27, D34; H2). A lost database connection
+    answers 503."""
+    try:
+        read = read_stream_settings(settings, state, ports.folder)
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return StreamSettingsOut(
         streaming=read.streaming,
         max_sessions=read.max_sessions,
@@ -133,6 +137,8 @@ def put_max_sessions(body: MaxSessionsIn, settings: Settings, _token: Token) -> 
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=[{"loc": ["body", "value"], "msg": str(refused), "type": "value_error"}],
         ) from refused
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return MaxSessionsOut(max_sessions=stored)
 
 
@@ -159,6 +165,8 @@ async def post_sign_off(
         raise _clip_invalid(refused) from refused
     except ClipStorageError as failed:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(failed)) from failed
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return _sign_off_out(stored)
 
 
@@ -169,4 +177,6 @@ def delete_sign_off(_token: Token, ports: Ports) -> Response:
         remove_sign_off(ports)
     except ClipStorageError as failed:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(failed)) from failed
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return Response(status_code=status.HTTP_204_NO_CONTENT)

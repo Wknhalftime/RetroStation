@@ -4,12 +4,15 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import psycopg
+import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
 from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
+from backend.db.sync_conn import commit_or_unavailable
 from backend.domain.streaming import ClipStorageError
+from backend.domain.system import StorageUnavailableError
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
@@ -19,6 +22,8 @@ from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
 from backend.services.streaming.stream_settings import StreamingState, streaming_state
+
+logger = structlog.get_logger()
 
 _LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
 
@@ -89,7 +94,16 @@ def get_mb_client() -> Generator[MusicBrainzClientProtocol]:
                 conn.rollback()
             raise
         else:
-            conn.commit()
+            _commit_mb_cache(conn)
+
+
+def _commit_mb_cache(conn: psycopg.Connection[Any]) -> None:
+    """Keep the search's cache rows. A connection lost by now loses only those rows: the
+    search's answer is already right, so it is logged and the answer stands."""
+    try:
+        commit_or_unavailable(conn)
+    except StorageUnavailableError as lost:
+        logger.warning("mb_cache_commit_lost", error=str(lost))
 
 
 def get_sync_repos() -> Generator[RepositoryFactory]:
@@ -103,6 +117,10 @@ def get_sync_repos() -> Generator[RepositoryFactory]:
     A connection already lost (e.g. its commit failed because the server went away) is not
     rolled back (I1): that rollback would raise and replace the route's own answer, such as
     a 503 for the failed commit, with a 500. psycopg's ``__exit__`` then skips it too.
+
+    A commit that meets a lost connection stored nothing, so it answers ``503 unavailable``
+    rather than the route's success or a 500 (the "function" scope runs it before the
+    response is sent).
     """
     from backend.db.sync_conn import connect_sync
 
@@ -114,7 +132,10 @@ def get_sync_repos() -> Generator[RepositoryFactory]:
                 conn.rollback()
             raise
         else:
-            conn.commit()
+            try:
+                commit_or_unavailable(conn)
+            except StorageUnavailableError as lost:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
 
 
 # "function": commit before the response goes out, so a client never sees a success
