@@ -25,6 +25,13 @@ logger = structlog.get_logger()
 POLL_INTERVAL_SECONDS = 0.5
 STALE_THRESHOLD_MINUTES = 10
 TERMINAL_GRACE_SECONDS = 5
+STALE_SQL = """UPDATE progress_tracking
+                       SET status = 'failed', completed_at = now()
+                       WHERE status = 'running'
+                         AND updated_at < now() - (interval '1 minute' * %s)"""
+"""The ``/ws`` feed's reaper: marks a ``running`` row ``failed`` when it was not updated for
+the given minutes (``STALE_THRESHOLD_MINUTES``). The cost meter's row stays fresh by being
+rewritten every 2 s with a UTC-aware time (design note 11; D90, I5)."""
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -54,13 +61,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             async with pool.connection() as conn:
                 # Mark stale tasks as failed
-                await conn.execute(
-                    """UPDATE progress_tracking
-                       SET status = 'failed', completed_at = now()
-                       WHERE status = 'running'
-                         AND updated_at < now() - (interval '1 minute' * %s)""",
-                    (STALE_THRESHOLD_MINUTES,),
-                )
+                await conn.execute(STALE_SQL, (STALE_THRESHOLD_MINUTES,))
                 await conn.commit()
 
                 # Fetch running tasks plus recently-terminal rows so the

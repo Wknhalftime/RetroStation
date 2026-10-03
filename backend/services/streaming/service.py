@@ -495,6 +495,16 @@ class StreamService:
         """Listener channels with a stream or a subscription."""
         return self._feed.channels
 
+    def engine_pids(self) -> list[int]:
+        """The pid of every open stream's running engine (D6), for the cost meter (D90): a
+        session still starting its engine, or whose engine was stopped, has none. Call it on
+        the event loop, which owns the sessions."""
+        return [
+            session.engine.pid
+            for session in self._sessions.values()
+            if session.engine is not None and not session.stopped
+        ]
+
     def now_playing(self, session_id: str) -> str:
         """``artist - title`` once its delay has passed; ``""`` before that, or if unknown."""
         session = self._sessions.get(session_id)

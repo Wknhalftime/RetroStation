@@ -20,24 +20,34 @@ upsert statement, so the ``/ws`` feed and the bottom bar show them like any task
 connection of its own per read: autocommit, read-only, and bounded by the D88 numbers (5 s to
 connect, 2 s on a lock, 10 s in all). Never the writer's connection and never the run's
 transaction. A count that fails or times out gives None, logged once.
+
+``progress_repository``: the progress rows on a connection of the caller's (the meter's
+telemetry connection, to end a row a crash left RUNNING, PG13), with a lost database
+translated to ``StorageUnavailableError``.
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg
 import structlog
 
 from backend.db.repositories.stream_cue_coverage import PgCueCoverageRepository
-from backend.db.repositories.task_progress import UPSERT_SQL, upsert_params
+from backend.db.repositories.task_progress import (
+    UPSERT_SQL,
+    PgTaskProgressRepository,
+    upsert_params,
+)
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import TaskStatus
 from backend.domain.streaming import CueCoverage, StreamReadError
-from backend.domain.system import TaskProgress
+from backend.domain.system import StorageUnavailableError, TaskProgress
 from backend.repositories.stream_cue_coverage import CoverageRead
+from backend.repositories.task_progress import TaskProgressRepository
 
 logger = structlog.get_logger()
 
@@ -49,6 +59,7 @@ __all__ = [
     "ProgressWriter",
     "bounded_coverage_read",
     "coverage_options",
+    "progress_repository",
     "writer_options",
 ]
 
@@ -184,3 +195,15 @@ def bounded_coverage_read(
 ) -> CoverageRead:
     """The cue coverage read for ``url`` on its own bounded connection per call (I7)."""
     return BoundedCoverageRead(url, connect)
+
+
+@contextmanager
+def progress_repository(connect: Connect) -> Iterator[TaskProgressRepository]:
+    """The progress rows on a connection ``connect`` opens, closed after use. A database that
+    cannot be reached, or a connection lost on the way, is ``StorageUnavailableError``, so the
+    caller never handles a psycopg exception."""
+    try:
+        with connect() as conn:
+            yield PgTaskProgressRepository(conn)
+    except _LOST as error:
+        raise StorageUnavailableError(f"the progress rows could not be reached: {error}") from error
