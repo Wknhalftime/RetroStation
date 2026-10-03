@@ -9,3 +9,4 @@ export * from "./matcher";
 export * from "./tasks";
 export * from "./settings";
 export * from "./system_logs";
+export * from "./streaming";
