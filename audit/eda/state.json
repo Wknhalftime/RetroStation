@@ -1,6 +1,6 @@
 {
   "session": "A",
-  "phase": "gate-A",
+  "phase": "gate-A-closed",
   "branch": "audit/event-graph",
   "base": "master 9cff8e9 (merged into audit/event-graph as a6a4e27 on 2026-10-03; was c79dce2)",
   "steps_done": [
@@ -20,12 +20,12 @@
     "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py",
     "D1-D8 best-practice review -> audit/eda/d1-d8-review.md: D1,D3,D4,D6,D8 best practice; D5,D7 acceptable; D2 concern (framework signals counted as EVENT); 3 whole-spec observations; nothing applied",
     "Gate A changes (Lance 2026-10-03: approved review D1/D4/D7 tweaks and the --check change; two-instance reading delegated): header.excluded_dirs; subscribe_handler unresolved row (evg_bus.py:28); schedule = ast.get_source_segment; --check also gates unresolved_dispatch identity (reason, producer, name); tasks carry instance, registered is per instance; new duo/ root (5 files). Not adopted: parse-failure handling, vanished-hit report. D2 framework tag deferred with the signals question.",
-    "red run after Gate A changes: 56 tests, 10 failed + 46 errors, all because scripts/audit/event_graph.py is missing; expectations 73 rows; independent check of the 5 new cases agreed (N1-N5)"
+    "red run after Gate A changes: 56 tests, 10 failed + 46 errors, all because scripts/audit/event_graph.py is missing; expectations 73 rows; independent check of the 5 new cases agreed (N1-N5)",
+    "Gate A closed 2026-10-03: Lance locked 23 spec files (tests/scripts/test_event_graph.py + 22 files under tests/scripts/fixtures/event_graph/) in manifest group 'audit/event-graph'",
+    "lock check: manifest has the group (46 'event_graph' entries = 23 hashes + 23 group rows); frozen_tests_check on this worktree flags none of the 23"
   ],
-  "next_step": "Session B after the lock: build scripts/audit/event_graph.py against the locked spec",
-  "open_stops": [
-    "GATE A: spec ready; Lance to lock the spec with the relock hook"
-  ],
+  "next_step": "Session B: in this worktree, read state.json, then build scripts/audit/event_graph.py against the locked spec (56 tests); real-code run uses --ev01-scope with all 16 task names (AUD-R014), no publish/subscribe fns, default --guard-fn; recall check against inventory.refresh_2026_10_03 totals",
+  "open_stops": [],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
     "count": 13,
@@ -219,7 +219,8 @@
         "mb_enrichment_task",
         "normalize_backfill_task"
       ],
-      "evidence": "Lance 2026-10-03: the EV01 ruling covers every task-to-task hand-off, so every task (state.json inventory.tasks, 12) is in scope; supersedes the four-task proposal from AUD-R012 (1)"
+      "evidence": "Lance 2026-10-03: the EV01 ruling covers every task-to-task hand-off, so every task (state.json inventory.tasks, 12) is in scope; supersedes the four-task proposal from AUD-R012 (1)",
+      "note_after_sync": "AUD-R014 covers every task: the 4 cue tasks added by the master sync join the 12 listed, 16 in all"
     },
     "--guard-fn": {
       "value": "backend.tasks._enqueue_chain:enqueue_or_log (default)",
@@ -235,5 +236,20 @@
     "OPEN, deferred to Session C (Lance 2026-10-03): Huey signals (SIGNAL_ENQUEUED/EXECUTING/COMPLETE/ERROR/EXPIRED/REVOKED...) are not used anywhere in backend; task lifecycle is reported by per-task envelopes (task_run, task_failure_telemetry, own try/except; AUD-R011 keeps them distinct). No recorded decision against signals was found (rg over the repo, git log --grep=signal). Discrepancy noted: design-pattern-signals.md asks for an Observer for cross-cutting logging, and signals are a ready-made lifecycle Observer. Whether framework signals should count as EVENT (D2 review concern) stays open with this question; D2 stays as written, and today there are zero signal edges, so the spec is unaffected."
   ],
   "rules_added_dropped": "none added, none dropped, none marked not implemented",
-  "spec_diff_ruling": "ACCEPTED by Lance 2026-10-03: D1-D8 as written in the spec (mine column of audit/eda/spec-diff.md); best-practice review by subagent requested"
+  "spec_diff_ruling": "ACCEPTED by Lance 2026-10-03: D1-D8 as written in the spec (mine column of audit/eda/spec-diff.md); best-practice review by subagent requested",
+  "spec_lock": {
+    "group": "audit/event-graph",
+    "files": 23,
+    "manifest": ".claude/frozen-tests.json in THIS worktree (laughing-euclid-c2f46a); .claude/ is gitignored (.gitignore:5), so the lock is not in git. Session B must run in this worktree, or the lock must be carried over by Lance.",
+    "pre_existing_drift": {
+      "files": [
+        "tests/integration/test_stream_cues.py",
+        "tests/integration/test_stream_cues_schema.py",
+        "tests/routers/test_listen.py",
+        "tests/services/streaming/test_stream_service.py"
+      ],
+      "check_output": "CHANGED (frozen_tests_check on this worktree)",
+      "cause": "changed on master by #120 f70f0fb, #122 7f68c06, #125 e5eefb6 (git log c79dce2..master -- <files>); no commit on this branch touches them (git log master..HEAD -- <files> empty); identical to master (git diff --stat master HEAD -- <files> empty). Stale hashes from the master sync, not this job. Lance to relock under their existing groups when convenient."
+    }
+  }
 }
