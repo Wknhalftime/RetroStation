@@ -1,15 +1,17 @@
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Annotated, Any
 
+import psycopg
 from fastapi import Depends, Header, HTTPException, Request, status
 from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
-from backend.domain.streaming import ProbedClip
+from backend.domain.streaming import ClipStorageError
 from backend.repositories.user_settings import UserSettingRepository
+from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
@@ -136,22 +138,33 @@ def get_streaming_state(request: Request) -> StreamingState:
     return streaming_state(enabled=get_settings().stream_enabled, running=running)
 
 
-def _sign_off_probe_not_yet_wired(path: Path) -> ProbedClip:
-    """Placeholder until PR G1's Task 3 adds ``backend.services.audio_tags.probe_clip``.
-
-    Unreachable today: no route calls ``SignOffPorts.probe`` before Task 3 adds the upload
-    route that does.
-    """
-    raise NotImplementedError(f"sign-off clip probing is not implemented yet: {path}")
+def get_sign_off_folder() -> Path:
+    """The one sign-off folder (design note 6, M13): the upload writes it and the stream
+    service reads it, both from ``STREAM_WORK_DIR``."""
+    return sign_off_folder(get_settings().stream_work_dir)
 
 
-def get_sign_off_ports(repos: SyncRepos) -> SignOffPorts:
-    """The sign-off's ports (D26): the folder the shared sign-off store reads and writes,
-    and the request's own settings repository and commit (PR G1's Task 3 wires probing and
-    translates a failed commit into ``ClipStorageError``)."""
+def _sign_off_commit(repos: RepositoryFactory) -> Callable[[], None]:
+    """The request's commit, with a lost database connection translated into the domain's
+    ``ClipStorageError`` at this adapter boundary (I3; 503 at the route)."""
+
+    def commit() -> None:
+        try:
+            repos.commit()
+        except psycopg.OperationalError as lost:
+            raise ClipStorageError(f"the sign-off setting could not be saved: {lost}") from lost
+
+    return commit
+
+
+def get_sign_off_ports(
+    repos: SyncRepos, folder: Annotated[Path, Depends(get_sign_off_folder)]
+) -> SignOffPorts:
+    """The sign-off's ports (D26): the request's settings repository and commit, the shared
+    sign-off folder and the real content probe (I2)."""
     return SignOffPorts(
         settings=repos.user_settings,
-        folder=sign_off_folder(get_settings().stream_work_dir),
-        probe=_sign_off_probe_not_yet_wired,
-        commit=repos.commit,
+        folder=folder,
+        probe=probe_clip,
+        commit=_sign_off_commit(repos),
     )

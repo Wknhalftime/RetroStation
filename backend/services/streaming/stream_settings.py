@@ -18,7 +18,7 @@ from backend.repositories.user_settings import UserSettingRepository
 from backend.services.setting_rules import save_setting
 from backend.services.streaming.errors import InvalidStreamSettingError
 from backend.services.streaming.max_sessions import MAX_SESSIONS_KEY, parse_max_sessions
-from backend.services.streaming.sign_off import SIGN_OFF_KEY
+from backend.services.streaming.sign_off import SIGN_OFF_KEY, stored_sign_off
 
 
 class StreamingState(StrEnum):
@@ -60,13 +60,12 @@ def _read_max_sessions(settings: UserSettingRepository) -> tuple[int | None, str
 def _read_sign_off(
     settings: UserSettingRepository, folder: Path
 ) -> tuple[SignOff | None, str | None]:
-    stored = settings.get(SIGN_OFF_KEY)
-    if stored is None:
-        return None, None
     try:
-        sign_off = SignOff.from_setting(stored.value)
+        sign_off = stored_sign_off(settings)
     except InvalidStreamValueError as bad_value:
         return None, f"{SIGN_OFF_KEY}: {bad_value}"
+    if sign_off is None:
+        return None, None
     if not (folder / sign_off.file_name).exists():
         return sign_off, f"{SIGN_OFF_KEY}: clip file {sign_off.file_name} is missing"
     return sign_off, None

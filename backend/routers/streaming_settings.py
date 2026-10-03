@@ -1,12 +1,13 @@
-"""Streaming settings over HTTP (D10, D27, D34, D42; H1, H2): under ``/api/v1/streaming``,
-``X-Airwave-Token`` required. ``POST``/``DELETE /sign-off`` land in PR G1's Task 3.
+"""Streaming settings over HTTP (D10, D26, D27, D34, D42; H1, H2): under
+``/api/v1/streaming``, ``X-Airwave-Token`` required.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from backend.dependencies import (
@@ -15,10 +16,18 @@ from backend.dependencies import (
     get_streaming_state,
     get_user_settings,
 )
-from backend.domain.streaming import SignOff
+from backend.domain.streaming import (
+    ClipLengthError,
+    ClipStorageError,
+    ClipTooLargeError,
+    SignOff,
+    UnreadableClipError,
+    UnsupportedClipError,
+)
 from backend.domain.system import SettingsError
 from backend.repositories.user_settings import UserSettingRepository
-from backend.services.streaming.sign_off import SignOffPorts
+from backend.routers.clip_upload import TOO_LARGE, declared_too_large, read_clip_upload
+from backend.services.streaming.sign_off import SignOffPorts, remove_sign_off, save_sign_off
 from backend.services.streaming.stream_settings import (
     StreamingState,
     read_stream_settings,
@@ -68,10 +77,15 @@ class MaxSessionsOut(BaseModel):
     max_sessions: int
 
 
-def _sign_off_out(sign_off: SignOff | None) -> SignOffOut | None:
-    if sign_off is None:
-        return None
+def _sign_off_out(sign_off: SignOff) -> SignOffOut:
     return SignOffOut(name=sign_off.name, seconds=sign_off.span_ms / 1000, format=sign_off.format)
+
+
+def _clip_invalid(refused: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=[{"loc": ["body", "file"], "msg": str(refused), "type": "value_error"}],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +103,7 @@ def get_streaming_settings(
         streaming=read.streaming,
         max_sessions=read.max_sessions,
         max_sessions_problem=read.max_sessions_problem,
-        sign_off=_sign_off_out(read.sign_off),
+        sign_off=None if read.sign_off is None else _sign_off_out(read.sign_off),
         sign_off_problem=read.sign_off_problem,
     )
 
@@ -105,3 +119,35 @@ def put_max_sessions(body: MaxSessionsIn, settings: Settings, _token: Token) -> 
             detail=[{"loc": ["body", "value"], "msg": str(refused), "type": "value_error"}],
         ) from refused
     return MaxSessionsOut(max_sessions=stored)
+
+
+@router.post("/sign-off", response_model=SignOffOut)
+async def post_sign_off(request: Request, ports: Ports, _token: Token) -> SignOffOut:
+    """Store the uploaded clip as the sign-off (D26; PG3, I2, I3, M3).
+
+    The body is read bounded (``read_clip_upload``); the clip is stored in the thread pool.
+    """
+    if declared_too_large(request):
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, TOO_LARGE)
+    try:
+        upload = await read_clip_upload(request)
+        stored = await run_in_threadpool(save_sign_off, ports, upload)
+    except ClipTooLargeError as refused:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(refused)) from refused
+    except UnsupportedClipError as refused:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(refused)) from refused
+    except (UnreadableClipError, ClipLengthError) as refused:
+        raise _clip_invalid(refused) from refused
+    except ClipStorageError as failed:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(failed)) from failed
+    return _sign_off_out(stored)
+
+
+@router.delete("/sign-off", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sign_off(ports: Ports, _token: Token) -> Response:
+    """Clear the sign-off clip (D26): the setting, then its file."""
+    try:
+        remove_sign_off(ports)
+    except ClipStorageError as failed:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(failed)) from failed
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
