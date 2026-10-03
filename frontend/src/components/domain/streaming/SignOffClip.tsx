@@ -24,13 +24,14 @@ function formatSeconds(seconds: number): string {
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
-function describeUploadError(error: unknown): string {
+/** The server's reason for refusing a change to the clip, else ``fallback``. */
+function describeRefusal(error: unknown, fallback: string): string {
   if (error instanceof ValidationError) {
     const messages = error.detail.map((entry) => entry.msg).filter((msg) => msg.length > 0);
     return messages.length > 0 ? messages.join("; ") : "Validation error";
   }
   if (error instanceof ApiError) return error.message;
-  return "The clip could not be uploaded.";
+  return fallback;
 }
 
 function describeLoadError(error: unknown): string {
@@ -72,13 +73,17 @@ export function SignOffClip() {
 
     setRefusal(null);
     upload.mutate(file, {
-      onError: (uploadError) => setRefusal(describeUploadError(uploadError)),
+      onError: (uploadError) =>
+        setRefusal(describeRefusal(uploadError, "The clip could not be uploaded.")),
     });
   }
 
   function handleRemove() {
     setRefusal(null);
-    remove.mutate();
+    remove.mutate(undefined, {
+      onError: (removeError) =>
+        setRefusal(describeRefusal(removeError, "The clip could not be removed.")),
+    });
   }
 
   return (
@@ -123,6 +128,12 @@ export function SignOffClip() {
           className="mt-1 block text-sm text-gray-600"
         />
       </label>
+
+      {upload.isPending && (
+        <p role="status" className="mt-2 text-sm text-gray-500">
+          Uploading…
+        </p>
+      )}
 
       {refusal && (
         <p role="alert" className="mt-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
