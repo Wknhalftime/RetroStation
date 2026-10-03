@@ -58,13 +58,22 @@ class ReadBounds:
 
 
 @contextmanager
-def bounded_connection(dsn: str, bounds: ReadBounds) -> Iterator[psycopg.Connection[DictRow]]:
+def bounded_connection(
+    dsn: str, bounds: ReadBounds, *, autocommit: bool = False
+) -> Iterator[psycopg.Connection[DictRow]]:
     """A connection whose reads end within ``bounds``. The database being unreachable, a lock
     wait or a statement past its bound, or the connection failing mid-read, is re-raised as
-    ``StreamReadError`` and logged; any other error, such as a broken query, passes through."""
+    ``StreamReadError`` and logged; any other error, such as a broken query, passes through.
+
+    ``autocommit`` (PG7): a plain read never needs the extra COMMIT round trip on exit, and
+    staying out of a transaction means nothing here can be left idle-in-transaction.
+    """
     try:
         with connect_sync(
-            dsn, connect_timeout=bounds.connect_timeout_s, options=bounds.options
+            dsn,
+            connect_timeout=bounds.connect_timeout_s,
+            options=bounds.options,
+            autocommit=autocommit,
         ) as conn:
             yield conn
     except psycopg.OperationalError as error:

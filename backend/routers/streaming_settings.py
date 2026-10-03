@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from backend.dependencies import (
+    get_cue_coverage,
     get_current_token,
     get_sign_off_ports,
     get_streaming_state,
@@ -25,6 +26,7 @@ from backend.domain.streaming import (
     UnsupportedClipError,
 )
 from backend.domain.system import SettingsError
+from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.routers.clip_upload import (
     TOO_LARGE,
@@ -45,6 +47,7 @@ Token = Annotated[str, Depends(get_current_token)]
 Settings = Annotated[UserSettingRepository, Depends(get_user_settings)]
 State = Annotated[StreamingState, Depends(get_streaming_state)]
 Ports = Annotated[SignOffPorts, Depends(get_sign_off_ports)]
+Coverage = Annotated[CueCoverageRepository, Depends(get_cue_coverage)]
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +83,15 @@ class MaxSessionsOut(BaseModel):
     """Response body for PUT /max-sessions."""
 
     max_sessions: int
+
+
+class CueCoverageOut(BaseModel):
+    """Response body for GET /cue-coverage: exactly the four counts (D77, D89; PG7)."""
+
+    analysable: int
+    ready: int
+    failed: int
+    unhashed: int
 
 
 def _sign_off_out(sign_off: SignOff) -> SignOffOut:
@@ -160,6 +172,18 @@ async def post_sign_off(
     except ClipStorageError as failed:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(failed)) from failed
     return _sign_off_out(stored)
+
+
+@router.get("/cue-coverage", response_model=CueCoverageOut)
+def get_cue_coverage_route(coverage: Coverage, _token: Token) -> CueCoverageOut:
+    """Cues ready X of Y (D77, D89; PG7): works whether streaming is on or off (D51)."""
+    counts = coverage.coverage()
+    return CueCoverageOut(
+        analysable=counts.analysable,
+        ready=counts.ready,
+        failed=counts.failed,
+        unhashed=counts.unhashed,
+    )
 
 
 @router.delete("/sign-off", status_code=status.HTTP_204_NO_CONTENT)

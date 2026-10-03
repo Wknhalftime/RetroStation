@@ -367,6 +367,46 @@ class StationYear:
         return 366 if calendar.isleap(self.year) else 365
 
 
+@dataclass(frozen=True)
+class CueCoverage:
+    """Cue coverage (D77, D89; PG7): the audio a listener may hear, grouped by cue state.
+
+    ``analysable`` is the present audio with an audio hash (twins count once, D20);
+    ``ready`` and ``failed`` are its settled audio, apart (a real row vs. a fallback row,
+    D52/D56); ``unhashed`` is present files with no audio hash, counted per file (D20: they
+    never get cues). A row for audio no present file carries is not counted (D20).
+    """
+
+    analysable: int
+    ready: int
+    failed: int
+    unhashed: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative(
+            "CueCoverage",
+            analysable=self.analysable,
+            ready=self.ready,
+            failed=self.failed,
+            unhashed=self.unhashed,
+        )
+        if self.ready + self.failed > self.analysable:
+            raise InvalidStreamValueError(
+                f"CueCoverage.analysable ({self.analysable}) must be >= ready + failed "
+                f"({self.ready + self.failed})"
+            )
+
+    @property
+    def settled(self) -> int:
+        """Analysable audio with a cue row, ready or failed (D20: a row means settled)."""
+        return self.ready + self.failed
+
+    @property
+    def waiting(self) -> int:
+        """Analysable audio with no cue row yet: exactly what needs analysis (D20)."""
+        return self.analysable - self.settled
+
+
 MAX_CLIP_BYTES = 25 * 2**20
 """The largest sign-off clip accepted, in bytes: exactly 25 MiB, 26 214 400 (PG3, M4)."""
 

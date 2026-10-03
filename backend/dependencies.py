@@ -9,7 +9,10 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
+from backend.db.repositories.stream_cue_coverage import PgCueCoverageRepository
+from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.domain.streaming import ClipStorageError
+from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
@@ -21,6 +24,13 @@ from backend.services.streaming.station_years import StationYearRepos
 from backend.services.streaming.stream_settings import StreamingState, streaming_state
 
 _LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
+
+COVERAGE_READ_BOUNDS = ReadBounds(
+    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
+)
+"""PG7, I7: the same bounds the stream service's reads use (D88). A coverage count is a scan
+over the library; it is read on its own bounded connection, never the request's own, so it
+cannot share a lock or a slot with other work and cannot hang the request past these bounds."""
 
 
 def require_internal_client(request: Request) -> None:
@@ -173,3 +183,12 @@ def get_sign_off_ports(
         probe=probe_clip,
         commit=_sign_off_commit(repos),
     )
+
+
+def get_cue_coverage() -> Generator[CueCoverageRepository]:
+    """Cue coverage (D77, D89; PG7), on its own bounded connection (``COVERAGE_READ_BOUNDS``),
+    never the request's own: works whether streaming is on or off (D51)."""
+    with bounded_connection(
+        get_settings().database_url, COVERAGE_READ_BOUNDS, autocommit=True
+    ) as conn:
+        yield PgCueCoverageRepository(conn)
