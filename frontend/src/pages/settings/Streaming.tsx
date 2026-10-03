@@ -5,6 +5,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useStreamSettings } from "@/api/streaming";
 import { MaxListenersSetting } from "@/components/domain/streaming/MaxListenersSetting";
 import { SignOffClip } from "@/components/domain/streaming/SignOffClip";
+import { CueCoverage } from "@/components/domain/streaming/CueCoverage";
+import { ResourceMeter } from "@/components/domain/streaming/ResourceMeter";
 
 // ---------------------------------------------------------------------------
 // Streaming state — PG1: STREAM_ENABLED stays env-only, shown read-only here.
@@ -73,6 +75,14 @@ export function Streaming() {
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <SignOffClip />
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <CueCoverage />
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <ResourceMeter />
       </section>
     </div>
   );

@@ -26,7 +26,10 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   matching: "/matcher",
   m3u_export: "/stations",
   rules_apply: "/stations",
-  // Settings intentionally absent — no tasks route there.
+  // D89: a running cue run marks Settings, where the Streaming page lives,
+  // the way a running scan marks Library. The meter row ("stream_resources")
+  // never appears here — it is filtered out of runningTasks entirely (D90).
+  cue_analysis: "/settings",
 };
 
 const NAV_LINK_BASE_CLASSES =
