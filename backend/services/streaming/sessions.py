@@ -75,7 +75,9 @@ class StreamSession:
     ``item`` request (seq 0, often before its start is confirmed) can wait for the landing
     instead of being told to retry. ``assigned`` maps seq to what was handed
     out for it — an item, or the final clip — so "the same seq always returns the same
-    item"; ``end_seq`` is the end-of-schedule marker. ``stopped`` marks a session the
+    item"; ``end_seq`` is the end-of-schedule marker. ``final_failed`` records that the
+    engine reported the final clip failed (PG5): it is never committed, since the engine may
+    fetch it, and fail it, before the last song starts. ``stopped`` marks a session the
     watchdog (or ``close``) has already stopped, so it is not frozen twice. ``now_playing``
     is ``(shows_at, text)``: the query compares ``shows_at`` to the clock rather than the
     record flipping itself, per CQRS.
@@ -95,6 +97,7 @@ class StreamSession:
     assigned: dict[int, Assigned | FinalClip] = field(default_factory=dict)
     committed: Committed | None = None
     end_seq: int | None = None
+    final_failed: bool = False
     engine: RunningEngine | None = None
     now_playing: tuple[datetime, str] | None = None
     stopped: bool = False

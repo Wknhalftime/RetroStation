@@ -9,6 +9,10 @@ that read fails (D85). A song handed out without cues plays D23's values, is war
 and reported to the cue owner once per app run (D78, D79, D82); a landing whose tail is
 too short for its cues plays D23's values with a warning (D80).
 
+The end of the schedule (D26): the user's sign-off clip is read when the schedule ends, never
+at tune-in (PG4), and plays after the last song; a clip that cannot play still signs the
+station off once the last song has started, and never cuts that song short (PG5).
+
 One instance per app, built at the composition root. Repository reads run in worker threads;
 all session state is mutated on the event loop (the day memo is the one exception, and it
 carries its own lock).
@@ -39,6 +43,7 @@ from backend.domain.streaming import (
     NoBroadcastError,
     PlayableFile,
     ScheduleItem,
+    SignOff,
     StreamTiming,
     TuneIn,
 )
@@ -91,6 +96,7 @@ from backend.services.streaming.sessions import (
     StreamSession,
     memoised_day_loader,
 )
+from backend.services.streaming.sign_off import SIGN_OFF_KEY, stored_sign_off
 from backend.services.streaming.watchdog import PlayingSpan, freeze_deadline
 
 __all__ = [
@@ -168,6 +174,10 @@ class StreamServiceConfig:
     callback_base_url: str
     log_dir: Path
     final_clip: FinalClip | None = None
+    """The default clip that signs the station off when the user has none (PG4)."""
+    sign_off_dir: Path | None = None
+    """The folder the user's sign-off clip is stored in (D26), read when a schedule ends
+    (PG4); ``None`` never reads the user's clip, so only ``final_clip`` can play."""
     timing: StreamTiming = field(default_factory=StreamTiming)
     relay: RelayConfig = field(default_factory=RelayConfig)
     freeze_grace: timedelta = timedelta(seconds=30)  # D31
@@ -306,6 +316,17 @@ def _place(schedule: _Schedule, saved: SavedBookmark | None, forget: Callable[[]
     return tune_in(load_day, schedule.year, now, timing)
 
 
+def _user_sign_off(repos: ReposFactory) -> SignOff | None:
+    """The user's sign-off clip as stored now (PG4), or ``None``; one connection per use.
+
+    Raises:
+        InvalidStreamValueError: the stored setting is not a sign-off (PG3).
+        StreamReadError: the database could not answer in time (D88).
+    """
+    with repos() as opened:
+        return stored_sign_off(opened.settings)
+
+
 def _item_at(load_day: DayLoader, ref: ItemRef) -> ScheduleItem:
     return load_day(ref.day)[ref.index]
 
@@ -402,13 +423,13 @@ def _landing_item(session: StreamSession, landing: Landing) -> ScheduleItem:
 
 
 def _schedule_finished(session: StreamSession) -> bool:
-    """The schedule has ended and its last assigned item has started (D26)."""
+    """The schedule has ended and its last item that can play has started (D26): the last
+    assigned one, or, when the final clip failed (PG5), the song before it."""
     committed = session.committed
-    return (
-        session.end_seq is not None
-        and committed is not None
-        and committed.seq == session.end_seq - 1
-    )
+    if session.end_seq is None or committed is None:
+        return False
+    last_to_play = session.end_seq - (2 if session.final_failed else 1)
+    return committed.seq >= last_to_play  # a clip reported started, then failed
 
 
 def _halt(engine: RunningEngine) -> None:
@@ -742,10 +763,13 @@ class StreamService:
             following = await asyncio.to_thread(_following, session.load_day, previous.ref, timing)
         except EndOfScheduleError:
             # The domain's documented end of the schedule (D26, D39): recorded, then answered.
-            clip = self._end_schedule(self._authorised(call), call.seq)
-            if clip is None:
+            # A failed clip read propagates before anything is recorded, so the engine's
+            # retry reads it again (D88).
+            clip = await self._final_clip()
+            final = self._end_schedule(self._authorised(call), call.seq, clip)
+            if final is None:
                 raise
-            return clip
+            return final
         following = await self._with_stored_cues(following)  # D85; never seq 0 (D86c)
         return self._assign(call, self._authorised(call), following)
 
@@ -849,12 +873,34 @@ class StreamService:
         self._no_cues.remember(file.file_id)
         self._ports.cue_reports.report(file.file_id)
 
-    def _end_schedule(self, session: StreamSession, seq: int) -> ItemPayload | None:
-        """Record the end at ``seq``: the final clip's payload, or ``None`` with no clip."""
+    async def _final_clip(self) -> FinalClip | None:
+        """The clip that signs the station off: the user's, read now (PG4), else the
+        configured default when the user has none. A stored value that is not a sign-off
+        is logged, naming the setting, and plays no clip, not the default (PG3, design
+        note 6).
+
+        Raises:
+            StreamReadError: the clip could not be read (D88); the engine retries.
+        """
+        folder = self._config.sign_off_dir
+        if folder is None:
+            return self._config.final_clip
+        try:
+            sign_off = await asyncio.to_thread(_user_sign_off, self._ports.repos)
+        except InvalidStreamValueError as bad_setting:
+            logger.error("stream_setting_invalid", setting=SIGN_OFF_KEY, error=str(bad_setting))
+            return None
+        if sign_off is None:
+            return self._config.final_clip
+        return FinalClip(path=folder / sign_off.file_name, span_ms=sign_off.span_ms)
+
+    def _end_schedule(
+        self, session: StreamSession, seq: int, clip: FinalClip | None
+    ) -> ItemPayload | None:
+        """Record the end at ``seq``: ``clip``'s payload, or ``None`` with no clip."""
         served = self._served(session, seq)  # a concurrent request may have recorded it
         if served is not None:
             return served
-        clip = self._config.final_clip
         if clip is None:
             session.end_seq = seq
             return None
@@ -887,8 +933,14 @@ class StreamService:
             self._feed.title(session.bookmark_key, session_id, told, shows_at)
 
     def failed(self, call: ItemCall) -> None:
-        """Flag an item the engine could not play (D32); the engine plays the next one."""
-        assigned = self._reported(call, self._authorised(call))
+        """Flag an item the engine could not play (D32); the engine plays the next one. A
+        final clip that cannot play is remembered, not committed, so the station still signs
+        off once the last song has started (PG5) and the watchdog keeps following that song:
+        the engine may fetch, and fail, the clip before the last song starts."""
+        session = self._authorised(call)
+        assigned = self._reported(call, session)
+        if isinstance(assigned, FinalClip):
+            session.final_failed = True
         logger.warning(
             "stream_item_failed", session_id=call.session_id, seq=call.seq, **_flagged(assigned)
         )

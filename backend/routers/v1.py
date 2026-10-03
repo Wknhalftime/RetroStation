@@ -9,6 +9,7 @@ from backend.routers import (
     playlists,
     settings,
     stations,
+    streaming_settings,
     system_logs,
     tasks,
 )
@@ -22,3 +23,4 @@ router.include_router(matching.router, prefix="/matching", tags=["resolution"])
 router.include_router(settings.router, prefix="/settings", tags=["settings"])
 router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 router.include_router(system_logs.router, prefix="/system-logs", tags=["system-logs"])
+router.include_router(streaming_settings.router, prefix="/streaming", tags=["streaming-settings"])
