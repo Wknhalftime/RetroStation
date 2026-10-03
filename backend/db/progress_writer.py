@@ -9,17 +9,19 @@ upsert statement, so the ``/ws`` feed and the bottom bar show them like any task
   (``writer_options()``: ``synchronous_commit=off``, a 1 s statement and a 0.5 s lock bound);
 - each write is one statement, a write-only upsert with no follow-up read (I6), made under a
   lock, so a write still running in a worker thread and the final row never interleave;
-- a write the database cannot take (``psycopg.OperationalError``, ``InterfaceError`` or
-  ``OSError``) is dropped, never raised: the first drop of an outage logs a warning, later
-  drops log at debug, and the first write that lands after it logs one info line. The broken
-  connection is closed, and the next write opens a new one;
+- a write the database cannot take (any ``psycopg.Error``, or ``OSError``; M8: not only a
+  lost connection, since the row is telemetry and must never stop its caller) is dropped,
+  never raised: the first drop of an outage logs a warning, later drops log at debug, and the
+  first write that lands after it logs one info line. The connection is closed, and the next
+  write opens a new one;
 - ``complete`` writes the final row; a RUNNING write that lands after it is dropped, so a
   cancelled tick that arrives late cannot reopen the row (M9).
 
 ``bounded_coverage_read`` (design note 9; I7, PG7): the cue coverage counted on a short-lived
 connection of its own per read: autocommit, read-only, and bounded by the D88 numbers (5 s to
 connect, 2 s on a lock, 10 s in all). Never the writer's connection and never the run's
-transaction. A count that fails or times out gives None, logged once.
+transaction. A count that fails, times out or meets any other database error gives None,
+logged once (M8).
 
 ``progress_repository``: the progress rows on a connection of the caller's (the meter's
 telemetry connection, to end a row a crash left RUNNING, PG13), with a lost database
@@ -75,12 +77,18 @@ COVERAGE_CONNECT_TIMEOUT_S = 5
 """D88's connect bound, as the stream service's reads use it."""
 
 _LOST = (psycopg.OperationalError, psycopg.InterfaceError, OSError)
-"""What a database that is down, or a connection that broke, raises: a write is dropped."""
+"""What a database that is down, or a connection that broke, raises
+(``progress_repository`` translates these to ``StorageUnavailableError``)."""
 
-_COUNT_FAILED = (*_LOST, StreamReadError)
-"""What a coverage read that failed or timed out raises. A statement or lock timeout
-(``QueryCanceled``, ``LockNotAvailable``) is an ``OperationalError``; ``StreamReadError`` is
-the repository's "the database gave no row"."""
+_TELEMETRY_DROPPED = (psycopg.Error, OSError)
+"""What the telemetry adapters drop (M8): any database error, not only a lost connection.
+A progress row or a count is telemetry, so a ``DataError`` or an ``InternalError`` must not
+end the cue run or the meter, nor mask the run's own error from its ``finally``."""
+
+_COUNT_FAILED = (*_TELEMETRY_DROPPED, StreamReadError)
+"""What a coverage read that failed raises. A statement or lock timeout (``QueryCanceled``,
+``LockNotAvailable``) is a ``psycopg.Error``; ``StreamReadError`` is the repository's "the
+database gave no row"."""
 
 
 def writer_options() -> str:
@@ -134,7 +142,7 @@ class ProgressWriter:
             if self._conn is None:
                 self._conn = self._connect()
             self._conn.execute(UPSERT_SQL, upsert_params(task))
-        except _LOST as error:
+        except _TELEMETRY_DROPPED as error:
             self._drop_connection()
             self._note_dropped(task, error)
             return
@@ -158,14 +166,15 @@ class ProgressWriter:
             return
         try:
             conn.close()
-        except _LOST as error:  # closing a broken connection can fail; it is gone either way
+        except _TELEMETRY_DROPPED as error:  # a broken connection's close can fail; it is gone
             logger.debug("progress_writer_close_failed", error=str(error))
 
 
 class BoundedCoverageRead:
     """A ``CoverageRead``: each call counts the cue coverage on a new bounded, read-only,
-    autocommit connection, closed after the read (I7). A count that fails or times out gives
-    None: the first of a run of failures logs a warning, the rest log at debug."""
+    autocommit connection, closed after the read (I7). A count that fails, times out or meets
+    any database error gives None (M8): the first of a run of failures logs a warning, the
+    rest log at debug."""
 
     def __init__(self, url: str, connect: Callable[..., psycopg.Connection[Any]]) -> None:
         self._url = url
