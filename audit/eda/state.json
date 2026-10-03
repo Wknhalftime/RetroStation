@@ -21,7 +21,7 @@
   ],
   "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
   "open_stops": [
-    "GATE A: Lance still to rule --publish-fn/--subscribe-fn (proposed none), --guard-fn (added option), D1-D8 in spec-diff.md, the two-instance question, then lock the spec with the relock hook"
+    "GATE A: Lance still to rule --guard-fn (added option), D1-D8 in spec-diff.md, the two-instance question, then lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -193,11 +193,13 @@
   "proposed_options": {
     "--publish-fn": {
       "value": [],
-      "evidence": "inventory.publish_subscribe_candidates: no registry of callables is iterated and called; on_progress (mb_enrichment_tasks.py:174/212/278, library_scan_service.scan_directory) is one optional callable the caller injects, so the caller names its one reactor; strategy lists (artist_matching_service.py:404, identity_matching_service.py:495) are first-match chains whose result the caller uses; other hits are names only"
+      "evidence": "inventory.publish_subscribe_candidates: no registry of callables is iterated and called; on_progress (mb_enrichment_tasks.py:174/212/278, library_scan_service.scan_directory) is one optional callable the caller injects, so the caller names its one reactor; strategy lists (artist_matching_service.py:404, identity_matching_service.py:495) are first-match chains whose result the caller uses; other hits are names only",
+      "ruled": "ACCEPTED by Lance 2026-10-03: none (default); EVENT on the real code comes only from Huey signals or SQL NOTIFY/LISTEN"
     },
     "--subscribe-fn": {
       "value": [],
-      "evidence": "same search; no subscribe/register call exists"
+      "evidence": "same search; no subscribe/register call exists",
+      "ruled": "ACCEPTED by Lance 2026-10-03: none (default); EVENT on the real code comes only from Huey signals or SQL NOTIFY/LISTEN"
     },
     "--ev01-scope": {
       "value": [
