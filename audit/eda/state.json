@@ -24,7 +24,7 @@
   ],
   "next_step": "Session B after the lock: build scripts/audit/event_graph.py against the locked spec",
   "open_stops": [
-    "GATE A: spec ready to lock; Lance to record the EV01 decision in audit/rulings.jsonl and lock the spec with the relock hook"
+    "GATE A: spec ready; Lance to lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -228,7 +228,7 @@
     }
   },
   "open_questions": [
-    "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Not yet in audit/rulings.jsonl (outside this job's allowed files): Lance to record it as an AUD-R012 amendment or a new ruling.",
+    "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Recorded as AUD-R014 (ACTIVE) in audit/rulings.jsonl, commit d9ef115, at Lance's explicit request (file outside this job's allowed list).",
     "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
     "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text.",
     "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock. RESOLVED at Gate A (delegated by Lance 2026-10-03): registered is per instance; duo/ fixture covers it.",
