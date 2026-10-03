@@ -875,8 +875,9 @@ class StreamService:
 
     async def _final_clip(self) -> FinalClip | None:
         """The clip that signs the station off: the user's, read now (PG4), else the
-        configured default. A stored value that is not a sign-off is logged, naming the
-        setting, and ignored (PG3).
+        configured default when the user has none. A stored value that is not a sign-off
+        is logged, naming the setting, and plays no clip, not the default (PG3, design
+        note 6).
 
         Raises:
             StreamReadError: the clip could not be read (D88); the engine retries.
@@ -888,7 +889,7 @@ class StreamService:
             sign_off = await asyncio.to_thread(_user_sign_off, self._ports.repos)
         except InvalidStreamValueError as bad_setting:
             logger.error("stream_setting_invalid", setting=SIGN_OFF_KEY, error=str(bad_setting))
-            return self._config.final_clip
+            return None
         if sign_off is None:
             return self._config.final_clip
         return FinalClip(path=folder / sign_off.file_name, span_ms=sign_off.span_ms)
