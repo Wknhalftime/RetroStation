@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 from backend.domain.system import TaskProgress
@@ -42,3 +43,8 @@ class TaskProgressRepository(ABC):
         other keys must use ``upsert`` (full document replace).
         """
         ...
+
+
+type ProgressWrite = Callable[[TaskProgress], None]
+"""Telemetry's write of one progress row (D77a, D89, D90). It never raises: a row that cannot
+be written is dropped by the writer (design note 10), so telemetry never changes its caller."""

@@ -2,11 +2,11 @@
 
 Spec: Cue pre-computation; D20 (needs analysis; an analyser change purges its old rows);
 D52/D55 (the fallback row; no duration, retried); D57 (an unreadable or changed file stores
-nothing); D59 (no progress rows: one summary log); D61 (the first file with no outcome is
-the stall and gets a fallback row; the files after it go back, untried); D62 (today's and
-tomorrow's playlists first); D63 (batches of 8, a bounded run); D64 (an unknown stored stat
-trusts the hash); D67 (each file's duration reaches the analyser); D68 (a rejected result
-line fails only its file).
+nothing); D59 (one summary log; an idle run leaves no trace); D61 (the first file with no
+outcome is the stall and gets a fallback row; the files after it go back, untried); D62
+(today's and tomorrow's playlists first); D63 (batches of 8, a bounded run); D64 (an unknown
+stored stat trusts the hash); D67 (each file's duration reaches the analyser); D68 (a
+rejected result line fails only its file); D77a and D89 (the run's progress row).
 
 The pipeline, one function per step:
 
@@ -15,12 +15,19 @@ The pipeline, one function per step:
 3. per batch: drop what this run has seen, check the stat, analyse, check the stat again,
    record, commit;
 4. stop when both sources are exhausted, or after a batch once the time budget is spent;
-5. log one summary, unless the run tried nothing.
+5. tell the progress sink how the run ended, then log one summary, unless the run tried
+   nothing.
+
+D77a, D89: the run reports its progress to ``CueRunPorts.progress`` (``cue_progress``), an
+observer: after each committed batch, how much audio it stored; at the end, whether the run
+ended in an error. The default sink, ``SilentProgress``, writes nothing; the cue task wires
+one that writes a ``progress_tracking`` row. The sink never changes what the run stores or
+logs (I2, I7).
 
 D79: the player reports a no-cue song to the cue owner, which analyses that audio ahead of
 its queue, storing cues or a failed row as a run does. ``analyse_reported`` is a report: one
 file, through the same batch step (``_run_batch``) a run uses. No purge, no priority set, no
-library read; writes nothing else.
+library read, no progress row; writes nothing else.
 
 ``Analyse`` blocks for as long as a batch takes, so a run belongs on the cue worker, never on
 an event loop. An ``AnalyserError`` ends the run and reaches the task boundary; the batches
@@ -46,6 +53,7 @@ from backend.repositories.stream_cue_work import CueWorkRepository
 from backend.repositories.stream_cues import StreamCueRepository
 from backend.services.audio_tags import disk_stat
 from backend.services.streaming.autocue import Unusable
+from backend.services.streaming.cue_progress import CueRunProgress, SilentProgress
 from backend.services.streaming.cue_record import Autocued, CueRecord, record_analysis
 
 logger = structlog.get_logger()
@@ -67,12 +75,13 @@ _STALLED = Unusable("analyser stalled or died on this file (D61)")
 
 @dataclass(frozen=True)
 class CueRunPorts:
-    """What a run reads, writes and runs."""
+    """What a run reads, writes and runs, and where it reports its progress (D89)."""
 
     work: CueWorkRepository
     store: StreamCueRepository
     commit: Callable[[], None]
     analyse: Analyse
+    progress: CueRunProgress = field(default_factory=SilentProgress)
 
 
 @dataclass(frozen=True)
@@ -143,6 +152,10 @@ class _Run:
 
     def count(self, outcomes: Iterable[str]) -> None:
         self.counts.update(outcomes)
+
+    def stored(self) -> int:
+        """How much audio this run has stored: analysed, or a fallback row."""
+        return self.counts[CueRecord.ANALYSED] + self.counts[CueRecord.FAILED]
 
 
 def _purge_other_versions(ports: CueRunPorts) -> None:
@@ -277,8 +290,7 @@ def _log_summary(run: _Run, paused: bool) -> None:
     does not spam System Logs every cadence."""
     if not run.tried:
         return
-    stored = run.counts[CueRecord.ANALYSED] + run.counts[CueRecord.FAILED]
-    log = logger.info if stored > 0 or paused else logger.debug
+    log = logger.info if run.stored() > 0 or paused else logger.debug
     log(
         "stream_cue_run",
         analysed=run.counts[CueRecord.ANALYSED],
@@ -290,21 +302,35 @@ def _log_summary(run: _Run, paused: bool) -> None:
     )
 
 
+def _run_batches(ports: CueRunPorts, config: CueRunConfig, run: _Run, started: float) -> bool:
+    """Run the backlog's batches, telling the progress sink what each one stored, until it is
+    exhausted or the time budget is spent; whether the run paused on the budget."""
+    while batch := run.backlog.take():
+        before = run.stored()
+        _run_batch(ports, config.timing, run, batch)
+        ports.progress.batch_stored(run.stored() - before)
+        if config.steady() - started >= config.budget_s:
+            return True
+    return False
+
+
 def run_cue_analysis(ports: CueRunPorts, config: CueRunConfig) -> None:
-    """One bounded run. Its results are the store's state and one ``stream_cue_run`` log.
+    """One bounded run. Its results are the store's state, one ``stream_cue_run`` log, and
+    what it told its progress sink.
 
     An ``AnalyserError`` propagates to the task boundary; the batches before it are
-    committed.
+    committed. The sink hears that the run failed on any error that ends the batches, so its
+    row never stays RUNNING for the ``/ws`` reaper to find.
     """
     started = config.steady()
     _purge_other_versions(ports)
     run = _Run(_Backlog(ports.work, _priority_set(ports.work, config.today), config.batch_size))
-    paused = False
-    while batch := run.backlog.take():
-        _run_batch(ports, config.timing, run, batch)
-        if config.steady() - started >= config.budget_s:
-            paused = True
-            break
+    ended_normally = False
+    try:
+        paused = _run_batches(ports, config, run, started)
+        ended_normally = True
+    finally:
+        ports.progress.run_ended(failed=not ended_normally)
     _log_summary(run, paused)
 
 
