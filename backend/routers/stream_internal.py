@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pydantic import BaseModel
 
 from backend.dependencies import get_stream_service, require_internal_client
-from backend.domain.streaming import EndOfScheduleError, StreamingError
+from backend.domain.streaming import EndOfScheduleError, StreamingError, StreamReadError
 from backend.services.streaming.errors import (
     SessionTokenError,
     UnknownItemError,
@@ -32,12 +32,13 @@ Seq = Annotated[int, Path(ge=0)]
 SessionToken = Annotated[str | None, Header()]
 
 _REPORT_ERRORS = (UnknownSessionError, UnknownItemError, SessionTokenError)
-_ITEM_ERRORS = (*_REPORT_ERRORS, EndOfScheduleError)
+_ITEM_ERRORS = (*_REPORT_ERRORS, EndOfScheduleError, StreamReadError)
 _HTTP_ERRORS: dict[type[StreamingError], tuple[int, str]] = {
     UnknownSessionError: (status.HTTP_404_NOT_FOUND, "unknown session"),
     UnknownItemError: (status.HTTP_404_NOT_FOUND, "unknown item"),
     SessionTokenError: (status.HTTP_403_FORBIDDEN, "wrong or missing session token"),
     EndOfScheduleError: (status.HTTP_410_GONE, "end of schedule"),
+    StreamReadError: (status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable"),  # D88: a retry
 }
 
 
