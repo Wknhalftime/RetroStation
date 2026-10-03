@@ -5,6 +5,8 @@ import type { TaskInfo } from "@/lib/schemas/tasks";
 import { getWarningText } from "@/lib/taskWarnings";
 import { cn } from "@/lib/utils";
 
+export const CUE_RUN_LABEL = "Measuring songs for streaming";
+
 const TASK_TYPE_LABELS: Record<string, string> = {
   scan: "Scanning library",
   library_enrichment: "Enriching library metadata",
@@ -15,8 +17,9 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   m3u_export: "Exporting M3U",
   rules_apply: "Applying rules",
   // D89: a cue run shows in the bottom bar like scans and enrichment, with a
-  // label of its own — never the raw task type.
-  cue_analysis: "Analysing cue points",
+  // label of its own — never the raw task type (plan manual check 6's words,
+  // shared with the Streaming page).
+  cue_analysis: CUE_RUN_LABEL,
 };
 
 function getLabel(taskType: string): string {
