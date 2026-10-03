@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { FolderCog, ScrollText } from "lucide-react";
+import { FolderCog, ScrollText, Radio } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -38,12 +38,22 @@ export function Settings() {
           </Link>
           <Link
             to="/settings/system-logs"
-            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <ScrollText className="h-5 w-5 shrink-0 text-indigo-500" />
             <div>
               <p className="text-sm font-medium text-gray-900">System Logs</p>
               <p className="text-xs text-gray-400">Operational log of background task activity</p>
+            </div>
+          </Link>
+          <Link
+            to="/settings/streaming"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <Radio className="h-5 w-5 shrink-0 text-indigo-500" />
+            <div>
+              <p className="text-sm font-medium text-gray-900">Streaming</p>
+              <p className="text-xs text-gray-400">Listener limit and the sign-off clip</p>
             </div>
           </Link>
         </div>

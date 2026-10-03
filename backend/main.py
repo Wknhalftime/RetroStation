@@ -1,23 +1,385 @@
+import asyncio
 import os
+import subprocess
 import sys
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from functools import partial
+from pathlib import Path
 
 import psycopg
 import structlog
 from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from psycopg.rows import DictRow
 from psycopg_pool import PoolTimeout, TooManyRequests
 
-from backend.config import get_settings
+from backend.config import Settings, callback_base_url, get_settings
 from backend.db.migrations import run_migrations
 from backend.db.pool import close_pool, init_pool
+from backend.db.progress_writer import (
+    Connect,
+    ProgressWriter,
+    progress_repository,
+    writer_options,
+)
+from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
+from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
+from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.db.stream_reads import ReadBounds, bounded_connection
+from backend.db.sync_conn import connect_sync
+from backend.domain.system import StorageUnavailableError
 from backend.logging_config import configure_logging
+from backend.playout.assets import ensure_stream_assets
+from backend.playout.liquidsoap_process import (
+    SESSION_SCRIPT,
+    EngineConfig,
+    RunningEngine,
+    ScriptCacheError,
+    SessionEndpoint,
+    prune_session_logs,
+    session_base_env,
+    start_ready_engine,
+    warm_script_cache,
+)
+from backend.playout.process_meter import PsutilMeter
+from backend.routers import listen, radio, radio_pages, stream_internal
 from backend.routers.v1 import router as v1_router
+from backend.services.streaming.bookmarks import BookmarkStore
+from backend.services.streaming.cue_reports import CueReporter, NoCueReports
+from backend.services.streaming.resource_meter import (
+    MeterPorts,
+    MeterRuntime,
+    end_leftover_meter_row_with,
+    start_meter_task,
+)
+from backend.services.streaming.resource_meter import stop_meter as stop_meter_task
+from backend.services.streaming.service import (
+    ReposFactory,
+    StreamPorts,
+    StreamRepos,
+    StreamService,
+    StreamServiceConfig,
+)
+from backend.services.streaming.sign_off import sign_off_folder
+from backend.services.streaming.watchdog import run_freeze_watchdog
+from backend.tasks.stream_cue_tasks import request_cue_analysis
 from backend.websocket import websocket_endpoint
 
 logger = structlog.get_logger()
+
+_WATCHDOG_INTERVAL_S = 5.0
+REPORT_FLUSH_S = 2.0
+"""D87(b): shutdown waits this long for the cue reporter's waiting reports to be sent."""
+STREAM_READ_BOUNDS = ReadBounds(
+    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
+)
+"""D88: the stream service's reads give up on a lock after 2 s (the realistic cause), on any
+statement after 10 s (a backstop far above a cold day read's ~1.7 s, D40) and on connecting
+after 5 s; a tune-in then answers 503 unavailable rather than hanging."""
+
+type EngineStarter = Callable[[SessionEndpoint], Awaitable[RunningEngine]]
+
+
+@dataclass(frozen=True)
+class StreamingRuntime:
+    """What the lifespan holds while streaming is on, and releases at shutdown."""
+
+    service: StreamService
+    close_job: Callable[[], None]
+    watchdog: asyncio.Task[None]
+    cue_reports: NoCueReports
+    """Where a song played without cues was reported (D79); flushed at shutdown (D87(b))."""
+
+
+def _engine_unavailable(reason: str, output: str = "") -> None:
+    """Streaming stays off; /listen answers 503 ``unavailable`` (D34)."""
+    logger.error("stream_engine_unavailable", reason=reason, output=output)
+
+
+def _log_prune_failure(path: Path, error: OSError) -> None:
+    logger.warning("stream_log_prune_failed", path=str(path), error=str(error))
+
+
+def _prune_logs(logs: Path) -> None:
+    """Keep the newest session logs (D35); a pruning error is logged, never raised (D46)."""
+    try:
+        prune_session_logs(logs, on_error=_log_prune_failure)
+    except OSError as error:  # the folder could not be listed, or a log failed otherwise
+        _log_prune_failure(logs, error)
+
+
+def _make_work_folders(work: Path) -> bool:
+    """Create the assets, cache and logs folders; False (logged) if one cannot be made."""
+    try:
+        for folder in (work / "assets", work / "cache", work / "logs"):
+            folder.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        _engine_unavailable("the streaming work folders could not be created", str(error))
+        return False
+    return True
+
+
+async def _prepared_engine(
+    ffmpeg: str, exe: Path, work: Path, base_env: dict[str, str]
+) -> EngineConfig | None:
+    """The engine, its filler and intro made and its script cache warm; None (logged) if
+    either cannot be prepared (spec: Engine "the app must warm it at startup"; D34)."""
+    try:
+        assets = ensure_stream_assets(ffmpeg, work / "assets")
+    except (subprocess.SubprocessError, OSError) as error:
+        _engine_unavailable("the filler and intro could not be generated", str(error))
+        return None
+    engine = EngineConfig(
+        exe=exe,
+        script=SESSION_SCRIPT,
+        cache_dir=work / "cache",
+        filler=assets.filler,
+        intro_sfx=assets.static_intro,
+    )
+    try:
+        await asyncio.to_thread(warm_script_cache, base_env, engine)
+    except (ScriptCacheError, subprocess.TimeoutExpired, OSError) as error:
+        _engine_unavailable("Liquidsoap's script cache could not be built", str(error))
+        return None
+    return engine
+
+
+def _opened_repos(
+    connect: Callable[[], AbstractContextManager[psycopg.Connection[DictRow]]],
+) -> ReposFactory:
+    """A ``ReposFactory`` over whatever connection ``connect`` opens, one per use."""
+
+    @contextmanager
+    def opened() -> Iterator[StreamRepos]:
+        with connect() as conn:
+            yield StreamRepos(
+                stations=PgBroadcastStationRepository(conn),
+                settings=PgUserSettingRepository(conn),
+                schedule=PgPlayableScheduleRepository(conn),
+            )
+
+    return opened
+
+
+def _stream_repos(database_url: str) -> ReposFactory:
+    """One connection per use, holding the repositories the stream service reads; each read
+    is bounded (D88), so a locked or unreachable database fails it with ``StreamReadError``."""
+    return _opened_repos(lambda: bounded_connection(database_url, STREAM_READ_BOUNDS))
+
+
+def _cue_reread_repos(database_url: str) -> ReposFactory:
+    """One connection per use, short-lived (D85, review M4): a stuck database frees the
+    re-read's slots instead of holding them, so a cold day read (``_stream_repos``, ~1.7 s,
+    D40) keeps its own, longer-lived connections. Autocommit: the re-read is one read, so no
+    COMMIT round trip after ``search_path`` or on exit (review M7)."""
+    options = "-c statement_timeout=2000 -c lock_timeout=1000"
+    return _opened_repos(
+        lambda: connect_sync(database_url, connect_timeout=2, options=options, autocommit=True)
+    )
+
+
+def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> StreamPorts:
+    """What the stream service is wired to: PostgreSQL, the engine start, two clocks and the
+    no-cue cue reports port.
+
+    D47: the wall clock only places listeners; the monotonic clock times everything else,
+    and the now-playing delay waits on the loop's monotonic clock.
+    D79: no-cue reports go to the cue consumer's queue (it runs whenever LIQUIDSOAP_PATH is
+    set, D51; streaming needs it too).
+    """
+    return StreamPorts(
+        _stream_repos(settings.database_url),
+        start_engine,
+        datetime.now,
+        time.monotonic,
+        cue_reread_repos=_cue_reread_repos(settings.database_url),
+        sleep=asyncio.sleep,
+        cue_reports=CueReporter(request_cue_analysis),
+    )
+
+
+def stream_service_config(settings: Settings, logs: Path) -> StreamServiceConfig:
+    """The stream service's config: engines call back on the API's own bind (D24) and log to
+    ``logs``; the user's sign-off clip is read from the folder its upload writes (D26, design
+    note 6). Production ships no default clip, so ``final_clip`` stays ``None``."""
+    return StreamServiceConfig(
+        callback_base_url(settings.server_host, settings.server_port),
+        logs,
+        sign_off_dir=sign_off_folder(settings.stream_work_dir),
+    )
+
+
+def _stream_service(ports: StreamPorts, settings: Settings, logs: Path) -> StreamService:
+    """The stream service, reading PostgreSQL."""
+    return StreamService(ports, BookmarkStore(), stream_service_config(settings, logs))
+
+
+def _report_watchdog_end(watchdog: asyncio.Task[None]) -> None:
+    """The watchdog only ends by cancellation at shutdown; any other end is an error."""
+    if watchdog.cancelled():
+        return
+    error = watchdog.exception()
+    logger.error(
+        "stream_watchdog_died",
+        message="frozen sessions are no longer stopped",
+        error=repr(error),
+        exc_info=error,
+    )
+
+
+def _start_watchdog(service: StreamService) -> asyncio.Task[None]:
+    watchdog = asyncio.create_task(run_freeze_watchdog(service.stop_frozen, _WATCHDOG_INTERVAL_S))
+    watchdog.add_done_callback(_report_watchdog_end)
+    return watchdog
+
+
+async def start_streaming(settings: Settings) -> StreamingRuntime | None:
+    """Streaming when enabled and able; None, streaming off, otherwise (I5, D34, D35)."""
+    if not settings.stream_enabled:
+        return None
+    if sys.platform != "win32":
+        _engine_unavailable("streaming runs on Windows only (D5)")
+        return None
+    if settings.liquidsoap_path is None:
+        _engine_unavailable("LIQUIDSOAP_PATH (.env) is not set")
+        return None
+    work = settings.stream_work_dir
+    if not _make_work_folders(work):
+        return None
+    _prune_logs(work / "logs")
+    base_env = session_base_env(os.environ)
+    engine = await _prepared_engine(settings.ffmpeg_path, settings.liquidsoap_path, work, base_env)
+    if engine is None:
+        return None
+    # Lazy: windows_job raises ImportError off Windows, and this line is reached only on win32.
+    from backend.playout.windows_job import KillOnCloseJob
+
+    try:
+        job = KillOnCloseJob()
+    except OSError as error:
+        _engine_unavailable("the job that ends engines with the app was refused", str(error))
+        return None
+    start_engine = partial(start_ready_engine, job.assign, base_env, engine=engine)
+    ports = build_stream_ports(settings, start_engine)
+    service = _stream_service(ports, settings, work / "logs")
+    return StreamingRuntime(service, job.close, _start_watchdog(service), ports.cue_reports)
+
+
+async def _flush_cue_reports(reports: NoCueReports) -> None:
+    """Wait at most ``REPORT_FLUSH_S`` for the reports still waiting to be sent (D87(b)); past
+    that, log and move on without cancelling a report in flight (the backlog still covers the
+    rest). Either way, close a wired ``CueReporter`` without waiting (carried from Task 6a,
+    review I1): it drops the reports still waiting and ignores later ones, and its worker is a
+    daemon thread, so a hung request never delays the app's exit. The close runs even when
+    the flush is cancelled (re-review N1).
+    """
+    try:
+        flushing = asyncio.ensure_future(reports.drained())
+        done, _ = await asyncio.wait({flushing}, timeout=REPORT_FLUSH_S)
+        if not done:
+            logger.warning("stream_cue_reports_unflushed")
+            flushing.cancel()
+            await asyncio.wait({flushing})
+    finally:
+        if isinstance(reports, CueReporter):
+            reports.close()
+
+
+async def stop_streaming(runtime: StreamingRuntime | None) -> None:
+    """Stop the watchdog, close every session, flush and close the cue reports, then the job
+    (its children die with it). The flush, the reporter's close and the job's close each run
+    even when an earlier step raises, and that error still propagates (re-review N1)."""
+    if runtime is None:
+        return
+    runtime.watchdog.cancel()
+    await asyncio.wait({runtime.watchdog})
+    try:
+        runtime.service.close_all()
+    finally:
+        try:
+            await _flush_cue_reports(runtime.cue_reports)
+        finally:
+            runtime.close_job()
+
+
+@dataclass(frozen=True)
+class LiveMeter:
+    """What the lifespan holds while the cost meter runs (C1): its task, and the telemetry
+    writer it alone owns, closed when the meter stops."""
+
+    runtime: MeterRuntime
+    writer: ProgressWriter
+
+
+def meter_clock() -> datetime:
+    """The cost meter's clock: UTC-aware, so the ``/ws`` reaper's ``now()`` reads its row as
+    fresh (I5). Never the stream service's naive wall clock."""
+    return datetime.now(UTC)
+
+
+def meter_connect(database_url: str) -> Connect:
+    """Opens the meter's telemetry connection: its own, autocommit, not waiting for the disk,
+    and bounded (D94, ``writer_options()``), as the cue task's writer connection is."""
+    return partial(
+        connect_sync, database_url, autocommit=True, connect_timeout=2, options=writer_options()
+    )
+
+
+async def start_meter(runtime: StreamingRuntime | None, connect: Connect) -> LiveMeter | None:
+    """The audio engine cost meter while streaming runs (D90, D95; C1): the running engines,
+    read with psutil, budgeted by D91, written through ``connect``'s connection. None, and
+    no connection opened, when streaming is off."""
+    if runtime is None:
+        return None
+    writer = ProgressWriter(connect)
+    ports = MeterPorts(
+        pids=runtime.service.engine_pids, meter=PsutilMeter(), writer=writer, clock=meter_clock
+    )
+    return LiveMeter(start_meter_task(ports, asyncio.sleep), writer)
+
+
+async def stop_meter(meter: LiveMeter | None) -> None:
+    """Stop the meter, completing its row (PG13), then close its connection."""
+    if meter is None:
+        return
+    try:
+        await stop_meter_task(meter.runtime)
+    finally:
+        await asyncio.to_thread(meter.writer.close)
+
+
+def end_leftover_meter_row(connect: Connect) -> None:
+    """Complete the meter row a crash left RUNNING (PG13, M10). A database that cannot be
+    reached is logged and start-up goes on (D46's spirit); the reaper then fails the row."""
+    try:
+        with progress_repository(connect) as repo:
+            end_leftover_meter_row_with(repo, meter_clock())
+    except StorageUnavailableError as error:
+        logger.warning("stream_meter_leftover_unended", error=str(error))
+
+
+async def _prepare_meter(
+    settings: Settings, connect: Connect
+) -> tuple[StreamingRuntime | None, LiveMeter | None]:
+    """End a leftover meter row, start streaming, then its meter (C1, M10): the row is
+    ended whether or not streaming is on, before the app serves."""
+    await asyncio.to_thread(end_leftover_meter_row, connect)
+    streaming = await start_streaming(settings)
+    return streaming, await start_meter(streaming, connect)
+
+
+async def _shutdown(meter: LiveMeter | None, streaming: StreamingRuntime | None) -> None:
+    """The meter stops, completing its row while the engines it measures still run, before
+    streaming stops (C1, PG13); streaming stops even when the meter's stop raises."""
+    try:
+        await stop_meter(meter)
+    finally:
+        await stop_streaming(streaming)
 
 
 @asynccontextmanager
@@ -62,9 +424,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             run_migrations(conn)
             conn.commit()
 
-    yield
+    app.state.server_host = settings.server_host
+    streaming, meter = await _prepare_meter(settings, meter_connect(settings.database_url))
+    app.state.stream_service = None if streaming is None else streaming.service
 
-    await close_pool()
+    try:
+        yield
+    finally:
+        await _shutdown(meter, streaming)
+        await close_pool()
 
 
 app = FastAPI(title="RetroStation", lifespan=lifespan)
@@ -104,6 +472,10 @@ app.add_exception_handler(PoolTimeout, _pool_saturation_handler)
 app.add_exception_handler(TooManyRequests, _pool_saturation_handler)
 
 app.include_router(v1_router)
+app.include_router(stream_internal.router)
+app.include_router(listen.router)
+app.include_router(radio_pages.router)
+app.include_router(radio.router)
 
 
 @app.get("/health")

@@ -4,10 +4,12 @@ from typing import Any
 
 import psycopg
 
-from backend.domain.system import UserSetting
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.system import StorageUnavailableError, UserSetting
 from backend.repositories.user_settings import UserSettingRepository
 
 
+@translate_lost_connection(StorageUnavailableError)
 class PgUserSettingRepository(UserSettingRepository):
     """PostgreSQL-backed implementation of :class:`UserSettingRepository`.
 
@@ -87,3 +89,11 @@ class PgUserSettingRepository(UserSettingRepository):
             )
             for row in rows
         ]
+
+    def delete(self, key: str) -> None:
+        """Remove the setting for *key*; a key with no row is not an error.
+
+        Args:
+            key: Settings key to remove.
+        """
+        self._conn.execute("DELETE FROM user_settings WHERE key = %s", (key,))

@@ -55,6 +55,38 @@ WHERE dp.station_id = %(station_id)s
 ORDER BY dp.position
 """
 
+_FILE_CUES_SQL = """
+SELECT c.audio_hash, c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms,
+       c.gain_db
+FROM library_files f
+JOIN stream_cues c ON c.audio_hash = f.audio_hash
+WHERE f.id = %(file_id)s
+"""
+"""The per-song re-read (D85): ``library_files`` by its primary key, then ``stream_cues`` by
+its primary key ``audio_hash`` (D20: cues belong to the audio). It goes through the file id,
+not a hash carried on ``PlayableFile``, because the player never sees a hash (D79) and this
+reads the file's *current* hash, so a hash a retag cleared correctly answers no cues."""
+
+_MAX_WARNED_RE_READ_HASHES = 4_096
+"""Bounds the warn-once memory below to about 240 hours of distinct songs (review M5)."""
+
+_warned_re_read_hashes: set[str] = set()
+"""Module-level state: which audio hashes have already warned at least once this app run
+that their stored row failed validation. The repository is built per connection, so this
+cannot live on the instance. Cleared once it grows past ``_MAX_WARNED_RE_READ_HASHES``."""
+
+
+def _log_reread_invalid(file_id: UUID, audio_hash: str, error: InvalidStreamValueError) -> None:
+    """Warn the first time this app run that ``audio_hash``'s stored row failed validation
+    (D85, review M5); every later sighting of the same audio, including a twin file that
+    shares it, logs at debug so a bad row cannot flood the log at every re-read."""
+    if len(_warned_re_read_hashes) >= _MAX_WARNED_RE_READ_HASHES:
+        _warned_re_read_hashes.clear()
+    first_sighting = audio_hash not in _warned_re_read_hashes
+    _warned_re_read_hashes.add(audio_hash)
+    log = logger.warning if first_sighting else logger.debug
+    log("stream_cue_reread_invalid", file_id=str(file_id), error=str(error))
+
 
 class PgPlayableScheduleRepository(PlayableScheduleRepository):
     """PostgreSQL implementation of :class:`PlayableScheduleRepository`."""
@@ -65,6 +97,16 @@ class PgPlayableScheduleRepository(PlayableScheduleRepository):
     def get_day(self, station_id: UUID, day: date) -> list[ScheduleItem]:
         rows = self._conn.execute(_DAY_SQL, {"station_id": station_id, "day": day}).fetchall()
         return [_to_item(row) for row in rows]
+
+    def file_cues(self, file_id: UUID) -> CuePoints | None:
+        row = self._conn.execute(_FILE_CUES_SQL, {"file_id": file_id}).fetchone()
+        if row is None:
+            return None
+        try:
+            return _points(row)
+        except InvalidStreamValueError as error:
+            _log_reread_invalid(file_id, row["audio_hash"], error)
+            return None
 
 
 def _to_item(row: DictRow) -> ScheduleItem:
@@ -133,19 +175,24 @@ def _to_valid_file(row: DictRow) -> PlayableFile | None:
         return None
 
 
+def _points(row: DictRow) -> CuePoints:
+    """Builds the cue points a ``stream_cues`` row describes; raises on an invalid row."""
+    return CuePoints(
+        cue_in_ms=row["cue_in_ms"],
+        cue_out_ms=row["cue_out_ms"],
+        fade_in_ms=row["fade_in_ms"],
+        fade_out_ms=row["fade_out_ms"],
+        start_next_ms=row["start_next_ms"],
+        gain_db=row["gain_db"],
+    )
+
+
 def _to_cues(row: DictRow) -> CuePoints | None:
     """The audio's cue points, or none. A row that fails validation is logged, not raised."""
     if row["cued_audio"] is None:
         return None
     try:
-        return CuePoints(
-            cue_in_ms=row["cue_in_ms"],
-            cue_out_ms=row["cue_out_ms"],
-            fade_in_ms=row["fade_in_ms"],
-            fade_out_ms=row["fade_out_ms"],
-            start_next_ms=row["start_next_ms"],
-            gain_db=row["gain_db"],
-        )
+        return _points(row)
     except InvalidStreamValueError as error:
         logger.warning(
             "schedule_cues_invalid",

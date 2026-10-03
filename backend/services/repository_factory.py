@@ -26,6 +26,7 @@ from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRep
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
+from backend.db.repositories.stream_cue_work import PgCueWorkRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
@@ -35,6 +36,7 @@ from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
+from backend.services.streaming.station_years import StationYearRepos
 
 
 @dataclass
@@ -88,7 +90,8 @@ class SystemRepos:
 
 @dataclass
 class StreamingRepos:
-    """Tune-in streaming repositories: the cue cache and the playable schedule reader.
+    """Tune-in streaming repositories: the cue cache, the playable schedule reader, and the
+    cue pre-computation work reader (``cue_work``).
 
     The reader checks no cue freshness (D20): a cue row for the final file's audio is used as
     it is, whatever its ``analyser_version``.
@@ -96,6 +99,7 @@ class StreamingRepos:
 
     cues: PgStreamCueRepository
     schedule: PgPlayableScheduleRepository
+    cue_work: PgCueWorkRepository
 
 
 class RepositoryFactory:
@@ -107,6 +111,7 @@ class RepositoryFactory:
     """
 
     def __init__(self, conn: psycopg.Connection[DictRow]) -> None:
+        self._conn = conn
         self.broadcast = BroadcastRepos(
             stations=PgBroadcastStationRepository(conn),
             playlists=PgBroadcastPlaylistRepository(conn),
@@ -140,6 +145,7 @@ class RepositoryFactory:
         self.streaming = StreamingRepos(
             cues=PgStreamCueRepository(conn),
             schedule=PgPlayableScheduleRepository(conn),
+            cue_work=PgCueWorkRepository(conn),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility
@@ -166,6 +172,11 @@ class RepositoryFactory:
         self.user_settings = self.system.user_settings
         self.system_logs = self.system.system_logs
 
+    def commit(self) -> None:
+        """Commit the request's connection now, ahead of an action that cannot be undone
+        (e.g. the sign-off's old clip file is deleted only after this commit lands, PG3/I1)."""
+        self._conn.commit()
+
     def m3u_repos(self) -> M3uRepos:
         """The repositories both M3U exports read."""
         return M3uRepos(
@@ -174,6 +185,10 @@ class RepositoryFactory:
             library_files=self.library.files,
             user_settings=self.system.user_settings,
         )
+
+    def station_year_repos(self) -> StationYearRepos:
+        """The repositories the station-year list reads (D70)."""
+        return StationYearRepos(stations=self.broadcast.stations, days=self.broadcast.days)
 
 
 @contextmanager

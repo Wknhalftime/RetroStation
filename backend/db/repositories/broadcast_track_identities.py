@@ -5,13 +5,18 @@ from uuid import UUID
 
 import psycopg
 
-from backend.db.repositories._pg_utils import format_embedding, parse_embedding
-from backend.domain.broadcast import BroadcastTrackIdentity
+from backend.db.repositories._pg_utils import (
+    format_embedding,
+    parse_embedding,
+    translate_lost_connection,
+)
+from backend.domain.broadcast import BroadcastStorageError, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_reasons import format_deferred_retry
 
 
+@translate_lost_connection(BroadcastStorageError)
 class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

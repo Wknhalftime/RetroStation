@@ -9,6 +9,30 @@ from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
 
+UPSERT_SQL = """INSERT INTO progress_tracking
+   (task_id, task_type, status, progress_data, started_at, updated_at, completed_at)
+   VALUES (%s, %s, %s, %s, %s, %s, %s)
+   ON CONFLICT (task_id) DO UPDATE SET
+     status = EXCLUDED.status,
+     progress_data = EXCLUDED.progress_data,
+     updated_at = EXCLUDED.updated_at,
+     completed_at = EXCLUDED.completed_at"""
+"""The one statement that writes a whole progress row: a write-only upsert (I6). Shared by
+the repository and telemetry's ``ProgressWriter`` (D77a), so both write the same columns."""
+
+
+def upsert_params(task: TaskProgress) -> tuple[object, ...]:
+    """``task`` as ``UPSERT_SQL``'s parameters, in column order."""
+    return (
+        task.task_id,
+        task.task_type.value,
+        task.status.value,
+        json.dumps(task.progress_data),
+        task.started_at,
+        task.updated_at,
+        task.completed_at,
+    )
+
 
 class PgTaskProgressRepository(TaskProgressRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
@@ -29,25 +53,7 @@ class PgTaskProgressRepository(TaskProgressRepository):
         )
 
     def upsert(self, task: TaskProgress) -> TaskProgress:
-        self._conn.execute(
-            """INSERT INTO progress_tracking
-               (task_id, task_type, status, progress_data, started_at, updated_at, completed_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (task_id) DO UPDATE SET
-                 status = EXCLUDED.status,
-                 progress_data = EXCLUDED.progress_data,
-                 updated_at = EXCLUDED.updated_at,
-                 completed_at = EXCLUDED.completed_at""",
-            (
-                task.task_id,
-                task.task_type.value,
-                task.status.value,
-                json.dumps(task.progress_data),
-                task.started_at,
-                task.updated_at,
-                task.completed_at,
-            ),
-        )
+        self._conn.execute(UPSERT_SQL, upsert_params(task))
         row = self._conn.execute(
             "SELECT * FROM progress_tracking WHERE task_id = %s", (task.task_id,)
         ).fetchone()

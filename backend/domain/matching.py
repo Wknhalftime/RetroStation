@@ -5,6 +5,15 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from backend.domain.enums import MatchTier, TargetType
+from backend.domain.system import StorageUnavailableError
+
+
+class MatchingError(Exception):
+    """Base class for matching-subdomain errors."""
+
+
+class MatchingStorageError(MatchingError, StorageUnavailableError):
+    """A matching repository lost its database connection mid-operation."""
 
 
 @dataclass

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from backend.domain.enums import CatalogSource, VersionType
+from backend.domain.system import StorageUnavailableError
 
 # Exactly the spelling MusicBrainz's lookup endpoints accept: a hyphenated
 # UUID, either case. Anything else (whitespace, braces, no hyphens) gets a
@@ -21,6 +22,10 @@ class CatalogError(Exception):
 
 class InvalidMusicBrainzIdError(CatalogError):
     """A value that MusicBrainz would reject as a malformed MBID."""
+
+
+class CatalogStorageError(CatalogError, StorageUnavailableError):
+    """A catalog repository lost its database connection mid-operation."""
 
 
 @dataclass(frozen=True)

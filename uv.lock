@@ -2370,6 +2370,7 @@ dependencies = [
     { name = "huey" },
     { name = "mutagen" },
     { name = "pgvector" },
+    { name = "psutil" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic-settings" },
@@ -2392,7 +2393,6 @@ dev = [
     { name = "pip-audit" },
     { name = "poethepoet" },
     { name = "pre-commit" },
-    { name = "psutil" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -2403,6 +2403,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "syrupy" },
+    { name = "types-psutil" },
     { name = "vulture" },
 ]
 
@@ -2422,7 +2423,7 @@ requires-dist = [
     { name = "pip-audit", marker = "extra == 'dev'" },
     { name = "poethepoet", marker = "extra == 'dev'" },
     { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "psutil", marker = "extra == 'dev'", specifier = ">=7.2.2" },
+    { name = "psutil", specifier = ">=7.2.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "psycopg-pool", specifier = ">=3.1" },
     { name = "pydantic-settings" },
@@ -2441,6 +2442,7 @@ requires-dist = [
     { name = "structlog" },
     { name = "syrupy", marker = "extra == 'dev'" },
     { name = "tenacity", specifier = ">=9.1.4" },
+    { name = "types-psutil", marker = "extra == 'dev'" },
     { name = "unidecode", specifier = ">=1.3" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "vulture", marker = "extra == 'dev'" },
@@ -2964,6 +2966,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f5/24/cb09efec5cc954f7f9b930bf8279447d24618bb6758d4f6adf2574c41780/typer-0.24.1.tar.gz", hash = "sha256:e39b4732d65fbdcde189ae76cf7cd48aeae72919dea1fdfc16593be016256b45", size = 118613, upload-time = "2026-02-21T16:54:40.609Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/91/48db081e7a63bb37284f9fbcefda7c44c277b18b0e13fbc36ea2335b71e6/typer-0.24.1-py3-none-any.whl", hash = "sha256:112c1f0ce578bfb4cab9ffdabc68f031416ebcc216536611ba21f04e9aa84c9e", size = 56085, upload-time = "2026-02-21T16:54:41.616Z" },
+]
+
+[[package]]
+name = "types-psutil"
+version = "7.2.2.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/97/0a/f48b9b0ab5ba8599fd117309e345152bf82c756c72be2ff0f635780c2792/types_psutil-7.2.2.20260906.tar.gz", hash = "sha256:93abf22cf9a62b915f724e433bde702995ac274865425fd4a76d1d9b5828da1a", size = 27396, upload-time = "2026-09-06T06:35:24.499Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/8d/81a86107486e1c23f5ca21bea1e9e5b18a50754242e7a0b82f41f9ae8384/types_psutil-7.2.2.20260906-py3-none-any.whl", hash = "sha256:db00baf7f96c3f63421c4d3d68d373923094a0dfddf13e922c5c5fbc42488159", size = 33383, upload-time = "2026-09-06T06:35:23.575Z" },
 ]
 
 [[package]]

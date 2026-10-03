@@ -20,6 +20,7 @@ from backend.domain.library import (
     RemapTargetNotPresentError,
     RemapTargetUngroupedError,
 )
+from backend.domain.system import StorageUnavailableError
 from backend.services.missing_file_reconciliation_service import (
     ReconciliationRepos,
     delete_missing_files,
@@ -123,7 +124,10 @@ def get_missing_files(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> MissingFilePageOut:
     """A page of missing rows with their work, matches and candidate successors."""
-    page = list_missing_files(offset, limit, repos.missing_files, repos.library_files)
+    try:
+        page = list_missing_files(offset, limit, repos.missing_files, repos.library_files)
+    except StorageUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from exc
     return MissingFilePageOut.of(page)
 
 
@@ -136,6 +140,8 @@ def remap_file(_token: Token, file_id: UUID, body: RemapIn, recon: ReconRepos) -
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except (RemapTargetNotPresentError, RemapTargetUngroupedError) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except StorageUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from exc
 
 
 @router.delete("/missing-files", response_model=DeletionOut)
@@ -146,6 +152,8 @@ def delete_files(_token: Token, body: DeleteIn, recon: ReconRepos, repos: SyncRe
     except MissingFileChangedError as exc:
         # A scan restored a row mid-delete; the dependency rolls the whole request back.
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except StorageUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from exc
     return DeletionOut(
         deleted=result.deleted,
         matches_released=result.matches_released,

@@ -7,10 +7,14 @@ station clock: ``station_time = real_time + clock_offset``.
 
 from __future__ import annotations
 
+import calendar
+import json
 import math
+import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from enum import StrEnum
 from uuid import UUID
 
 from backend.domain.library import AudioHash
@@ -36,6 +40,34 @@ class EndOfScheduleError(StreamingError):
 
 class StaleScheduleError(StreamingError):
     """A position points past the end of its day: the day's log changed under the session."""
+
+
+class StreamReadError(StreamingError):
+    """The database could not answer a stream read within its bounds, or at all (D88)."""
+
+
+class SignOffError(StreamingError):
+    """Base class for the sign-off clip's refusals and storage failures (D26; PG3)."""
+
+
+class UnsupportedClipError(SignOffError):
+    """The clip's content is audio, but not FLAC, MP3 or WAV (I2)."""
+
+
+class ClipTooLargeError(SignOffError):
+    """The clip is larger than ``MAX_CLIP_BYTES`` (PG3, M4)."""
+
+
+class ClipLengthError(SignOffError):
+    """The clip lasts less than 1 second or more than 5 minutes (PG3)."""
+
+
+class UnreadableClipError(SignOffError):
+    """The clip's content is not audio that can be read (I2)."""
+
+
+class ClipStorageError(SignOffError):
+    """The clip or its setting could not be stored (I3): a disk or database failure."""
 
 
 def to_ms(delta: timedelta) -> int:
@@ -97,9 +129,26 @@ class CuePoints:
 CUE_ANALYSER_VERSION = 1
 """Version of the cue analysis in force, recorded on each row; never checked on read (D20).
 
-Policy (D20): an analyser change purges the old rows once. That purge belongs to a later PR;
-nothing here enforces it.
+Policy (D20): an analyser change purges the old rows once. The purge exists now
+(``StreamCueRepository.purge_other_versions``, PR E1): cue pre-computation runs it at the
+start of every run.
 """
+
+
+@dataclass(frozen=True)
+class CueCandidate:
+    """Audio that needs analysis (D20), and the library file it is read from.
+
+    A read of library data, not validated: an odd ``duration_ms`` means no fallback row
+    (D52, D55), and an unknown stat means the hash is trusted (D64).
+    """
+
+    file_id: UUID
+    path: str
+    audio_hash: AudioHash
+    duration_ms: int | None
+    file_size: int | None
+    file_mtime_ns: int | None
 
 
 @dataclass(frozen=True)
@@ -184,6 +233,20 @@ class PlayableFile:
 
     def is_playable(self, timing: StreamTiming) -> bool:
         return self.span_ms() > 0 and self.tail_fits(0, timing)
+
+    def cues_to_play(self, offset_ms: int, timing: StreamTiming) -> CuePoints | None:
+        """The cues to play from ``offset_ms`` after cue-in: the file's own when they leave
+        D9's minimum (``tail_fits``), otherwise none, so D23's values play instead (D80)."""
+        if self.cues is not None and self.tail_fits(offset_ms, timing):
+            return self.cues
+        return None
+
+    def with_stored_cues(self, cues: CuePoints | None, timing: StreamTiming) -> PlayableFile:
+        """This file with the cues stored for its audio now (D85): a row makes it cued, no
+        row makes it uncued, unless the change would leave it unplayable (D9); then it is
+        returned unchanged, with the values read at tune-in."""
+        candidate = replace(self, cues=cues)
+        return candidate if candidate.is_playable(timing) else self
 
 
 @dataclass(frozen=True)
@@ -274,3 +337,169 @@ class Bookmark:
         """True once the station clock has passed the bookmarked position."""
         _require_naive("Bookmark.is_expired", now=now)
         return now + self.clock_offset >= self.expires_at
+
+
+@dataclass(frozen=True)
+class StationYear:
+    """A station-year a listener can tune in to, and the days its log covers (D70).
+
+    Coverage is days logged only ("362 of 365 days"): no per-day file check and no
+    whole-year percentage.
+    """
+
+    call_letters: str
+    year: int
+    days_logged: int
+
+    def __post_init__(self) -> None:
+        if not self.call_letters:
+            raise InvalidStreamValueError("StationYear.call_letters must not be empty")
+        if not 1 <= self.year <= 9999:
+            raise InvalidStreamValueError(f"StationYear.year must be 1..9999, got {self.year}")
+        if not 1 <= self.days_logged <= self.days_in_year:
+            raise InvalidStreamValueError(
+                f"StationYear.days_logged must be 1..{self.days_in_year}, got {self.days_logged}"
+            )
+
+    @property
+    def days_in_year(self) -> int:
+        """366 in a leap year, else 365."""
+        return 366 if calendar.isleap(self.year) else 365
+
+
+@dataclass(frozen=True)
+class CueCoverage:
+    """Cue coverage (D77, D89; PG7): the audio a listener may hear, grouped by cue state.
+
+    ``analysable`` is the present audio with an audio hash (twins count once, D20);
+    ``ready`` and ``failed`` are its settled audio, apart (a real row vs. a fallback row,
+    D52/D56); ``unhashed`` is present files with no audio hash, counted per file (D20: they
+    never get cues). A row for audio no present file carries is not counted (D20).
+    """
+
+    analysable: int
+    ready: int
+    failed: int
+    unhashed: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative(
+            "CueCoverage",
+            analysable=self.analysable,
+            ready=self.ready,
+            failed=self.failed,
+            unhashed=self.unhashed,
+        )
+        if self.ready + self.failed > self.analysable:
+            raise InvalidStreamValueError(
+                f"CueCoverage.analysable ({self.analysable}) must be >= ready + failed "
+                f"({self.ready + self.failed})"
+            )
+
+    @property
+    def settled(self) -> int:
+        """Analysable audio with a cue row, ready or failed (D20: a row means settled)."""
+        return self.ready + self.failed
+
+    @property
+    def waiting(self) -> int:
+        """Analysable audio with no cue row yet: exactly what needs analysis (D20)."""
+        return self.analysable - self.settled
+
+
+MAX_CLIP_BYTES = 25 * 2**20
+"""The largest sign-off clip accepted, in bytes: exactly 25 MiB, 26 214 400 (PG3, M4)."""
+
+MIN_CLIP_MS = 1_000
+"""The shortest sign-off clip, in milliseconds: 1 second (PG3)."""
+
+MAX_CLIP_MS = 300_000
+"""The longest sign-off clip, in milliseconds: 5 minutes (PG3)."""
+
+MAX_SIGN_OFF_NAME = 255
+"""The longest name a sign-off clip is shown under, in characters."""
+
+
+class ClipFormat(StrEnum):
+    """Audio container of a sign-off clip (PG3): detected from content, never from a name."""
+
+    FLAC = "flac"
+    MP3 = "mp3"
+    WAV = "wav"
+
+
+@dataclass(frozen=True)
+class ProbedClip:
+    """What probing a candidate sign-off clip's bytes finds (I2): its detected format and
+    length, never read from a file name or extension."""
+
+    format: ClipFormat
+    span_ms: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative("ProbedClip", span_ms=self.span_ms)
+
+
+SIGN_OFF_FILE_NAME = re.compile(r"^[0-9a-f]{16}\.(flac|mp3|wav)$")
+"""A stored sign-off clip's file name: 16 lowercase hex characters, then its format (PG3)."""
+
+
+@dataclass(frozen=True)
+class SignOff:
+    """The user's sign-off clip (D26; PG3): stored content-named, so its file name alone can
+    never escape the sign-off folder.
+
+    ``file_name`` is ``<16 lowercase hex characters>.<format>``, with the extension matching
+    ``format``; ``span_ms`` is the clip's length, 1 s to 5 min; ``name`` is the name shown on
+    the page, 1-255 characters (the upload's own name, trimmed).
+    """
+
+    file_name: str
+    format: ClipFormat
+    span_ms: int
+    name: str
+
+    def __post_init__(self) -> None:
+        match = SIGN_OFF_FILE_NAME.fullmatch(self.file_name)
+        if match is None or match.group(1) != self.format.value:
+            raise InvalidStreamValueError(
+                f"SignOff.file_name must be 16 lowercase hex characters plus "
+                f".{self.format.value}, got {self.file_name!r}"
+            )
+        if not MIN_CLIP_MS <= self.span_ms <= MAX_CLIP_MS:
+            raise InvalidStreamValueError(
+                f"SignOff.span_ms must be {MIN_CLIP_MS}..{MAX_CLIP_MS}, got {self.span_ms}"
+            )
+        if not 1 <= len(self.name) <= MAX_SIGN_OFF_NAME:
+            raise InvalidStreamValueError(
+                f"SignOff.name must be 1..{MAX_SIGN_OFF_NAME} characters, got {len(self.name)}"
+            )
+
+    def to_setting(self) -> str:
+        """This clip as the JSON stored under the ``stream_sign_off`` user setting."""
+        return json.dumps(
+            {
+                "file_name": self.file_name,
+                "format": self.format.value,
+                "span_ms": self.span_ms,
+                "name": self.name,
+            }
+        )
+
+    @classmethod
+    def from_setting(cls, value: str) -> SignOff:
+        """The clip stored under ``stream_sign_off``; refused, never half-read, if malformed."""
+        try:
+            data = json.loads(value)
+            return cls(
+                file_name=data["file_name"],
+                format=ClipFormat(data["format"]),
+                span_ms=data["span_ms"],
+                name=data["name"],
+            )
+        except InvalidStreamValueError:
+            raise
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as bad_setting:
+            raise InvalidStreamValueError(
+                f"SignOff: not a sign-off setting ({bad_setting})"
+            ) from bad_setting

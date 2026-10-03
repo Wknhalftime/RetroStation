@@ -5,6 +5,15 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from backend.domain.enums import FileStatus, SelectionMethod
+from backend.domain.system import StorageUnavailableError
+
+
+class CurationError(Exception):
+    """Base class for curation-subdomain (song masters, format overrides) errors."""
+
+
+class CurationStorageError(CurationError, StorageUnavailableError):
+    """A curation repository lost its database connection mid-operation."""
 
 
 @dataclass

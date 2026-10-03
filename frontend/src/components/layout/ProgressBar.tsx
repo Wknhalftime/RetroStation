@@ -5,6 +5,8 @@ import type { TaskInfo } from "@/lib/schemas/tasks";
 import { getWarningText } from "@/lib/taskWarnings";
 import { cn } from "@/lib/utils";
 
+export const CUE_RUN_LABEL = "Measuring songs for streaming";
+
 const TASK_TYPE_LABELS: Record<string, string> = {
   scan: "Scanning library",
   library_enrichment: "Enriching library metadata",
@@ -14,13 +16,17 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   matching: "Matching tracks",
   m3u_export: "Exporting M3U",
   rules_apply: "Applying rules",
+  // D89: a cue run shows in the bottom bar like scans and enrichment, with a
+  // label of its own — never the raw task type (plan manual check 6's words,
+  // shared with the Streaming page).
+  cue_analysis: CUE_RUN_LABEL,
 };
 
 function getLabel(taskType: string): string {
   return TASK_TYPE_LABELS[taskType] ?? taskType;
 }
 
-function getPercent(progressData: Record<string, unknown>): number | null {
+export function getPercent(progressData: Record<string, unknown>): number | null {
   const total = progressData["total"];
   const processed = progressData["processed"];
   if (typeof total === "number" && typeof processed === "number" && total > 0) {
@@ -69,10 +75,7 @@ function TaskProgressRow({ task }: { task: TaskInfo }) {
       )}
 
       {task.status === "completed" && warningText !== null && (
-        <span
-          className="text-xs text-amber-600 ml-1 truncate max-w-md"
-          title={warningText}
-        >
+        <span className="text-xs text-amber-600 ml-1 truncate max-w-md" title={warningText}>
           — {warningText}
         </span>
       )}
@@ -157,10 +160,7 @@ export function ProgressBar() {
         )}
 
         {status === "COMPLETED" && warningText !== null && (
-          <span
-            className="text-xs text-amber-600 ml-1 truncate max-w-md"
-            title={warningText}
-          >
+          <span className="text-xs text-amber-600 ml-1 truncate max-w-md" title={warningText}>
             — {warningText}
           </span>
         )}
