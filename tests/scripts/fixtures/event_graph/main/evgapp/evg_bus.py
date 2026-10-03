@@ -22,3 +22,7 @@ def on_batch_finished(payload: dict[str, str]) -> None:
 
 def wire() -> None:
     subscribe("batch.finished", on_batch_finished)
+
+
+def wire_inline() -> None:
+    subscribe("batch.finished", lambda payload: print(payload["batch_id"]))

@@ -18,11 +18,13 @@
     "P1 review.3 diff -> audit/eda/spec-diff.md: 8 disagreements D1-D8, not resolved",
     "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)",
     "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py",
-    "D1-D8 best-practice review -> audit/eda/d1-d8-review.md: D1,D3,D4,D6,D8 best practice; D5,D7 acceptable; D2 concern (framework signals counted as EVENT); 3 whole-spec observations; nothing applied"
+    "D1-D8 best-practice review -> audit/eda/d1-d8-review.md: D1,D3,D4,D6,D8 best practice; D5,D7 acceptable; D2 concern (framework signals counted as EVENT); 3 whole-spec observations; nothing applied",
+    "Gate A changes (Lance 2026-10-03: approved review D1/D4/D7 tweaks and the --check change; two-instance reading delegated): header.excluded_dirs; subscribe_handler unresolved row (evg_bus.py:28); schedule = ast.get_source_segment; --check also gates unresolved_dispatch identity (reason, producer, name); tasks carry instance, registered is per instance; new duo/ root (5 files). Not adopted: parse-failure handling, vanished-hit report. D2 framework tag deferred with the signals question.",
+    "red run after Gate A changes: 56 tests, 10 failed + 46 errors, all because scripts/audit/event_graph.py is missing; expectations 73 rows; independent check of the 5 new cases agreed (N1-N5)"
   ],
-  "next_step": "Gate A: wait for the user's ruling on options, D1-D8, and the spec lock (.claude/hooks/frozen_relock.py)",
+  "next_step": "Session B after the lock: build scripts/audit/event_graph.py against the locked spec",
   "open_stops": [
-    "GATE A: Lance to rule on the remaining review suggestions in audit/eda/d1-d8-review.md (D1/D4/D7 tweaks, observations 1-3; D2 tag deferred with the signals question) and the two-instance question, then lock the spec with the relock hook"
+    "GATE A: spec ready to lock; Lance to record the EV01 decision in audit/rulings.jsonl and lock the spec with the relock hook"
   ],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -176,7 +178,7 @@
     },
     "spec_expectation_rows": {
       "command": "wc -l audit/eda/spec-expectations.jsonl",
-      "value": 68
+      "value": 73
     },
     "independent_rows": {
       "command": "wc -l audit/eda/spec-expectations-independent.jsonl",
@@ -188,7 +190,7 @@
     },
     "spec_tests": {
       "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q -p no:randomly",
-      "value": "51 tests: 10 failed + 41 errors, all 'can't open file ... event_graph.py'"
+      "value": "56 tests: 10 failed + 46 errors, all script missing"
     }
   },
   "proposed_options": {
@@ -229,7 +231,7 @@
     "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Not yet in audit/rulings.jsonl (outside this job's allowed files): Lance to record it as an AUD-R012 amendment or a new ruling.",
     "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
     "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text.",
-    "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock.",
+    "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock. RESOLVED at Gate A (delegated by Lance 2026-10-03): registered is per instance; duo/ fixture covers it.",
     "OPEN, deferred to Session C (Lance 2026-10-03): Huey signals (SIGNAL_ENQUEUED/EXECUTING/COMPLETE/ERROR/EXPIRED/REVOKED...) are not used anywhere in backend; task lifecycle is reported by per-task envelopes (task_run, task_failure_telemetry, own try/except; AUD-R011 keeps them distinct). No recorded decision against signals was found (rg over the repo, git log --grep=signal). Discrepancy noted: design-pattern-signals.md asks for an Observer for cross-cutting logging, and signals are a ready-made lifecycle Observer. Whether framework signals should count as EVENT (D2 review concern) stays open with this question; D2 stays as written, and today there are zero signal edges, so the spec is unaffected."
   ],
   "rules_added_dropped": "none added, none dropped, none marked not implemented",

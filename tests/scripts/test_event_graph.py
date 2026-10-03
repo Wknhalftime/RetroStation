@@ -22,6 +22,7 @@ _SCRIPT = _REPO / "scripts" / "audit" / "event_graph.py"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "event_graph"
 MAIN = _FIXTURES / "main"
 ALT = _FIXTURES / "alt"
+DUO = _FIXTURES / "duo"
 
 GUARD = "evgapp.evg_enqueue_chain:enqueue_or_log"
 MAIN_OPTS = [
@@ -97,6 +98,12 @@ def bare_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
 @pytest.fixture(scope="module")
 def alt_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
     return _analyse(ALT, tmp_path_factory.mktemp("alt"))
+
+
+@pytest.fixture(scope="module")
+def duo_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    """Two Huey instances in one tree."""
+    return _analyse(DUO, tmp_path_factory.mktemp("duo"))
 
 
 # ---- rules EV01-EV10: one hit and one near-miss each ----
@@ -380,9 +387,22 @@ def test_unresolved_dispatch_is_listed_never_dropped(graph: Any) -> None:
         (api, 21, "task_table", "table_only_task"),
         (api, 75, "getattr", None),
         (api, 83, "task_as_value", "chain_head_task"),
+        ("evgapp/evg_bus.py", 28, "subscribe_handler", None),
     }
     producers = {u["producer"] for u in graph["unresolved_dispatch"] if u["line"] == 21}
     assert producers == {f"{API}:<module>"}
+
+
+def test_unresolvable_subscribe_handler_is_unresolved_not_an_edge(graph: Any) -> None:
+    # case UD-subscribe-handler
+    subscribers = {
+        e["consumer"]
+        for e in graph["edges"]
+        if e["kind"] == "SUBSCRIBE" and e["producer"] == "topic:batch.finished"
+    }
+    assert subscribers == {f"{BUS}:on_batch_finished"}
+    rows = [u for u in graph["unresolved_dispatch"] if u["reason"] == "subscribe_handler"]
+    assert [u["producer"] for u in rows] == [f"{BUS}:wire_inline"]
 
 
 def test_task_nodes(graph: Any) -> None:
@@ -390,6 +410,7 @@ def test_task_nodes(graph: Any) -> None:
     tail = _task(graph, "chain_tail_task")
     assert (tail["module"], tail["kind"], tail["schedule"]) == (CHAIN, "task", None)
     assert (tail["retries"], tail["envelope"], tail["registered"]) == (0, "none", True)
+    assert tail["instance"] == "evgapp.evg_huey_app:huey"
     sweep = _task(graph, "sweep_periodic")
     assert (sweep["kind"], sweep["schedule"]) == ("periodic", 'crontab(minute="*/4")')
     own = _task(graph, "own_envelope_task")
@@ -399,6 +420,29 @@ def test_task_nodes(graph: Any) -> None:
     assert _task(graph, "orphan_task")["registered"] is False
     assert _task(graph, "service_heavy_task")["body_lines"] == 5
     assert "on_task_done" not in {t["name"] for t in graph["nodes"]["tasks"]}
+
+
+def test_each_task_belongs_to_the_instance_that_decorates_it(duo_graph: Any) -> None:
+    # case DUO-instance
+    instances = {t["name"]: t["instance"] for t in duo_graph["nodes"]["tasks"]}
+    assert instances == {
+        "lib_task": "evgduo.evg_duo_main_app:huey",
+        "cue_task": "evgduo.evg_duo_cue_app:cue",
+        "misrouted_task": "evgduo.evg_duo_cue_app:cue",
+    }
+
+
+def test_registered_means_imported_by_its_own_instances_app(duo_graph: Any) -> None:
+    # case DUO-registered (misrouted_task's module is imported by the other app only)
+    registered = {t["name"]: t["registered"] for t in duo_graph["nodes"]["tasks"]}
+    assert registered == {"lib_task": True, "cue_task": True, "misrouted_task": False}
+    unregistered = {
+        h["subject"]
+        for h in duo_graph["hits"]
+        if h["code"] == "EV06" and h["detail"] == "unregistered_module"
+    }
+    assert unregistered == {"evgduo.tasks.evg_duo_misrouted_tasks"}
+    assert not [h for h in duo_graph["hits"] if h["code"] == "EV05"]
 
 
 def test_producer_layers(graph: Any) -> None:
@@ -437,7 +481,7 @@ def test_counts(graph: Any) -> None:
         "rule.EV08": 19,
         "rule.EV09": 2,
         "rule.EV10": 23,
-        "unresolved_dispatch": 4,
+        "unresolved_dispatch": 5,
     }
 
 
@@ -497,6 +541,18 @@ def test_header_records_every_option(graph: Any) -> None:
     assert options["ev01_scope"] == ["unguarded_head_task"]
 
 
+def test_header_records_the_excluded_directories(graph: Any) -> None:
+    # case HEADER-excluded
+    assert graph["header"]["excluded_dirs"] == [
+        ".*",
+        "__pycache__",
+        "frontend",
+        "htmlcov",
+        "node_modules",
+        "tests",
+    ]
+
+
 # ---- --check ----
 
 
@@ -543,6 +599,14 @@ def test_check_is_clean_when_a_hit_goes_away(tree: Path) -> None:
     assert _check(tree) == 0
 
 
+def test_check_fails_on_new_unresolved_dispatch(tree: Path) -> None:
+    # case CHECK-unresolved (a getattr dispatch adds no hit, only an unresolved row)
+    path = tree / "evgapp/routers/evg_api.py"
+    extra = "\n\ndef dispatch_again(name: str) -> None:\n    getattr(evg_chain_tasks, name)()\n"
+    path.write_text(path.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    assert _check(tree) == 1
+
+
 def test_missing_root_is_an_analysis_error(tmp_path: Path) -> None:
     # case EXIT-2
     proc = _run(tmp_path / "no-such-root", tmp_path / "out.json")
@@ -560,6 +624,7 @@ def test_analyzer_source_names_no_fixture() -> None:
     assert "evg_" not in source
     assert "evgapp" not in source
     assert "evgalt" not in source
+    assert "evgduo" not in source
     for path in _FIXTURES.rglob("*.py"):
         assert path.name not in source
         assert path.stem not in source

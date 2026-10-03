@@ -31,10 +31,11 @@ the user rules at Gate A.
 - Imports resolve absolute and relative (`from ..tasks.x import t`, `from . import m`,
   `import a.b as m`), at module level or inside a function.
 - Huey instance: module-level `NAME = <callee ending in "Huey">(...)` whose callee is
-  imported from `huey`. Its module is the huey app. `results` is the keyword's literal
-  value; absent means Huey's default, True.
+  imported from `huey`. A tree may hold several; each instance's module is its app module.
+  `results` is the keyword's literal value; absent means Huey's default, True.
 - Task: a function decorated `@<instance>.task(...)` (kind `task`) or
   `@<instance>.periodic_task(...)` (kind `periodic`), the instance resolved through imports.
+  The task belongs to that instance (`instance: appmodule:NAME`).
 
 ## Output (`schema_version: 1`)
 
@@ -44,15 +45,18 @@ durations, host names or absolute paths; `file` values are POSIX relative to the
 
 - `header.options`: every option. `root` is recorded as `"."`; other path options (`out`,
   `check`) by file name only; lists sorted.
-- `nodes.tasks[]` sorted by (module, name): `name, module, file, line, kind, schedule`
-  (source text of the periodic decorator's first argument, else null), `retries` (keyword
-  literal, default 0), `envelope`, `body_lines`, `registered`, `params` [{name,
-  annotation}].
+- `header.excluded_dirs`: the directory names never scanned, sorted: `.*` (any name starting
+  with `.`), `__pycache__`, `frontend`, `htmlcov`, `node_modules`, `tests`.
+- `nodes.tasks[]` sorted by (module, name): `name, module, file, line, kind, instance,
+  schedule` (`ast.get_source_segment` of the periodic decorator's first positional
+  argument, else null), `retries` (keyword literal, default 0), `envelope`, `body_lines`,
+  `registered`, `params` [{name, annotation}].
   - envelope: a `with` item calling a function resolved to a def named `task_run` ->
     `task_run`; else `task_failure_telemetry` -> that; else a `try` with a handler in the
     body -> `own`; else `none`. Nested defs are not the task body.
   - body_lines = def `end_lineno` - first body statement `lineno` + 1.
-  - registered: the task's module is imported by the huey app module.
+  - registered: the task's module is imported by the app module of the task's own
+    instance (an import by another instance's app does not count).
 - `nodes.producers[]` sorted by qualname: `qualname, layer, file, line` for every code
   location that is an edge producer. layer: function named `lifespan` -> `lifespan`; else
   the first directory segment of the file in {routers: router, tasks: task, services:
@@ -75,7 +79,9 @@ durations, host names or absolute paths; `file` values are POSIX relative to the
       `pg-channel:<name>` -> enclosing. Case-insensitive.
     - `--publish-fn Q`: a call resolved to Q -> PUBLISH enclosing -> `topic:<first arg
       literal>`. `--subscribe-fn Q`: a call resolved to Q -> SUBSCRIBE `topic:<first arg>` ->
-      handler (second arg resolved to `module:qualname`).
+      handler (second arg resolved to `module:qualname`). A handler that does not resolve
+      (lambda, attribute, partial) makes no edge; it is an `unresolved_dispatch` row with
+      reason `subscribe_handler`, producer = enclosing, name null.
   - POLL: a `while`/`for` loop whose body (not nested defs) calls `sleep` (any receiver)
     and calls `.execute/.executemany/.fetchone/.fetchall/.fetchmany`. Producer = enclosing;
     consumer `table:<name>` from the first `FROM|UPDATE|INTO <name>` in a string literal
@@ -87,7 +93,8 @@ durations, host names or absolute paths; `file` values are POSIX relative to the
   reason, name`. reason `getattr` (getattr on a module defining tasks; name null),
   `task_table` (a task name inside a dict/list/set/tuple literal; one row per task),
   `task_as_value` (any other load of a task name: argument to a non-guard call,
-  assignment, return). Never dropped.
+  assignment, return), `subscribe_handler` (above). Never dropped. Identity for `--check`
+  = (reason, producer, name).
 - `hits[]` sorted by (code, subject): `code, class, subject, file, line` plus extras.
   Identity = (code, subject). No severity.
 
@@ -98,7 +105,7 @@ durations, host names or absolute paths; `file` values are POSIX relative to the
 | EV03 | inventory | `module -> task` | a file under services/db/repositories/domain/playout that imports or calls a task; one per (module, task) |
 | EV04 | inventory | `a -> b -> a` | each elementary cycle of the task graph (ENQUEUE/DEFERRED, producer task -> consumer task), rotated to start at the smallest name |
 | EV05 | inventory | `producer -> task` / `appmodule:instance` | each QUERY edge; a Huey instance whose results is not literal False |
-| EV06 | inventory | `module` / `module:task` | a module defining tasks not imported by the huey app (`detail: unregistered_module`); a task of kind task with no ENQUEUE/DEFERRED/INLINE edge in (`detail: no_producer`, extra `referenced_in_unresolved_dispatch`) |
+| EV06 | inventory | `module` / `module:task` | a module defining tasks not imported by the app module of those tasks' instance (`detail: unregistered_module`); a task of kind task with no ENQUEUE/DEFERRED/INLINE edge in (`detail: no_producer`, extra `referenced_in_unresolved_dispatch`) |
 | EV07 | inventory | `module:task(param)` | a param annotated with anything but str, int, float, bool, None, a union of those, or list[X] / dict[X, Y] with X, Y among them |
 | EV08 | metric | `module:task` | every task; `value: {body_lines, service_calls}`; service_calls = distinct callees resolved to a def in a module with a `services` segment |
 | EV09 | inventory | `producer` / `module:task` | each POLL edge; a periodic task with an `if`/`while` whose test contains a call or a name assigned in the task body |
@@ -116,5 +123,5 @@ included.
   listing ends with `N more (--offset M)`. `--node` prints each in/out edge as
   `KIND producer -> consumer`. `--chains` prints the longest simple paths of the task
   graph and every cycle, as `a -> b -> c`.
-- `--check BASELINE`: BASELINE is an earlier output; exit 1 if any current hit identity is
-  not in it; lines are ignored.
+- `--check BASELINE`: BASELINE is an earlier output; exit 1 if any current hit identity or
+  any current `unresolved_dispatch` identity is not in it; lines are ignored.
