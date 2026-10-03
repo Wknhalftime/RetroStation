@@ -32,8 +32,10 @@ function NoMeter() {
 }
 
 function MeterFigures({ meter }: { meter: ResourceMeterData }) {
-  const { open_streams, streams, cost, machine, suggested_max, limited_by } = meter;
+  const { open_streams, streams, cost, machine, suggested_max, limited_by, budget } = meter;
   const limitedByLabel = limited_by === "processor" ? "processor" : "memory";
+  const cpuSharePercent = Math.round(budget.cpu_share * 100);
+  const memorySharePercent = Math.round(budget.memory_share * 100);
 
   return (
     <div className="space-y-3 text-sm text-gray-700">
@@ -61,12 +63,19 @@ function MeterFigures({ meter }: { meter: ResourceMeterData }) {
 
       <p className="text-xs text-gray-500">
         Machine: {machine.threads} threads, {mb(machine.memory_total_mb)} total memory (
-        {mb(machine.memory_available_mb)} available).
+        {mb(machine.memory_available_mb)} available),{" "}
+        {machine.cpu_percent === null
+          ? "still measuring its own load."
+          : `currently about ${pct(machine.cpu_percent)} CPU.`}
       </p>
 
       <p className="text-xs text-gray-500">
         Suggested limit: {suggested_max} listeners, limited by {limitedByLabel}. Disk is not
         counted.
+      </p>
+
+      <p className="text-xs text-gray-500">
+        Budget: {cpuSharePercent}% of the processor threads, {memorySharePercent}% of the memory.
       </p>
     </div>
   );

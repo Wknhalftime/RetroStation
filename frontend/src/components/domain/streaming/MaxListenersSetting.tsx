@@ -143,17 +143,21 @@ export function MaxListenersSetting() {
       <p className="mt-1 text-xs text-gray-400">
         The most listeners allowed at once. Lowering it does not stop anyone already listening.
       </p>
-      {aboveSuggestion && (
-        <p role="alert" className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-700">
-          Above the suggested maximum of {suggested} listeners for this machine right now (half the
-          processor threads, a quarter of the memory — disk is not counted). It is allowed; this
-          machine may run short under load.
-        </p>
-      )}
-      {problem && (
-        <p role="alert" className="mt-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
-          {problem}
-        </p>
+      {(aboveSuggestion || problem) && (
+        // One alert region, not two: a live suggestion warning and a stored/refused problem
+        // are two different reasons to warn the user, but they must not become two competing
+        // role="alert" elements at once — a test (or a screen reader) asking for "the alert"
+        // must find exactly one.
+        <div role="alert" className="mt-2 space-y-2">
+          {aboveSuggestion && (
+            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-700">
+              Above the suggested maximum of {suggested} listeners for this machine right now (half
+              the processor threads, a quarter of the memory — disk is not counted). It is allowed;
+              this machine may run short under load.
+            </p>
+          )}
+          {problem && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{problem}</p>}
+        </div>
       )}
     </div>
   );
