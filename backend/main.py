@@ -50,6 +50,7 @@ from backend.services.streaming.service import (
     StreamService,
     StreamServiceConfig,
 )
+from backend.services.streaming.sign_off import sign_off_folder
 from backend.services.streaming.watchdog import run_freeze_watchdog
 from backend.tasks.stream_cue_tasks import request_cue_analysis
 from backend.websocket import websocket_endpoint
@@ -187,13 +188,20 @@ def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> Strea
     )
 
 
-def _stream_service(ports: StreamPorts, settings: Settings, logs: Path) -> StreamService:
-    """The stream service, reading PostgreSQL and calling back on the API's own bind (D24)."""
-    return StreamService(
-        ports,
-        BookmarkStore(),
-        StreamServiceConfig(callback_base_url(settings.server_host, settings.server_port), logs),
+def stream_service_config(settings: Settings, logs: Path) -> StreamServiceConfig:
+    """The stream service's config: engines call back on the API's own bind (D24) and log to
+    ``logs``; the user's sign-off clip is read from the folder its upload writes (D26, design
+    note 6). Production ships no default clip, so ``final_clip`` stays ``None``."""
+    return StreamServiceConfig(
+        callback_base_url(settings.server_host, settings.server_port),
+        logs,
+        sign_off_dir=sign_off_folder(settings.stream_work_dir),
     )
+
+
+def _stream_service(ports: StreamPorts, settings: Settings, logs: Path) -> StreamService:
+    """The stream service, reading PostgreSQL."""
+    return StreamService(ports, BookmarkStore(), stream_service_config(settings, logs))
 
 
 def _report_watchdog_end(watchdog: asyncio.Task[None]) -> None:

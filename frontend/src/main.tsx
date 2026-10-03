@@ -16,6 +16,7 @@ import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
 import { Settings } from "@/pages/settings/Settings";
 import { PathConfiguration } from "@/pages/settings/PathConfiguration";
 import { SystemLogs } from "@/pages/settings/SystemLogs";
+import { Streaming } from "@/pages/settings/Streaming";
 import "@/index.css";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
       { path: "settings", element: <Settings /> },
       { path: "settings/paths", element: <PathConfiguration /> },
       { path: "settings/system-logs", element: <SystemLogs /> },
+      { path: "settings/streaming", element: <Streaming /> },
     ],
   },
 ]);

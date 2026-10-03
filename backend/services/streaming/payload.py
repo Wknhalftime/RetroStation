@@ -1,8 +1,8 @@
-"""What the backend sends Liquidsoap for one item (D23 no-cues defaults; D26 the final hook).
+"""What the backend sends Liquidsoap for one item (D23 no-cues defaults; D26 the sign-off).
 
 Liquidsoap always needs a valid ``liq_cue_out`` greater than ``liq_cue_in``: a no-cues song
-plays to its end with no overlap and no gain change (D23), and the interim PR G sign-off
-hook (D26) sends a whole clip the same way, marked ``final``.
+plays to its end with no overlap and no gain change (D23), and the sign-off clip (D26) is
+sent whole the same way, with zero fades and no title (PG14), marked ``final``.
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ class ItemPayload:
 
 @dataclass(frozen=True)
 class FinalClip:
-    """The PR G sign-off clip; PR D only wires the hook (D26), so no clip ships yet."""
+    """The clip that signs the station off (D26): the user's own sign-off, or a configured
+    default; ``span_ms`` is how long it plays, from its start."""
 
     path: Path
     span_ms: int
@@ -114,7 +115,8 @@ def landing_payload(
 
 
 def final_payload(seq: int, clip: FinalClip) -> ItemPayload:
-    """The sign-off clip's annotations: zero fades, no gain change, marked ``final`` (D26)."""
+    """The sign-off clip's annotations: whole, at 0 dB, with zero fades and no title (PG14),
+    marked ``final`` (D26)."""
     annotations = {
         "item_seq": str(seq),
         "liq_cue_in": _seconds(0),
