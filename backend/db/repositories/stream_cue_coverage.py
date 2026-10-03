@@ -10,6 +10,14 @@ from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.domain.streaming import CueCoverage, StreamReadError
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
 
+COVERAGE_READ_BOUNDS = ReadBounds(
+    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
+)
+"""PG7, I7: the bounds of both coverage counts, the route's and the cue run's: the D88
+numbers the stream service's reads use. A count is a scan over the library, read on a
+connection of its own (never a request's or a run's), so it cannot share a lock or a slot
+with other work and cannot hang its caller past these bounds."""
+
 # D20, H8: "waiting" is read through the one "needs analysis" fragment (NEEDS_ANALYSIS), not
 # a second definition; "ready"/"failed" share its baseline (PRESENT_WITH_HASH) and add the
 # settled-row check. Counts are per audio (DISTINCT audio_hash): twins share one cue row
@@ -62,12 +70,15 @@ class BoundedCueCoverageRepository(CueCoverageRepository):
     before the route body runs; the route's own error handling can never catch it there (the
     coordinator's review on PR G2's Task 6). Opening it lazily, inside ``coverage()``, means
     the one call the route makes is the one that can fail, so the route's try/except maps the
-    resulting ``StreamReadError`` to 503 like every other stream read (D88).
+    resulting ``StreamReadError`` to 503 like every other stream read (D88). The connection
+    is read-only, as the cue run's count is (PG7).
     """
 
     database_url: str
     bounds: ReadBounds
 
     def coverage(self) -> CueCoverage:
-        with bounded_connection(self.database_url, self.bounds, autocommit=True) as conn:
+        with bounded_connection(
+            self.database_url, self.bounds, autocommit=True, read_only=True
+        ) as conn:
             return PgCueCoverageRepository(conn).coverage()

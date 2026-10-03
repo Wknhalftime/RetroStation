@@ -24,6 +24,9 @@ from backend.domain.system import StorageUnavailableError
 
 logger = structlog.get_logger()
 
+READ_ONLY_OPTION = "-c default_transaction_read_only=on"
+"""The startup option that makes every transaction on a connection read-only (PG7, I7)."""
+
 
 @dataclass(frozen=True)
 class ReadBounds:
@@ -60,7 +63,7 @@ class ReadBounds:
 
 @contextmanager
 def bounded_connection(
-    dsn: str, bounds: ReadBounds, *, autocommit: bool = False
+    dsn: str, bounds: ReadBounds, *, autocommit: bool = False, read_only: bool = False
 ) -> Iterator[psycopg.Connection[DictRow]]:
     """A connection whose reads end within ``bounds``. The database being unreachable, a lock
     wait or a statement past its bound, or the connection failing mid-read, is re-raised as
@@ -70,12 +73,14 @@ def bounded_connection(
 
     ``autocommit`` (PG7): a plain read never needs the extra COMMIT round trip on exit, and
     staying out of a transaction means nothing here can be left idle-in-transaction.
+    ``read_only`` adds ``READ_ONLY_OPTION``: a count that must never write (PG7).
     """
+    options = f"{bounds.options} {READ_ONLY_OPTION}" if read_only else bounds.options
     try:
         with connect_sync(
             dsn,
             connect_timeout=bounds.connect_timeout_s,
-            options=bounds.options,
+            options=options,
             autocommit=autocommit,
         ) as conn:
             yield conn

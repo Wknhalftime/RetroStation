@@ -18,10 +18,10 @@ upsert statement, so the ``/ws`` feed and the bottom bar show them like any task
   cancelled tick that arrives late cannot reopen the row (M9).
 
 ``bounded_coverage_read`` (design note 9; I7, PG7): the cue coverage counted on a short-lived
-connection of its own per read: autocommit, read-only, and bounded by the D88 numbers (5 s to
-connect, 2 s on a lock, 10 s in all). Never the writer's connection and never the run's
-transaction. A count that fails, times out or meets any other database error gives None,
-logged once (M8).
+connection of its own per read: autocommit, read-only, and bounded by
+``COVERAGE_READ_BOUNDS`` (the D88 numbers: 5 s to connect, 2 s on a lock, 10 s in all), as
+the route's count is. Never the writer's connection and never the run's transaction. A
+count that fails, times out or meets any other database error gives None, logged once (M8).
 
 ``progress_repository``: the progress rows on a connection of the caller's (the meter's
 telemetry connection, to end a row a crash left RUNNING, PG13), with a lost database
@@ -38,12 +38,16 @@ from typing import Any
 import psycopg
 import structlog
 
-from backend.db.repositories.stream_cue_coverage import PgCueCoverageRepository
+from backend.db.repositories.stream_cue_coverage import (
+    COVERAGE_READ_BOUNDS,
+    PgCueCoverageRepository,
+)
 from backend.db.repositories.task_progress import (
     UPSERT_SQL,
     PgTaskProgressRepository,
     upsert_params,
 )
+from backend.db.stream_reads import READ_ONLY_OPTION
 from backend.db.sync_conn import connect_sync
 from backend.domain.enums import TaskStatus
 from backend.domain.streaming import CueCoverage, StreamReadError
@@ -70,10 +74,8 @@ type Connect = Callable[[], psycopg.Connection[Any]]
 bound."""
 
 _WRITER_OPTIONS = "-c synchronous_commit=off -c statement_timeout=1000 -c lock_timeout=500"
-_COVERAGE_OPTIONS = (
-    "-c statement_timeout=10000 -c lock_timeout=2000 -c default_transaction_read_only=on"
-)
-COVERAGE_CONNECT_TIMEOUT_S = 5
+_COVERAGE_OPTIONS = f"{COVERAGE_READ_BOUNDS.options} {READ_ONLY_OPTION}"
+COVERAGE_CONNECT_TIMEOUT_S = COVERAGE_READ_BOUNDS.connect_timeout_s
 """D88's connect bound, as the stream service's reads use it."""
 
 _LOST = (psycopg.OperationalError, psycopg.InterfaceError, OSError)
@@ -98,8 +100,8 @@ def writer_options() -> str:
 
 
 def coverage_options() -> str:
-    """The coverage read's startup options (I7; the D88 numbers): a 10 s statement bound, a
-    2 s lock bound, and read-only."""
+    """The coverage read's startup options (I7): ``COVERAGE_READ_BOUNDS`` (a 10 s statement
+    bound, a 2 s lock bound) and read-only, as the route's count has them."""
     return _COVERAGE_OPTIONS
 
 

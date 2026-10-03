@@ -10,8 +10,10 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
-from backend.db.repositories.stream_cue_coverage import BoundedCueCoverageRepository
-from backend.db.stream_reads import ReadBounds
+from backend.db.repositories.stream_cue_coverage import (
+    COVERAGE_READ_BOUNDS,
+    BoundedCueCoverageRepository,
+)
 from backend.db.sync_conn import commit_or_unavailable
 from backend.domain.streaming import ClipStorageError
 from backend.domain.system import StorageUnavailableError
@@ -29,13 +31,6 @@ from backend.services.streaming.stream_settings import StreamingState, streaming
 logger = structlog.get_logger()
 
 _LOOPBACK_BIND: BindHost = IPv4Address("127.0.0.1")
-
-COVERAGE_READ_BOUNDS = ReadBounds(
-    connect_timeout_s=5, lock_timeout_ms=2_000, statement_timeout_ms=10_000
-)
-"""PG7, I7: the same bounds the stream service's reads use (D88). A coverage count is a scan
-over the library; it is read on its own bounded connection, never the request's own, so it
-cannot share a lock or a slot with other work and cannot hang the request past these bounds."""
 
 
 def require_internal_client(request: Request) -> None:
