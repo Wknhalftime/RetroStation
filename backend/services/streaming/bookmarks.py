@@ -12,9 +12,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
-from backend.domain.streaming import Bookmark, DayLoader
+from backend.domain.streaming import Bookmark, DayLoader, ItemRef
 
-__all__ = ["BookmarkKey", "BookmarkStore", "SavedBookmark", "bookmark_still_valid"]
+__all__ = [
+    "BookmarkKey",
+    "BookmarkStore",
+    "SavedBookmark",
+    "bookmark_still_valid",
+    "still_logged_at",
+]
 
 
 @dataclass(frozen=True)
@@ -70,8 +76,11 @@ def bookmark_still_valid(load_day: DayLoader, saved: SavedBookmark, now: datetim
     """Whether ``saved`` is still worth resuming from: unexpired, and its play still matches."""
     if saved.bookmark.is_expired(now):
         return False
-    ref = saved.bookmark.landing.ref
+    return still_logged_at(load_day, saved.bookmark.landing.ref, saved.event_id)
+
+
+def still_logged_at(load_day: DayLoader, ref: ItemRef, event_id: UUID) -> bool:
+    """Whether the day as ``load_day`` reads it still logs the play ``event_id`` at ``ref``: a
+    relogged day (another play there, or the play moved) means a saved position is stale."""
     items = load_day(ref.day)
-    if ref.index >= len(items):
-        return False
-    return items[ref.index].event_id == saved.event_id
+    return ref.index < len(items) and items[ref.index].event_id == event_id

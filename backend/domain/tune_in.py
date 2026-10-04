@@ -175,18 +175,25 @@ def next_item(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> Item
     return ref
 
 
-def resume(load_day: DayLoader, bookmark: Bookmark, now: datetime, timing: StreamTiming) -> Landing:
-    """Where the station would be if it had kept playing since ``bookmark.left_at`` (D11).
+def played_on(
+    load_day: DayLoader, start: Landing, elapsed: timedelta, timing: StreamTiming
+) -> Landing | None:
+    """Where the station is ``elapsed`` after it was at ``start``, had it kept playing (D11);
+    None when the schedule ends first.
 
-    If the bookmarked item is no longer playable (its file is gone, or its cues are now
-    too short), the stale offset into it is dropped: the walk starts from its top instead,
-    so the away time is not also spent on the next song.
+    If ``start``'s item is no longer playable (its file is gone, or its cues are now too
+    short), the stale offset into it is dropped: the walk starts from its top instead, so
+    ``elapsed`` is not also spent on the next song.
     """
-    _require_naive_now("resume", now=now)
-    start = bookmark.landing
     if not _item_at(load_day, start.ref).is_playable(timing):
         start = Landing(start.ref, 0)
-    landing = walk_forward(load_day, start.advanced_by(now - bookmark.left_at), timing)
+    return walk_forward(load_day, start.advanced_by(elapsed), timing)
+
+
+def resume(load_day: DayLoader, bookmark: Bookmark, now: datetime, timing: StreamTiming) -> Landing:
+    """Where the station would be if it had kept playing since ``bookmark.left_at`` (D11)."""
+    _require_naive_now("resume", now=now)
+    landing = played_on(load_day, bookmark.landing, now - bookmark.left_at, timing)
     if landing is None:
         raise EndOfScheduleError(f"schedule ended while away since {bookmark.left_at}")
     return landing
