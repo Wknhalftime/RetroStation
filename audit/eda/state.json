@@ -1,6 +1,6 @@
 {
-  "session": "B",
-  "phase": "session-B-done",
+  "session": "C",
+  "phase": "session-C-done",
   "branch": "audit/event-graph",
   "base": "master 9cff8e9 (merged into audit/event-graph as a6a4e27 on 2026-10-03; was c79dce2)",
   "steps_done": [
@@ -23,9 +23,10 @@
     "red run after Gate A changes: 56 tests, 10 failed + 46 errors, all because scripts/audit/event_graph.py is missing; expectations 73 rows; independent check of the 5 new cases agreed (N1-N5)",
     "Gate A closed 2026-10-03: Lance locked 23 spec files (tests/scripts/test_event_graph.py + 22 files under tests/scripts/fixtures/event_graph/) in manifest group 'audit/event-graph'",
     "lock check: manifest has the group (46 'event_graph' entries = 23 hashes + 23 group rows); frozen_tests_check on this worktree flags none of the 23",
-    "Session B 2026-10-03/04: analyzer built (715d5e5, 56/56), real-code run, recall reconciled, precision 15/15 before and after, mutation 584 survivors classified, 18 spec gaps proposed, baseline copied, history at 3 and 6 months; details in tool_status"
+    "Session B 2026-10-03/04: analyzer built (715d5e5, 56/56), real-code run, recall reconciled, precision 15/15 before and after, mutation 584 survivors classified, 18 spec gaps proposed, baseline copied, history at 3 and 6 months; details in tool_status",
+    "P4 Session C 2026-10-04: tool_status read (precision 15/15, recall reconciled, no gap) -> criteria measured; analyzer re-run --check exit 0 on HEAD ad7f317 and master a97a64a (identical graph); 7 module subagents (43 windows, max 8 each) + 7 own windows; audit/eda/report.md, audit/eda/findings.jsonl (AUD-059..080), audit/eda/proposed-rulings.jsonl (AUD-R015..R020, all PROPOSED); audit/rulings.jsonl untouched"
   ],
-  "next_step": "Lance: review audit/eda/spec-gaps.jsonl (18 proposed cases; GAP-01, 05, 10, 16, 18 need a ruling, not just a fixture) and add the accepted ones to the locked spec; Session C: the open Huey-signals question",
+  "next_step": "Lance: rule on target shape (proposed AUD-R015) and open questions 1-6 in audit/eda/report.md; then move accepted PROPOSED rows into audit/rulings.jsonl and schedule the fix PRs (AUD-059..066 first)",
   "open_stops": [],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -434,5 +435,21 @@
       "3_months": "git rev-list -1 --before=\"2026-07-03 23:59\" master -> a3c83a457afe228a137500f37f6cc3ed3c6c8cbd (2026-04-30)",
       "6_months": "git rev-list -1 --before=\"2026-04-03 23:59\" master -> 17be22264425948c34704e7657ac86364a0c5304 (2026-04-03)"
     }
+  },
+  "session_c": {
+    "verdict": "command pipeline, not event-driven: COMMAND 14 / EVENT 0 / QUERY 0; recommend target shape (b)",
+    "conformance": {
+      "C1": "BROKEN for EDA (expected under b)",
+      "C2": "BROKEN (EV01 3, AUD-R014)",
+      "C3": "BROKEN (EV06 1)",
+      "C4": "KEPT conditional on -w 1",
+      "C5": "BROKEN (1 site, AUD-060)",
+      "C6": "KEPT",
+      "C7": "KEPT",
+      "C8": "BROKEN (watcher logic)"
+    },
+    "criteria_definitions": "C1-C8 not found in repo; reconstructed in report.md section 3 (open question 1)",
+    "huey_signals": "recommended not adopted: proposed AUD-R016",
+    "gate": "proposed in report.md section 9, NOT applied"
   }
 }
