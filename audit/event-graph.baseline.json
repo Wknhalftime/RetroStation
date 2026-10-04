@@ -1,0 +1,1160 @@
+{
+  "counts": {
+    "class.COMMAND": 14,
+    "class.EVENT": 0,
+    "class.QUERY": 0,
+    "edge.ENQUEUE": 14,
+    "edge.ENQUEUE_DEFERRED": 0,
+    "edge.INLINE": 3,
+    "edge.POLL": 1,
+    "edge.PUBLISH": 0,
+    "edge.SUBSCRIBE": 0,
+    "node.periodic": 4,
+    "node.producer": 17,
+    "node.task": 12,
+    "rule.EV01": 3,
+    "rule.EV02": 3,
+    "rule.EV03": 0,
+    "rule.EV04": 0,
+    "rule.EV05": 0,
+    "rule.EV06": 1,
+    "rule.EV07": 1,
+    "rule.EV08": 16,
+    "rule.EV09": 2,
+    "rule.EV10": 16,
+    "unresolved_dispatch": 1
+  },
+  "edges": [
+    {
+      "args": [
+        {
+          "annotation": "bytes",
+          "name": "file_bytes"
+        },
+        {
+          "annotation": "str",
+          "name": "file_name"
+        },
+        {
+          "annotation": "str",
+          "name": "station_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "task_id"
+        }
+      ],
+      "consumer": "ingestion_task",
+      "file": "backend/routers/ingestion.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        37
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.routers.ingestion:upload_playlist"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "root_path"
+        }
+      ],
+      "consumer": "library_scan_task",
+      "file": "backend/routers/library/scan.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        39
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.routers.library.scan:scan_library"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "artist_matching_task",
+      "file": "backend/routers/matching.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        1316
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.routers.matching:_enqueue_playlists"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "identity_matching_task",
+      "file": "backend/routers/matching.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        735
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.routers.matching:resolve_artist"
+    },
+    {
+      "args": [],
+      "consumer": "library_enrichment_task",
+      "file": "backend/routers/tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        131
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.routers.tasks:retry_enrichment"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "identity_matching_task",
+      "file": "backend/tasks/artist_matching_tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        110
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.artist_matching_tasks:artist_matching_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "artist_matching_task",
+      "file": "backend/tasks/embedding_tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        68
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.embedding_tasks:embedding_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "embedding_task",
+      "file": "backend/tasks/ingestion_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        357
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.ingestion_tasks:ingestion_task"
+    },
+    {
+      "args": [],
+      "consumer": "mb_enrichment_task",
+      "file": "backend/tasks/library_enrichment_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        245
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.library_enrichment_tasks:library_enrichment_task"
+    },
+    {
+      "args": [],
+      "consumer": "library_enrichment_task",
+      "file": "backend/tasks/library_scan_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        552
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.library_scan_tasks:library_scan_task"
+    },
+    {
+      "args": [],
+      "consumer": "library_hash_backfill_task",
+      "file": "backend/tasks/library_scan_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        545
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.library_scan_tasks:library_scan_task"
+    },
+    {
+      "args": [],
+      "consumer": "library_enrichment_task",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        317
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "list[str]",
+          "name": "folder_paths"
+        },
+        {
+          "annotation": "str",
+          "name": "task_id"
+        }
+      ],
+      "consumer": "library_scan_files_task",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        102
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.library_watcher_tasks:library_watcher_poll"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "file_id"
+        }
+      ],
+      "consumer": "stream_cue_request_task",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        250
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.stream_cue_tasks:request_cue_analysis"
+    },
+    {
+      "args": [],
+      "consumer": "library_hash_backfill_task",
+      "file": "backend/tasks/library_hash_backfill_tasks.py",
+      "guarded": false,
+      "kind": "INLINE",
+      "lines": [
+        182
+      ],
+      "message_class": null,
+      "producer": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_resume"
+    },
+    {
+      "args": [],
+      "consumer": "stream_cue_analysis_task",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "guarded": false,
+      "kind": "INLINE",
+      "lines": [
+        258
+      ],
+      "message_class": null,
+      "producer": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
+    },
+    {
+      "args": [],
+      "consumer": "library_enrichment_task",
+      "file": "scripts/bench_enrich.py",
+      "guarded": false,
+      "kind": "INLINE",
+      "lines": [
+        449
+      ],
+      "message_class": null,
+      "producer": "scripts.bench_enrich:cmd_run"
+    },
+    {
+      "args": [],
+      "consumer": "table:progress_tracking",
+      "file": "backend/websocket.py",
+      "guarded": false,
+      "kind": "POLL",
+      "lines": [
+        61
+      ],
+      "message_class": null,
+      "producer": "backend.websocket:websocket_endpoint"
+    }
+  ],
+  "header": {
+    "excluded_dirs": [
+      ".*",
+      "__pycache__",
+      "frontend",
+      "htmlcov",
+      "node_modules",
+      "tests"
+    ],
+    "options": {
+      "chains": false,
+      "check": null,
+      "ev01_scope": [
+        "artist_matching_task",
+        "embedding_task",
+        "identity_matching_task",
+        "ingestion_task",
+        "library_enrichment_task",
+        "library_hash_backfill_resume",
+        "library_hash_backfill_task",
+        "library_scan_files_task",
+        "library_scan_task",
+        "library_watcher_poll",
+        "mb_enrichment_task",
+        "normalize_backfill_task",
+        "stream_cue_analysis_resume",
+        "stream_cue_analysis_task",
+        "stream_cue_prune_task",
+        "stream_cue_request_task"
+      ],
+      "guard_fn": "backend.tasks._enqueue_chain:enqueue_or_log",
+      "limit": 20,
+      "node": null,
+      "offset": 0,
+      "out": "event-graph.json",
+      "publish_fn": [],
+      "root": ".",
+      "rule": null,
+      "subscribe_fn": [],
+      "summary": true
+    }
+  },
+  "hits": [
+    {
+      "class": "ruling",
+      "code": "EV01",
+      "file": "backend/tasks/artist_matching_tasks.py",
+      "line": 110,
+      "ruling_scope": "stated",
+      "subject": "backend.tasks.artist_matching_tasks:artist_matching_task -> identity_matching_task"
+    },
+    {
+      "class": "ruling",
+      "code": "EV01",
+      "file": "backend/tasks/embedding_tasks.py",
+      "line": 68,
+      "ruling_scope": "stated",
+      "subject": "backend.tasks.embedding_tasks:embedding_task -> artist_matching_task"
+    },
+    {
+      "class": "ruling",
+      "code": "EV01",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 102,
+      "ruling_scope": "stated",
+      "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll -> library_scan_files_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV02",
+      "file": "backend/tasks/library_hash_backfill_tasks.py",
+      "line": 182,
+      "subject": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_resume -> library_hash_backfill_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV02",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 258,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume -> stream_cue_analysis_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV02",
+      "file": "scripts/bench_enrich.py",
+      "line": 449,
+      "subject": "scripts.bench_enrich:cmd_run -> library_enrichment_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
+      "file": "backend/tasks/normalize_backfill_tasks.py",
+      "line": 50,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.normalize_backfill_tasks:normalize_backfill_task"
+    },
+    {
+      "annotation": "bytes",
+      "class": "inventory",
+      "code": "EV07",
+      "file": "backend/tasks/ingestion_tasks.py",
+      "line": 203,
+      "subject": "backend.tasks.ingestion_tasks:ingestion_task(file_bytes)"
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/artist_matching_tasks.py",
+      "line": 29,
+      "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
+      "value": {
+        "body_lines": 81,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/embedding_tasks.py",
+      "line": 20,
+      "subject": "backend.tasks.embedding_tasks:embedding_task",
+      "value": {
+        "body_lines": 48,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/identity_matching_tasks.py",
+      "line": 34,
+      "subject": "backend.tasks.identity_matching_tasks:identity_matching_task",
+      "value": {
+        "body_lines": 45,
+        "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/ingestion_tasks.py",
+      "line": 202,
+      "subject": "backend.tasks.ingestion_tasks:ingestion_task",
+      "value": {
+        "body_lines": 247,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_enrichment_tasks.py",
+      "line": 63,
+      "subject": "backend.tasks.library_enrichment_tasks:library_enrichment_task",
+      "value": {
+        "body_lines": 190,
+        "service_calls": 3
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_hash_backfill_tasks.py",
+      "line": 180,
+      "subject": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_resume",
+      "value": {
+        "body_lines": 2,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_hash_backfill_tasks.py",
+      "line": 164,
+      "subject": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_task",
+      "value": {
+        "body_lines": 12,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_scan_tasks.py",
+      "line": 429,
+      "subject": "backend.tasks.library_scan_tasks:library_scan_task",
+      "value": {
+        "body_lines": 168,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 106,
+      "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
+      "value": {
+        "body_lines": 260,
+        "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 60,
+      "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
+      "value": {
+        "body_lines": 42,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/mb_enrichment_tasks.py",
+      "line": 755,
+      "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
+      "value": {
+        "body_lines": 129,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/normalize_backfill_tasks.py",
+      "line": 50,
+      "subject": "backend.tasks.normalize_backfill_tasks:normalize_backfill_task",
+      "value": {
+        "body_lines": 79,
+        "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 256,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
+      "value": {
+        "body_lines": 2,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 208,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_task",
+      "value": {
+        "body_lines": 17,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 262,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_prune_task",
+      "value": {
+        "body_lines": 8,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 231,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_request_task",
+      "value": {
+        "body_lines": 13,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "inventory",
+      "code": "EV09",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 60,
+      "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll"
+    },
+    {
+      "class": "inventory",
+      "code": "EV09",
+      "file": "backend/websocket.py",
+      "line": 37,
+      "subject": "backend.websocket:websocket_endpoint"
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/routers/ingestion.py",
+      "line": 19,
+      "subject": "backend.routers.ingestion:upload_playlist",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/routers/library/scan.py",
+      "line": 23,
+      "subject": "backend.routers.library.scan:scan_library",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/routers/matching.py",
+      "line": 1306,
+      "subject": "backend.routers.matching:_enqueue_playlists",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/routers/matching.py",
+      "line": 578,
+      "subject": "backend.routers.matching:resolve_artist",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/routers/tasks.py",
+      "line": 103,
+      "subject": "backend.routers.tasks:retry_enrichment",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/artist_matching_tasks.py",
+      "line": 29,
+      "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/embedding_tasks.py",
+      "line": 20,
+      "subject": "backend.tasks.embedding_tasks:embedding_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/ingestion_tasks.py",
+      "line": 202,
+      "subject": "backend.tasks.ingestion_tasks:ingestion_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/library_enrichment_tasks.py",
+      "line": 63,
+      "subject": "backend.tasks.library_enrichment_tasks:library_enrichment_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/library_hash_backfill_tasks.py",
+      "line": 180,
+      "subject": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_resume",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/library_scan_tasks.py",
+      "line": 429,
+      "subject": "backend.tasks.library_scan_tasks:library_scan_task",
+      "value": {
+        "tasks": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 106,
+      "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/library_watcher_tasks.py",
+      "line": 60,
+      "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 247,
+      "subject": "backend.tasks.stream_cue_tasks:request_cue_analysis",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 256,
+      "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "scripts/bench_enrich.py",
+      "line": 423,
+      "subject": "scripts.bench_enrich:cmd_run",
+      "value": {
+        "tasks": 1
+      }
+    }
+  ],
+  "nodes": {
+    "producers": [
+      {
+        "file": "backend/routers/ingestion.py",
+        "layer": "router",
+        "line": 19,
+        "qualname": "backend.routers.ingestion:upload_playlist"
+      },
+      {
+        "file": "backend/routers/library/scan.py",
+        "layer": "router",
+        "line": 23,
+        "qualname": "backend.routers.library.scan:scan_library"
+      },
+      {
+        "file": "backend/routers/matching.py",
+        "layer": "router",
+        "line": 1306,
+        "qualname": "backend.routers.matching:_enqueue_playlists"
+      },
+      {
+        "file": "backend/routers/matching.py",
+        "layer": "router",
+        "line": 578,
+        "qualname": "backend.routers.matching:resolve_artist"
+      },
+      {
+        "file": "backend/routers/tasks.py",
+        "layer": "router",
+        "line": 103,
+        "qualname": "backend.routers.tasks:retry_enrichment"
+      },
+      {
+        "file": "backend/tasks/artist_matching_tasks.py",
+        "layer": "task",
+        "line": 29,
+        "qualname": "backend.tasks.artist_matching_tasks:artist_matching_task"
+      },
+      {
+        "file": "backend/tasks/embedding_tasks.py",
+        "layer": "task",
+        "line": 20,
+        "qualname": "backend.tasks.embedding_tasks:embedding_task"
+      },
+      {
+        "file": "backend/tasks/ingestion_tasks.py",
+        "layer": "task",
+        "line": 202,
+        "qualname": "backend.tasks.ingestion_tasks:ingestion_task"
+      },
+      {
+        "file": "backend/tasks/library_enrichment_tasks.py",
+        "layer": "task",
+        "line": 63,
+        "qualname": "backend.tasks.library_enrichment_tasks:library_enrichment_task"
+      },
+      {
+        "file": "backend/tasks/library_hash_backfill_tasks.py",
+        "layer": "task",
+        "line": 180,
+        "qualname": "backend.tasks.library_hash_backfill_tasks:library_hash_backfill_resume"
+      },
+      {
+        "file": "backend/tasks/library_scan_tasks.py",
+        "layer": "task",
+        "line": 429,
+        "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
+      },
+      {
+        "file": "backend/tasks/library_watcher_tasks.py",
+        "layer": "task",
+        "line": 106,
+        "qualname": "backend.tasks.library_watcher_tasks:library_scan_files_task"
+      },
+      {
+        "file": "backend/tasks/library_watcher_tasks.py",
+        "layer": "task",
+        "line": 60,
+        "qualname": "backend.tasks.library_watcher_tasks:library_watcher_poll"
+      },
+      {
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "layer": "task",
+        "line": 247,
+        "qualname": "backend.tasks.stream_cue_tasks:request_cue_analysis"
+      },
+      {
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "layer": "task",
+        "line": 256,
+        "qualname": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
+      },
+      {
+        "file": "backend/websocket.py",
+        "layer": "other",
+        "line": 37,
+        "qualname": "backend.websocket:websocket_endpoint"
+      },
+      {
+        "file": "scripts/bench_enrich.py",
+        "layer": "script",
+        "line": 423,
+        "qualname": "scripts.bench_enrich:cmd_run"
+      }
+    ],
+    "tasks": [
+      {
+        "body_lines": 81,
+        "envelope": "task_failure_telemetry",
+        "file": "backend/tasks/artist_matching_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 29,
+        "module": "backend.tasks.artist_matching_tasks",
+        "name": "artist_matching_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "playlist_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 48,
+        "envelope": "task_failure_telemetry",
+        "file": "backend/tasks/embedding_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 20,
+        "module": "backend.tasks.embedding_tasks",
+        "name": "embedding_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "playlist_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 45,
+        "envelope": "task_failure_telemetry",
+        "file": "backend/tasks/identity_matching_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 34,
+        "module": "backend.tasks.identity_matching_tasks",
+        "name": "identity_matching_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "playlist_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 247,
+        "envelope": "own",
+        "file": "backend/tasks/ingestion_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 202,
+        "module": "backend.tasks.ingestion_tasks",
+        "name": "ingestion_task",
+        "params": [
+          {
+            "annotation": "bytes",
+            "name": "file_bytes"
+          },
+          {
+            "annotation": "str",
+            "name": "file_name"
+          },
+          {
+            "annotation": "str",
+            "name": "station_id"
+          },
+          {
+            "annotation": "str | None",
+            "name": "task_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 190,
+        "envelope": "task_run",
+        "file": "backend/tasks/library_enrichment_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 63,
+        "module": "backend.tasks.library_enrichment_tasks",
+        "name": "library_enrichment_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 2,
+        "envelope": "none",
+        "file": "backend/tasks/library_hash_backfill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "periodic",
+        "line": 180,
+        "module": "backend.tasks.library_hash_backfill_tasks",
+        "name": "library_hash_backfill_resume",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"*/5\")"
+      },
+      {
+        "body_lines": 12,
+        "envelope": "task_failure_telemetry",
+        "file": "backend/tasks/library_hash_backfill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 164,
+        "module": "backend.tasks.library_hash_backfill_tasks",
+        "name": "library_hash_backfill_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 168,
+        "envelope": "own",
+        "file": "backend/tasks/library_scan_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 429,
+        "module": "backend.tasks.library_scan_tasks",
+        "name": "library_scan_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "root_path"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 260,
+        "envelope": "own",
+        "file": "backend/tasks/library_watcher_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 106,
+        "module": "backend.tasks.library_watcher_tasks",
+        "name": "library_scan_files_task",
+        "params": [
+          {
+            "annotation": "list[str]",
+            "name": "folder_paths"
+          },
+          {
+            "annotation": "str",
+            "name": "task_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 42,
+        "envelope": "none",
+        "file": "backend/tasks/library_watcher_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "periodic",
+        "line": 60,
+        "module": "backend.tasks.library_watcher_tasks",
+        "name": "library_watcher_poll",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"*/4\")"
+      },
+      {
+        "body_lines": 129,
+        "envelope": "task_run",
+        "file": "backend/tasks/mb_enrichment_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 755,
+        "module": "backend.tasks.mb_enrichment_tasks",
+        "name": "mb_enrichment_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 79,
+        "envelope": "task_failure_telemetry",
+        "file": "backend/tasks/normalize_backfill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 50,
+        "module": "backend.tasks.normalize_backfill_tasks",
+        "name": "normalize_backfill_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "db_url"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 2,
+        "envelope": "none",
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "instance": "backend.tasks.cue_huey_app:cue_huey",
+        "kind": "periodic",
+        "line": 256,
+        "module": "backend.tasks.stream_cue_tasks",
+        "name": "stream_cue_analysis_resume",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"*/5\")"
+      },
+      {
+        "body_lines": 17,
+        "envelope": "none",
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "instance": "backend.tasks.cue_huey_app:cue_huey",
+        "kind": "task",
+        "line": 208,
+        "module": "backend.tasks.stream_cue_tasks",
+        "name": "stream_cue_analysis_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 8,
+        "envelope": "none",
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "instance": "backend.tasks.cue_huey_app:cue_huey",
+        "kind": "periodic",
+        "line": 262,
+        "module": "backend.tasks.stream_cue_tasks",
+        "name": "stream_cue_prune_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"0\", hour=\"4\")"
+      },
+      {
+        "body_lines": 13,
+        "envelope": "none",
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "instance": "backend.tasks.cue_huey_app:cue_huey",
+        "kind": "task",
+        "line": 231,
+        "module": "backend.tasks.stream_cue_tasks",
+        "name": "stream_cue_request_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "file_id"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      }
+    ]
+  },
+  "schema_version": 1,
+  "unresolved_dispatch": [
+    {
+      "file": "scripts/bench_enrich.py",
+      "line": 217,
+      "name": "mb_enrichment_task",
+      "producer": "scripts.bench_enrich:follow_on_task",
+      "reason": "task_as_value"
+    }
+  ]
+}
