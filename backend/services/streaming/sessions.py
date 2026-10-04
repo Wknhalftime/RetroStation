@@ -20,7 +20,13 @@ from backend.playout.liquidsoap_process import RunningEngine
 from backend.services.streaming.bookmarks import BookmarkKey
 from backend.services.streaming.payload import FinalClip
 
-__all__ = ["Assigned", "Committed", "StreamSession", "memoised_day_loader"]
+__all__ = [
+    "Assigned",
+    "Committed",
+    "StreamSession",
+    "memoised_day_loader",
+    "schedule_finished",
+]
 
 
 def memoised_day_loader(load: DayLoader) -> DayLoader:
@@ -101,3 +107,13 @@ class StreamSession:
     engine: RunningEngine | None = None
     now_playing: tuple[datetime, str] | None = None
     stopped: bool = False
+
+
+def schedule_finished(session: StreamSession) -> bool:
+    """The schedule has ended and its last item that can play has started (D26): the last
+    assigned one, or, when the final clip failed (PG5), the song before it."""
+    committed = session.committed
+    if session.end_seq is None or committed is None:
+        return False
+    last_to_play = session.end_seq - (2 if session.final_failed else 1)
+    return committed.seq >= last_to_play  # a clip reported started, then failed

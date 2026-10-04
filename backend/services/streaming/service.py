@@ -3,6 +3,9 @@ freeze watchdog (spec: Service and routes; Errors and edge cases; the Backend <-
 contract; D10, D11, D15, D22-D32, D39, D42, D43, D72; R1: the day read overlaps the engine
 start); and what it tells the listener feed (D13, D28, D74, D78a, D78b).
 
+A same-key reconnect lands on the channel's still-open session's live position (D109), read on
+the event loop and checked in the placement thread like a bookmark; that session is only read.
+
 Songs without cues (D78-D80, D85): each song after the landing has its stored cues re-read
 just before it is handed out, within a time limit, and keeps what was read at tune-in when
 that read fails (D85). A song handed out without cues plays D23's values, is warned about
@@ -83,6 +86,11 @@ from backend.services.streaming.listener_events import (
     Sleep,
     StatusKind,
 )
+from backend.services.streaming.live_position import (
+    LivePosition,
+    live_landing,
+    newest_live_position,
+)
 from backend.services.streaming.max_sessions import MAX_SESSIONS_KEY, parse_max_sessions
 from backend.services.streaming.payload import (
     FinalClip,
@@ -95,6 +103,7 @@ from backend.services.streaming.sessions import (
     Committed,
     StreamSession,
     memoised_day_loader,
+    schedule_finished,
 )
 from backend.services.streaming.sign_off import SIGN_OFF_KEY, stored_sign_off
 from backend.services.streaming.watchdog import PlayingSpan, freeze_deadline
@@ -316,6 +325,30 @@ def _place(schedule: _Schedule, saved: SavedBookmark | None, forget: Callable[[]
     return tune_in(load_day, schedule.year, now, timing)
 
 
+@dataclass(frozen=True)
+class _Placement:
+    """Where placement put the listener, and the open session it resumed from (D109)."""
+
+    tuned: TuneIn
+    resumed_from: str | None = None
+
+
+def _place_listener(
+    schedule: _Schedule,
+    live: LivePosition | None,
+    saved: SavedBookmark | None,
+    forget: Callable[[], None],
+) -> _Placement:
+    """The channel's live position while the day still holds it (D109: it beats any
+    bookmark), else ``_place``. ``live`` was read on the event loop; it is checked and
+    walked here against this session's own read of the day."""
+    if live is not None:
+        landing = live_landing(schedule.load_day, live, schedule.timing)
+        if landing is not None:
+            return _Placement(TuneIn(landing, live.clock_offset), live.session_id)
+    return _Placement(_place(schedule, saved, forget))
+
+
 def _user_sign_off(repos: ReposFactory) -> SignOff | None:
     """The user's sign-off clip as stored now (PG4), or ``None``; one connection per use.
 
@@ -420,16 +453,6 @@ def _landing_item(session: StreamSession, landing: Landing) -> ScheduleItem:
     if isinstance(first, Assigned):
         return first.item
     return _item_at(session.load_day, landing.ref)
-
-
-def _schedule_finished(session: StreamSession) -> bool:
-    """The schedule has ended and its last item that can play has started (D26): the last
-    assigned one, or, when the final clip failed (PG5), the song before it."""
-    committed = session.committed
-    if session.end_seq is None or committed is None:
-        return False
-    last_to_play = session.end_seq - (2 if session.final_failed else 1)
-    return committed.seq >= last_to_play  # a clip reported started, then failed
 
 
 def _halt(engine: RunningEngine) -> None:
@@ -648,7 +671,7 @@ class StreamService:
         """
         endpoint = self._endpoint(session_id, session.token)
         starting = asyncio.ensure_future(self._ports.start_engine(endpoint))
-        placing = self._publish_placement(session, year)
+        placing = self._publish_placement(session_id, session, year)
         kept = False
         try:
             placed, started = await asyncio.gather(placing, starting, return_exceptions=True)
@@ -659,11 +682,14 @@ class StreamService:
                 _abandon_start(starting)
         return engine
 
-    async def _publish_placement(self, session: StreamSession, year: int) -> None:
+    async def _publish_placement(self, session_id: str, session: StreamSession, year: int) -> None:
         """Place the listener and publish the landing at once, so the engine's seq 0 request
         need not wait for the engine start to be confirmed; ``placed`` is set either way."""
         key = session.bookmark_key
         saved = None if key is None else self._bookmarks.get(key)
+        # D109: read on the loop, which owns session state, before the thread; found and
+        # captured in one synchronous call, so no report can land in between.
+        live = None if key is None else newest_live_position(self._sessions, key, self._elapsed())
         schedule = _Schedule(
             session.load_day,
             year,
@@ -672,8 +698,16 @@ class StreamService:
             self._config.timing,
         )
         try:
-            tuned = await asyncio.to_thread(_place, schedule, saved, self._forgetter(key, saved))
-            session.landing, session.clock_offset = tuned.landing, tuned.clock_offset
+            forget = self._forgetter(key, saved)
+            placed = await asyncio.to_thread(_place_listener, schedule, live, saved, forget)
+            session.landing = placed.tuned.landing
+            session.clock_offset = placed.tuned.clock_offset
+            if placed.resumed_from is not None:
+                logger.info(
+                    "stream_resumed_from_open_session",
+                    session_id=session_id,
+                    from_session_id=placed.resumed_from,
+                )
         finally:
             session.placed.set()
 
@@ -975,7 +1009,7 @@ class StreamService:
         key = session.bookmark_key
         finished = False
         if key is not None:
-            finished = _schedule_finished(session)
+            finished = schedule_finished(session)
             self._feed.ended(key, session_id, StatusKind.ENDED if finished else StatusKind.STOPPED)
         self._stop(session)
         if key is None:
