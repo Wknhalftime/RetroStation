@@ -46,7 +46,8 @@ def live_position(
 ) -> LivePosition | None:
     """``session``'s position at ``elapsed_now`` (an elapsed-clock reading), or ``None`` when
     it has none to resume from: nothing has started yet, or its final item has started (it
-    signed off, D26)."""
+    signed off, D26). Unlike the service's ``_left_at`` (a bookmark), the start offset and
+    the time since are kept apart, so ``played_on`` can drop a stale offset (D11)."""
     committed = session.committed
     if committed is None or session.clock_offset is None or schedule_finished(session):
         return None

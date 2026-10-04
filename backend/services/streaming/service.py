@@ -341,12 +341,28 @@ def _place_listener(
 ) -> _Placement:
     """The channel's live position while the day still holds it (D109: it beats any
     bookmark), else ``_place``. ``live`` was read on the event loop; it is checked and
-    walked here against this session's own read of the day."""
+    walked here against this session's own read of the day.
+
+    When the live position wins, the bookmark is left as it is, even one that is no longer
+    valid: only ``_place`` forgets. That is harmless, since the next placement that reads the
+    bookmark checks it again (and a close soon replaces it).
+    """
     if live is not None:
         landing = live_landing(schedule.load_day, live, schedule.timing)
         if landing is not None:
             return _Placement(TuneIn(landing, live.clock_offset), live.session_id)
     return _Placement(_place(schedule, saved, forget))
+
+
+def _log_resume(session_id: str, placed: _Placement) -> None:
+    """Log one info event when ``placed`` resumed from an open session (D109); a live
+    position that was not used is not logged."""
+    if placed.resumed_from is not None:
+        logger.info(
+            "stream_resumed_from_open_session",
+            session_id=session_id,
+            from_session_id=placed.resumed_from,
+        )
 
 
 def _user_sign_off(repos: ReposFactory) -> SignOff | None:
@@ -430,7 +446,8 @@ def _left_at(
     """Where the listener was at ``wall_now``: the committed item plus the time it has played
     (D11, measured on the elapsed clock: D47), or the landing when nothing has started
     (D30); ``None`` if the session never finished opening (no engine), so a close during
-    ``open`` bookmarks nothing."""
+    ``open`` bookmarks nothing. Unlike ``live_position`` (D109), it folds the time played
+    into the offset and falls back to the landing, since a bookmark stores one point."""
     if session.engine is None or session.clock_offset is None or session.landing is None:
         return None
     committed = session.committed
@@ -702,12 +719,7 @@ class StreamService:
             placed = await asyncio.to_thread(_place_listener, schedule, live, saved, forget)
             session.landing = placed.tuned.landing
             session.clock_offset = placed.tuned.clock_offset
-            if placed.resumed_from is not None:
-                logger.info(
-                    "stream_resumed_from_open_session",
-                    session_id=session_id,
-                    from_session_id=placed.resumed_from,
-                )
+            _log_resume(session_id, placed)
         finally:
             session.placed.set()
 
