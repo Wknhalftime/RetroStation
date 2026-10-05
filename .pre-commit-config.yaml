@@ -22,3 +22,9 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: event-graph
+        name: event-graph check (AUD-R019)
+        entry: uv run poe events-check
+        language: system
+        files: ^(backend|scripts)/.*\.py$
+        pass_filenames: false

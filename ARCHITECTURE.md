@@ -93,8 +93,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - pytest with branch coverage ≥ 80%
 - frontend typecheck, tests and build
 
-Frozen acceptance tests are guarded by a local hook. *(AUD-R019, not yet wired in:)* the event-graph
-`--check` against `audit/event-graph.baseline.json`.
+Frozen acceptance tests are guarded by a local hook. The event graph (AUD-R019) is checked in
+CI and in pre-commit: `uv run poe events-check` fails on any task hand-off hit or unresolved
+dispatch that is not in `audit/event-graph.baseline.json`. A PR that adds one refreshes the
+baseline with `uv run poe events-baseline` and says why.
 
 ## Rules for changing the system (agreed 2026-10-05)
 

@@ -18,6 +18,8 @@ frontend/dist/
 frontend/coverage/
 frontend/src/**/*.js
 frontend/tsconfig.tsbuildinfo
+# poe events-check output (AUD-R019); the committed graph is audit/event-graph.json
+audit/event-graph.check.json
 huey.db
 huey.db-shm
 huey.db-wal

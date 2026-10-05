@@ -221,7 +221,14 @@ deps        = "deptry . --json-output audit/deptry.json"
 vulns       = "pip-audit -f json -o audit/pip-audit.json"
 tests       = "pytest -p randomly --junitxml audit/pytest.xml --cov=backend --cov-branch --cov-report=json:audit/coverage.json --cov-report=xml:audit/coverage.xml"
 hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out audit/hotspots.json"
-audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots"]
+# Event graph (AUD-R019). A hit's identity ignores --ev01-scope (AUD-R014 puts every task in
+# scope), so no task list is kept here. events-check fails on any hit or unresolved dispatch not
+# in the baseline; refresh the baseline (events-baseline) only in the PR that adds one, and say
+# why in the PR body.
+events          = "python scripts/audit/event_graph.py --summary --out audit/event-graph.json"
+events-check    = "python scripts/audit/event_graph.py --check audit/event-graph.baseline.json --out audit/event-graph.check.json"
+events-baseline = "python scripts/audit/event_graph.py --out audit/event-graph.baseline.json"
+audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots", "events"]
 audit.ignore_fail = "return_non_zero"
 
 # ---- refactor gate (four-step gate before hotspot refactors) ----
