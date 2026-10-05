@@ -62,6 +62,20 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             reason_detail=reason_detail,
         )
 
+    def update_match_status_if_pending(
+        self,
+        identity_id: UUID,
+        status: MatchStatus,
+        tier: MatchTier | None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> bool:
+        current = self._data.get(identity_id)
+        if current is None or current.match_status != MatchStatus.PENDING:
+            return False
+        self.update_match_status(identity_id, status, tier, reason_code, reason_detail)
+        return True
+
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
         if identity := self._data.get(identity_id):
             identity.embedding = embedding
