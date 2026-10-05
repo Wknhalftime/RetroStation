@@ -420,7 +420,7 @@ def test_emit_pre_pass_heartbeat_resurrects_failed_row() -> None:
     back to RUNNING.
 
     This is the central behavior the whole fix exists to provide. The WS
-    stale-cleanup at backend/websocket.py:57 tentatively flips a row to
+    stale-cleanup (`STALE_SQL` in backend/websocket.py) tentatively flips a row to
     `failed` after 10 minutes without `updated_at` advance. If the worker
     is still running and emits a heartbeat afterwards, the row MUST go
     back to `running` so the WS broadcast picks it up again.

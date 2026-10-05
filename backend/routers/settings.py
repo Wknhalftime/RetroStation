@@ -37,15 +37,14 @@ class SettingEntry(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-# NOTE (tracked debt): GET still issues raw asyncpg SQL directly instead of
-# delegating to UserSettingRepository.  The repository layer uses a
+# NOTE (known gap, AUD-R010): GET still issues raw async SQL directly instead
+# of delegating to UserSettingRepository.  The repository layer uses a
 # synchronous psycopg connection, while FastAPI's dependency stack provides an
-# AsyncConnection — bridging the two requires an AsyncUserSettingRepository
-# adapter that does not yet exist.  Until that adapter is implemented, the SQL
-# here and in PgUserSettingRepository must be kept in sync manually (same
-# SELECT shape, same column set).  PUT below validates and writes through
-# ``save_setting`` on the sync repository instead (D27; PG2).  Follow-up task:
-# "Implement AsyncUserSettingRepository and wire it into GET /settings."
+# AsyncConnection, and there is no async repository layer yet (AUD-R010:
+# deferred, not rejected).  Until one exists, the SQL here and in
+# PgUserSettingRepository must be kept in sync manually (same SELECT shape,
+# same column set).  PUT below validates and writes through ``save_setting``
+# on the sync repository instead (D27; PG2).
 # ---------------------------------------------------------------------------
 
 

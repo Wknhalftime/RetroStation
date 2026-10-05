@@ -437,7 +437,7 @@ def test_match_artists_auto_rejected_cascades_to_identity_bulk_reject() -> None:
 #
 # coalesce_artist_searches builds {lower(original_name): [MbArtistResult, ...]}
 # from a pending-artist list by calling search_artist once per distinct bucket.
-# Mirrors coalesce_artist_lookups (mb_enrichment_tasks.py:192):
+# Mirrors coalesce_artist_lookups (backend/tasks/mb_enrichment_tasks.py):
 #   - transient httpx.HTTPError for a bucket -> key OMITTED (live fallback).
 #   - empty MB response for a bucket -> key present with [] (no-candidates
 #     sentinel; strategy returns None without re-querying).

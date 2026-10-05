@@ -1,12 +1,12 @@
 """AUD-014 gate 1 characterisation tests for title-scoring policy.
 
-Locks the CURRENT observable behaviour of broadcast/library title scoring
-before it moves out of ``backend/services/matching_utils.py`` and
+Locks the observable behaviour of broadcast/library title scoring. Written
+before it moved out of ``backend/services/matching_utils.py`` and
 ``backend/services/identity_matching_service.py`` into a single
-``backend/services/title_scoring.py`` module (see audit/triage/findings.jsonl
-AUD-014). Only the imports below change in the refactor commit — this
-file's snapshot (``__snapshots__/test_title_scoring_characterisation.ambr``)
-must stay byte-identical across that commit.
+``backend/services/title_scoring.py`` module (AUD-014, PR #95). Only the
+imports below changed in that refactor commit — this file's snapshot
+(``__snapshots__/test_title_scoring_characterisation.ambr``) stayed
+byte-identical across it.
 
 No Postgres, no network: everything here is a pure function or an in-memory
 ``LibraryFile`` dataclass built with deterministic UUIDs so the sort-by-id

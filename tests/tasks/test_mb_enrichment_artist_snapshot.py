@@ -1,15 +1,12 @@
 """Syrupy characterisation tests for ``_enhance_artist`` (AUD-R008 gate 1).
 
-Locks the CURRENT observable behaviour of the artist-enhancement tiers
-before Tier 1 (the ``artist.mbid is None`` branch — MB name search that
-auto-links an MBID onto a bare local artist) is deleted per AUD-R008.
-
-Every snapshot here must stay byte-identical across the AUD-R008 change
-EXCEPT the ``test_tier1_*`` cases: the ruling deliberately replaces the
-auto-link behaviour with an immediate FAILED/quarantine outcome (an
-MBID-less artist reaching ``_enhance_artist`` is a logic bug once artists
-can only gain an MBID via release/recording enrichment). Those snapshots
-are expected to change in the behaviour-changing commit, and only those.
+Written before Tier 1 (the ``artist.mbid is None`` branch — MB name search
+that auto-linked an MBID onto a bare local artist) was deleted per AUD-R008
+(PR #94). The ``test_tier1_*`` snapshots changed in that commit, and only
+those: an MBID-less artist reaching ``_enhance_artist`` is now a logic bug,
+quarantined with an immediate FAILED outcome, because artists gain an MBID
+only via release/recording enrichment. The test names keep their pre-ruling
+names so the snapshot keys stay stable.
 
 No Postgres, no network: `conn` and `repos` are lightweight recorders, and
 `FakeMbClient` returns canned payloads shaped like the real
@@ -130,8 +127,8 @@ def _run(
 
 
 # ---------------------------------------------------------------------------
-# Tier 1 (today's behaviour): artist.mbid is None. AUD-R008 deletes this
-# entire branch; these three cases are the ones expected to change.
+# Tier 1: artist.mbid is None. AUD-R008 deleted the name-search branch;
+# all three cases now end FAILED (quarantined) without calling MusicBrainz.
 # ---------------------------------------------------------------------------
 
 
@@ -168,8 +165,8 @@ def test_tier1_no_search_results_marks_enhanced(snapshot: SnapshotAssertion) -> 
 
 
 # ---------------------------------------------------------------------------
-# Tier 2 (MBID known, fields filled from a lookup). Must be byte-identical
-# after AUD-R008 — Tier 2/3 behaviour is kept verbatim.
+# Tier 2 (MBID known, fields filled from a lookup). Unchanged by AUD-R008 —
+# Tier 2/3 behaviour was kept verbatim.
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +187,7 @@ def test_tier2_fills_disambiguation_and_sort_name(snapshot: SnapshotAssertion) -
 
 
 # ---------------------------------------------------------------------------
-# Tier 3 (nothing to change). Must be byte-identical after AUD-R008.
+# Tier 3 (nothing to change). Unchanged by AUD-R008.
 # ---------------------------------------------------------------------------
 
 
@@ -211,8 +208,8 @@ def test_tier3_all_fields_present_no_update(snapshot: SnapshotAssertion) -> None
 
 
 # ---------------------------------------------------------------------------
-# A 404 lookup on an MBID-known artist becomes FAILED. Must be
-# byte-identical after AUD-R008.
+# A 404 lookup on an MBID-known artist becomes FAILED. Unchanged by
+# AUD-R008.
 # ---------------------------------------------------------------------------
 
 
@@ -225,7 +222,7 @@ def test_tier2_404_lookup_marks_enhancement_failed(snapshot: SnapshotAssertion) 
 
 # ---------------------------------------------------------------------------
 # The mbid_map pre-fetched path (both a hit with data and a cached-404
-# hit). Must be byte-identical after AUD-R008.
+# hit). Unchanged by AUD-R008.
 # ---------------------------------------------------------------------------
 
 

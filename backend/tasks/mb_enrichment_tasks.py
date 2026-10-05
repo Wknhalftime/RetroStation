@@ -29,7 +29,7 @@ from backend.tasks.huey_app import huey
 # Threshold for the slow-iteration warning emitted from inside the coalesce
 # helpers. If the wall-clock gap between consecutive heartbeats exceeds this,
 # we log a structured warning so post-hoc analysis can spot drift toward the
-# 10-minute WS stale threshold (see `backend/websocket.py:57`). Independent
+# 10-minute WS stale threshold (`STALE_THRESHOLD_MINUTES` in `backend/websocket.py`). Independent
 # of the cadence math; this is a guardrail, not a contract.
 _SLOW_ITERATION_WARN_SECONDS = 30.0
 
@@ -345,8 +345,8 @@ class _PhaseContext:
     total: int
     # Annotated as the ABC `TaskProgressRepository`, not the concrete
     # `PgTaskProgressRepository`, so test fakes are type-compatible without
-    # `# type: ignore`. Project convention (.claude/CLAUDE.md) mandates ABCs
-    # for repository interfaces.
+    # `# type: ignore`. Repository interfaces are ABC ports in
+    # backend/repositories (ARCHITECTURE.md, enforced by import-linter).
     progress_repo: TaskProgressRepository
     processed: int = 0
     done: dict[str, int] = field(default_factory=dict)
