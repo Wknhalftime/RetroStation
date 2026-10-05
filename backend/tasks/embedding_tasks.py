@@ -23,6 +23,9 @@ def embedding_task(playlist_id: str) -> None:
     Wraps the pipeline stage in `task_failure_telemetry` so any exception
     (embedding model failure, repo error) surfaces as a FAILED TaskProgress
     row + ERROR SystemLog before re-raising to Huey.
+
+    A side branch of ingestion (AUD-R020): it hands off to nothing, and
+    matching does not wait on it, because no query reads the vectors yet.
     """
     settings = get_settings()
 
@@ -60,12 +63,3 @@ def embedding_task(playlist_id: str) -> None:
             playlist_id=playlist_id,
             task_id=task_id,
         )
-
-    # Fire-and-forget: enqueue artist matching. Outside the telemetry
-    # boundary — downstream enqueue failures are not embedding failures.
-    # Known gap: AUD-R020 removes this hand-off (ingestion_task enqueues
-    # embedding_task and artist_matching_task separately, both through
-    # enqueue_or_log per AUD-R014); open findings AUD-059, AUD-062.
-    from backend.tasks.artist_matching_tasks import artist_matching_task
-
-    artist_matching_task(playlist_id)

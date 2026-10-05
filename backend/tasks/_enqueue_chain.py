@@ -56,6 +56,7 @@ def enqueue_or_log(
     caller_task_id: str,
     log_category: LogCategory,
     sys_log_repo: SystemLogRepository,
+    on_failure: Callable[[], None] | None = None,
 ) -> None:
     """Call `enqueue` (a zero-arg closure wrapping a Huey task call).
 
@@ -79,6 +80,12 @@ def enqueue_or_log(
         sys_log_repo: Repository to write the failure SystemLog to. Callers
             pass whichever connection/repo is open at the point of the
             enqueue call.
+        on_failure: Optional zero-arg callback run after a storage failure has
+            been reported (even when the SystemLog write itself failed), to undo
+            what the caller prepared for the next task, e.g. the watcher poll
+            releases the folders it staged. Not run on success or on any other
+            exception. An exception it raises propagates: it is the caller's own
+            work, not telemetry.
     """
     try:
         enqueue()
@@ -105,3 +112,5 @@ def enqueue_or_log(
                 enqueue_error=str(exc),
                 telemetry_error=str(log_exc),
             )
+        if on_failure is not None:
+            on_failure()

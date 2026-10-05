@@ -99,9 +99,25 @@ def library_watcher_poll() -> None:
         # only folders whose own files changed and the scan is non-recursive,
         # so there is nothing to collapse — a parent never stands in for a
         # child.
-        # Known gap: AUD-R014 requires this hand-off to go through
-        # enqueue_or_log; it does not yet (open finding AUD-063).
-        library_scan_files_task(changed, task_id)
+        #
+        # Guarded hand-off (AUD-R012 (1), AUD-R014). The poll has no run of its
+        # own, so a failure is logged under the staging task_id. On failure the
+        # staged folders are released, so the next 4-minute poll retries them
+        # instead of waiting out STAGED_HASH_TTL. The log goes through its own
+        # autocommit connection, so it survives even if the release fails.
+        def release_staged_folders() -> None:
+            repos.library_folders.clear_staged_hashes(task_id)
+            conn.commit()
+
+        with connect_sync(settings.database_url, autocommit=True) as log_conn:
+            enqueue_or_log(
+                lambda: library_scan_files_task(changed, task_id),
+                task_name="library_scan_files_task",
+                caller_task_id=task_id,
+                log_category=LogCategory.SCAN,
+                sys_log_repo=PgSystemLogRepository(log_conn),
+                on_failure=release_staged_folders,
+            )
 
 
 @huey.task()  # type: ignore[untyped-decorator]

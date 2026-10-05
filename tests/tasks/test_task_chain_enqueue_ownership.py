@@ -384,7 +384,10 @@ class TestIngestionLifecycleLogs:
             broadcast_days_created=1,
         )
 
-        with patch("backend.tasks.embedding_tasks.embedding_task"):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task"),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task"),
+        ):
             from backend.tasks.ingestion_tasks import ingestion_task
 
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-1")
@@ -479,7 +482,10 @@ class TestIngestionLifecycleLogs:
             broadcast_days_created=1,
         )
 
-        with patch("backend.tasks.embedding_tasks.embedding_task"):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task"),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task"),
+        ):
             from backend.tasks.ingestion_tasks import ingestion_task
 
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-3")

@@ -346,17 +346,28 @@ def ingestion_task(
             lifecycle="completed",
         )
 
-        # Embedding dispatch is decoupled from ingestion COMPLETED: the DB
+        # Two independent hand-offs, decoupled from ingestion COMPLETED: the DB
         # commit has already happened, so a broker hiccup here is a separate
         # operational concern, not an ingestion failure. Guarded (AUD-R012
-        # (1)): the caller owns the handoff, so an enqueue failure is
-        # logged on this ingestion run's own task_id instead of silently
-        # swallowed — progress_conn is still open at this point.
+        # (1), AUD-R014): the caller owns each handoff, so an enqueue failure
+        # is logged on this ingestion run's own task_id instead of silently
+        # swallowed — progress_conn is still open at this point. Embedding is
+        # a side branch (AUD-R020): matching does not read the vectors, so it
+        # is handed off here rather than chained after embedding.
+        from backend.tasks.artist_matching_tasks import artist_matching_task
         from backend.tasks.embedding_tasks import embedding_task
 
+        playlist_id = result.playlist_id
         enqueue_or_log(
-            lambda: embedding_task(result.playlist_id),
+            lambda: embedding_task(playlist_id),
             task_name="embedding_task",
+            caller_task_id=task_id,
+            log_category=LogCategory.INGESTION,
+            sys_log_repo=sys_log_repo,
+        )
+        enqueue_or_log(
+            lambda: artist_matching_task(playlist_id),
+            task_name="artist_matching_task",
             caller_task_id=task_id,
             log_category=LogCategory.INGESTION,
             sys_log_repo=sys_log_repo,
