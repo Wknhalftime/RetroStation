@@ -64,6 +64,19 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
             reason_detail=reason_detail,
         )
 
+    def update_match_status_if_pending(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> bool:
+        current = self._data.get(artist_id)
+        if current is None or current.match_status != MatchStatus.PENDING:
+            return False
+        self.update_match_status(artist_id, status, reason_code, reason_detail)
+        return True
+
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         if artist := self._data.get(artist_id):
             artist.embedding = embedding

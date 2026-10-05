@@ -126,6 +126,32 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             ),
         )
 
+    def update_match_status_if_pending(
+        self,
+        identity_id: UUID,
+        status: MatchStatus,
+        tier: MatchTier | None,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> bool:
+        # One statement, so a decision committed by another connection between the
+        # worker's read and this write is seen here and wins (AUD-R018).
+        cur = self._conn.execute(
+            """UPDATE track_identities
+               SET match_status = %s, match_tier = %s,
+                   reason_code = %s, reason_detail = %s
+               WHERE id = %s AND match_status = %s""",
+            (
+                status.value,
+                tier.value if tier is not None else None,
+                reason_code,
+                reason_detail,
+                identity_id,
+                MatchStatus.PENDING.value,
+            ),
+        )
+        return cur.rowcount == 1
+
     def update_embedding(self, identity_id: UUID, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE track_identities SET embedding = %s WHERE id = %s",

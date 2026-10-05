@@ -59,6 +59,22 @@ class BroadcastArtistRepository(ABC):
         ...
 
     @abstractmethod
+    def update_match_status_if_pending(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> bool:
+        """`update_match_status`, but only while the row is still PENDING.
+
+        Used by the matching worker (AUD-R018): the API runs in another process, so a
+        decision the user makes while the worker runs must not be overwritten. Returns True
+        when the row was still PENDING and was updated; False, changing nothing, otherwise.
+        """
+        ...
+
+    @abstractmethod
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None: ...
 
     @abstractmethod

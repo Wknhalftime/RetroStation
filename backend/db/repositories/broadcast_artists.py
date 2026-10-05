@@ -112,6 +112,23 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             (status.value, reason_code, reason_detail, artist_id),
         )
 
+    def update_match_status_if_pending(
+        self,
+        artist_id: UUID,
+        status: MatchStatus,
+        reason_code: ReasonCode | None = None,
+        reason_detail: str | None = None,
+    ) -> bool:
+        # One statement, so a decision committed by another connection between the
+        # worker's read and this write is seen here and wins (AUD-R018).
+        cur = self._conn.execute(
+            """UPDATE broadcast_artists
+               SET match_status = %s, reason_code = %s, reason_detail = %s
+               WHERE id = %s AND match_status = %s""",
+            (status.value, reason_code, reason_detail, artist_id, MatchStatus.PENDING.value),
+        )
+        return cur.rowcount == 1
+
     def update_embedding(self, artist_id: UUID, embedding: list[float]) -> None:
         self._conn.execute(
             "UPDATE broadcast_artists SET embedding = %s WHERE id = %s",

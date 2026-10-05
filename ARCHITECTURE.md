@@ -77,8 +77,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   cue-analysis resume (every 5 min each), cue prune.
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column.
-  Worker writes that finish a work item should be guarded on the status they read
-  (AUD-R018; not yet done: AUD-060, AUD-067).
+  The matching workers' status writes are guarded on the `pending` status they read
+  (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
+  while a run is in progress wins.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, `task_failure_telemetry`, the tasks' own try/except, and `reported_failures`.
   No Huey signals (AUD-R016).
