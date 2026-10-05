@@ -91,7 +91,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 Frozen acceptance tests are guarded by a local hook. *(AUD-R019, not yet wired in:)* the event-graph
 `--check` against `audit/event-graph.baseline.json`.
 
-## Rules for changing the system *(proposed, not yet agreed)*
+## Rules for changing the system (agreed 2026-10-05)
 
 1. **One way to do each thing.** Copy the existing pattern (envelope, hand-off helper,
    repository port). If you need a second pattern, change this page first.
