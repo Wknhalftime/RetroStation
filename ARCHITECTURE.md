@@ -1,0 +1,101 @@
+# RetroStation architecture (one page)
+
+**Status: 2026-10-05.** Checked against master a97a64a. Rulings cited here are in
+`audit/rulings.jsonl` (AUD-R015..R020 ACTIVE since 2026-10-05). If the code and this page disagree, fix one of them
+in the same PR. Cite decisions by id and name, never by line number.
+
+## What it is
+
+A single-user monolith. It imports radio station play logs (CSV), matches the plays to a local
+music library enriched from MusicBrainz, and plays stations back as a radio stream through
+Liquidsoap. Python 3.13 + FastAPI + PostgreSQL (pgvector), React + Vite frontend.
+
+## Processes (`Procfile`)
+
+| process | runs | job |
+|---|---|---|
+| `api` | `backend.run_server` | FastAPI with an async psycopg pool; `/ws` progress; launches Liquidsoap (`backend/playout`) |
+| `worker` | Huey consumer `backend.tasks.huey_app.huey -w 1` | library scan, watcher, enrichment, ingest, matching |
+| `cues` | Huey consumer `backend.tasks.cue_huey_app.cue_huey -w 1` | stream cue analysis, on its own queue so it never waits behind a scan |
+| `web` | `npm run dev` in `frontend/` | UI |
+
+All processes share one PostgreSQL database. The queues are SQLite files (`SqliteHuey`,
+`results=False`). Tasks use sync psycopg; the API uses async psycopg.
+
+## Layers (enforced by import-linter, `pyproject.toml [tool.importlinter]`)
+
+```
+main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  ->  domain
+```
+
+- `domain/`: dataclasses split by subdomain (broadcast, catalog, library, matching, curation,
+  system, streaming, tune_in). Stdlib only. **Enforced.**
+- `repositories/`: ABC ports. `db/repositories/`: their Pg adapters. Services never import
+  `backend.db`, except `services/repository_factory.py`. **Enforced.**
+- `playout/`: takes primitives and imports nothing else from backend. **Enforced.**
+- `domain.library` never references streaming (D20). **Enforced.**
+
+**Known gaps** (true today, not rules to copy):
+- Routers run SQL directly: 133 `.execute()` calls in 10 router files. `routers/matching.py` is
+  1,453 lines and `routers/library/works.py` is 1,101.
+- Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
+  not one.
+- import-linter carries 7 baseline ignores.
+- New code should not add to any of these.
+
+## Background work: an orchestrated command pipeline (not pub/sub)
+
+- **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id
+  or nothing). Event graph 2026-10-04: 14 commands, 0 events, 0 queries, no cycles.
+- **The work list lives in status columns**, not in the message. These columns are the contract
+  between tasks (AUD-R015):
+
+| column / predicate | written by | read by |
+|---|---|---|
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY) | ingest, matchers, review UI | artist / identity matching |
+| `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
+| `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
+| `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
+| no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
+| `library_folder_staged_hashes` | watcher poll | watcher scan |
+| `progress_tracking` | every task envelope | `/ws` poll (0.5 s), hash-backfill liveness |
+
+- **Flows:**
+  - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with `embedding_task`
+    as a side branch (AUD-R020; today it still sits in the chain until that fix lands)
+  - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
+    `mb_enrichment_task`
+  - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task`
+  - streaming no-cue report → `stream_cue_request_task`
+- **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
+  (AUD-R012 (1), AUD-R014). Three sites don't yet (AUD-061..063).
+- **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
+  cue-analysis resume (every 5 min each), cue prune.
+- **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
+  delivery is harmless only because jobs run one at a time and re-check their status column.
+  Worker writes that finish a work item should be guarded on the status they read
+  (AUD-R018; not yet done: AUD-060, AUD-067).
+- **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
+  enrichment pair, `task_failure_telemetry`, the tasks' own try/except, and `reported_failures`.
+  No Huey signals (AUD-R016).
+
+## What is enforced in CI (`.github/workflows/ci.yml`)
+
+- ruff check
+- ruff format
+- import-linter
+- `mypy backend --strict`
+- pytest with branch coverage ≥ 80%
+- frontend typecheck, tests and build
+
+Frozen acceptance tests are guarded by a local hook. *(AUD-R019, not yet wired in:)* the event-graph
+`--check` against `audit/event-graph.baseline.json`.
+
+## Rules for changing the system (agreed 2026-10-05)
+
+1. **One way to do each thing.** Copy the existing pattern (envelope, hand-off helper,
+   repository port). If you need a second pattern, change this page first.
+2. **A rule exists only if a check enforces it.** An unenforced rule gets deleted, not kept as
+   aspiration.
+3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
+   treated as rejected.
