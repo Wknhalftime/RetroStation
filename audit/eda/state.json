@@ -26,7 +26,7 @@
     "Session B 2026-10-03/04: analyzer built (715d5e5, 56/56), real-code run, recall reconciled, precision 15/15 before and after, mutation 584 survivors classified, 18 spec gaps proposed, baseline copied, history at 3 and 6 months; details in tool_status",
     "P4 Session C 2026-10-04: tool_status read (precision 15/15, recall reconciled, no gap) -> criteria measured; analyzer re-run --check exit 0 on HEAD ad7f317 and master a97a64a (identical graph); 7 module subagents (43 windows, max 8 each) + 7 own windows; audit/eda/report.md, audit/eda/findings.jsonl (AUD-059..080), audit/eda/proposed-rulings.jsonl (AUD-R015..R020, all PROPOSED); audit/rulings.jsonl untouched"
   ],
-  "next_step": "Fix PRs: AUD-061..063 + AUD-059/R020 (hand-offs, embedding side branch), AUD-060 needs AUD-R018 ruling, gate per AUD-R019, GAP-01 analyzer fix (needs Lance's approval of a new spec test + relock); ARCHITECTURE.md draft awaits 'ship it' (own branch docs/architecture-note)",
+  "next_step": "Fix PRs: AUD-061..063 + AUD-059/R020 (hand-offs, embedding side branch), AUD-060 per AUD-R018, gate per AUD-R019, GAP-01 analyzer fix (needs Lance's approval of a new spec test + relock); ARCHITECTURE.md draft awaits 'ship it' (own branch docs/architecture-note)",
   "open_stops": [],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -459,7 +459,7 @@
       "Q5 gate": "accepted incl. baseline refresh per PR (AUD-R019 ACTIVE, not yet wired)",
       "Q6 spec gaps": "fix GAP-01 (reported_failures envelope), park GAP-02..18",
       "Q7 shape": "(b) command pipeline (AUD-R015 ACTIVE)",
-      "not asked": "AUD-R018 (guarded worker writes) stays PROPOSED"
+      "not asked": "AUD-R018 asked later the same day: yes (ACTIVE)"
     }
   }
 }
