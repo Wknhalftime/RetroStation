@@ -10,9 +10,9 @@
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
     "node.periodic": 4,
-    "node.producer": 17,
+    "node.producer": 16,
     "node.task": 12,
-    "rule.EV01": 3,
+    "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
@@ -21,7 +21,7 @@
     "rule.EV07": 1,
     "rule.EV08": 16,
     "rule.EV09": 2,
-    "rule.EV10": 16,
+    "rule.EV10": 15,
     "unresolved_dispatch": 1
   },
   "edges": [
@@ -126,10 +126,10 @@
       ],
       "consumer": "identity_matching_task",
       "file": "backend/tasks/artist_matching_tasks.py",
-      "guarded": false,
+      "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        110
+        114
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.artist_matching_tasks:artist_matching_task"
@@ -142,14 +142,14 @@
         }
       ],
       "consumer": "artist_matching_task",
-      "file": "backend/tasks/embedding_tasks.py",
-      "guarded": false,
+      "file": "backend/tasks/ingestion_tasks.py",
+      "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        68
+        368
       ],
       "message_class": "COMMAND",
-      "producer": "backend.tasks.embedding_tasks:embedding_task"
+      "producer": "backend.tasks.ingestion_tasks:ingestion_task"
     },
     {
       "args": [
@@ -163,7 +163,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        357
+        361
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.ingestion_tasks:ingestion_task"
@@ -211,7 +211,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        317
+        335
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
@@ -229,10 +229,10 @@
       ],
       "consumer": "library_scan_files_task",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "guarded": false,
+      "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        102
+        113
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_watcher_poll"
@@ -347,30 +347,6 @@
   },
   "hits": [
     {
-      "class": "ruling",
-      "code": "EV01",
-      "file": "backend/tasks/artist_matching_tasks.py",
-      "line": 110,
-      "ruling_scope": "stated",
-      "subject": "backend.tasks.artist_matching_tasks:artist_matching_task -> identity_matching_task"
-    },
-    {
-      "class": "ruling",
-      "code": "EV01",
-      "file": "backend/tasks/embedding_tasks.py",
-      "line": 68,
-      "ruling_scope": "stated",
-      "subject": "backend.tasks.embedding_tasks:embedding_task -> artist_matching_task"
-    },
-    {
-      "class": "ruling",
-      "code": "EV01",
-      "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 102,
-      "ruling_scope": "stated",
-      "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll -> library_scan_files_task"
-    },
-    {
       "class": "inventory",
       "code": "EV02",
       "file": "backend/tasks/library_hash_backfill_tasks.py",
@@ -412,10 +388,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/artist_matching_tasks.py",
-      "line": 29,
+      "line": 31,
       "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
       "value": {
-        "body_lines": 81,
+        "body_lines": 89,
         "service_calls": 1
       }
     },
@@ -426,7 +402,7 @@
       "line": 20,
       "subject": "backend.tasks.embedding_tasks:embedding_task",
       "value": {
-        "body_lines": 48,
+        "body_lines": 45,
         "service_calls": 1
       }
     },
@@ -448,7 +424,7 @@
       "line": 202,
       "subject": "backend.tasks.ingestion_tasks:ingestion_task",
       "value": {
-        "body_lines": 247,
+        "body_lines": 258,
         "service_calls": 1
       }
     },
@@ -500,7 +476,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 106,
+      "line": 124,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
         "body_lines": 260,
@@ -514,7 +490,7 @@
       "line": 60,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
-        "body_lines": 42,
+        "body_lines": 60,
         "service_calls": 0
       }
     },
@@ -652,18 +628,8 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/artist_matching_tasks.py",
-      "line": 29,
+      "line": 31,
       "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
-      "value": {
-        "tasks": 1
-      }
-    },
-    {
-      "class": "metric",
-      "code": "EV10",
-      "file": "backend/tasks/embedding_tasks.py",
-      "line": 20,
-      "subject": "backend.tasks.embedding_tasks:embedding_task",
       "value": {
         "tasks": 1
       }
@@ -675,7 +641,7 @@
       "line": 202,
       "subject": "backend.tasks.ingestion_tasks:ingestion_task",
       "value": {
-        "tasks": 1
+        "tasks": 2
       }
     },
     {
@@ -712,7 +678,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 106,
+      "line": 124,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
         "tasks": 1
@@ -794,14 +760,8 @@
       {
         "file": "backend/tasks/artist_matching_tasks.py",
         "layer": "task",
-        "line": 29,
+        "line": 31,
         "qualname": "backend.tasks.artist_matching_tasks:artist_matching_task"
-      },
-      {
-        "file": "backend/tasks/embedding_tasks.py",
-        "layer": "task",
-        "line": 20,
-        "qualname": "backend.tasks.embedding_tasks:embedding_task"
       },
       {
         "file": "backend/tasks/ingestion_tasks.py",
@@ -830,7 +790,7 @@
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 106,
+        "line": 124,
         "qualname": "backend.tasks.library_watcher_tasks:library_scan_files_task"
       },
       {
@@ -866,12 +826,12 @@
     ],
     "tasks": [
       {
-        "body_lines": 81,
+        "body_lines": 89,
         "envelope": "task_failure_telemetry",
         "file": "backend/tasks/artist_matching_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 29,
+        "line": 31,
         "module": "backend.tasks.artist_matching_tasks",
         "name": "artist_matching_task",
         "params": [
@@ -885,7 +845,7 @@
         "schedule": null
       },
       {
-        "body_lines": 48,
+        "body_lines": 45,
         "envelope": "task_failure_telemetry",
         "file": "backend/tasks/embedding_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
@@ -923,7 +883,7 @@
         "schedule": null
       },
       {
-        "body_lines": 247,
+        "body_lines": 258,
         "envelope": "own",
         "file": "backend/tasks/ingestion_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
@@ -1020,7 +980,7 @@
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 106,
+        "line": 124,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_scan_files_task",
         "params": [
@@ -1038,7 +998,7 @@
         "schedule": null
       },
       {
-        "body_lines": 42,
+        "body_lines": 60,
         "envelope": "none",
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",

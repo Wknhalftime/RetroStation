@@ -64,14 +64,15 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `progress_tracking` | every task envelope | `/ws` poll (0.5 s), hash-backfill liveness |
 
 - **Flows:**
-  - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with `embedding_task`
-    as a side branch (AUD-R020; today it still sits in the chain until that fix lands)
+  - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
+    `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020)
   - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
     `mb_enrichment_task`
   - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task`
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
-  (AUD-R012 (1), AUD-R014). Three sites don't yet (AUD-061..063).
+  (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
+  folders, so a failed hand-off is retried on the next poll.
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
   cue-analysis resume (every 5 min each), cue prune.
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
