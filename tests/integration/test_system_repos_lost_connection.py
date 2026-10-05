@@ -1,10 +1,10 @@
 """The system subdomain's sync Pg repositories when their database connection is lost.
 
-Requirements: ``.claude/rules/error-handling.md`` (a low-level exception is handled at its
-layer: the repository translates psycopg's ``OperationalError`` into a domain error) and the
-G1 final review (a lost connection in a settings read or upsert surfaced as a 500). The
-request's backend is terminated with ``pg_terminate_backend`` from a second connection, so
-the repository meets a dead connection as it would in production.
+Requirements: a low-level exception is handled at its layer (the repository translates
+psycopg's ``OperationalError`` into a domain error), and the G1 final review (a lost
+connection in a settings read or upsert surfaced as a 500). The request's backend is
+terminated with ``pg_terminate_backend`` from a second connection, so the repository meets a
+dead connection as it would in production.
 
 Only a *lost* connection is translated: an ``OperationalError`` on a live connection (a lock
 wait past ``lock_timeout``, a deadlock) keeps its psycopg type, which the retry and per-item

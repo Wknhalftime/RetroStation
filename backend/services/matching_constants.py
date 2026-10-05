@@ -2,8 +2,7 @@
 
 All strategies and the router's triage computation import from here. Never
 redeclare any of these values elsewhere; never copy-paste their literals into
-inline checks. See `docs/superpowers/plans/2026-04-22-resolution-center-visibility.md`
-§Task 1 for rationale and the zones defined in §3.3 of the source spec.
+inline checks.
 """
 
 MB_AUTO_LINK_SCORE: int = 95

@@ -1,6 +1,6 @@
 """PG: the station adapter turns a duplicate call sign into the domain's error (spec D72; C1:
 low-level errors are handled at their layer, so routes catch domain exceptions only;
-error-handling.md: the translation is keyed by constraint, so another unique violation is
+the translation is keyed by constraint, so another unique violation is
 not called a duplicate; it may surface as the driver's error or as another broadcast
 error)."""
 

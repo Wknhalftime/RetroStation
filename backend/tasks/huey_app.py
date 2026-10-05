@@ -4,9 +4,11 @@ from backend.config import get_settings
 from backend.logging_config import configure_logging
 from backend.tasks.huey_files import huey_db_path
 
-# Single-worker SQLite backend (WAL mode); sufficient for this single-user tool.
+# SQLite backend (WAL mode) consumed by exactly one worker: `-w 1` in the
+# Procfile is a constraint, not a tuning value (AUD-R017). A second worker or a
+# RedisHuey swap first needs the run exclusion, rate limit and guarded writes
+# that ruling names.
 # results=False because all tasks are fire-and-forget (no .get() calls).
-# Replace with RedisHuey for multi-worker or multi-user deployments.
 huey = SqliteHuey(filename=huey_db_path("huey"), results=False)
 
 

@@ -63,6 +63,9 @@ def embedding_task(playlist_id: str) -> None:
 
     # Fire-and-forget: enqueue artist matching. Outside the telemetry
     # boundary — downstream enqueue failures are not embedding failures.
+    # Known gap: AUD-R020 removes this hand-off (ingestion_task enqueues
+    # embedding_task and artist_matching_task separately, both through
+    # enqueue_or_log per AUD-R014); open findings AUD-059, AUD-062.
     from backend.tasks.artist_matching_tasks import artist_matching_task
 
     artist_matching_task(playlist_id)

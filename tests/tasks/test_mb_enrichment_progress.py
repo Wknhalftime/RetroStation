@@ -49,14 +49,14 @@ def _stub_repo_factory(
 
 
 def _make_entity(mbid: str, name_field: str = "name") -> MagicMock:
-    """Build a Tier 1 artist / work / recording stub (mbid=None forces name-search).
+    """Build an MBID-less artist / work / recording stub (mbid=None).
 
     Do NOT reuse for tests exercising Tier 2/3; rebuild with a real MBID and
     explicit `disambiguation` / `sort_name` values for those cases.
     """
     ent = MagicMock()
     ent.id = mbid
-    ent.mbid = None  # forces Tier 1 path
+    ent.mbid = None  # MBID-less: an artist is quarantined (AUD-R008)
     ent.disambiguation = None  # avoid MagicMock truthiness in Tier 2/3 checks
     ent.sort_name = f"Name-{mbid}"  # deterministic value, avoids MagicMock `in (...)` comparison
     setattr(ent, name_field, f"Name-{mbid}")
@@ -69,7 +69,7 @@ def _mbid_entity(mbid: str, name_field: str = "name") -> MagicMock:
 
     Unlike `_make_entity` (mbid=None, forces the bare-artist path), this
     stub always carries an MBID so `_enhance_artist` goes straight to the
-    lookup branch regardless of the AUD-R008 Tier 1 removal.
+    lookup branch (the only artist path since AUD-R008).
     """
     ent = MagicMock()
     ent.id = mbid
@@ -440,8 +440,8 @@ class TestMbEnrichmentSummary:
 # Artist phase outcome counting (AUD-R008 gate 2 mutation-kill tests) — the
 # per-item loop in `_run_artist_phase` distinguishes ENHANCED (ctx.done)
 # from FAILED (ctx.failed) and isolates a per-item retriable exception to
-# just that row. These use MBID-known (Tier 2/3) artists so the assertions
-# hold unchanged before and after the AUD-R008 Tier 1 removal.
+# just that row. These use MBID-known (Tier 2/3) artists, the only path
+# that enhances an artist since AUD-R008.
 # ---------------------------------------------------------------------------
 
 

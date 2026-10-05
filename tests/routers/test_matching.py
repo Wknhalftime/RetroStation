@@ -1579,8 +1579,8 @@ class TestMatchingRun:
         """When a row transitions back to PENDING, match_tier / reason_code /
         reason_detail must be cleared so PENDING never carries stale matcher
         metadata. Matches the convention in resolve_artist's cascade
-        ([matching.py:562-575](backend/routers/matching.py:562)) — "NULL =
-        no reason for pending" is a project-wide invariant.
+        (backend/routers/matching.py) — "NULL = no reason for pending" is a
+        project-wide invariant.
         """
         monkeypatch.setattr("backend.routers.matching.artist_matching_task", lambda _pid: None)
 

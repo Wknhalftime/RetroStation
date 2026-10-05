@@ -348,8 +348,8 @@ def ingestion_task(
 
         # Embedding dispatch is decoupled from ingestion COMPLETED: the DB
         # commit has already happened, so a broker hiccup here is a separate
-        # operational concern, not an ingestion failure. Guarded (AUD-R011
-        # decision 1): the caller owns the handoff, so an enqueue failure is
+        # operational concern, not an ingestion failure. Guarded (AUD-R012
+        # (1)): the caller owns the handoff, so an enqueue failure is
         # logged on this ingestion run's own task_id instead of silently
         # swallowed — progress_conn is still open at this point.
         from backend.tasks.embedding_tasks import embedding_task

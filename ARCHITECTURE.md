@@ -1,8 +1,11 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-05.** Checked against master a97a64a. Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R020 ACTIVE since 2026-10-05). If the code and this page disagree, fix one of them
-in the same PR. Cite decisions by id and name, never by line number.
+**Status: 2026-10-05.** Checked against master a004e56 (comment audit: `audit/comment-audit.md`).
+Rulings cited here are in `audit/rulings.jsonl` (AUD-R015..R020 ACTIVE since 2026-10-05). If the
+code and this page disagree, fix one of them in the same PR. Cite decisions by id and name, never
+by line number. Streaming decision ids (`D20`, `D109`, ...) come from
+`docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is gitignored, so the repo
+cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph spec's own, separate list.
 
 ## What it is
 

@@ -99,6 +99,8 @@ def library_watcher_poll() -> None:
         # only folders whose own files changed and the scan is non-recursive,
         # so there is nothing to collapse — a parent never stands in for a
         # child.
+        # Known gap: AUD-R014 requires this hand-off to go through
+        # enqueue_or_log; it does not yet (open finding AUD-063).
         library_scan_files_task(changed, task_id)
 
 
@@ -304,8 +306,8 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
             total_written=total_written,
         )
 
-        # Chain into enrichment if files were written. Guarded (AUD-R011
-        # decision 1): this scan's own run already reported COMPLETED above,
+        # Chain into enrichment if files were written. Guarded (AUD-R012
+        # (1)): this scan's own run already reported COMPLETED above,
         # so a downstream enqueue failure must not retroactively flip it to
         # FAILED. The caller owns the handoff and logs the failure on its
         # own task_id instead.

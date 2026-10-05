@@ -231,8 +231,8 @@ def library_enrichment_task() -> dict[str, int]:
         failed=total_failed,
     )
 
-    # Fire-and-forget: trigger MB enhancement pass. Guarded (AUD-R011
-    # decision 1): this task's own run already reported COMPLETED above (by
+    # Fire-and-forget: trigger MB enhancement pass. Guarded (AUD-R012
+    # (1)): this task's own run already reported COMPLETED above (by
     # `task_run` on `with`-block exit), so a downstream enqueue failure must
     # not escape unreported. `task_run`'s progress_conn is already closed at
     # this point, so a fresh short-lived autocommit connection is opened

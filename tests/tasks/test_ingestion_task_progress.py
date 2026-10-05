@@ -273,7 +273,7 @@ class TestIngestionTaskFailurePaths:
 
 
 class TestIngestionTaskEmbeddingDecoupling:
-    """AUD-R011 decision 1: the caller owns the embedding_task handoff.
+    """AUD-R012 (1): the caller owns the embedding_task handoff.
 
     Before this decision, `contextlib.suppress(Exception)` swallowed ANY
     exception from the enqueue call, including logic bugs. Now only the

@@ -9,7 +9,8 @@ Splits the work into two functions with distinct failure semantics:
 
 - ``recalculate_for_work_sync`` runs AFTER the caller commits, on a
   connection supplied by its ``repos_factory`` argument (mirrors
-  ``backend/tasks/identity_matching_tasks.py:41``, which builds its own).
+  ``identity_matching_task`` in ``backend/tasks/identity_matching_tasks.py``,
+  which builds its own).
   This recalc is a best-effort side effect for *database* failures only:
   a ``psycopg.Error`` (a constraint violation, etc.) or a repository's
   ``StorageUnavailableError`` (the connection dropping) is caught and
