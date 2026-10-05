@@ -315,34 +315,17 @@
     "options": {
       "chains": false,
       "check": null,
-      "ev01_scope": [
-        "artist_matching_task",
-        "embedding_task",
-        "identity_matching_task",
-        "ingestion_task",
-        "library_enrichment_task",
-        "library_hash_backfill_resume",
-        "library_hash_backfill_task",
-        "library_scan_files_task",
-        "library_scan_task",
-        "library_watcher_poll",
-        "mb_enrichment_task",
-        "normalize_backfill_task",
-        "stream_cue_analysis_resume",
-        "stream_cue_analysis_task",
-        "stream_cue_prune_task",
-        "stream_cue_request_task"
-      ],
+      "ev01_scope": [],
       "guard_fn": "backend.tasks._enqueue_chain:enqueue_or_log",
       "limit": 20,
       "node": null,
       "offset": 0,
-      "out": "event-graph.json",
+      "out": "event-graph.baseline.json",
       "publish_fn": [],
       "root": ".",
       "rule": null,
       "subscribe_fn": [],
-      "summary": true
+      "summary": false
     }
   },
   "hits": [
