@@ -72,7 +72,10 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-1")
 
         statuses = [u.status for u in fake_repo.received_upserts]
@@ -106,7 +109,10 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-2")
 
         upserts = fake_repo.received_upserts
@@ -137,7 +143,10 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "my.csv", str(uuid4()), "tid-3")
 
         terminal = fake_repo.received_upserts[-1]
@@ -167,7 +176,10 @@ class TestIngestionTaskLifecycle:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "skipped.csv", str(uuid4()), "tid-sk")
 
         terminal = fake_repo.received_upserts[-1]
@@ -294,9 +306,12 @@ class TestIngestionTaskEmbeddingDecoupling:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch(
-            "backend.tasks.embedding_tasks.embedding_task",
-            side_effect=sqlite3.OperationalError("database is locked"),
+        with (
+            patch(
+                "backend.tasks.embedding_tasks.embedding_task",
+                side_effect=sqlite3.OperationalError("database is locked"),
+            ),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
         ):
             # Must NOT raise: the caller owns the handoff and keeps its own
             # COMPLETED status.
@@ -343,6 +358,7 @@ class TestIngestionTaskEmbeddingDecoupling:
                 "backend.tasks.embedding_tasks.embedding_task",
                 side_effect=RuntimeError("broker down"),
             ),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
             pytest.raises(RuntimeError, match="broker down"),
         ):
             ingestion_task.call_local(CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-e2")
@@ -372,7 +388,10 @@ class TestIngestionTaskBackwardCompat:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             returned_id = ingestion_task.call_local(
                 CSV_PAYLOAD,
                 "f.csv",
@@ -489,7 +508,10 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-fault")
 
         terminal = fault_repo.received_upserts[-1]
@@ -537,7 +559,10 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             ingestion_task.call_local(CSV_PAYLOAD, "big.csv", str(uuid4()), "tid-throttle")
 
         warning_events = [call.args[0] for call in mock_logger.warning.call_args_list if call.args]
@@ -575,7 +600,10 @@ class TestIngestionTaskMidRunTelemetryFault:
 
         from backend.tasks.ingestion_tasks import ingestion_task
 
-        with patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()):
+        with (
+            patch("backend.tasks.embedding_tasks.embedding_task", MagicMock()),
+            patch("backend.tasks.artist_matching_tasks.artist_matching_task", MagicMock()),
+        ):
             # Must NOT raise — the ingest already committed.
             returned_id = ingestion_task.call_local(
                 CSV_PAYLOAD, "f.csv", str(uuid4()), "tid-comp-fault"
