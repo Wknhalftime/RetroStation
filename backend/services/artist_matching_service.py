@@ -588,17 +588,26 @@ def _persist_artist_result(
     broadcast_artist_repo: BroadcastArtistRepository,
     artist_repo: ArtistCatalogRepository,
     match_repo: MatchRepository,
-) -> None:
+) -> bool:
     """Apply a single result to repositories. Owned by orchestration so
-    strategies stay read-only (Invariant 1)."""
-    broadcast_artist_repo.update_match_status(
+    strategies stay read-only (Invariant 1).
+
+    Returns whether the result was written. The status write is guarded on the
+    PENDING status this run read (AUD-R018): if the user decided the artist in
+    the meantime, their decision wins and nothing that follows from this
+    result (match row, catalog upsert) is written either.
+    """
+    written = broadcast_artist_repo.update_match_status_if_pending(
         broadcast_artist.id,
         result.status,
         reason_code=result.reason_code,
         reason_detail=result.reason_detail,
     )
+    if not written:
+        logger.info("artist_decided_during_matching", broadcast_artist_id=str(broadcast_artist.id))
+        return False
     if result.status != MatchStatus.AUTO_MATCHED:
-        return
+        return True
     match_repo.create(
         Match(
             id=uuid4(),
@@ -619,6 +628,7 @@ def _persist_artist_result(
             normalized_name=normalize_artist(result.mb_candidate["name"]),
             disambiguation=result.mb_candidate.get("disambiguation"),
         )
+    return True
 
 
 @dataclass(frozen=True)
@@ -686,20 +696,24 @@ def match_artists_for_playlist(
             )
         )
 
+        written_ids: set[UUID] = set()
         for broadcast_artist in pending:
-            _persist_artist_result(
+            if _persist_artist_result(
                 broadcast_artist,
                 resolved[broadcast_artist.id],
                 repos.broadcast_artist_repo,
                 repos.artist_repo,
                 repos.match_repo,
-            )
+            ):
+                written_ids.add(broadcast_artist.id)
 
         _cascade_auto_rejected(playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo)
+        # Only artists this run actually wrote: one the user decided meanwhile keeps
+        # its songs as they are (AUD-R018).
         deferred_artist_ids = [
             artist_id
             for artist_id, result in resolved.items()
-            if result.reason_code == ReasonCode.DEFERRED_RETRY
+            if artist_id in written_ids and result.reason_code == ReasonCode.DEFERRED_RETRY
         ]
         _cascade_deferred(deferred_artist_ids, repos.track_identity_repo)
     finally:

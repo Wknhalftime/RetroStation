@@ -559,6 +559,7 @@ def match_identities_for_playlist(
 
     auto_matched = 0
     needs_review = 0
+    decided_meanwhile = 0
     work_ids: list[str] = []
 
     for identity in pending:
@@ -571,14 +572,16 @@ def match_identities_for_playlist(
                 identity_id=str(identity.id),
                 missing_artist_id=str(identity.broadcast_artist_id),
             )
-            repos.track_identity_repo.update_match_status(
+            if repos.track_identity_repo.update_match_status_if_pending(
                 identity.id,
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.ORPHANED_IDENTITY,
                 reason_detail=(f"No broadcast_artist row for id {identity.broadcast_artist_id}"),
-            )
-            needs_review += 1
+            ):
+                needs_review += 1
+            else:
+                decided_meanwhile += 1
             continue
 
         result = engine.resolve(identity, artist)
@@ -587,23 +590,29 @@ def match_identities_for_playlist(
             # Engine exhausted all strategies. Should not happen given the
             # strategies' defensive exhaustiveness, but persist NEEDS_REVIEW so
             # the identity is surfaced rather than stuck PENDING.
-            repos.track_identity_repo.update_match_status(
+            if repos.track_identity_repo.update_match_status_if_pending(
                 identity.id,
                 MatchStatus.NEEDS_REVIEW,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=("All matching strategies exhausted — no result produced"),
-            )
-            needs_review += 1
+            ):
+                needs_review += 1
+            else:
+                decided_meanwhile += 1
             continue
 
-        repos.track_identity_repo.update_match_status(
+        if not repos.track_identity_repo.update_match_status_if_pending(
             identity.id,
             result.status,
             result.tier,
             reason_code=result.reason_code,
             reason_detail=result.reason_detail,
-        )
+        ):
+            # The user decided this song while the run was matching it (AUD-R018):
+            # their decision wins, so no match row and no master recalculation.
+            decided_meanwhile += 1
+            continue
 
         # Persist a matches row whenever a best candidate was scored — including
         # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
@@ -632,6 +641,7 @@ def match_identities_for_playlist(
         playlist_id=str(playlist_id),
         auto_matched=auto_matched,
         needs_review=needs_review,
+        decided_meanwhile=decided_meanwhile,
         work_ids_collected=len(work_ids),
     )
     return work_ids
