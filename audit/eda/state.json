@@ -1,0 +1,465 @@
+{
+  "session": "C",
+  "phase": "session-C-ruled",
+  "branch": "audit/event-graph",
+  "base": "master 9cff8e9 (merged into audit/event-graph as a6a4e27 on 2026-10-03; was c79dce2)",
+  "steps_done": [
+    "P0.1 branch audit/event-graph created from master c79dce2; audit/eda/ and state.json created",
+    "P0.2 rulings in force filtered -> audit/eda/rulings-in-scope.txt",
+    "P0.3 inventory by search -> audit/eda/inv-decorators.txt, audit/eda/inv-callsites.txt",
+    "P0.4 prediction written",
+    "P1 contract -> audit/eda/contract.md (adds --guard-fn; see open question)",
+    "P1 fixtures -> tests/scripts/fixtures/event_graph/{main,alt} (17 files, ruff check + format --check clean)",
+    "P1 spec tests -> tests/scripts/test_event_graph.py (51 tests)",
+    "P1 red run: all 51 fail because scripts/audit/event_graph.py does not exist",
+    "P1 review.1 audit/eda/spec-expectations.jsonl written: 68 rows, case ids match the # case comments in the tests (checked by script)",
+    "P1 review.2 prep: neutral ids K01-K68 -> audit/eda/case-key.json; anchors list in scratchpad",
+    "P1 review.2 independent derivation -> audit/eda/spec-expectations-independent.jsonl (68 rows, 43 ambiguity flags)",
+    "P1 review.3 diff -> audit/eda/spec-diff.md: 8 disagreements D1-D8, not resolved",
+    "checks: uv run ruff check . (All checks passed); uv run ruff format --check . (437 files already formatted); pytest tests/scripts --collect-only (99 collected, no fixture collected)",
+    "sync: merged master 9cff8e9 into audit/event-graph (a6a4e27, no conflicts); inventory refreshed for backend/tasks/cue_huey_app.py, stream_cue_tasks.py, huey_files.py, websocket.py",
+    "D1-D8 best-practice review -> audit/eda/d1-d8-review.md: D1,D3,D4,D6,D8 best practice; D5,D7 acceptable; D2 concern (framework signals counted as EVENT); 3 whole-spec observations; nothing applied",
+    "Gate A changes (Lance 2026-10-03: approved review D1/D4/D7 tweaks and the --check change; two-instance reading delegated): header.excluded_dirs; subscribe_handler unresolved row (evg_bus.py:28); schedule = ast.get_source_segment; --check also gates unresolved_dispatch identity (reason, producer, name); tasks carry instance, registered is per instance; new duo/ root (5 files). Not adopted: parse-failure handling, vanished-hit report. D2 framework tag deferred with the signals question.",
+    "red run after Gate A changes: 56 tests, 10 failed + 46 errors, all because scripts/audit/event_graph.py is missing; expectations 73 rows; independent check of the 5 new cases agreed (N1-N5)",
+    "Gate A closed 2026-10-03: Lance locked 23 spec files (tests/scripts/test_event_graph.py + 22 files under tests/scripts/fixtures/event_graph/) in manifest group 'audit/event-graph'",
+    "lock check: manifest has the group (46 'event_graph' entries = 23 hashes + 23 group rows); frozen_tests_check on this worktree flags none of the 23",
+    "Session B 2026-10-03/04: analyzer built (715d5e5, 56/56), real-code run, recall reconciled, precision 15/15 before and after, mutation 584 survivors classified, 18 spec gaps proposed, baseline copied, history at 3 and 6 months; details in tool_status",
+    "P4 Session C 2026-10-04: tool_status read (precision 15/15, recall reconciled, no gap) -> criteria measured; analyzer re-run --check exit 0 on HEAD ad7f317 and master a97a64a (identical graph); 7 module subagents (43 windows, max 8 each) + 7 own windows; audit/eda/report.md, audit/eda/findings.jsonl (AUD-059..080), audit/eda/proposed-rulings.jsonl (AUD-R015..R020, all PROPOSED); audit/rulings.jsonl untouched"
+  ],
+  "next_step": "Fix PRs: AUD-061..063 + AUD-059/R020 (hand-offs, embedding side branch), AUD-060 per AUD-R018, gate per AUD-R019, GAP-01 analyzer fix (needs Lance's approval of a new spec test + relock); ARCHITECTURE.md draft awaits 'ship it' (own branch docs/architecture-note)",
+  "open_stops": [],
+  "rulings_in_scope": {
+    "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
+    "count": 13,
+    "load_bearing": {
+      "AUD-R012": "ACTIVE. (1) Chained task calls are Huey enqueues; caller owns only the handoff: enqueue failure -> ERROR SystemLog <next_task>_enqueue_failed, caller keeps COMPLETED. Applies to library_scan_task, the watcher (library_scan_files_task), library_enrichment_task and ingestion_task. (2) watcher + ingestion_task write started/completed/failed SystemLogs. (3) failed-run SystemLogs carry a traceback: library_scan_task and _error_boundary.task_failure_telemetry (artist matching, identity matching, embedding, normalize backfill, hash backfill).",
+      "AUD-R011": "ACTIVE. Only mb_enrichment_task and library_enrichment_task share task_run; library_scan_task, library_scan_files_task, ingestion_task, library_hash_backfill_task keep their own envelopes; task_failure_telemetry keeps FAILED-only contract.",
+      "others": "AUD-R008 (MB artist enrichment rule, keyword hit only), AUD-057/015/040/025/021/051 ACTIVE-fixed, AUD-024/035/050/053 ACTIVE-no-change: none rules on messaging shape."
+    }
+  },
+  "inventory": {
+    "command_decorators": "rg -n -A3 '@huey\\.(task|periodic_task|signal|on_startup|pre_execute|post_execute)' backend scripts --glob '*.py'",
+    "huey_task": 10,
+    "huey_periodic_task": 2,
+    "huey_signal": 0,
+    "huey_on_startup": 1,
+    "tasks": {
+      "library_scan_task": "backend/tasks/library_scan_tasks.py:429",
+      "library_watcher_poll": "backend/tasks/library_watcher_tasks.py:60 (periodic */4)",
+      "library_scan_files_task": "backend/tasks/library_watcher_tasks.py:106",
+      "ingestion_task": "backend/tasks/ingestion_tasks.py:202",
+      "mb_enrichment_task": "backend/tasks/mb_enrichment_tasks.py:755",
+      "library_hash_backfill_task": "backend/tasks/library_hash_backfill_tasks.py:164",
+      "library_hash_backfill_resume": "backend/tasks/library_hash_backfill_tasks.py:180 (periodic */5)",
+      "identity_matching_task": "backend/tasks/identity_matching_tasks.py:34",
+      "normalize_backfill_task": "backend/tasks/normalize_backfill_tasks.py:50",
+      "library_enrichment_task": "backend/tasks/library_enrichment_tasks.py:63",
+      "artist_matching_task": "backend/tasks/artist_matching_tasks.py:29",
+      "embedding_task": "backend/tasks/embedding_tasks.py:20"
+    },
+    "huey_app_import_list": 10,
+    "command_callsites": "uv run python <scratchpad>/inv.py '<12 task names>' (AST walk of backend/ and scripts/, enclosing qualname)",
+    "direct_enqueue_callsites": {
+      "count": 8,
+      "router": [
+        "backend/routers/ingestion.py:37 upload_playlist -> ingestion_task",
+        "backend/routers/library/scan.py:39 scan_library -> library_scan_task",
+        "backend/routers/matching.py:734 resolve_artist -> identity_matching_task",
+        "backend/routers/matching.py:1315 _enqueue_playlists -> artist_matching_task",
+        "backend/routers/tasks.py:131 retry_enrichment -> library_enrichment_task (import alias _library_enrichment_task)"
+      ],
+      "task_unguarded": [
+        "backend/tasks/artist_matching_tasks.py:110 artist_matching_task -> identity_matching_task",
+        "backend/tasks/embedding_tasks.py:68 embedding_task -> artist_matching_task",
+        "backend/tasks/library_watcher_tasks.py:102 library_watcher_poll -> library_scan_files_task"
+      ]
+    },
+    "enqueue_or_log_callsites": {
+      "command": "rg -n 'enqueue_or_log\\(' backend scripts --glob '*.py'",
+      "count": 5,
+      "sites": [
+        "backend/tasks/ingestion_tasks.py:357 ingestion_task -> embedding_task (lambda)",
+        "backend/tasks/library_enrichment_tasks.py:245 library_enrichment_task -> mb_enrichment_task (task as value)",
+        "backend/tasks/library_scan_tasks.py:545 library_scan_task -> library_hash_backfill_task (task as value)",
+        "backend/tasks/library_scan_tasks.py:552 library_scan_task -> library_enrichment_task (task as value)",
+        "backend/tasks/library_watcher_tasks.py:317 library_scan_files_task -> library_enrichment_task (task as value)"
+      ]
+    },
+    "schedule_calls": 0,
+    "call_local": {
+      "command": "rg -n '\\.call_local\\(|\\.schedule\\(|\\.func\\b' backend scripts --glob '*.py'",
+      "count_backend": 1,
+      "count_scripts": 2,
+      "sites": [
+        "backend/tasks/library_hash_backfill_tasks.py:182 library_hash_backfill_resume -> library_hash_backfill_task.call_local()",
+        "scripts/bench_enrich.py:449 cmd_run -> library_enrichment_task.call_local()",
+        "scripts/bench_enrich.py:223 stub -> original.call_local() (original = met.mb_enrichment_task: task bound to a local name)"
+      ]
+    },
+    "result_get_calls": 0,
+    "task_attr_rebinding": "scripts/bench_enrich.py:227,231 met.mb_enrichment_task = stub/original (monkeypatch, not a dispatch)",
+    "tasks_with_no_producer_and_no_schedule": [
+      "normalize_backfill_task (only tests call it, via call_local)"
+    ],
+    "sleep_in_loop": {
+      "command": "rg -n 'sleep\\(' backend scripts --glob '*.py' (+ enclosing loop check)",
+      "backend": [
+        "backend/websocket.py:103 while True around SELECT/UPDATE progress_tracking (poll)",
+        "backend/playout/harbor.py:85 while True around _answer(port) probe (no query)",
+        "backend/db/retry.py:53 for-attempt retry around func() (no query)"
+      ],
+      "scripts": [
+        "scripts/stream_stub.py:218,223",
+        "scripts/bench_stream.py:256"
+      ],
+      "not_in_loop": [
+        "backend/services/mb_client.py:42 rate limit",
+        "scripts/bench_stream.py:249"
+      ]
+    },
+    "notify_listen_pg_notify": 0,
+    "publish_subscribe_candidates": {
+      "command": "rg -n -w -i 'def (\\w*(publish|emit|post_event|notify|dispatch|subscribe|broadcast|on_event|register|listener|handler)\\w*)' backend scripts; rg -i 'observer|callback|on_progress|_HANDLERS|_REGISTRY|_STRATEG' backend",
+      "registries_iterated_and_called": 0,
+      "found": [
+        "on_progress callback params: backend/tasks/mb_enrichment_tasks.py:174,212,278 (+ call sites 505,675); backend/services/library_scan_service.py scan_directory(on_progress, on_file, on_quarantine). One optional callable injected by the caller: the caller names the one reactor.",
+        "strategy lists iterated: backend/services/artist_matching_service.py:404, identity_matching_service.py:495. First-match chain whose result the caller uses: the publisher's outcome depends on them.",
+        "name-only hits, not mechanisms: mb_enrichment_tasks._emit_pre_pass_heartbeat:358, scripts/bench_stream.emit:369, audio_tags._dispatch_id3/_dispatch_wav, routers *broadcast_days (domain word)"
+      ]
+    },
+    "websocket": "backend/websocket.py:30 websocket_endpoint polls progress_tracking every 0.5 s (POLL_INTERVAL_SECONDS) and pushes JSON; no message feeds it",
+    "note": "inv-*.txt scratch listings removed; every count and location is in this file with its command",
+    "refresh_2026_10_03": {
+      "command": "git diff --stat c79dce2 9cff8e9 -- backend/tasks backend/websocket.py; rg -n '@\\w+\\.(task|periodic_task|signal)' backend/tasks/stream_cue_tasks.py; rg -n -w <each new task> backend scripts --glob '*.py'",
+      "phase0_search_gap": "Phase 0 searched '@huey\\.' only; the new instance is named cue_huey, so the original pattern misses its tasks. Session B's recall check must use the totals below.",
+      "huey_instances": {
+        "count": 2,
+        "huey": "backend/tasks/huey_app.py:10 SqliteHuey(..., results=False), imports 10 task modules",
+        "cue_huey": "backend/tasks/cue_huey_app.py:17 SqliteHuey(..., results=False), imports backend.tasks.stream_cue_tasks (line 63); 2 on_startup hooks (lines 24, 34)"
+      },
+      "new_tasks": {
+        "stream_cue_analysis_task": "backend/tasks/stream_cue_tasks.py:208 (task)",
+        "stream_cue_request_task": "backend/tasks/stream_cue_tasks.py:231 (task, priority/expires kwargs)",
+        "stream_cue_analysis_resume": "backend/tasks/stream_cue_tasks.py:256 (periodic */5)",
+        "stream_cue_prune_task": "backend/tasks/stream_cue_tasks.py:262 (periodic minute=0 hour=4)"
+      },
+      "totals_now": {
+        "huey_task": 12,
+        "huey_periodic_task": 4,
+        "huey_signal": 0,
+        "on_startup": 3,
+        "tasks": 16,
+        "enqueue_or_log_callsites": 5
+      },
+      "new_callsites": [
+        "backend/tasks/stream_cue_tasks.py:250 request_cue_analysis -> stream_cue_request_task (direct enqueue, plain function in a task module)",
+        "backend/tasks/stream_cue_tasks.py:258 stream_cue_analysis_resume -> stream_cue_analysis_task.call_local() (INLINE)",
+        "backend/main.py:202 CueReporter(request_cue_analysis): the plain wrapper is injected into the stream service; request_cue_analysis is not a task, so it is not unresolved_dispatch"
+      ],
+      "tasks_with_no_producer_and_no_schedule": [
+        "normalize_backfill_task",
+        "stream_cue_analysis_task (only stream_cue_analysis_resume runs it, via call_local; INLINE counts as a producer under contract.md EV06, so no hit expected)"
+      ],
+      "websocket_change": "backend/websocket.py: the stale-row UPDATE moved to a module constant STALE_SQL outside the poll loop; contract.md takes the POLL table name from string literals inside the loop"
+    }
+  },
+  "prediction": {
+    "written_before_tool_exists": true,
+    "EVENT": "0 edges (0%): no Huey signal, no NOTIFY/LISTEN, no pub/sub registry; --summary should print 'no publish mechanism found'",
+    "COMMAND": "13 edges (100% of ENQUEUE): 5 router->task, 3 task->task unguarded, 5 guarded by enqueue_or_log",
+    "QUERY": "0 edges (0%): results=False and no .get( on a task result",
+    "INLINE": "backend 1 (library_hash_backfill_resume), scripts 1 resolved + 1 to unresolved_dispatch (bench_enrich original.call_local)",
+    "POLL": "1 (backend/websocket.py)"
+  },
+  "numbers": {
+    "spec_red_run": {
+      "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q -p no:randomly --junitxml=audit/eda/_junit.xml (classified by a one-liner: failure text contains can't open file / FileNotFoundError + event_graph.py)",
+      "result": "10 failed, 41 errors (module fixtures), 0 passed; 51/51 cause = analyzer script missing",
+      "output": "audit/eda/spec-red-run.txt",
+      "fixed_before_final_run": "test_missing_root_is_an_analysis_error passed vacuously (python exits 2 when the script is missing); now also requires the root name in stderr"
+    },
+    "spec_expectation_rows": {
+      "command": "wc -l audit/eda/spec-expectations.jsonl",
+      "value": 73
+    },
+    "independent_rows": {
+      "command": "wc -l audit/eda/spec-expectations-independent.jsonl",
+      "value": 68
+    },
+    "disagreements": {
+      "source": "audit/eda/spec-diff.md",
+      "value": 8
+    },
+    "spec_tests": {
+      "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q -p no:randomly",
+      "value": "56 tests: 10 failed + 46 errors, all script missing"
+    }
+  },
+  "proposed_options": {
+    "--publish-fn": {
+      "value": [],
+      "evidence": "inventory.publish_subscribe_candidates: no registry of callables is iterated and called; on_progress (mb_enrichment_tasks.py:174/212/278, library_scan_service.scan_directory) is one optional callable the caller injects, so the caller names its one reactor; strategy lists (artist_matching_service.py:404, identity_matching_service.py:495) are first-match chains whose result the caller uses; other hits are names only",
+      "ruled": "ACCEPTED by Lance 2026-10-03: none (default); EVENT on the real code comes only from Huey signals or SQL NOTIFY/LISTEN"
+    },
+    "--subscribe-fn": {
+      "value": [],
+      "evidence": "same search; no subscribe/register call exists",
+      "ruled": "ACCEPTED by Lance 2026-10-03: none (default); EVENT on the real code comes only from Huey signals or SQL NOTIFY/LISTEN"
+    },
+    "--ev01-scope": {
+      "value": [
+        "artist_matching_task",
+        "embedding_task",
+        "identity_matching_task",
+        "ingestion_task",
+        "library_enrichment_task",
+        "library_hash_backfill_resume",
+        "library_hash_backfill_task",
+        "library_scan_files_task",
+        "library_scan_task",
+        "library_watcher_poll",
+        "mb_enrichment_task",
+        "normalize_backfill_task"
+      ],
+      "evidence": "Lance 2026-10-03: the EV01 ruling covers every task-to-task hand-off, so every task (state.json inventory.tasks, 12) is in scope; supersedes the four-task proposal from AUD-R012 (1)",
+      "note_after_sync": "AUD-R014 covers every task: the 4 cue tasks added by the master sync join the 12 listed, 16 in all"
+    },
+    "--guard-fn": {
+      "value": "backend.tasks._enqueue_chain:enqueue_or_log (default)",
+      "evidence": "ADDED option: the fixture guard lives in another module and a same-named function must not count (a name is never evidence)",
+      "ruled": "ACCEPTED by Lance 2026-10-03: keep the option; default backend.tasks._enqueue_chain:enqueue_or_log; the real-code run passes nothing"
+    }
+  },
+  "open_questions": [
+    "ANSWERED by Lance 2026-10-03: every task-to-task hand-off outside enqueue_or_log is a typical EV01 finding, including artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task and library_watcher_poll -> library_scan_files_task. Recorded as AUD-R014 (ACTIVE) in audit/rulings.jsonl, commit d9ef115, at Lance's explicit request (file outside this job's allowed list).",
+    "AUD-R012 breach check (inventory only): every hand-off by the four named producers goes through enqueue_or_log (library_scan_tasks.py:545,552; library_watcher_tasks.py:317; library_enrichment_tasks.py:245; ingestion_tasks.py:357). No breach found; no finding written.",
+    "Interpretations the user may overrule: EV02 'the undecorated function' read as T.func; EV09 'reads state to decide' read as an if/while test containing a call or a name assigned in the task body; EV06 no_producer counts INLINE as a producer and flags tasks seen only in unresolved_dispatch; schedule recorded as source text.",
+    "Two Huey instances since master 9cff8e9 (huey, cue_huey). contract.md and the fixtures assume one huey app: 'registered' and EV06 'missing from the huey_app import list' need a ruling. Proposed reading: a task is registered when the module of the instance that decorates it imports the task's module. No fixture covers two instances; adding one is a spec change for Gate A, before the lock. RESOLVED at Gate A (delegated by Lance 2026-10-03): registered is per instance; duo/ fixture covers it.",
+    "OPEN, deferred to Session C (Lance 2026-10-03): Huey signals (SIGNAL_ENQUEUED/EXECUTING/COMPLETE/ERROR/EXPIRED/REVOKED...) are not used anywhere in backend; task lifecycle is reported by per-task envelopes (task_run, task_failure_telemetry, own try/except; AUD-R011 keeps them distinct). No recorded decision against signals was found (rg over the repo, git log --grep=signal). Discrepancy noted: design-pattern-signals.md asks for an Observer for cross-cutting logging, and signals are a ready-made lifecycle Observer. Whether framework signals should count as EVENT (D2 review concern) stays open with this question; D2 stays as written, and today there are zero signal edges, so the spec is unaffected."
+  ],
+  "rules_added_dropped": "none added, none dropped, none marked not implemented",
+  "spec_diff_ruling": "ACCEPTED by Lance 2026-10-03: D1-D8 as written in the spec (mine column of audit/eda/spec-diff.md); best-practice review by subagent requested",
+  "spec_lock": {
+    "group": "audit/event-graph",
+    "files": 23,
+    "manifest": ".claude/frozen-tests.json in THIS worktree (laughing-euclid-c2f46a); .claude/ is gitignored (.gitignore:5), so the lock is not in git. Session B must run in this worktree, or the lock must be carried over by Lance.",
+    "pre_existing_drift": {
+      "files": [
+        "tests/integration/test_stream_cues.py",
+        "tests/integration/test_stream_cues_schema.py",
+        "tests/routers/test_listen.py",
+        "tests/services/streaming/test_stream_service.py"
+      ],
+      "check_output": "CHANGED (frozen_tests_check on this worktree)",
+      "cause": "changed on master by #120 f70f0fb, #122 7f68c06, #125 e5eefb6 (git log c79dce2..master -- <files>); no commit on this branch touches them (git log master..HEAD -- <files> empty); identical to master (git diff --stat master HEAD -- <files> empty). Stale hashes from the master sync, not this job. Lance to relock under their existing groups when convenient."
+    }
+  },
+  "tool_status": {
+    "commit": "715d5e5 feat(audit): event-graph analyzer",
+    "spec": {
+      "command": "uv run pytest tests/scripts/test_event_graph.py -n 0 -q",
+      "result": "56 passed (first attempt; no test needed a second attempt)",
+      "ruff_check": "All checks passed!",
+      "ruff_format_check": "1 file already formatted",
+      "mypy_strict": "Success: no issues found in 1 source file",
+      "suppressions": "none (no noqa / type: ignore / fmt: in scripts/audit/event_graph.py)"
+    },
+    "real_run": {
+      "command": "uv run python scripts/audit/event_graph.py --root . --out audit/event-graph.json --ev01-scope <each of the 16 task names, AUD-R014> --summary (default --guard-fn, no --publish-fn / --subscribe-fn)",
+      "counts": {
+        "node.task": 12,
+        "node.periodic": 4,
+        "node.producer": 17,
+        "edge.ENQUEUE": 14,
+        "edge.ENQUEUE_DEFERRED": 0,
+        "edge.INLINE": 3,
+        "edge.PUBLISH": 0,
+        "edge.SUBSCRIBE": 0,
+        "edge.POLL": 1,
+        "class.COMMAND": 14,
+        "class.QUERY": 0,
+        "class.EVENT": 0,
+        "rule.EV01": 3,
+        "rule.EV02": 3,
+        "rule.EV03": 0,
+        "rule.EV04": 0,
+        "rule.EV05": 0,
+        "rule.EV06": 1,
+        "rule.EV07": 1,
+        "rule.EV08": 16,
+        "rule.EV09": 2,
+        "rule.EV10": 16,
+        "unresolved_dispatch": 1
+      },
+      "summary_extra_line": "no publish mechanism found"
+    },
+    "recall": {
+      "against": "inventory.refresh_2026_10_03.totals_now and the inventory site lists",
+      "tasks": "16 = 12 task + 4 periodic; matches totals_now (huey_task 12, periodic 4)",
+      "instances": "2 (backend.tasks.huey_app:huey, backend.tasks.cue_huey_app:cue_huey), both results=False, so EV05 0; matches",
+      "ENQUEUE": "14 = Session A's 13 (5 router + 3 unguarded task + 5 enqueue_or_log) + new_callsites stream_cue_tasks.py:250 request_cue_analysis -> stream_cue_request_task; every site matches by producer and consumer",
+      "guarded": "5 guarded = the 5 enqueue_or_log sites (ingestion_tasks 357, library_enrichment_tasks 245, library_scan_tasks 545/552, library_watcher_tasks 317); lines cite the guard call",
+      "INLINE": "3 = library_hash_backfill_resume:182 + stream_cue_analysis_resume:258 (new since Phase 0) + scripts/bench_enrich.py:449 cmd_run; matches",
+      "unresolved_dispatch": "1 = scripts/bench_enrich.py:217 task_as_value mb_enrichment_task (producer follow_on_task). The same dispatch Session A listed at :223 (original.call_local()): the tool cites where the task leaves resolution (original = met.mb_enrichment_task), Session A the later call through the alias. Not a gap. The :227/:231 monkeypatch assignments are stores and correctly make no row",
+      "POLL": "1 = backend/websocket.py:61 websocket_endpoint -> table:progress_tracking (table from the SELECT literal; STALE_SQL is a name defined outside the loop, as contract.md reads); matches",
+      "EVENT_PUBLISH_SUBSCRIBE": "0; matches (no signal, no NOTIFY/LISTEN, no publish fn ruled)",
+      "EV01": "3 = artist_matching_task -> identity_matching_task, embedding_task -> artist_matching_task, library_watcher_poll -> library_scan_files_task; all ruling_scope stated; matches the AUD-R014 list",
+      "EV06": "1 = normalize_backfill_task no_producer; stream_cue_analysis_task has an INLINE producer so no hit, as Session A expected; every task module is imported by its own instance's app",
+      "line_differences": "matching.py 735 and 1316 vs Session A's 734 and 1315: the master sync changed matching.py (+9 -1, git diff --stat c79dce2 9cff8e9); the tool's lines are today's call lines. Not a gap",
+      "not_in_session_A": "node.producer 17 = 16 task-edge producers (EV10 16) + websocket_endpoint (POLL); the 3 on_startup hooks are not tasks and make no edge, by contract",
+      "tool_gaps": "none found in recall"
+    },
+    "precision": {
+      "seed": 20261003,
+      "method": "random.Random(20261003): sample(range(len(edges)), 10), then sample(range(len(hits)), 5), over the sorted lists of audit/event-graph.json (18 edges, 42 hits)",
+      "edge_indices": [
+        0,
+        1,
+        2,
+        4,
+        6,
+        7,
+        8,
+        10,
+        14,
+        17
+      ],
+      "hit_indices": [
+        1,
+        3,
+        19,
+        30,
+        33
+      ],
+      "edges_checked": [
+        "ENQUEUE routers.ingestion:upload_playlist -> ingestion_task :37 correct",
+        "ENQUEUE routers.library.scan:scan_library -> library_scan_task :39 correct",
+        "ENQUEUE routers.matching:_enqueue_playlists -> artist_matching_task :1316 correct",
+        "ENQUEUE routers.tasks:retry_enrichment -> library_enrichment_task :131 correct (import alias; the call is in the outer function, not nested _reset_failed)",
+        "ENQUEUE tasks.embedding_tasks:embedding_task -> artist_matching_task :68 unguarded correct",
+        "ENQUEUE tasks.ingestion_tasks:ingestion_task -> embedding_task :357 guarded (lambda) correct",
+        "ENQUEUE tasks.library_enrichment_tasks:library_enrichment_task -> mb_enrichment_task :245 guarded (value) correct",
+        "ENQUEUE tasks.library_scan_tasks:library_scan_task -> library_hash_backfill_task :545 guarded correct",
+        "INLINE tasks.library_hash_backfill_tasks:library_hash_backfill_resume -> library_hash_backfill_task :182 correct",
+        "POLL websocket:websocket_endpoint -> table:progress_tracking :61 correct"
+      ],
+      "hits_checked": [
+        "EV01 embedding_task -> artist_matching_task, stated: correct",
+        "EV02 library_hash_backfill_resume -> library_hash_backfill_task: correct",
+        "EV08 normalize_backfill_task {body_lines 79, service_calls 2}: correct (lines 51..129; normalize_artist, normalize_title)",
+        "EV10 routers.tasks:retry_enrichment {tasks 1}, line 103: correct",
+        "EV10 tasks.ingestion_tasks:ingestion_task {tasks 1}: correct"
+      ],
+      "before_fixes": "edges 10/10, hits 5/5 (15/15)",
+      "after_fixes": "15/15 (no wrong item, so no fix)"
+    },
+    "observation_outside_sample": "the 3 cue tasks wrapped in `with reported_failures(...)` report envelope 'none'; that is the contract value, logged as GAP-01 in audit/eda/spec-gaps.jsonl, analyzer unchanged",
+    "message_class_vs_prediction": "Predicted COMMAND 13 / QUERY 0 / EVENT 0 and INLINE 1+1; measured COMMAND 14 / QUERY 0 / EVENT 0 and INLINE 3. The prediction predates the master sync and missed the cue worker's request_cue_analysis enqueue and stream_cue_analysis_resume's call_local; the 100% COMMAND, 0 EVENT split held.",
+    "baseline": "audit/event-graph.baseline.json = copy of audit/event-graph.json (records today)",
+    "history": {
+      "method": "git archive <commit> | tar -x into the session scratchpad (outside the repo); the committed analyzer (715d5e5) run with the same options",
+      "3_months": {
+        "asked": "2026-07-03",
+        "commit": "a3c83a4",
+        "commit_date": "2026-04-30 (no master commit between 2026-05-01 and 2026-07-03)",
+        "counts": {
+          "node.task": 9,
+          "node.periodic": 1,
+          "edge.ENQUEUE": 12,
+          "edge.INLINE": 0,
+          "edge.POLL": 1,
+          "class.COMMAND": 12,
+          "class.QUERY": 0,
+          "class.EVENT": 0,
+          "rule.EV01": 7,
+          "rule.EV05": 0,
+          "unresolved_dispatch": 0
+        }
+      },
+      "6_months": {
+        "asked": "2026-04-03",
+        "commit": "17be222",
+        "commit_date": "2026-04-03",
+        "counts": {
+          "node.task": 7,
+          "node.periodic": 0,
+          "edge.ENQUEUE": 7,
+          "edge.INLINE": 0,
+          "edge.POLL": 1,
+          "class.COMMAND": 7,
+          "class.QUERY": 0,
+          "class.EVENT": 0,
+          "rule.EV01": 4,
+          "rule.EV05": 1,
+          "unresolved_dispatch": 0
+        }
+      },
+      "movement": "ENQUEUE 7 -> 12 -> 14; tasks 7 -> 10 -> 16; INLINE 0 -> 0 -> 3; unguarded task-to-task (EV01) 4 -> 7 -> 3 (enqueue_or_log arrived after April). The split stayed 100% COMMAND and 0 EVENT at every point. Six months ago the one instance kept results enabled (EV05 1)."
+    },
+    "mutation": {
+      "command": "uv run poe mutate --timeout 60 scripts/audit/event_graph.py tests/scripts/test_event_graph.py",
+      "timeout_note": "--timeout 60 added: the runner's default 10 s is about one full spec run (8.5 s at -n 0), so survivors risked being counted as timeouts",
+      "result": "mutants 1676, killed 1091, survived 584, exception 1 (L215 import_base Sub->BitOr, timed out)",
+      "session_file": "audit/cosmic-ray-scripts_audit_event_graph_py.json (gitignored)",
+      "classification": {
+        "equivalent": 249,
+        "rule_logic_spec_gap": 287,
+        "plumbing_cli_loading_exit": 48,
+        "abnormal": 1
+      },
+      "equivalent_reasons": "annotation-only operators (lazy under from __future__ / type statement), == <-> is on literal strings and AST nodes, dataclass frozen flips, keyword defaults every caller overrides, args[0] -> args[-1] on one-element lists, union of disjoint sets, comparisons whose other branch makes them coincide (L450, L697, L846, L909, L938)",
+      "rule_logic_groups": "GAP-02..GAP-18 in audit/eda/spec-gaps.jsonl (per-group survivor counts there); largest: imports/naming 77, nested scopes 55, QUERY forms 35, instance/decorator near-misses 32",
+      "plumbing_lines": "load_module read/parse errors, paged arithmetic on a second page, --summary threshold, baseline read error, MODULE:QUALNAME validation, --out default path, mkdir, AnalysisError exit 2: not rule logic, not logged as gaps, not chased",
+      "side_effect": "a mutant broke the --out default and wrote tests/scripts/fixtures/event_graph/main/audit/event-graph.json (untracked, not one of the 23 locked files); removed after the run, git status clean under tests/"
+    },
+    "unresolved_dispatch": 1,
+    "rules_not_implemented": "none: EV01-EV10 all implemented",
+    "spec_gaps": {
+      "file": "audit/eda/spec-gaps.jsonl",
+      "count": 18,
+      "from_precision": 0,
+      "from_recall_read": 1,
+      "from_mutation": 17,
+      "analyzer_changed_for_gaps": false
+    },
+    "interpretations": [
+      "string statements (docstrings, attribute docstrings) are not SQL text and not scanned for NOTIFY/LISTEN or POLL table names",
+      "a package's __init__.py is named by its package (pkg, not pkg.__init__)",
+      "an unreadable or unparseable file is an analysis error: exit 2 naming the file",
+      "a guarded site cites the guard call's line (as Session A's inventory does); an unguarded site cites the call's line",
+      "an unannotated task param makes no EV07 hit; inside list[X]/dict[X, Y], X may be a union of the plain scalars",
+      "header.options also records the listing flags (summary, rule, node, chains, check, limit, offset); --check ignores the header",
+      "an unresolved_dispatch task_as_value row is written for any other attribute read on a task name (T.revoke(), T.name); GAP-10 asks the owner to rule"
+    ],
+    "git_commands": {
+      "3_months": "git rev-list -1 --before=\"2026-07-03 23:59\" master -> a3c83a457afe228a137500f37f6cc3ed3c6c8cbd (2026-04-30)",
+      "6_months": "git rev-list -1 --before=\"2026-04-03 23:59\" master -> 17be22264425948c34704e7657ac86364a0c5304 (2026-04-03)"
+    }
+  },
+  "session_c": {
+    "verdict": "command pipeline, not event-driven: COMMAND 14 / EVENT 0 / QUERY 0; recommend target shape (b)",
+    "conformance": {
+      "C1": "BROKEN for EDA (expected under b)",
+      "C2": "BROKEN (EV01 3, AUD-R014)",
+      "C3": "BROKEN (EV06 1)",
+      "C4": "KEPT conditional on -w 1",
+      "C5": "BROKEN (1 site, AUD-060)",
+      "C6": "KEPT",
+      "C7": "KEPT",
+      "C8": "BROKEN (watcher logic)"
+    },
+    "criteria_definitions": "C1-C8 not found in repo; reconstructed in report.md section 3 (open question 1)",
+    "huey_signals": "recommended not adopted: proposed AUD-R016",
+    "gate": "proposed in report.md section 9, NOT applied",
+    "rulings_2026_10_05": {
+      "Q1 C1-C8": "keep Session C definitions; stored in audit/eda/contract.md",
+      "Q2 embeddings": "not planned for matching -> side branch (AUD-R020 ACTIVE)",
+      "Q3 Huey signals": "not adopted (AUD-R016 ACTIVE)",
+      "Q4 workers": "one per queue (AUD-R017 ACTIVE)",
+      "Q5 gate": "accepted incl. baseline refresh per PR (AUD-R019 ACTIVE, not yet wired)",
+      "Q6 spec gaps": "fix GAP-01 (reported_failures envelope), park GAP-02..18",
+      "Q7 shape": "(b) command pipeline (AUD-R015 ACTIVE)",
+      "not asked": "AUD-R018 asked later the same day: yes (ACTIVE)"
+    }
+  }
+}

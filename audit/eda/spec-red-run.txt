@@ -1,0 +1,1551 @@
+EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEFFFEEEEEEEFFFFFFF                 [100%]
+=================================== ERRORS ====================================
+__ ERROR at setup of test_ev01_unguarded_task_handoffs_hit_with_ruling_scope __
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+__ ERROR at setup of test_ev01_near_miss_guarded_handoff_and_router_enqueue ___
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+______ ERROR at setup of test_ev01_scope_is_unstated_without_the_option _______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def bare_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+        """The main tree with only the guard named: no publish/subscribe fns, no EV01 scope."""
+>       return _analyse(MAIN, tmp_path_factory.mktemp("bare"), "--guard-fn", GUARD)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:95: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/bare0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log')
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/bare0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_________ ERROR at setup of test_ev02_inline_execution_outside_tests __________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____ ERROR at setup of test_ev02_near_miss_code_under_tests_is_not_scanned ____
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_________ ERROR at setup of test_ev03_task_referenced_from_a_service __________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___________ ERROR at setup of test_ev04_cycle_in_the_enqueue_graph ____________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___ ERROR at setup of test_ev05_query_edge_hits_and_results_false_does_not ____
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+________ ERROR at setup of test_ev05_results_left_at_huey_default_hits ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def alt_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(ALT, tmp_path_factory.mktemp("alt"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:100: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/alt')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/alt0')
+args = ()
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/alt0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_ev06_unregistered_module_and_tasks_without_producer __
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_______ ERROR at setup of test_ev07_task_params_that_are_not_plain_data _______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+______ ERROR at setup of test_ev08_body_lines_and_distinct_service_calls ______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____ ERROR at setup of test_ev09_polling_loop_and_state_reading_periodic _____
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+________ ERROR at setup of test_ev10_distinct_tasks_named_per_producer ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+________________ ERROR at setup of test_hits_carry_no_severity ________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____ ERROR at setup of test_command_is_an_enqueue_whose_result_is_not_read ____
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_command_near_miss_plain_function_calls_are_not_edges _
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____________ ERROR at setup of test_query_reads_the_result_handle _____________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____________ ERROR at setup of test_query_near_miss_get_on_a_dict _____________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+______________ ERROR at setup of test_event_huey_signal_handler _______________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____________ ERROR at setup of test_event_sql_notify_and_listen ______________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____ ERROR at setup of test_event_named_publish_and_subscribe_functions ______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____ ERROR at setup of test_event_near_miss_publish_fn_needs_the_option ______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def bare_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+        """The main tree with only the guard named: no publish/subscribe fns, no EV01 scope."""
+>       return _analyse(MAIN, tmp_path_factory.mktemp("bare"), "--guard-fn", GUARD)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:95: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/bare0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log')
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/bare0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_event_near_miss_publish_named_function_that_enqueues_is_a_command _
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___________ ERROR at setup of test_no_publish_mechanism_is_a_result ___________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def alt_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(ALT, tmp_path_factory.mktemp("alt"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:100: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/alt')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/alt0')
+args = ()
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/alt0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___________________ ERROR at setup of test_deferred_enqueue ___________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_______ ERROR at setup of test_guard_takes_a_lambda_or_the_task_itself ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_same_named_guard_in_another_module_is_not_the_guard __
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+__________ ERROR at setup of test_repeated_sites_merge_into_one_edge __________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___ ERROR at setup of test_task_called_through_a_module_attribute_resolves ____
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_edge_carries_consumer_argument_names_and_annotations _
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+______________________ ERROR at setup of test_poll_edge _______________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____ ERROR at setup of test_unresolved_dispatch_is_listed_never_dropped ______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_unresolvable_subscribe_handler_is_unresolved_not_an_edge _
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+______________________ ERROR at setup of test_task_nodes ______________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_ ERROR at setup of test_each_task_belongs_to_the_instance_that_decorates_it __
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def duo_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+        """Two Huey instances in one tree."""
+>       return _analyse(DUO, tmp_path_factory.mktemp("duo"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/duo')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/duo0')
+args = ()
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/duo0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+__ ERROR at setup of test_registered_means_imported_by_its_own_instances_app __
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def duo_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+        """Two Huey instances in one tree."""
+>       return _analyse(DUO, tmp_path_factory.mktemp("duo"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/duo')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/duo0')
+args = ()
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/duo0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___________________ ERROR at setup of test_producer_layers ____________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+________________________ ERROR at setup of test_counts ________________________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_____________ ERROR at setup of test_header_records_every_option ______________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+_______ ERROR at setup of test_header_records_the_excluded_directories ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x000002E0DD82AEA0>, _basetemp=WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247'), _retention_count=3, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+>       return _analyse(MAIN, tmp_path_factory.mktemp("main"), *MAIN_OPTS)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/main0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____________ ERROR at setup of test_check_unchanged_tree_is_clean _____________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_check_unchanged_tree_is_c0')
+
+    @pytest.fixture
+    def tree(tmp_path: Path) -> Path:
+        """A copy of the main tree with a baseline written beside it."""
+        copy = tmp_path / "tree"
+        shutil.copytree(MAIN, copy)
+        proc = _run(copy, tmp_path / "baseline.json", *MAIN_OPTS)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:565: AssertionError
+____________ ERROR at setup of test_check_ignores_a_line_only_move ____________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_check_ignores_a_line_only0')
+
+    @pytest.fixture
+    def tree(tmp_path: Path) -> Path:
+        """A copy of the main tree with a baseline written beside it."""
+        copy = tmp_path / "tree"
+        shutil.copytree(MAIN, copy)
+        proc = _run(copy, tmp_path / "baseline.json", *MAIN_OPTS)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:565: AssertionError
+_______________ ERROR at setup of test_check_fails_on_a_new_hit _______________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_check_fails_on_a_new_hit0')
+
+    @pytest.fixture
+    def tree(tmp_path: Path) -> Path:
+        """A copy of the main tree with a baseline written beside it."""
+        copy = tmp_path / "tree"
+        shutil.copytree(MAIN, copy)
+        proc = _run(copy, tmp_path / "baseline.json", *MAIN_OPTS)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:565: AssertionError
+_________ ERROR at setup of test_check_is_clean_when_a_hit_goes_away __________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_check_is_clean_when_a_hit0')
+
+    @pytest.fixture
+    def tree(tmp_path: Path) -> Path:
+        """A copy of the main tree with a baseline written beside it."""
+        copy = tmp_path / "tree"
+        shutil.copytree(MAIN, copy)
+        proc = _run(copy, tmp_path / "baseline.json", *MAIN_OPTS)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:565: AssertionError
+________ ERROR at setup of test_check_fails_on_new_unresolved_dispatch ________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_check_fails_on_new_unreso0')
+
+    @pytest.fixture
+    def tree(tmp_path: Path) -> Path:
+        """A copy of the main tree with a baseline written beside it."""
+        copy = tmp_path / "tree"
+        shutil.copytree(MAIN, copy)
+        proc = _run(copy, tmp_path / "baseline.json", *MAIN_OPTS)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:565: AssertionError
+================================== FAILURES ===================================
+______________________ test_two_runs_are_byte_identical _______________________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_two_runs_are_byte_identic0')
+
+    def test_two_runs_are_byte_identical(tmp_path: Path) -> None:
+        # case DET-bytes
+        out = tmp_path / "event-graph.json"
+>       _analyse(MAIN, tmp_path, *MAIN_OPTS)
+
+tests\scripts\test_event_graph.py:494: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_two_runs_are_byte_identic0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_two_runs_are_byte_identic0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+____________ test_relative_and_absolute_root_give_identical_output ____________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_relative_and_absolute_roo0')
+
+    def test_relative_and_absolute_root_give_identical_output(tmp_path: Path) -> None:
+        # case DET-root
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        rel = _run("main", tmp_path / "a" / "event-graph.json", *MAIN_OPTS, cwd=_FIXTURES)
+        absolute = _run(MAIN.resolve(), tmp_path / "b" / "event-graph.json", *MAIN_OPTS)
+>       assert rel.returncode == 0, rel.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:506: AssertionError
+_________________ test_output_is_sorted_relative_and_timeless _________________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_output_is_sorted_relative0')
+
+    def test_output_is_sorted_relative_and_timeless(tmp_path: Path) -> None:
+        # case DET-format
+        out = tmp_path / "event-graph.json"
+>       _analyse(MAIN, tmp_path, *MAIN_OPTS)
+
+tests\scripts\test_event_graph.py:516: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+root = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/tests/scripts/fixtures/event_graph/main')
+out_dir = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_output_is_sorted_relative0')
+args = ('--guard-fn', 'evgapp.evg_enqueue_chain:enqueue_or_log', '--publish-fn', 'evgapp.evg_bus:publish', '--subscribe-fn', 'evgapp.evg_bus:subscribe', ...)
+out = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_output_is_sorted_relative0/event-graph.json')
+proc = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n")
+@py_assert1 = 2
+
+    def _analyse(root: Path, out_dir: Path, *args: str) -> Any:
+        out = out_dir / "event-graph.json"
+        proc = _run(root, out, *args)
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:63: AssertionError
+___________________ test_missing_root_is_an_analysis_error ____________________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_missing_root_is_an_analys0')
+
+    def test_missing_root_is_an_analysis_error(tmp_path: Path) -> None:
+        # case EXIT-2
+        proc = _run(tmp_path / "no-such-root", tmp_path / "out.json")
+        assert proc.returncode == 2
+>       assert "no-such-root" in proc.stderr
+E       assert 'no-such-root' in "D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\python.exe: can't open fil...e\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n"
+E        +  where "D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\python.exe: can't open fil...e\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n" = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").stderr
+
+tests\scripts\test_event_graph.py:614: AssertionError
+____________________ test_analyzer_source_names_no_fixture ____________________
+
+    def test_analyzer_source_names_no_fixture() -> None:
+        # case SRC-nofixture
+>       source = _SCRIPT.read_text(encoding="utf-8")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:622: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/scripts/audit/event_graph.py')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py'
+
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:537: FileNotFoundError
+______________________ test_analyzer_imports_stdlib_only ______________________
+
+    def test_analyzer_imports_stdlib_only() -> None:
+        # case SRC-stdlib
+>       tree = ast.parse(_SCRIPT.read_text(encoding="utf-8"))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\scripts\test_event_graph.py:635: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('D:/PythonStuff/RetroStation/.claude/worktrees/laughing-euclid-c2f46a/scripts/audit/event_graph.py')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py'
+
+C:\Users\lance\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:537: FileNotFoundError
+_____________ test_summary_prints_the_counts_in_40_lines_or_fewer _____________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_summary_prints_the_counts0')
+
+    def test_summary_prints_the_counts_in_40_lines_or_fewer(tmp_path: Path) -> None:
+        # case CLI-summary
+        out = tmp_path / "event-graph.json"
+        proc = _run(MAIN, out, *MAIN_OPTS, "--summary")
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:653: AssertionError
+____________________ test_rule_listing_is_capped_and_pages ____________________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_rule_listing_is_capped_an0')
+
+    def test_rule_listing_is_capped_and_pages(tmp_path: Path) -> None:
+        # case CLI-rule
+        out = tmp_path / "event-graph.json"
+        first = _run(MAIN, out, *MAIN_OPTS, "--rule", "EV02", "--limit", "2")
+>       assert first.returncode == 0, first.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:665: AssertionError
+__________________ test_node_listing_shows_in_and_out_edges ___________________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_node_listing_shows_in_and0')
+
+    def test_node_listing_shows_in_and_out_edges(tmp_path: Path) -> None:
+        # case CLI-node
+        proc = _run(MAIN, tmp_path / "event-graph.json", *MAIN_OPTS, "--node", "chain_mid_task")
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:680: AssertionError
+_____________ test_chains_listing_shows_longest_paths_and_cycles ______________
+
+tmp_path = WindowsPath('C:/Users/lance/AppData/Local/Temp/pytest-of-lance/pytest-3247/test_chains_listing_shows_long0')
+
+    def test_chains_listing_shows_longest_paths_and_cycles(tmp_path: Path) -> None:
+        # case CLI-chains
+        proc = _run(MAIN, tmp_path / "event-graph.json", *MAIN_OPTS, "--chains")
+>       assert proc.returncode == 0, proc.stderr
+E       AssertionError: D:\PythonStuff\RetroStation\.claude\worktrees\laughing-euclid-c2f46a\.venv\Scripts\python.exe: can't open file 'D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\scripts\\audit\\event_graph.py': [Errno 2] No such file or directory
+E         
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\PythonStuff\\RetroStation\\.claude\\worktrees\\laughing-euclid-c2f46a\\.venv\\Scripts\\pyt...\\\\worktrees\\\\laughing-euclid-c2f46a\\\\scripts\\\\audit\\\\event_graph.py': [Errno 2] No such file or directory\n").returncode
+
+tests\scripts\test_event_graph.py:688: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/scripts/test_event_graph.py::test_two_runs_are_byte_identical - ...
+FAILED tests/scripts/test_event_graph.py::test_relative_and_absolute_root_give_identical_output
+FAILED tests/scripts/test_event_graph.py::test_output_is_sorted_relative_and_timeless
+FAILED tests/scripts/test_event_graph.py::test_missing_root_is_an_analysis_error
+FAILED tests/scripts/test_event_graph.py::test_analyzer_source_names_no_fixture
+FAILED tests/scripts/test_event_graph.py::test_analyzer_imports_stdlib_only
+FAILED tests/scripts/test_event_graph.py::test_summary_prints_the_counts_in_40_lines_or_fewer
+FAILED tests/scripts/test_event_graph.py::test_rule_listing_is_capped_and_pages
+FAILED tests/scripts/test_event_graph.py::test_node_listing_shows_in_and_out_edges
+FAILED tests/scripts/test_event_graph.py::test_chains_listing_shows_longest_paths_and_cycles
+ERROR tests/scripts/test_event_graph.py::test_ev01_unguarded_task_handoffs_hit_with_ruling_scope
+ERROR tests/scripts/test_event_graph.py::test_ev01_near_miss_guarded_handoff_and_router_enqueue
+ERROR tests/scripts/test_event_graph.py::test_ev01_scope_is_unstated_without_the_option
+ERROR tests/scripts/test_event_graph.py::test_ev02_inline_execution_outside_tests
+ERROR tests/scripts/test_event_graph.py::test_ev02_near_miss_code_under_tests_is_not_scanned
+ERROR tests/scripts/test_event_graph.py::test_ev03_task_referenced_from_a_service
+ERROR tests/scripts/test_event_graph.py::test_ev04_cycle_in_the_enqueue_graph
+ERROR tests/scripts/test_event_graph.py::test_ev05_query_edge_hits_and_results_false_does_not
+ERROR tests/scripts/test_event_graph.py::test_ev05_results_left_at_huey_default_hits
+ERROR tests/scripts/test_event_graph.py::test_ev06_unregistered_module_and_tasks_without_producer
+ERROR tests/scripts/test_event_graph.py::test_ev07_task_params_that_are_not_plain_data
+ERROR tests/scripts/test_event_graph.py::test_ev08_body_lines_and_distinct_service_calls
+ERROR tests/scripts/test_event_graph.py::test_ev09_polling_loop_and_state_reading_periodic
+ERROR tests/scripts/test_event_graph.py::test_ev10_distinct_tasks_named_per_producer
+ERROR tests/scripts/test_event_graph.py::test_hits_carry_no_severity - Assert...
+ERROR tests/scripts/test_event_graph.py::test_command_is_an_enqueue_whose_result_is_not_read
+ERROR tests/scripts/test_event_graph.py::test_command_near_miss_plain_function_calls_are_not_edges
+ERROR tests/scripts/test_event_graph.py::test_query_reads_the_result_handle
+ERROR tests/scripts/test_event_graph.py::test_query_near_miss_get_on_a_dict
+ERROR tests/scripts/test_event_graph.py::test_event_huey_signal_handler - Ass...
+ERROR tests/scripts/test_event_graph.py::test_event_sql_notify_and_listen - A...
+ERROR tests/scripts/test_event_graph.py::test_event_named_publish_and_subscribe_functions
+ERROR tests/scripts/test_event_graph.py::test_event_near_miss_publish_fn_needs_the_option
+ERROR tests/scripts/test_event_graph.py::test_event_near_miss_publish_named_function_that_enqueues_is_a_command
+ERROR tests/scripts/test_event_graph.py::test_no_publish_mechanism_is_a_result
+ERROR tests/scripts/test_event_graph.py::test_deferred_enqueue - AssertionErr...
+ERROR tests/scripts/test_event_graph.py::test_guard_takes_a_lambda_or_the_task_itself
+ERROR tests/scripts/test_event_graph.py::test_same_named_guard_in_another_module_is_not_the_guard
+ERROR tests/scripts/test_event_graph.py::test_repeated_sites_merge_into_one_edge
+ERROR tests/scripts/test_event_graph.py::test_task_called_through_a_module_attribute_resolves
+ERROR tests/scripts/test_event_graph.py::test_edge_carries_consumer_argument_names_and_annotations
+ERROR tests/scripts/test_event_graph.py::test_poll_edge - AssertionError: D:\...
+ERROR tests/scripts/test_event_graph.py::test_unresolved_dispatch_is_listed_never_dropped
+ERROR tests/scripts/test_event_graph.py::test_unresolvable_subscribe_handler_is_unresolved_not_an_edge
+ERROR tests/scripts/test_event_graph.py::test_task_nodes - AssertionError: D:...
+ERROR tests/scripts/test_event_graph.py::test_each_task_belongs_to_the_instance_that_decorates_it
+ERROR tests/scripts/test_event_graph.py::test_registered_means_imported_by_its_own_instances_app
+ERROR tests/scripts/test_event_graph.py::test_producer_layers - AssertionErro...
+ERROR tests/scripts/test_event_graph.py::test_counts - AssertionError: D:\Pyt...
+ERROR tests/scripts/test_event_graph.py::test_header_records_every_option - A...
+ERROR tests/scripts/test_event_graph.py::test_header_records_the_excluded_directories
+ERROR tests/scripts/test_event_graph.py::test_check_unchanged_tree_is_clean
+ERROR tests/scripts/test_event_graph.py::test_check_ignores_a_line_only_move
+ERROR tests/scripts/test_event_graph.py::test_check_fails_on_a_new_hit - Asse...
+ERROR tests/scripts/test_event_graph.py::test_check_is_clean_when_a_hit_goes_away
+ERROR tests/scripts/test_event_graph.py::test_check_fails_on_new_unresolved_dispatch
+10 failed, 46 errors in 3.96s
