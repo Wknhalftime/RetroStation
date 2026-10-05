@@ -24,6 +24,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run lint-imports
+      - run: uv run poe events-check
 
   lint-proposed:
     # Rules the audit proposes but nobody has ruled on yet: report, never block.
