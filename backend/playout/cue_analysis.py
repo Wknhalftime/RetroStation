@@ -8,8 +8,11 @@ naming the field); C8 (the child gets only the environment it is given).
 
 Protocol (``cue_analysis.liq``): the child reads its file list from the JSON file named by
 ``CUE_FILES`` and prints ``RS_CUE_BEGIN <i>`` before and ``RS_CUE_RESULT <json>`` after each
-file; every other line is Liquidsoap's log. This runs on the cue consumer only, never on an
-event loop, so it blocks: ``Popen`` and a reader thread.
+file; every other line is Liquidsoap's log. The protocol is read from stdout alone: FFmpeg
+writes its warnings to stderr through a block-buffered C stream, whose flush can end mid-line
+and glue the next protocol line onto it, so stderr is drained apart and only kept for
+diagnosis. This runs on the cue consumer only, never on an event loop, so it blocks: ``Popen``
+and a reader thread per stream.
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ _TAIL_LINES = 200  # enough lines to fill _TAIL_CHARS with Liquidsoap's log
 ECHO_CHARS = 200  # of an offending value, quoted in a rejection; shared with autocue.py
 _EXIT_WAIT_S = 10.0  # for a child whose output ended to exit by itself, before a kill
 _KILL_WAIT_S = 10.0
+_DRAIN_WAIT_S = 2.0  # for stderr to end once the child has exited
 _AUDIO_S_PER_DEADLINE_S = 40  # D67: autocue runs at about 65x real time; 40x leaves margin
 _BACKSLASH_DIGIT = re.compile(r"\\\d")
 _LISTING_PREFIX = "cue-files-"  # a batch's file list, in the cache folder
@@ -125,6 +129,33 @@ def _pump(stream: IO[str], lines: queue.Queue[_Line]) -> None:
         for line in stream:
             lines.put(line.rstrip("\r\n"))
     lines.put(None)
+
+
+class _Drain:
+    """Keeps the last lines of the child's stderr, read on a thread of its own.
+
+    Reading it at all keeps a chatty decoder from filling the pipe and blocking the child.
+    """
+
+    def __init__(self, stream: IO[str]) -> None:
+        self._lines: deque[str] = deque(maxlen=_TAIL_LINES)
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._read, args=(stream,), name="cue-analyser-stderr", daemon=True
+        )
+        self._thread.start()
+
+    def _read(self, stream: IO[str]) -> None:
+        with stream:
+            for line in stream:
+                with self._lock:
+                    self._lines.append(line.rstrip("\r\n"))
+
+    def tail(self, wait_s: float) -> str:
+        """The last ``_TAIL_CHARS`` characters read, once the stream ended or ``wait_s`` passed."""
+        self._thread.join(timeout=wait_s)
+        with self._lock:
+            return "\n".join(self._lines)[-_TAIL_CHARS:]
 
 
 def _reap(process: subprocess.Popen[str], exit_wait_s: float) -> int | None:
@@ -299,7 +330,7 @@ def _start(
             env={**base_env, **cache_env(config.cache_dir), "CUE_FILES": str(listing)},
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,  # not the protocol: see the module docstring
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -327,7 +358,8 @@ def analyse_batch(
         process = _start(listing, base_env, config)
         reader: _Reader | None = None
         try:
-            assert process.stdout is not None  # stdout=PIPE
+            assert process.stdout is not None and process.stderr is not None  # both PIPE
+            errors = _Drain(process.stderr)
             reader = _Reader(process.stdout, files, config)  # starts the pump thread
             reader.run()
         finally:
@@ -341,6 +373,8 @@ def analyse_batch(
             never_began.add_note(
                 f"killed: no {_BEGIN} within the {config.startup_timeout_s} s startup timeout"
             )
+        if stderr := errors.tail(_DRAIN_WAIT_S):
+            never_began.add_note(f"stderr: {stderr}")
         raise never_began
     stalled = None if reader.settled(reader.begun) else reader.begun
     return BatchAnalysis(metadata=reader.metadata, stalled=stalled, rejected=reader.rejected)
