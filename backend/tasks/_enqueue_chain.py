@@ -6,10 +6,12 @@ Several tasks in the pipeline chain into the next stage by calling another
 only enqueues it (`TaskWrapper.__call__` -> `Huey.enqueue` -> the storage
 backend's `enqueue`). A chained task's own RUN failure is already its own to
 report (its own FAILED row and failed log, written by whichever envelope it
-uses). But the ENQUEUE call itself can also fail, and per AUD-R011 the
+uses). But the ENQUEUE call itself can also fail, and per AUD-R012 (1) the
 caller owns that handoff: it must report the enqueue failure on its own
 trace_id and keep its own COMPLETED/FAILED status exactly as if the handoff
 had never been attempted.
+
+Every task-to-task hand-off goes through `enqueue_or_log` (AUD-R014).
 
 `enqueue_or_log` wraps a zero-arg enqueue call, catching only the exception
 types SqliteHuey's enqueue path actually raises, and reporting the failure

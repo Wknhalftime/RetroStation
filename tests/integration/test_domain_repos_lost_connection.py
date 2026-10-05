@@ -1,8 +1,8 @@
 """The broadcast, library, curation, matching and catalog sync Pg repositories on a lost
 connection (follow-up to PR #133, confirmed with the G1 coordinator).
 
-Requirements: ``.claude/rules/error-handling.md`` (translate at the repository layer; one base
-exception per subdomain with typed subclasses). Each repository behind a ``SyncRepos`` route
+Requirements: translate at the repository layer; one base exception per subdomain with typed
+subclasses. Each repository behind a ``SyncRepos`` route
 raises its own subdomain's storage error, and every one of those is a
 ``StorageUnavailableError``, so a router or ``bounded_connection`` catches them all with one
 clause. The backend is terminated with ``pg_terminate_backend`` from a second connection.

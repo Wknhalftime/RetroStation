@@ -8,7 +8,7 @@
 -- deferred_artist_ids per playlist routinely exceeds ~1k).
 --
 -- NO BEGIN/COMMIT — backend/db/migrations.py wraps every .sql file in
--- conn.transaction() per .claude/CLAUDE.md.
+-- conn.transaction().
 --
 -- Stored enum-value conventions (verified against backend/domain/enums.py):
 --   MatchStatus values are lowercase  ('pending', 'needs_review', ...)

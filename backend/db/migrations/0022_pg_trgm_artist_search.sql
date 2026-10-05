@@ -8,7 +8,7 @@
 -- results (those fall under the trigram threshold by construction).
 --
 -- NO BEGIN/COMMIT -- backend/db/migrations.py wraps every .sql file in
--- conn.transaction() per .claude/CLAUDE.md.
+-- conn.transaction().
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 

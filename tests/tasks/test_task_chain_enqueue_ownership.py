@@ -1,11 +1,11 @@
-"""AUD-R011 characterisation tests: who owns a failed task-chain handoff.
+"""AUD-R012 characterisation tests: who owns a failed task-chain handoff.
 
 `library_scan_task`, `library_scan_files_task` (the watcher), and
 `ingestion_task` each chain into a downstream Huey task by calling it
 directly (e.g. `library_enrichment_task()`), which only ENQUEUES the next
 task rather than running it.
 
-Decision 1 (AUD-R011): the caller owns the handoff. An enqueue failure
+AUD-R012 (1): the caller owns the handoff. An enqueue failure
 (the real `sqlite3.Error` SqliteHuey's storage backend raises) is logged as
 an ERROR SystemLog on the caller's own trace_id via
 `backend.tasks._enqueue_chain.enqueue_or_log`, and the caller keeps its own
@@ -13,10 +13,10 @@ COMPLETED status — it no longer flips to FAILED. `library_scan_task`
 enqueues two tasks; if the first fails, the second is still attempted, and
 each failure is logged on its own.
 
-Decision 2 (not yet implemented here) will add started/completed/failed
-SystemLogs to the watcher and to `ingestion_task` themselves. The classes
-below pin that neither task writes those YET — only the decision-1 enqueue-
-failure log exists so far.
+AUD-R012 (2): the watcher and `ingestion_task` write their own
+started/completed/failed SystemLogs (`TestWatcherLifecycleLogs`,
+`TestIngestionLifecycleLogs`). AUD-R012 (3): `library_scan_task`'s failed
+SystemLog carries a traceback.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _fake_connect_sync(_url: str, *, autocommit: bool = False) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# library_scan_task: enqueue failure ownership (AUD-R011 decision 1)
+# library_scan_task: enqueue failure ownership (AUD-R012 (1))
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +170,7 @@ class TestLibraryScanTaskEnqueueFailureOwnership:
 
 
 class TestLibraryScanTaskFailedDetailsHaveTraceback:
-    """AUD-R011 decision 3: library_scan_task's failed SystemLog details now
+    """AUD-R012 (3): library_scan_task's failed SystemLog details now
     carry a traceback, matching `_task_run.task_run`'s existing shape.
     """
 
@@ -270,7 +270,7 @@ class TestWatcherScanTaskEnqueueFailureOwnership:
 
 
 # ---------------------------------------------------------------------------
-# AUD-R011 decision 2: the watcher and ingestion_task now write their own
+# AUD-R012 (2): the watcher and ingestion_task now write their own
 # started/completed/failed SystemLogs, like their peers (library_scan_task,
 # library_enrichment_task, mb_enrichment_task).
 # ---------------------------------------------------------------------------

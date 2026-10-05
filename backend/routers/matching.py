@@ -700,7 +700,7 @@ async def resolve_artist(
         )
         # Find every playlist that ever played one of this artist's
         # identities, and enqueue identity matching once per playlist.
-        # Non-blocking Huey enqueue (mirrors artist_matching_tasks.py:100).
+        # Non-blocking Huey enqueue (mirrors the end of artist_matching_task).
         playlist_cur = await conn.execute(
             """
             SELECT DISTINCT pe.playlist_id
@@ -718,7 +718,7 @@ async def resolve_artist(
         # entirely (get_pending_for_playlist filters strictly to
         # match_status='pending'). get_db_connection's post-yield commit
         # becomes a no-op after this. Mirrors the commit-before-enqueue
-        # ordering in artist_matching_tasks.py:87-100.
+        # ordering in artist_matching_task.
         await conn.commit()
         # Enqueue is fire-and-forget across a transaction boundary the
         # request handler has already crossed. The cascade DB work is
@@ -727,7 +727,7 @@ async def resolve_artist(
         # backend is unavailable, the worker's next regular run (or a
         # manual /matching/run) will pick up the now-PENDING children. The
         # broad except is justified at this top-level handler boundary
-        # (per error-handling.md) because no specific exception type is
+        # because no specific exception type is
         # reliably knowable across Huey backends (SQLite today, possibly
         # Redis later).
         for row in playlist_rows:
@@ -860,8 +860,8 @@ async def resolve_identity(
             ) from exc
 
         # Commit the durable match-state writes BEFORE the cross-connection
-        # recalc step. Mirrors resolve_artist's pre-enqueue commit pattern
-        # (see line 501) — the post-yield commit in get_db_connection
+        # recalc step. Mirrors resolve_artist's commit-before-enqueue
+        # pattern — the post-yield commit in get_db_connection
         # becomes a no-op once this fires.
         await conn.commit()
 
@@ -1177,7 +1177,7 @@ async def _reset_identities(conn: AsyncConnection[Any]) -> tuple[int, int]:
 
     Also nulls match_tier, reason_code, reason_detail on the reset rows so
     PENDING never carries stale matcher metadata. Mirrors the convention in
-    resolve_artist's cascade (matching.py:562-575) — "NULL = no reason for
+    resolve_artist's cascade — "NULL = no reason for
     pending" is a project-wide invariant, not an opt-in.
 
     Returns (identities_reset, identity_matches_deleted).
@@ -1213,8 +1213,8 @@ async def _reset_identities(conn: AsyncConnection[Any]) -> tuple[int, int]:
 
 async def _reset_artists(conn: AsyncConnection[Any]) -> tuple[int, int]:
     """Cohort-scoped artist reset. Mirrors _reset_identities for the artist
-    side. The matches.artist_id IS NOT NULL guard plus the XOR CHECK at
-    0003_matching_layer.sql:17-18 ensures identity-keyed match rows are
+    side. The matches.artist_id IS NOT NULL guard plus the xor_match_target
+    CHECK (migration 0003) ensures identity-keyed match rows are
     untouched.
 
     Also nulls reason_code / reason_detail on the reset rows. broadcast_artists

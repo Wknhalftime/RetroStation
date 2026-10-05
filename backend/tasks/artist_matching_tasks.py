@@ -104,7 +104,8 @@ def artist_matching_task(playlist_id: str) -> None:
 
     # Fire-and-forget: enqueue identity matching. Outside the telemetry
     # boundary — if this enqueue fails, that's a downstream concern, not an
-    # artist-matching failure.
+    # artist-matching failure. Known gap: AUD-R014 requires this hand-off to
+    # go through enqueue_or_log; it does not yet (open finding AUD-061).
     from backend.tasks.identity_matching_tasks import identity_matching_task
 
     identity_matching_task(playlist_id)

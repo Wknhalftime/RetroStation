@@ -1,9 +1,9 @@
 """Every ``SyncRepos`` route answers 503 when the database connection dies mid-request
 (follow-up to PR #133, confirmed with the G1 coordinator).
 
-Requirements: G1 final review (a lost connection in a sync Pg repository answered 500) and
-``.claude/rules/architecture-boundaries.md`` (the router maps the domain's storage error, here
-any ``StorageUnavailableError``, to an HTTP response). The dependencies are the real ones on
+Requirements: G1 final review (a lost connection in a sync Pg repository answered 500), and
+the router maps the domain's storage error, here any ``StorageUnavailableError``, to an HTTP
+response. The dependencies are the real ones on
 the real PostgreSQL test database; only the token is bypassed. Each request's backend is
 terminated with ``pg_terminate_backend`` from a second connection right after it connects, so
 the route's first repository call meets the dead connection.

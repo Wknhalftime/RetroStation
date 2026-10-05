@@ -94,7 +94,7 @@ class PgTaskProgressRepository(TaskProgressRepository):
         #
         # `completed_at = NULL` is part of the resurrection: the WS
         # stale-cleanup sets `completed_at = now()` when it flips a row
-        # to `failed` (backend/websocket.py:57). Without explicitly
+        # to `failed` (`STALE_SQL` in backend/websocket.py). Without explicitly
         # clearing it here, a resurrected row would carry a stale
         # `completed_at` while having `status='running'` — currently
         # harmless because the WS SELECT does not filter the running

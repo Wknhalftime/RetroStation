@@ -42,7 +42,7 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.6",
     "pytest-recording>=0.13",
-    # audit tooling (retrostation-audit-kit.md section 3)
+    # audit tooling (`poe audit`)
     "import-linter>=2.0",
     "poethepoet",
     "pip-audit",
@@ -79,7 +79,8 @@ markers = [
 strict = true
 python_version = "3.13"
 ignore_missing_imports = false
-# redundant-expr is proposed by the audit (poe types), not enforced yet: it flags 9 lines.
+# redundant-expr is proposed by the audit (poe types), not enforced. It flags 0 lines since
+# AUD-058; AUD-R001, which would enforce it, lapsed unruled (PROPOSED > 1 week).
 enable_error_code = ["ignore-without-code", "truthy-bool"]
 
 [[tool.mypy.overrides]]

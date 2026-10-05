@@ -457,7 +457,7 @@ class ArtistMatchThresholds:
 
     Threaded through match_artists_for_playlist, _run_local_phase and
     _run_mb_or_deferred_phase as one object instead of five loose ints — see
-    AUD-040. Defaults are identical to today's individual parameter defaults.
+    AUD-040. Defaults are identical to the loose parameter defaults it replaced.
     """
 
     strong_match_threshold: int = 80

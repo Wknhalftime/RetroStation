@@ -70,7 +70,7 @@ def test_task_failure_telemetry_writes_failed_row_and_reraises(
         assert log_row["level"] == LogLevel.ERROR.value
         assert log_row["message"] == f"{TaskType.MATCHING.value}_failed"
         assert log_row["details"]["error"] == "deliberate"
-        # AUD-R011 decision 3: task_failure_telemetry's failed SystemLog now
+        # AUD-R012 (3): task_failure_telemetry's failed SystemLog now
         # carries a traceback too, matching `_task_run.task_run`.
         assert "RuntimeError: deliberate" in log_row["details"]["traceback"]
 

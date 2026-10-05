@@ -528,7 +528,7 @@ def library_scan_task(root_path: str) -> str:
         )
 
         # Fire-and-forget: chain into enrichment if any files were written.
-        # Each enqueue is guarded independently (AUD-R011 decision 1): this
+        # Each enqueue is guarded independently (AUD-R012 (1)): this
         # scan's own run already reported COMPLETED above, so a downstream
         # enqueue failure must not retroactively flip it to FAILED. The
         # caller owns the handoff — an enqueue failure is logged on this

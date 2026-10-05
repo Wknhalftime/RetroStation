@@ -1,14 +1,13 @@
 """Characterisation snapshots for AUD-015 / AUD-040 (gate 1).
 
-Locks TODAY's persisted state, returned work_ids, catalog upserts and MB
+Locks the persisted state, returned work_ids, catalog upserts and MB
 client call sequence for both ``match_identities_for_playlist`` and
-``match_artists_for_playlist`` before their loose-parameter signatures are
-grouped into frozen repos/threshold dataclasses (see
-``.claude/rules/refactoring-workflow.md`` — more than 4 params means a
-config object).
+``match_artists_for_playlist``. Written before their loose-parameter
+signatures were grouped into frozen repos/threshold dataclasses (PR #96,
+the PLR0913 findings AUD-015 / AUD-040).
 
-In the refactor commit, only the two ``match_*_for_playlist(...)`` call
-sites below may change (positional/keyword repo args -> repos objects).
+In that refactor commit only the two ``match_*_for_playlist(...)`` call
+sites below changed (positional/keyword repo args -> repos objects).
 Every captured value must stay byte-identical: all fixture ids are fixed
 (``_uid``), never ``uuid4()``, so re-running this file never perturbs the
 snapshot on its own.

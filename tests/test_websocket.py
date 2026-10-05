@@ -268,7 +268,7 @@ class TestWebSocketHeartbeatResurrection:
     """Regression test for the WS-empty-during-mb_enrichment bug.
 
     A long pre-pass in `mb_enrichment_task` left `progress_tracking.updated_at`
-    frozen for hours. The WS stale-cleanup at backend/websocket.py:57
+    frozen for hours. The WS stale-cleanup (`STALE_SQL` in backend/websocket.py)
     tentatively flipped the row to `failed`, the 5-second grace expired, and
     the broadcast became `{"tasks": []}` even though the worker was still
     running. The fix: heartbeats from inside `coalesce_*_lookups` call

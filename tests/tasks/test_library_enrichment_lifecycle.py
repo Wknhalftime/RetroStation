@@ -230,7 +230,7 @@ def test_mb_enrichment_task_called_after_envelope_closes_its_failure_is_not_reco
 ) -> None:
     """`mb_enrichment_task()` is called AFTER library_enrichment's own
     try/except/finally has exited (progress_conn already closed). Since
-    AUD-R011 decision 1, that call is guarded by `enqueue_or_log`, but only
+    AUD-R012 (1), that call is guarded by `enqueue_or_log`, but only
     for the real SqliteHuey enqueue-failure type (`sqlite3.Error`) — see
     `test_mb_enrichment_enqueue_failure_is_logged_and_does_not_propagate`
     for that case. An `httpx.HTTPError` (a pipeline-stage failure, not an
@@ -273,7 +273,7 @@ def test_mb_enrichment_enqueue_failure_is_logged_and_does_not_propagate(
     _repo_cls: MagicMock,
     _mb_cls: MagicMock,
 ) -> None:
-    """AUD-R011 decision 1: a real SqliteHuey enqueue failure (`sqlite3.Error`)
+    """AUD-R012 (1): a real SqliteHuey enqueue failure (`sqlite3.Error`)
     calling `mb_enrichment_task()` is the caller's own problem to report. It
     must be logged as an ERROR SystemLog on library_enrichment's own
     task_id, and must NOT propagate out of `library_enrichment_task` —
