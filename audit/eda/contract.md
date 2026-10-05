@@ -125,3 +125,21 @@ included.
   graph and every cycle, as `a -> b -> c`.
 - `--check BASELINE`: BASELINE is an earlier output; exit 1 if any current hit identity or
   any current `unresolved_dispatch` identity is not in it; lines are ignored.
+
+## Conformance criteria C1–C8 (Session C; adopted by Lance 2026-10-05)
+
+Used by the Phase 4 audit (`audit/eda/report.md` section 3). "Tool" means the analyzer counts it;
+"judged" means a spot read settles it.
+
+| C | criterion | measure | rules | source |
+|---|---|---|---|---|
+| C1 | messages announce facts rather than order a named consumer | EVENT share of classified edges | message_class | tool |
+| C2 | every task-to-task hand-off goes through the guard (AUD-R012 (1), AUD-R014) | unguarded task-produced ENQUEUE edges | EV01 | tool |
+| C3 | the queue is not bypassed and every task has a producer | INLINE edges, service imports of tasks, tasks with no producer | EV02 EV03 EV06 | tool + judged |
+| C4 | a second delivery is harmless | for the five tasks with the most inbound edges: upsert, guarded write or status check | none | judged |
+| C5 | id payloads stay correct when state moves on between enqueue and run | re-read under a status filter; no blind overwrite; payload types | EV07 | tool + judged |
+| C6 | no poll where an existing message could replace it | each POLL edge and periodic reconciler, with the cost of replacing it | EV09 | tool + judged |
+| C7 | no request/response or cycles over the queue | QUERY edges, results-enabled instances, task-graph cycles | EV04 EV05 | tool |
+| C8 | task handlers are thin: envelope plus one call into a service | for the three largest tasks: envelope lines vs business-logic lines | EV08 | tool + judged |
+
+Under AUD-R015 (command pipeline), C1 = 0% EVENT is the expected value, not a breach.

@@ -1,6 +1,6 @@
 {
   "session": "C",
-  "phase": "session-C-done",
+  "phase": "session-C-ruled",
   "branch": "audit/event-graph",
   "base": "master 9cff8e9 (merged into audit/event-graph as a6a4e27 on 2026-10-03; was c79dce2)",
   "steps_done": [
@@ -26,7 +26,7 @@
     "Session B 2026-10-03/04: analyzer built (715d5e5, 56/56), real-code run, recall reconciled, precision 15/15 before and after, mutation 584 survivors classified, 18 spec gaps proposed, baseline copied, history at 3 and 6 months; details in tool_status",
     "P4 Session C 2026-10-04: tool_status read (precision 15/15, recall reconciled, no gap) -> criteria measured; analyzer re-run --check exit 0 on HEAD ad7f317 and master a97a64a (identical graph); 7 module subagents (43 windows, max 8 each) + 7 own windows; audit/eda/report.md, audit/eda/findings.jsonl (AUD-059..080), audit/eda/proposed-rulings.jsonl (AUD-R015..R020, all PROPOSED); audit/rulings.jsonl untouched"
   ],
-  "next_step": "Lance: rule on target shape (proposed AUD-R015) and open questions 1-6 in audit/eda/report.md; then move accepted PROPOSED rows into audit/rulings.jsonl and schedule the fix PRs (AUD-059..066 first)",
+  "next_step": "Fix PRs: AUD-061..063 + AUD-059/R020 (hand-offs, embedding side branch), AUD-060 needs AUD-R018 ruling, gate per AUD-R019, GAP-01 analyzer fix (needs Lance's approval of a new spec test + relock); ARCHITECTURE.md draft awaits 'ship it' (own branch docs/architecture-note)",
   "open_stops": [],
   "rulings_in_scope": {
     "command": "uv run python -c \"...status in (ACTIVE, ACTIVE-fixed, ACTIVE-no-change) and re.search('task|enqueue|huey|chain|queue|websocket|poll|progress', ruling+rationale)\" > audit/eda/rulings-in-scope.txt",
@@ -450,6 +450,16 @@
     },
     "criteria_definitions": "C1-C8 not found in repo; reconstructed in report.md section 3 (open question 1)",
     "huey_signals": "recommended not adopted: proposed AUD-R016",
-    "gate": "proposed in report.md section 9, NOT applied"
+    "gate": "proposed in report.md section 9, NOT applied",
+    "rulings_2026_10_05": {
+      "Q1 C1-C8": "keep Session C definitions; stored in audit/eda/contract.md",
+      "Q2 embeddings": "not planned for matching -> side branch (AUD-R020 ACTIVE)",
+      "Q3 Huey signals": "not adopted (AUD-R016 ACTIVE)",
+      "Q4 workers": "one per queue (AUD-R017 ACTIVE)",
+      "Q5 gate": "accepted incl. baseline refresh per PR (AUD-R019 ACTIVE, not yet wired)",
+      "Q6 spec gaps": "fix GAP-01 (reported_failures envelope), park GAP-02..18",
+      "Q7 shape": "(b) command pipeline (AUD-R015 ACTIVE)",
+      "not asked": "AUD-R018 (guarded worker writes) stays PROPOSED"
+    }
   }
 }
