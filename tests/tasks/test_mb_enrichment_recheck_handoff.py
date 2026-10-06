@@ -50,7 +50,7 @@ class _Rig:
         self.refuse = False
 
     def connect(self, _url: str, **kwargs: Any) -> MagicMock:
-        if self.fail_connect:
+        if self.fail_connect and len(self.connects) == 0:
             raise RuntimeError("pre-count boom")
         self.connects.append(kwargs)
         return _mk_conn()
