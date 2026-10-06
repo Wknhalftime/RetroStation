@@ -46,11 +46,13 @@ class _Rig:
         self.connects: list[dict[str, Any]] = []
         self.scopes: list[str] = []
         self.statuses_at_hand_off: list[list[TaskStatus]] = []
+        self.attempts = 0
         self.fail_connect = False
         self.refuse = False
 
     def connect(self, _url: str, **kwargs: Any) -> MagicMock:
-        if self.fail_connect and len(self.connects) == 0:
+        self.attempts += 1
+        if self.fail_connect and self.attempts == 1:
             raise RuntimeError("pre-count boom")
         self.connects.append(kwargs)
         return _mk_conn()
