@@ -11,6 +11,13 @@ from structlog.testing import capture_logs
 from backend.domain.enums import TaskStatus, TaskType
 
 
+@pytest.fixture(autouse=True)
+def _no_recheck_hand_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mb_enrichment_task ends by queuing rematch_undecided_task("changed") (spec 2026-10-05
+    §4.2). Stub it so these tests never put a re-check on the real Huey queue."""
+    monkeypatch.setattr("backend.tasks.matching_recheck_tasks.rematch_undecided_task", MagicMock())
+
+
 def _mk_conn() -> MagicMock:
     conn = MagicMock()
     conn.__enter__.return_value = conn

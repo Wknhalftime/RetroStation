@@ -49,6 +49,18 @@ def test_follow_on_task_is_stubbed_and_restored(bench_enrich: ModuleType) -> Non
     assert mb_enrichment_tasks.mb_enrichment_task is original
 
 
+def test_recheck_hand_off_is_stubbed_and_restored(bench_enrich: ModuleType) -> None:
+    from backend.tasks import matching_recheck_tasks
+
+    original = matching_recheck_tasks.rematch_undecided_task
+    with bench_enrich.follow_on_task(run=False):
+        # mb_enrichment_task resolves this name at call time (spec 2026-10-05 §4.2); a
+        # --phase both run must find the stub, or it queues a real re-check.
+        assert matching_recheck_tasks.rematch_undecided_task is not original
+        assert matching_recheck_tasks.rematch_undecided_task("changed") is None
+    assert matching_recheck_tasks.rematch_undecided_task is original
+
+
 def test_reset_scope_limits_releases_when_asked(bench_enrich: ModuleType) -> None:
     unlimited = bench_enrich.reset_scope_sql(limit=None)
     limited = bench_enrich.reset_scope_sql(limit=25)
