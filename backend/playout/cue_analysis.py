@@ -4,7 +4,8 @@ Spec: Cue pre-computation ("It runs Liquidsoap in batch mode"); D61 (a file that
 hangs the analyser is reported, not the batch); D63 (15 s at startup plus 20 s per file);
 D65 (a deadline per file, and every result line validated); D67 (that deadline is
 max(20 s, duration / 40)); D68 (a malformed result line fails only its file, the reason
-naming the field); C8 (the child gets only the environment it is given).
+naming the field); D110 (so does a result line that never came before the next file began);
+C8 (the child gets only the environment it is given).
 
 Protocol (``cue_analysis.liq``): the child reads its file list from the JSON file named by
 ``CUE_FILES`` and prints ``RS_CUE_BEGIN <i>`` before and ``RS_CUE_RESULT <json>`` after each
@@ -110,8 +111,9 @@ class BatchAnalysis:
 
     ``metadata``: autocue's metadata for each file whose result line was valid (empty when
     autocue failed on the file). ``rejected``: each file whose result line broke the
-    protocol, with the reason naming the field (D68). ``stalled``: the file the analyser
-    died or hung on (D61). Files after a stalled one were not analysed and appear nowhere.
+    protocol, with the reason naming the field (D68), or never came before the next file
+    began (D110). ``stalled``: the file the analyser died or hung on (D61). Files after a
+    stalled one were not analysed and appear nowhere.
     """
 
     metadata: Mapping[int, Mapping[str, str]]
@@ -261,20 +263,21 @@ class _Reader:
         return 0 if self.begun is None else self.begun + 1
 
     def _begin(self, body: str, expected: int) -> None:
-        """Record that file ``expected`` has begun; the one before it must have settled.
+        """Record that file ``expected`` has begun.
 
-        A begin that skips a file, repeats one, or comes before the previous file's result
-        breaks the protocol: that file would otherwise be in no outcome at all.
+        A begin that skips a file, repeats one, or goes beyond the batch breaks the protocol.
+        D110: the next file beginning before the previous file's result rejects that file, as
+        a malformed result line does (D68), and the batch goes on.
         """
-        if self.begun is not None and not self.settled(self.begun):
-            raise AnalyserError(
-                f"{_BEGIN} on output line {self._line_no} before a result for file "
-                f"{self.begun}: {body!r}"
-            )
         if body != str(expected) or expected >= len(self._files):
             raise AnalyserError(
                 f"{_BEGIN} on output line {self._line_no} must be {expected} "
                 f"of {len(self._files)} files: {body!r}"
+            )
+        if self.begun is not None and not self.settled(self.begun):
+            self.rejected[self.begun] = (
+                f"no {_RESULT} for file {self.begun} before {_BEGIN} {expected} "
+                f"on output line {self._line_no}"
             )
         self.begun = expected
 
@@ -346,10 +349,11 @@ def analyse_batch(
     """Run autocue on ``files`` in one process; results are matched to files by index.
 
     A file the process died or hung on is ``stalled``, and later files are not analysed. A
-    file whose result line is malformed is ``rejected``, and the rest go on (D68). Raises
-    ``AnalyserError`` when the process did not start or never began a file (a broken
-    install or script), or broke the protocol outside a result line. The process never
-    outlives the call.
+    file whose result line is malformed, or missing when the next file begins, is ``rejected``,
+    and the rest go on (D68, D110). Raises ``AnalyserError`` when the process did not start
+    or never began a file (a broken install or script), or broke the protocol in any other
+    way: a begin out of order or beyond the batch, or a result with no file awaiting it. The
+    process never outlives the call.
     """
     if not files:
         return BatchAnalysis(metadata={}, stalled=None)
