@@ -209,10 +209,11 @@ def test_step_a_skips_the_rejected_work() -> None:
     matches = FakeMatchRepository()
     artist = _resolved_artist(matches)
     best = _file(TITLE, "w1", artist_mbid=MBID)
+    sibling = _file(TITLE, "w1", artist_mbid=MBID)
     runner = _file(f"{TITLE} (Live)", "w2", artist_mbid=MBID)
     song = _song(artist, rejected=(best.id,))
     strategy = ResolvedArtistMbidStrategy(
-        _files(best, runner),
+        _files(best, sibling, runner),
         matches,
         FakeMbClient(),
         FakeArtistRepository(),
@@ -230,13 +231,14 @@ def test_step_b_skips_the_rejected_work() -> None:
     matches = FakeMatchRepository()
     artist = _resolved_artist(matches)
     rejected = _file(TITLE, "w1", recording_mbid="rec-1")
-    allowed = _file(TITLE, "w2", recording_mbid="rec-1")
+    sibling = _file(TITLE, "w1", recording_mbid="rec-1")
+    allowed = _file(f"{TITLE} (Live)", "w2", recording_mbid="rec-1")
     song = _song(artist, rejected=(rejected.id,))
     mb = FakeMbClient(
         recording_searches={(MBID, broadcast_title_variants(TITLE)[0]): [{"id": "rec-1"}]}
     )
     strategy = ResolvedArtistMbidStrategy(
-        _files(rejected, allowed),
+        _files(rejected, sibling, allowed),
         matches,
         mb,
         FakeArtistRepository(),
@@ -254,10 +256,12 @@ def test_step_b_skips_the_rejected_work() -> None:
 def test_step_c_skips_the_rejected_work() -> None:
     matches = FakeMatchRepository()
     artist = _resolved_artist(matches)
-    best, runner = _file(TITLE, "w1"), _file(f"{TITLE} (Live)", "w2")
+    best = _file(TITLE, "w1")
+    sibling = _file(TITLE, "w1")
+    runner = _file(f"{TITLE} (Live)", "w2")
     song = _song(artist, rejected=(best.id,))
     strategy = ResolvedArtistMbidStrategy(
-        _files(best, runner),
+        _files(best, sibling, runner),
         matches,
         FakeMbClient(),
         FakeArtistRepository(),
@@ -287,11 +291,13 @@ def _rule(song: BroadcastTrackIdentity, target: LibraryFile, priority: int) -> M
 
 def test_a_rule_pointing_at_a_rejected_work_is_skipped_for_the_next_rule() -> None:
     artist = _artist()
-    rejected, allowed = _file(TITLE, "w1"), _file(TITLE, "w2")
+    rejected = _file(TITLE, "w1")
+    sibling = _file(TITLE, "w1")
+    allowed = _file(TITLE, "w2")
     song = _song(artist, rejected=(rejected.id,))
     strategy = IdentityMappingRuleStrategy(
-        [_rule(song, rejected, 20), _rule(song, allowed, 10)],
-        _files(rejected, allowed),
+        [_rule(song, rejected, 20), _rule(song, sibling, 15), _rule(song, allowed, 10)],
+        _files(rejected, sibling, allowed),
         exclusions_by_identity=_rejecting(song, rejected),
     )
 
@@ -328,7 +334,12 @@ class _CountingFiles(FakeLibraryFileRepository):
 
 
 def _run(
-    song: BroadcastTrackIdentity, artist: BroadcastArtist, files: FakeLibraryFileRepository
+    song: BroadcastTrackIdentity,
+    artist: BroadcastArtist,
+    files: FakeLibraryFileRepository,
+    *,
+    matches: FakeMatchRepository | None = None,
+    rules: list[MappingRule] | None = None,
 ) -> FakeMatchRepository:
     playlist_id = uuid4()
     artists = FakeBroadcastArtistRepository()
@@ -336,7 +347,12 @@ def _run(
     identities = FakeBroadcastTrackIdentityRepository()
     identities.upsert(song)
     identities.register_playlist_identity(playlist_id, song.id)
-    matches = FakeMatchRepository()
+    if matches is None:
+        matches = FakeMatchRepository()
+    rules_repo = FakeMappingRuleRepository()
+    if rules:
+        for rule in rules:
+            rules_repo.create(rule)
     match_identities_for_playlist(
         playlist_id=playlist_id,
         repos=IdentityMatchingRepos(
@@ -344,7 +360,7 @@ def _run(
             broadcast_artist_repo=artists,
             match_repo=matches,
             library_file_repo=files,
-            rules_repo=FakeMappingRuleRepository(),
+            rules_repo=rules_repo,
             catalog_repo=FakeArtistRepository(),
         ),
         mb_client=FakeMbClient(),
@@ -358,7 +374,7 @@ def test_exclusion_follows_the_rejected_files_current_work() -> None:
     artist = _artist()
     rejected = _file(TITLE, "w3")
     same_work_now = _file(TITLE, "w3")
-    old_work = _file(TITLE, "w1")
+    old_work = _file(f"{TITLE} (Live)", "w1")
     files = _CountingFiles()
     for f in (rejected, same_work_now, old_work):
         files.upsert(f)
@@ -408,3 +424,40 @@ def test_the_rejected_file_itself_is_never_suggested(work_id: str | None) -> Non
 
     created = matches.get_by_identity(song.id)
     assert created is None or created.library_file_id != rejected.id
+
+
+def test_orchestrated_resolved_artist_with_rejections() -> None:
+    """Full match_identities_for_playlist flow: resolved artist, rejected work excluded."""
+    artist_matches = FakeMatchRepository()
+    artist = _resolved_artist(artist_matches)
+    best = _file(TITLE, "w1", artist_mbid=MBID)
+    runner = _file(f"{TITLE} (Live)", "w2", artist_mbid=MBID)
+    files = FakeLibraryFileRepository()
+    files.upsert(best)
+    files.upsert(runner)
+    song = _song(artist, rejected=(best.id,))
+
+    matches = _run(song, artist, files, matches=artist_matches)
+
+    created = matches.get_by_identity(song.id)
+    assert created is not None
+    assert created.library_file_id == runner.id
+
+
+def test_orchestrated_mapping_rules_with_rejections() -> None:
+    """Full match_identities_for_playlist flow: rules, rejected work excluded."""
+    artist = _artist()
+    rejected = _file(TITLE, "w1")
+    allowed = _file(TITLE, "w2")
+    files = FakeLibraryFileRepository()
+    files.upsert(rejected)
+    files.upsert(allowed)
+    song = _song(artist, rejected=(rejected.id,))
+    rule_rejected = _rule(song, rejected, 20)
+    rule_allowed = _rule(song, allowed, 10)
+
+    matches = _run(song, artist, files, rules=[rule_rejected, rule_allowed])
+
+    created = matches.get_by_identity(song.id)
+    assert created is not None
+    assert created.library_file_id == allowed.id
