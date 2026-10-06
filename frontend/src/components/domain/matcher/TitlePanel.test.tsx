@@ -224,6 +224,7 @@ describe("TitlePanel artist gate", () => {
         original_title: "Your Disease",
         match_status: "needs_review",
         match_tier: "musicbrainz_id_search",
+        proposed_match: makeProposedMatch(),
       }),
     ]);
     artist.match_status = "auto_matched";
@@ -309,9 +310,9 @@ describe("TitlePanel proposed match + Approve", () => {
       { wrapper: wrapperFor(makeClient()) }
     );
     expect(screen.queryByRole("button", { name: /Approve/i })).toBeNull();
-    // Find File / Reject still present.
+    // Find File stays; Reject needs a suggestion to reject (spec 2026-10-05 D3).
     expect(screen.getByRole("button", { name: /Find File/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Reject/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /^Reject$/i })).toBeNull();
   });
 
   it("does not render Approve when status is not needs_review even if proposed_match exists", () => {
