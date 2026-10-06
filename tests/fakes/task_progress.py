@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from backend.domain.enums import TaskStatus
+from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
 
@@ -52,3 +52,12 @@ class FakeTaskProgressRepository(TaskProgressRepository):
             completed_at=None,
         )
         return 1
+
+    def last_completed_started_at(self, task_type: TaskType) -> datetime | None:
+        # The re-check watermark (spec 2026-10-05 §4.2): only COMPLETED rows count.
+        starts = [
+            t.started_at
+            for t in self._data.values()
+            if t.task_type == task_type and t.status == TaskStatus.COMPLETED
+        ]
+        return max(starts, default=None)
