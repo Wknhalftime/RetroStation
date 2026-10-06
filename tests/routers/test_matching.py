@@ -894,20 +894,21 @@ class TestResolveIdentity:
 
     def test_manual_reject(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
+        shown = _insert_library_file(db_conn)
 
         resp = client.post(
             f"/api/v1/matching/identities/{identity.id}/resolve",
-            json={"match_status": "manual_rejected"},
+            json={"match_status": "manual_rejected", "library_file_id": str(shown.id)},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["match_status"] == "manual_rejected"
+        assert data["match_status"] == "needs_review"
 
         id_row = db_conn.execute(
             "SELECT match_status FROM track_identities WHERE id = %s", (identity.id,)
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "manual_rejected"
+        assert id_row["match_status"] == "needs_review"
 
     def test_manual_match_replaces_existing_match(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
