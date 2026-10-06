@@ -16,9 +16,14 @@ from backend.dependencies import get_current_token, get_db_connection, get_mb_cl
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.system import StorageUnavailableError
 from backend.services.identity_resolution_service import (
+    IdentityNotFoundError,
     LibraryFileNotFoundError,
+    SongNotRejectableError,
+    SuggestionRequiredError,
     persist_manual_match,
     recalculate_for_work_sync,
+    reject_song_suggestion,
+    unmatch_song,
 )
 from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
 from backend.services.mb_client import MusicBrainzClientProtocol
@@ -801,6 +806,8 @@ async def resolve_identity(
         HTTPException: 404 if the identity does not exist.
         HTTPException: 422 if match_status is invalid, library_file_id is
             missing for MANUAL_MATCHED, or library_file_id does not exist.
+        HTTPException: 409 if the song is already rejected.
+        HTTPException: 422 if a song in review is rejected without library_file_id.
     """
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
@@ -891,15 +898,19 @@ async def resolve_identity(
                     exc_info=True,
                 )
     else:
-        # MANUAL_REJECTED: update status, delete existing match
-        await conn.execute(
-            "UPDATE track_identities SET match_status = %s, match_tier = %s WHERE id = %s",
-            (new_status.value, MatchTier.MANUAL.value, identity_id),
-        )
-        await conn.execute(
-            "DELETE FROM matches WHERE identity_id = %s",
-            (identity_id,),
-        )
+        # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song goes back to review
+        # with the file recorded, and the matcher skips it and its work from now on.
+        try:
+            await reject_song_suggestion(conn, identity_id, body.library_file_id)
+        except IdentityNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except SuggestionRequiredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            ) from exc
+        except SongNotRejectableError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
 
     return ResolveResult(id=identity_id, match_status=new_status.value)
 
@@ -1014,58 +1025,20 @@ async def unmatch_identity(
 
     Per-song unmatch — does not touch sibling identities or the parent
     artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
+    A matched song's file(s) are recorded as rejected (AUD-R022, D5).
 
     Raises:
         HTTPException: 404 if the identity does not exist.
         HTTPException: 409 if the identity's current ``match_status`` is
             not in :data:`_UNMATCHABLE_STATUSES`.
     """
-    needs_review = MatchStatus.NEEDS_REVIEW.value
-
-    # See unmatch_artist for the atomic-gate rationale.
-    identity_cur = await conn.execute(
-        """
-        UPDATE track_identities
-           SET match_status  = %s,
-               match_tier    = NULL,
-               reason_code   = %s,
-               reason_detail = NULL
-         WHERE id = %s
-           AND match_status = ANY(%s)
-        RETURNING id
-        """,
-        (
-            needs_review,
-            ReasonCode.USER_UNMATCHED.value,
-            identity_id,
-            _UNMATCHABLE_STATUSES,
-        ),
-    )
-    if await identity_cur.fetchone() is None:
-        existing = await conn.execute(
-            "SELECT match_status FROM track_identities WHERE id = %s",
-            (identity_id,),
-        )
-        existing_row = await existing.fetchone()
-        if existing_row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Identity {identity_id} not found",
-            )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Identity {identity_id} is in {existing_row['match_status']!r}; "
-                "only finalized matches can be unmatched"
-            ),
-        )
-
-    await conn.execute(
-        "DELETE FROM matches WHERE identity_id = %s",
-        (identity_id,),
-    )
-
-    return ResolveResult(id=identity_id, match_status=needs_review)
+    try:
+        await unmatch_song(conn, identity_id)
+    except IdentityNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SongNotRejectableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
 
 
 # ---------------------------------------------------------------------------
