@@ -1030,7 +1030,7 @@ async def unmatch_identity(
     Raises:
         HTTPException: 404 if the identity does not exist.
         HTTPException: 409 if the identity's current ``match_status`` is
-            not in :data:`_UNMATCHABLE_STATUSES`.
+            not in :data:`backend.services.identity_resolution_service._UNMATCHABLE`.
     """
     try:
         await unmatch_song(conn, identity_id)

@@ -296,8 +296,8 @@ class ResolvedArtistMbidStrategy:
             not None. Naturally skipped for true local-only artists.
     Step C: name-based fuzzy fallback — fires when real_mbid is None (local-
             only artist with no MB link yet), or when A and B both yield
-            nothing. Uses original_name (not normalized_name) to preserve
-            punctuation for the substring search.
+            nothing. Uses `artist.normalized_name` with `_eligible` to enforce
+            rejection exclusions and prevent cross-artist matches.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -393,7 +393,7 @@ class ResolvedArtistMbidStrategy:
                 # trustworthy label, and its candidate is anchored on the
                 # resolved artist MBID rather than a downstream MB recording
                 # hit (which can pull in cross-artist files when a local tag
-                # carries someone else's recording_mbid — _filter_to_artist
+                # carries someone else's recording_mbid — _eligible
                 # in _mb_recording_search now enforces that as a hard guard
                 # rather than a comment). Deliberate product choice; do not
                 # "fix" without discussion.
@@ -518,7 +518,7 @@ class BroadcastToLocalStrategy:
         }:
             return None
 
-        # Repo enforces equality on normalized_artist_name; _filter_to_artist
+        # Repo enforces equality on normalized_artist_name; _eligible
         # is defense-in-depth so a future query loosening can't quietly
         # reintroduce cross-artist proposals.
         candidate_files = _eligible(
