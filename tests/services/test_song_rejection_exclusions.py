@@ -276,6 +276,30 @@ def test_step_c_skips_the_rejected_work() -> None:
     assert result.tier == MatchTier.LOCAL_FILE_FUZZY
 
 
+def test_resolved_artist_with_every_candidate_rejected_needs_review_without_suggestion() -> None:
+    """Steps A, B and C all come up empty after exclusions: NO_LOCAL_FILES, no suggestion."""
+    matches = FakeMatchRepository()
+    artist = _resolved_artist(matches)
+    rejected = _file(TITLE, "w1", artist_mbid=MBID)
+    sibling = _file(f"{TITLE} (Live)", "w1", artist_mbid=MBID)
+    song = _song(artist, rejected=(rejected.id,))
+    strategy = ResolvedArtistMbidStrategy(
+        _files(rejected, sibling),
+        matches,
+        FakeMbClient(),
+        FakeArtistRepository(),
+        80,
+        exclusions_by_identity=_rejecting(song, rejected),
+    )
+
+    result = strategy.apply(song, artist)
+
+    assert result is not None
+    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.library_file_id is None
+    assert result.reason_code == ReasonCode.NO_LOCAL_FILES
+
+
 # --- Mapping rules -----------------------------------------------------------------------------
 
 
@@ -340,13 +364,15 @@ def _run(
     *,
     matches: FakeMatchRepository | None = None,
     rules: list[MappingRule] | None = None,
+    more_songs: tuple[BroadcastTrackIdentity, ...] = (),
 ) -> FakeMatchRepository:
     playlist_id = uuid4()
     artists = FakeBroadcastArtistRepository()
     artists.upsert(artist)
     identities = FakeBroadcastTrackIdentityRepository()
-    identities.upsert(song)
-    identities.register_playlist_identity(playlist_id, song.id)
+    for pending in (song, *more_songs):
+        identities.upsert(pending)
+        identities.register_playlist_identity(playlist_id, pending.id)
     if matches is None:
         matches = FakeMatchRepository()
     rules_repo = FakeMappingRuleRepository()
@@ -386,6 +412,26 @@ def test_exclusion_follows_the_rejected_files_current_work() -> None:
     assert created is not None
     assert created.library_file_id == old_work.id
     assert files.batch_calls == [[rejected.id]]
+
+
+def test_two_songs_load_their_rejections_in_one_batch_and_each_honours_only_its_own() -> None:
+    """Song A rejected the plain take, song B rejected the live take: each is still proposed the
+    other song's rejected work, and both rejected ids are fetched in a single lookup."""
+    artist = _artist()
+    plain, live = _file(TITLE, "w1"), _file(f"{TITLE} (Live)", "w2")
+    files = _CountingFiles()
+    for f in (plain, live):
+        files.upsert(f)
+    song_a = _song(artist, title=TITLE, rejected=(plain.id,))
+    song_b = _song(artist, title=f"{TITLE} (Live)", rejected=(live.id,))
+
+    matches = _run(song_a, artist, files, more_songs=(song_b,))
+
+    created_a, created_b = matches.get_by_identity(song_a.id), matches.get_by_identity(song_b.id)
+    assert created_a is not None and created_b is not None
+    assert created_a.library_file_id == live.id
+    assert created_b.library_file_id == plain.id
+    assert files.batch_calls == [sorted([plain.id, live.id], key=str)]
 
 
 def test_no_rejections_means_no_batch_lookup() -> None:

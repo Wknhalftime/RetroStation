@@ -3,6 +3,7 @@ file merges carrying rejections over (spec 2026-10-05 §4.1)."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,11 +11,20 @@ import psycopg
 from psycopg.rows import dict_row
 
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
+from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
+from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
+from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import (
     PgBroadcastTrackIdentityRepository,
 )
 from backend.db.repositories.library_files import PgLibraryFileRepository
-from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
+from backend.domain.broadcast import (
+    BroadcastArtist,
+    BroadcastPlayEvent,
+    BroadcastPlaylist,
+    BroadcastStation,
+    BroadcastTrackIdentity,
+)
 from backend.domain.enums import EnrichmentStatus
 from backend.domain.library import AudioMetadata, LibraryFile
 
@@ -71,6 +81,33 @@ def test_the_mapper_reads_rejections_as_a_tuple(migrated_db: str) -> None:
         song, ids = _identity(conn), [uuid4(), uuid4()]
         _set_rejections(conn, song.id, ids)
         assert _rejections(conn, song.id) == tuple(ids)
+
+
+def test_get_pending_for_playlist_returns_the_stored_rejections(migrated_db: str) -> None:
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        song, ids = _identity(conn), [uuid4(), uuid4()]
+        station = PgBroadcastStationRepository(conn).create(
+            BroadcastStation(id=uuid4(), call_letters=f"KRJ-{uuid4().hex[:8]}", name="Rejections")
+        )
+        playlist = PgBroadcastPlaylistRepository(conn).create(
+            BroadcastPlaylist(
+                id=uuid4(), name="rej.csv", content_hash=uuid4().hex, station_id=station.id
+            )
+        )
+        PgBroadcastPlayEventRepository(conn).create(
+            BroadcastPlayEvent(
+                id=uuid4(),
+                identity_id=song.id,
+                playlist_id=playlist.id,
+                played_at=datetime(2001, 3, 15, 12, 0, tzinfo=UTC),
+            )
+        )
+        _set_rejections(conn, song.id, ids)
+
+        pending = PgBroadcastTrackIdentityRepository(conn).get_pending_for_playlist(playlist.id)
+
+        assert [p.id for p in pending] == [song.id]
+        assert pending[0].rejected_file_ids == tuple(ids)
 
 
 def test_get_by_ids_returns_present_and_missing_files_and_omits_unknown(

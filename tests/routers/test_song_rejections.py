@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 
-from backend.domain.enums import MatchStatus, ReasonCode
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from tests.routers.test_matching import (
     _insert_identity,
     _insert_library_file,
@@ -29,7 +29,15 @@ REJECT = {"match_status": "manual_rejected"}
 
 def _song(db_conn: psycopg.Connection[Any], status: MatchStatus) -> Any:
     _, _, artist, _, _ = _seed_review_chain(db_conn)
-    return _insert_identity(db_conn, artist, original_title="Shown Song", match_status=status)
+    song = _insert_identity(db_conn, artist, original_title="Shown Song", match_status=status)
+    # Non-null tier / reason / detail, so "cleared" in _assert_back_in_review proves the write.
+    db_conn.execute(
+        """UPDATE track_identities
+           SET match_tier = %s, reason_code = %s, reason_detail = %s WHERE id = %s""",
+        (MatchTier.LOCAL_FILE_FUZZY.value, ReasonCode.LOW_CONFIDENCE.value, "seeded", song.id),
+    )
+    db_conn.commit()
+    return song
 
 
 def _row(db_conn: psycopg.Connection[Any], identity_id: UUID) -> dict[str, Any]:
@@ -171,6 +179,30 @@ def test_reject_matched_song_without_a_file_row_still_returns_it_to_review(clien
     assert list(row["rejected_file_ids"]) == []
 
 
+def _store_rejection(db_conn: psycopg.Connection[Any], identity_id: UUID, file_id: UUID) -> None:
+    db_conn.execute(
+        "UPDATE track_identities SET rejected_file_ids = %s WHERE id = %s",
+        ([file_id], identity_id),
+    )
+
+
+def test_reject_matched_song_keeps_earlier_rejections_and_adds_the_matched_file(
+    client, db_conn
+) -> None:
+    song = _song(db_conn, MatchStatus.AUTO_MATCHED)
+    earlier, matched = uuid4(), _insert_library_file(db_conn)
+    _insert_match_row(db_conn, song, 99.0, library_file_id=matched.id)
+    _store_rejection(db_conn, song.id, earlier)
+    db_conn.commit()
+
+    resp = _reject(client, song.id, uuid4())
+
+    assert resp.status_code == 200
+    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
+    row = _assert_back_in_review(db_conn, song.id)
+    assert set(row["rejected_file_ids"]) == {earlier, matched.id}
+
+
 # --- Reject: refused ----
 
 
@@ -206,6 +238,21 @@ def test_unmatch_matched_song_records_its_file(client, db_conn, status: MatchSta
     assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
     row = _assert_back_in_review(db_conn, song.id)
     assert list(row["rejected_file_ids"]) == [matched.id]
+
+
+def test_unmatch_matched_song_keeps_earlier_rejections_and_adds_its_file(client, db_conn) -> None:
+    song = _song(db_conn, MatchStatus.AUTO_MATCHED)
+    earlier, matched = uuid4(), _insert_library_file(db_conn)
+    _insert_match_row(db_conn, song, 99.0, library_file_id=matched.id)
+    _store_rejection(db_conn, song.id, earlier)
+    db_conn.commit()
+
+    resp = client.post(f"/api/v1/matching/identities/{song.id}/unmatch")
+
+    assert resp.status_code == 200
+    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
+    row = _assert_back_in_review(db_conn, song.id)
+    assert set(row["rejected_file_ids"]) == {earlier, matched.id}
 
 
 def test_unmatch_auto_rejected_song_records_nothing(client, db_conn) -> None:
