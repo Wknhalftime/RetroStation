@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -9,7 +10,7 @@ import structlog
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import LibraryFile
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import NO_EXCLUSIONS, CandidateExclusions, MappingRule, Match
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
@@ -83,6 +84,52 @@ def _filter_to_artist(
     # null-as-wildcard would silently re-open the cross-artist hole the
     # Resolution Center invariant exists to close.
     return [f for f in candidates if f.audio.normalized_artist_name == artist_normalized_name]
+
+
+ExclusionsByIdentity = Mapping[UUID, CandidateExclusions]
+
+
+def _eligible(
+    candidates: list[LibraryFile],
+    artist_normalized_name: str,
+    exclusions: CandidateExclusions,
+) -> list[LibraryFile]:
+    """The one candidate gate: same artist, and not a rejected file or work (AUD-R022)."""
+    return [
+        f for f in _filter_to_artist(candidates, artist_normalized_name) if exclusions.allows(f)
+    ]
+
+
+def _exclusions_for(
+    exclusions_by_identity: ExclusionsByIdentity, identity: BroadcastTrackIdentity
+) -> CandidateExclusions:
+    return exclusions_by_identity.get(identity.id, NO_EXCLUSIONS)
+
+
+def _load_exclusions(
+    identities: list[BroadcastTrackIdentity], library_file_repo: LibraryFileRepository
+) -> dict[UUID, CandidateExclusions]:
+    """One batch lookup for every pending song's rejections, by the files' CURRENT works.
+
+    Purged files are simply absent: their ids still exclude themselves; they add no work.
+    """
+    rejected = {fid for identity in identities for fid in identity.rejected_file_ids}
+    if not rejected:
+        return {}
+    files = {f.id: f for f in library_file_repo.get_by_ids(sorted(rejected, key=str))}
+    exclusions: dict[UUID, CandidateExclusions] = {}
+    for identity in identities:
+        if not identity.rejected_file_ids:
+            continue
+        works = frozenset(
+            work_id
+            for fid in identity.rejected_file_ids
+            if (f := files.get(fid)) is not None and (work_id := f.work_id)
+        )
+        exclusions[identity.id] = CandidateExclusions(
+            file_ids=frozenset(identity.rejected_file_ids), work_ids=works
+        )
+    return exclusions
 
 
 def _score_candidates(
@@ -198,9 +245,12 @@ class IdentityMappingRuleStrategy:
         self,
         rules: list[MappingRule],
         library_file_repo: LibraryFileRepository,
+        *,
+        exclusions_by_identity: ExclusionsByIdentity | None = None,
     ) -> None:
         self._rules = rules
         self._library_file_repo = library_file_repo
+        self._exclusions_by_identity = exclusions_by_identity or {}
 
     def apply(
         self,
@@ -208,6 +258,7 @@ class IdentityMappingRuleStrategy:
         artist: BroadcastArtist,
     ) -> IdentityMatchResult | None:
         sig = identity.normalized_signature
+        exclusions = _exclusions_for(self._exclusions_by_identity, identity)
         for rule in self._rules:
             if rule.target_type != TargetType.LIBRARY_FILE:
                 continue
@@ -217,7 +268,7 @@ class IdentityMappingRuleStrategy:
                 lib_file = self._library_file_repo.get_by_id(UUID(rule.target_id))
             except ValueError:
                 lib_file = self._library_file_repo.get_by_path(rule.target_id)
-            if lib_file is None:
+            if lib_file is None or not exclusions.allows(lib_file):
                 continue
             return IdentityMatchResult(
                 status=MatchStatus.AUTO_MATCHED,
@@ -245,8 +296,8 @@ class ResolvedArtistMbidStrategy:
             not None. Naturally skipped for true local-only artists.
     Step C: name-based fuzzy fallback — fires when real_mbid is None (local-
             only artist with no MB link yet), or when A and B both yield
-            nothing. Uses original_name (not normalized_name) to preserve
-            punctuation for the substring search.
+            nothing. Uses `artist.normalized_name` with `_eligible` to enforce
+            rejection exclusions and prevent cross-artist matches.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -261,12 +312,15 @@ class ResolvedArtistMbidStrategy:
         mb_client: MusicBrainzClientProtocol,
         catalog_repo: ArtistCatalogRepository,
         strong_match_threshold: int = 80,
+        *,
+        exclusions_by_identity: ExclusionsByIdentity | None = None,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
         self._mb_client = mb_client
         self._catalog_repo = catalog_repo
         self._strong_match_threshold = strong_match_threshold
+        self._exclusions_by_identity = exclusions_by_identity or {}
 
     def apply(
         self,
@@ -313,14 +367,16 @@ class ResolvedArtistMbidStrategy:
         #                 the UUID value, and naturally handles artists that gain
         #                 an MB link after the initial match.
         #   • Not found → target_id is already the MBID; use it directly.
+        exclusions = _exclusions_for(self._exclusions_by_identity, identity)
         catalog_artist = self._catalog_repo.get_by_id(mbid)
         real_mbid: str | None = catalog_artist.mbid if catalog_artist is not None else mbid
 
         if real_mbid:
             # Step A — local library lookup by artist MBID.
-            candidate_files = _filter_to_artist(
+            candidate_files = _eligible(
                 self._library_file_repo.get_by_artist_mbid(real_mbid),
                 artist.normalized_name,
+                exclusions,
             )
             if candidate_files:
                 local_result = _score_candidates(
@@ -337,7 +393,7 @@ class ResolvedArtistMbidStrategy:
                 # trustworthy label, and its candidate is anchored on the
                 # resolved artist MBID rather than a downstream MB recording
                 # hit (which can pull in cross-artist files when a local tag
-                # carries someone else's recording_mbid — _filter_to_artist
+                # carries someone else's recording_mbid — _eligible
                 # in _mb_recording_search now enforces that as a hard guard
                 # rather than a comment). Deliberate product choice; do not
                 # "fix" without discussion.
@@ -362,8 +418,10 @@ class ResolvedArtistMbidStrategy:
         # backend.services.normalization.normalize_artist. The previous
         # original_name+substring path silently allowed cross-artist matches
         # (e.g. files tagged "feat. <artist>") and has been retired.
-        name_candidates = self._library_file_repo.get_by_normalized_artist_name(
-            artist.normalized_name
+        name_candidates = _eligible(
+            self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
+            artist.normalized_name,
+            exclusions,
         )
         if name_candidates:
             return _score_candidates(
@@ -415,7 +473,11 @@ class ResolvedArtistMbidStrategy:
         # A local file can be tagged with someone else's recording_mbid (cover
         # versions, mistags, MB recording merges). Drop anything whose
         # normalized_artist_name does not match the locked broadcast artist.
-        filtered = _filter_to_artist(all_candidates, artist.normalized_name)
+        filtered = _eligible(
+            all_candidates,
+            artist.normalized_name,
+            _exclusions_for(self._exclusions_by_identity, identity),
+        )
         if not filtered:
             return None
         return _score_candidates(
@@ -438,9 +500,12 @@ class BroadcastToLocalStrategy:
         self,
         library_file_repo: LibraryFileRepository,
         strong_match_threshold: int = 80,
+        *,
+        exclusions_by_identity: ExclusionsByIdentity | None = None,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._strong_match_threshold = strong_match_threshold
+        self._exclusions_by_identity = exclusions_by_identity or {}
 
     def apply(
         self,
@@ -453,12 +518,13 @@ class BroadcastToLocalStrategy:
         }:
             return None
 
-        # Repo enforces equality on normalized_artist_name; _filter_to_artist
+        # Repo enforces equality on normalized_artist_name; _eligible
         # is defense-in-depth so a future query loosening can't quietly
         # reintroduce cross-artist proposals.
-        candidate_files = _filter_to_artist(
+        candidate_files = _eligible(
             self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
             artist.normalized_name,
+            _exclusions_for(self._exclusions_by_identity, identity),
         )
         if not candidate_files:
             return IdentityMatchResult(
@@ -543,17 +609,26 @@ def match_identities_for_playlist(
     artist_ids = [identity.broadcast_artist_id for identity in pending]
     artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
 
+    exclusions_by_identity = _load_exclusions(pending, repos.library_file_repo)
+
     engine = IdentityMatchingEngine(
         [
-            IdentityMappingRuleStrategy(rules, repos.library_file_repo),
+            IdentityMappingRuleStrategy(
+                rules, repos.library_file_repo, exclusions_by_identity=exclusions_by_identity
+            ),
             ResolvedArtistMbidStrategy(
                 repos.library_file_repo,
                 repos.match_repo,
                 mb_client,
                 repos.catalog_repo,
                 strong_match_threshold,
+                exclusions_by_identity=exclusions_by_identity,
             ),
-            BroadcastToLocalStrategy(repos.library_file_repo, strong_match_threshold),
+            BroadcastToLocalStrategy(
+                repos.library_file_repo,
+                strong_match_threshold,
+                exclusions_by_identity=exclusions_by_identity,
+            ),
         ]
     )
 

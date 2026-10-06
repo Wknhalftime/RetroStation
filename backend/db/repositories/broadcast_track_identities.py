@@ -35,6 +35,7 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             embedding=parse_embedding(row.get("embedding")),
             reason_code=ReasonCode(rc) if rc else None,
             reason_detail=row.get("reason_detail"),
+            rejected_file_ids=tuple(row.get("rejected_file_ids") or ()),
         )
 
     def upsert(self, identity: BroadcastTrackIdentity) -> BroadcastTrackIdentity:

@@ -56,6 +56,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | column / predicate | written by | read by |
 |---|---|---|
 | `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY) | ingest, matchers, review UI | artist / identity matching |
+| `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |

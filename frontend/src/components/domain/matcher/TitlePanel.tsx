@@ -272,7 +272,12 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   function handleReject(identity: QueueIdentity) {
     resolveIdentity.mutate({
       id: identity.id,
-      resolution: { match_status: "manual_rejected", library_file_id: null },
+      // A review card rejects the suggestion it shows (spec D3); a matched row sends no file and
+      // the server records the song's matched file(s).
+      resolution: {
+        match_status: "manual_rejected",
+        library_file_id: identity.proposed_match?.library_file_id ?? null,
+      },
     });
   }
 
@@ -493,13 +498,15 @@ function ReviewCard({ identity, isPending, onApprove, onReject, onFileSearch }: 
         >
           Find File
         </button>
-        <button
-          onClick={() => onReject(identity)}
-          disabled={isPending}
-          className="rounded border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-        >
-          Reject
-        </button>
+        {identity.proposed_match && (
+          <button
+            onClick={() => onReject(identity)}
+            disabled={isPending}
+            className="rounded border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            Reject
+          </button>
+        )}
       </div>
     </div>
   );

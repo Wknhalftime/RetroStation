@@ -61,6 +61,9 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
     def get_by_id(self, file_id: UUID) -> LibraryFile | None:
         return self._data.get(file_id)
 
+    def get_by_ids(self, ids: list[UUID]) -> list[LibraryFile]:
+        return [self._data[i] for i in ids if i in self._data]
+
     def get_by_path(self, file_path: str) -> LibraryFile | None:
         return next((f for f in self._data.values() if f.file_path == file_path), None)
 

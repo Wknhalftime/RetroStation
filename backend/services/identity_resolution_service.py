@@ -41,7 +41,7 @@ branch. Refactoring the whole endpoint onto repositories is a separate PR.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
@@ -51,7 +51,7 @@ import psycopg
 import structlog
 from psycopg import AsyncConnection
 
-from backend.domain.enums import MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.system import StorageUnavailableError
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
@@ -90,6 +90,100 @@ class LibraryFileNotFoundError(IdentityResolutionError):
     deterministic 422 instead of waiting for the FK violation to surface
     as a 500.
     """
+
+
+class IdentityNotFoundError(IdentityResolutionError):
+    """No broadcast song has this id."""
+
+
+class SuggestionRequiredError(IdentityResolutionError):
+    """A song in review can only be rejected together with the suggestion that was shown."""
+
+
+class SongNotRejectableError(IdentityResolutionError):
+    """The song's status does not allow this action."""
+
+
+_MATCHED = (MatchStatus.AUTO_MATCHED.value, MatchStatus.MANUAL_MATCHED.value)
+_IN_REVIEW = (MatchStatus.PENDING.value, MatchStatus.NEEDS_REVIEW.value)
+_UNMATCHABLE = (*_MATCHED, MatchStatus.AUTO_REJECTED.value, MatchStatus.MANUAL_REJECTED.value)
+
+
+async def _lock_song_status(conn: AsyncConnection[Any], identity_id: UUID) -> str:
+    cur = await conn.execute(
+        "SELECT match_status FROM track_identities WHERE id = %s FOR UPDATE", (identity_id,)
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise IdentityNotFoundError(f"Identity {identity_id} not found")
+    return str(row["match_status"])
+
+
+async def _matched_file_ids(conn: AsyncConnection[Any], identity_id: UUID) -> list[UUID]:
+    cur = await conn.execute(
+        """SELECT DISTINCT library_file_id FROM matches
+            WHERE identity_id = %s AND library_file_id IS NOT NULL""",
+        (identity_id,),
+    )
+    return [row["library_file_id"] for row in await cur.fetchall()]
+
+
+async def record_song_rejection(
+    conn: AsyncConnection[Any], identity_id: UUID, library_file_ids: Sequence[UUID]
+) -> None:
+    """Record rejected files and return the song to review, inside the caller's transaction.
+
+    The one write behind both Reject and Unmatch (AUD-R022, D3/D5). The first statement locks
+    the row, so a worker's uncommitted match insert cannot survive the delete that follows.
+    """
+    await conn.execute(
+        """UPDATE track_identities
+              SET rejected_file_ids = COALESCE(
+                      (SELECT array_agg(DISTINCT x)
+                         FROM unnest(rejected_file_ids || %s::uuid[]) AS x),
+                      '{}'),
+                  match_status  = %s,
+                  match_tier    = NULL,
+                  reason_code   = %s,
+                  reason_detail = NULL
+            WHERE id = %s""",
+        (
+            list(library_file_ids),
+            MatchStatus.NEEDS_REVIEW.value,
+            ReasonCode.USER_UNMATCHED.value,
+            identity_id,
+        ),
+    )
+    await conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
+
+
+async def reject_song_suggestion(
+    conn: AsyncConnection[Any], identity_id: UUID, shown_file_id: UUID | None
+) -> None:
+    """Reject: a song in review rejects the suggestion shown; a matched song its matched file(s)."""
+    status = await _lock_song_status(conn, identity_id)
+    if status in _MATCHED:
+        files = await _matched_file_ids(conn, identity_id)
+    elif status in _IN_REVIEW:
+        if shown_file_id is None:
+            raise SuggestionRequiredError("library_file_id (the suggestion shown) is required")
+        files = [shown_file_id]
+    else:
+        raise SongNotRejectableError(
+            f"Identity {identity_id} is in {status!r}; it has no suggestion to reject"
+        )
+    await record_song_rejection(conn, identity_id, files)
+
+
+async def unmatch_song(conn: AsyncConnection[Any], identity_id: UUID) -> None:
+    """Unmatch: back to review; a matched song's file(s) are recorded as rejected (D5)."""
+    status = await _lock_song_status(conn, identity_id)
+    if status not in _UNMATCHABLE:
+        raise SongNotRejectableError(
+            f"Identity {identity_id} is in {status!r}; only finalized matches can be unmatched"
+        )
+    files = await _matched_file_ids(conn, identity_id) if status in _MATCHED else []
+    await record_song_rejection(conn, identity_id, files)
 
 
 async def persist_manual_match(

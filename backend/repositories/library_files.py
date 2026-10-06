@@ -16,6 +16,13 @@ class LibraryFileRepository(ABC):
     def get_by_id(self, file_id: UUID) -> LibraryFile | None: ...
 
     @abstractmethod
+    def get_by_ids(self, ids: list[UUID]) -> list[LibraryFile]:
+        """Batch fetch files by id, whatever their file_status. Missing ids are silently omitted.
+        Empty input returns an empty list without touching the database.
+        """
+        ...
+
+    @abstractmethod
     def get_by_path(self, file_path: str) -> LibraryFile | None: ...
 
     @abstractmethod
@@ -131,6 +138,8 @@ class LibraryFileRepository(ABC):
 
         For two rows that name the same file. A match the target already
         has for the same broadcast identity is dropped rather than doubled.
+        Songs that rejected *source_id* now reject *target_id* (AUD-R022),
+        without duplicates.
         """
         ...
 
