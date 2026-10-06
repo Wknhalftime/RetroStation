@@ -198,6 +198,14 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         row = self._conn.execute("SELECT * FROM library_files WHERE id = %s", (file_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
+    def get_by_ids(self, ids: list[UUID]) -> list[LibraryFile]:
+        if not ids:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM library_files WHERE id = ANY(%s)", (ids,)
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
     def get_by_path(self, file_path: str) -> LibraryFile | None:
         row = self._conn.execute(
             "SELECT * FROM library_files WHERE file_path = %s", (file_path,)
@@ -424,6 +432,15 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         self._conn.execute(
             "UPDATE format_overrides SET preferred_file_id = %s WHERE preferred_file_id = %s",
             (target, source),
+        )
+        # A song that rejected the source has rejected the surviving row (AUD-R022).
+        self._conn.execute(
+            """UPDATE track_identities
+                  SET rejected_file_ids = ARRAY(
+                          SELECT DISTINCT unnest(
+                              array_replace(rejected_file_ids, %s::uuid, %s::uuid)))
+                WHERE %s::uuid = ANY(rejected_file_ids)""",
+            (source, target, source),
         )
         self._conn.execute("DELETE FROM library_files WHERE id = %s", (source,))
 
