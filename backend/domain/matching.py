@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from backend.domain.enums import MatchTier, TargetType
 from backend.domain.system import StorageUnavailableError
+
+if TYPE_CHECKING:
+    from backend.domain.library import LibraryFile
 
 
 class MatchingError(Exception):
@@ -58,3 +62,23 @@ class MappingRule:
     target_id: str
     priority: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class CandidateExclusions:
+    """Library files a curator rejected for one broadcast song, and their current works.
+
+    A candidate is excluded when it is a rejected file or currently belongs to the same work as one
+    (AUD-R022, D3): rejecting a suggestion rules out that work for that song only.
+    """
+
+    file_ids: frozenset[UUID] = frozenset()
+    work_ids: frozenset[str] = frozenset()
+
+    def allows(self, candidate: LibraryFile) -> bool:
+        if candidate.id in self.file_ids:
+            return False
+        return not candidate.work_id or candidate.work_id not in self.work_ids
+
+
+NO_EXCLUSIONS = CandidateExclusions()
