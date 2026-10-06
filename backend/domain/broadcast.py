@@ -97,6 +97,8 @@ class BroadcastTrackIdentity:
     embedding: list[float] | None = None
     reason_code: ReasonCode | None = None
     reason_detail: str | None = None
+    # AUD-R022: files the curator rejected for this song (the matcher skips them and their works).
+    rejected_file_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True)
