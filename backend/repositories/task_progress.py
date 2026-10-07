@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
+from backend.domain.enums import TaskType
 from backend.domain.system import TaskProgress
 
 
@@ -41,6 +43,15 @@ class TaskProgressRepository(ABC):
         alive during long pre-pass phases. Heartbeats overlay only
         ``current_item`` / ``phase`` / ``prepass_current`` / ``prepass_total``;
         other keys must use ``upsert`` (full document replace).
+        """
+        ...
+
+    @abstractmethod
+    def last_completed_started_at(self, task_type: TaskType) -> datetime | None:
+        """``started_at`` of the newest COMPLETED row of *task_type*; None when there is none.
+
+        FAILED, RUNNING and TIMEOUT rows never count. The matching re-check uses it as its
+        watermark (spec 2026-10-05 §4.2).
         """
         ...
 

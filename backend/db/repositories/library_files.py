@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -90,7 +91,16 @@ _UPSERT_SQL = """
             library_files.artist_name),
         file_size              = EXCLUDED.file_size,
         file_mtime_ns          = EXCLUDED.file_mtime_ns,
-        indexed_at             = NOW()
+        -- D11: only a new file, a file back from missing, or a size/mtime change moves
+        -- indexed_at, so a full scan's re-check wave holds only truly changed files
+        -- (matching-revisit spec, PR B).
+        indexed_at             = CASE
+            WHEN library_files.file_status = 'present'
+             AND library_files.file_size = EXCLUDED.file_size
+             AND library_files.file_mtime_ns = EXCLUDED.file_mtime_ns
+            THEN library_files.indexed_at
+            ELSE NOW()
+        END
 """
 
 
@@ -205,6 +215,16 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             "SELECT * FROM library_files WHERE id = ANY(%s)", (ids,)
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def normalized_artist_names_changed_since(self, when: datetime) -> set[str]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT normalized_artist_name
+                 FROM library_files
+                WHERE NULLIF(normalized_artist_name, '') IS NOT NULL
+                  AND (indexed_at > %s OR missing_since > %s)""",
+            (when, when),
+        ).fetchall()
+        return {row["normalized_artist_name"] for row in rows}
 
     def get_by_path(self, file_path: str) -> LibraryFile | None:
         row = self._conn.execute(
@@ -345,9 +365,13 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
         )
 
     def relocate(self, file_id: UUID, new_path: str) -> None:
+        # D11: a file back from missing is a real change for the re-check wave; the CASE
+        # reads the old row, so it sees missing_since before it is cleared.
         self._conn.execute(
             """UPDATE library_files
-               SET file_path = %s, file_status = %s, missing_since = NULL
+               SET file_path = %s, file_status = %s, missing_since = NULL,
+                   indexed_at = CASE WHEN missing_since IS NOT NULL THEN NOW()
+                                     ELSE indexed_at END
                WHERE id = %s""",
             (new_path, FileStatus.PRESENT, str(file_id)),
         )

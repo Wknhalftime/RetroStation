@@ -1,17 +1,17 @@
 {
   "counts": {
-    "class.COMMAND": 14,
+    "class.COMMAND": 16,
     "class.EVENT": 0,
     "class.QUERY": 0,
-    "edge.ENQUEUE": 14,
+    "edge.ENQUEUE": 16,
     "edge.ENQUEUE_DEFERRED": 0,
     "edge.INLINE": 3,
     "edge.POLL": 1,
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
     "node.periodic": 4,
-    "node.producer": 16,
-    "node.task": 12,
+    "node.producer": 18,
+    "node.task": 13,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
@@ -19,9 +19,9 @@
     "rule.EV05": 0,
     "rule.EV06": 1,
     "rule.EV07": 1,
-    "rule.EV08": 16,
+    "rule.EV08": 17,
     "rule.EV09": 2,
-    "rule.EV10": 15,
+    "rule.EV10": 17,
     "unresolved_dispatch": 1
   },
   "edges": [
@@ -78,29 +78,12 @@
           "name": "playlist_id"
         }
       ],
-      "consumer": "artist_matching_task",
-      "file": "backend/routers/matching.py",
-      "guarded": false,
-      "kind": "ENQUEUE",
-      "lines": [
-        1316
-      ],
-      "message_class": "COMMAND",
-      "producer": "backend.routers.matching:_enqueue_playlists"
-    },
-    {
-      "args": [
-        {
-          "annotation": "str",
-          "name": "playlist_id"
-        }
-      ],
       "consumer": "identity_matching_task",
       "file": "backend/routers/matching.py",
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        735
+        713
       ],
       "message_class": "COMMAND",
       "producer": "backend.routers.matching:resolve_artist"
@@ -241,6 +224,57 @@
       "args": [
         {
           "annotation": "str",
+          "name": "scope"
+        }
+      ],
+      "consumer": "rematch_undecided_task",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "guarded": false,
+      "kind": "ENQUEUE",
+      "lines": [
+        136
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        }
+      ],
+      "consumer": "artist_matching_task",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        117
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "scope"
+        }
+      ],
+      "consumer": "rematch_undecided_task",
+      "file": "backend/tasks/mb_enrichment_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        888
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
           "name": "file_id"
         }
       ],
@@ -285,7 +319,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        449
+        460
       ],
       "message_class": null,
       "producer": "scripts.bench_enrich:cmd_run"
@@ -347,7 +381,7 @@
       "class": "inventory",
       "code": "EV02",
       "file": "scripts/bench_enrich.py",
-      "line": 449,
+      "line": 460,
       "subject": "scripts.bench_enrich:cmd_run -> library_enrichment_task"
     },
     {
@@ -480,11 +514,22 @@
     {
       "class": "metric",
       "code": "EV08",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "line": 40,
+      "subject": "backend.tasks.matching_recheck_tasks:rematch_undecided_task",
+      "value": {
+        "body_lines": 85,
+        "service_calls": 3
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 755,
+      "line": 757,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
-        "body_lines": 129,
+        "body_lines": 146,
         "service_calls": 0
       }
     },
@@ -581,17 +626,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/routers/matching.py",
-      "line": 1306,
-      "subject": "backend.routers.matching:_enqueue_playlists",
-      "value": {
-        "tasks": 1
-      }
-    },
-    {
-      "class": "metric",
-      "code": "EV10",
-      "file": "backend/routers/matching.py",
-      "line": 578,
+      "line": 556,
       "subject": "backend.routers.matching:resolve_artist",
       "value": {
         "tasks": 1
@@ -680,6 +715,36 @@
     {
       "class": "metric",
       "code": "EV10",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "line": 128,
+      "subject": "backend.tasks.matching_recheck_tasks:queue_recheck_all",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "line": 40,
+      "subject": "backend.tasks.matching_recheck_tasks:rematch_undecided_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/mb_enrichment_tasks.py",
+      "line": 757,
+      "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
       "file": "backend/tasks/stream_cue_tasks.py",
       "line": 247,
       "subject": "backend.tasks.stream_cue_tasks:request_cue_analysis",
@@ -701,7 +766,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "scripts/bench_enrich.py",
-      "line": 423,
+      "line": 434,
       "subject": "scripts.bench_enrich:cmd_run",
       "value": {
         "tasks": 1
@@ -725,13 +790,7 @@
       {
         "file": "backend/routers/matching.py",
         "layer": "router",
-        "line": 1306,
-        "qualname": "backend.routers.matching:_enqueue_playlists"
-      },
-      {
-        "file": "backend/routers/matching.py",
-        "layer": "router",
-        "line": 578,
+        "line": 556,
         "qualname": "backend.routers.matching:resolve_artist"
       },
       {
@@ -783,6 +842,24 @@
         "qualname": "backend.tasks.library_watcher_tasks:library_watcher_poll"
       },
       {
+        "file": "backend/tasks/matching_recheck_tasks.py",
+        "layer": "task",
+        "line": 128,
+        "qualname": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
+      },
+      {
+        "file": "backend/tasks/matching_recheck_tasks.py",
+        "layer": "task",
+        "line": 40,
+        "qualname": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
+      },
+      {
+        "file": "backend/tasks/mb_enrichment_tasks.py",
+        "layer": "task",
+        "line": 757,
+        "qualname": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
+      },
+      {
         "file": "backend/tasks/stream_cue_tasks.py",
         "layer": "task",
         "line": 247,
@@ -803,7 +880,7 @@
       {
         "file": "scripts/bench_enrich.py",
         "layer": "script",
-        "line": 423,
+        "line": 434,
         "qualname": "scripts.bench_enrich:cmd_run"
       }
     ],
@@ -995,12 +1072,31 @@
         "schedule": "crontab(minute=\"*/4\")"
       },
       {
-        "body_lines": 129,
+        "body_lines": 85,
+        "envelope": "task_run",
+        "file": "backend/tasks/matching_recheck_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 40,
+        "module": "backend.tasks.matching_recheck_tasks",
+        "name": "rematch_undecided_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "scope"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 146,
         "envelope": "task_run",
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 755,
+        "line": 757,
         "module": "backend.tasks.mb_enrichment_tasks",
         "name": "mb_enrichment_task",
         "params": [],
@@ -1094,7 +1190,7 @@
   "unresolved_dispatch": [
     {
       "file": "scripts/bench_enrich.py",
-      "line": 217,
+      "line": 222,
       "name": "mb_enrichment_task",
       "producer": "scripts.bench_enrich:follow_on_task",
       "reason": "task_as_value"

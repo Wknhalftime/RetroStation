@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
@@ -72,7 +73,8 @@ class BroadcastTrackIdentityRepository(ABC):
 
     @abstractmethod
     def bulk_reject_by_artist(self, artist_id: UUID) -> None:
-        """Set all identities for this artist to AUTO_REJECTED."""
+        """Set PENDING identities for this artist to AUTO_REJECTED, and delete their match
+        rows."""
         ...
 
     @abstractmethod
@@ -82,7 +84,8 @@ class BroadcastTrackIdentityRepository(ABC):
         Mirrors ``bulk_reject_by_artist`` but uses the retryable DEFERRED_RETRY
         reason code (so the next playlist's reset path picks them back up)
         instead of the terminal AUTO_REJECTED status. Already-matched identities
-        are left alone. Returns rows changed.
+        are left alone. Returns rows changed. Their match rows are deleted in the same
+        statement.
         """
         ...
 
@@ -95,4 +98,17 @@ class BroadcastTrackIdentityRepository(ABC):
         AUTO_REJECTED rows and non-DEFERRED_RETRY NEEDS_REVIEW rows are
         untouched.
         """
+        ...
+
+    @abstractmethod
+    def rewind_undecided(self, artist_ids: Collection[UUID] | None) -> int:
+        """Return undecided songs (NEEDS_REVIEW, AUTO_REJECTED) under these broadcast artists,
+        whatever the artist's own status, to PENDING with tier and reason cleared; returns rows
+        changed. None means every song, an empty collection none. Status only: match rows and
+        rejected_file_ids stay (AUD-R022 D1/D2, spec 2026-10-05 §4.2)."""
+        ...
+
+    @abstractmethod
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        """Every playlist with a play of a PENDING song (the re-check's fan-out)."""
         ...

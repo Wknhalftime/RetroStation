@@ -14,6 +14,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   mb_enrichment: "Enhancing MusicBrainz entities",
   ingestion: "Ingesting tracks",
   matching: "Matching tracks",
+  matching_recheck: "Re-checking undecided matches",
   m3u_export: "Exporting M3U",
   rules_apply: "Applying rules",
   // D89: a cue run shows in the bottom bar like scans and enrichment, with a

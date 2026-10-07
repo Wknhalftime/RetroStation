@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -111,3 +112,13 @@ class PgTaskProgressRepository(TaskProgressRepository):
             (json.dumps(progress_overlay), task_id),
         )
         return result.rowcount
+
+    def last_completed_started_at(self, task_type: TaskType) -> datetime | None:
+        row = self._conn.execute(
+            """SELECT max(started_at) AS started_at
+                 FROM progress_tracking
+                WHERE task_type = %s AND status = %s""",
+            (task_type.value, TaskStatus.COMPLETED.value),
+        ).fetchone()
+        started: datetime | None = row["started_at"] if row else None
+        return started

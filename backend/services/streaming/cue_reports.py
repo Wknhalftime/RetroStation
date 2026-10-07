@@ -177,7 +177,7 @@ class CueReporter:
         """Send one report on the worker thread; a failure is logged, never raised."""
         try:
             await asyncio.wrap_future(self._worker.submit(partial(self._request, file_id)))
-        except Exception as error:  # noqa: BLE001 - fire-and-forget boundary, as _enqueue_playlists
+        except Exception as error:  # noqa: BLE001 - fire-and-forget boundary
             self._log_failure(file_id, error)
         else:
             self._failing = False

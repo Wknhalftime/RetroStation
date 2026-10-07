@@ -15,14 +15,16 @@ from psycopg import sql
 
 from backend.config import Settings, get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.catalog import Artist, Recording, Work
-from backend.domain.enums import LogCategory, TaskStatus, TaskType
+from backend.domain.enums import LogCategory, RecheckScope, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
 
@@ -756,7 +758,7 @@ def mb_enrichment_task() -> dict[str, int]:
     """Fill metadata on canonical entities flagged needs_enhancement=TRUE.
 
     Processes artists, works, and recordings in sequence, each committed
-    independently.  This is the final step in the library pipeline chain.
+    independently.  It hands off the targeted matching re-check when it completes.
     """
     settings = get_settings()
 
@@ -767,6 +769,7 @@ def mb_enrichment_task() -> dict[str, int]:
     # mid-loop raise must leave accurate partial values visible even though
     # ctx was created after some of this function's early setup.
     ctx: _PhaseContext | None = None
+    task_id = ""
 
     config = TaskRunConfig(
         task_type=TaskType.MB_ENRICHMENT,
@@ -781,6 +784,7 @@ def mb_enrichment_task() -> dict[str, int]:
 
     try:
         with task_run(settings.database_url, config) as handle:
+            task_id = handle.task_id
             # Pre-count all three queues so `total` is known for the initial
             # RUNNING upsert. Each phase re-opens its own transactional
             # connection below for mutations; this counting connection is
@@ -873,6 +877,21 @@ def mb_enrichment_task() -> dict[str, int]:
         recordings_done=recordings_done,
         recordings_failed=recordings_failed,
     )
+
+    # Hand off the targeted re-check (AUD-R022 D1, spec 2026-10-05 §4.2): matching reads what
+    # this pass wrote. Only after a normal exit; a FAILED run hands off nothing, and the
+    # watermark keeps its wave. Guarded (AUD-R012 (1), AUD-R014) on a fresh autocommit
+    # connection, as library_enrichment_task does for its own hand-off.
+    from backend.tasks.matching_recheck_tasks import rematch_undecided_task
+
+    with connect_sync(settings.database_url, autocommit=True) as log_conn:
+        enqueue_or_log(
+            lambda: rematch_undecided_task(RecheckScope.CHANGED.value),
+            task_name="rematch_undecided_task",
+            caller_task_id=task_id,
+            log_category=LogCategory.ENRICHMENT,
+            sys_log_repo=PgSystemLogRepository(log_conn),
+        )
 
     return {
         "artists_done": artists_done,

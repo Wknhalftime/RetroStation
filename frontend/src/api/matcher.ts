@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
+import { useProgressStore } from "@/store/progressStore";
 import { MbArtistSearchResponseSchema } from "@/lib/schemas/matcher";
 import type {
   MatchingQueue,
@@ -157,43 +159,43 @@ export function useMbArtistSearch(query: string) {
   });
 }
 
-// Mirrors the backend RunMatchingRequest body. perform_reset=true triggers
-// the cohort-scoped rewind of NEEDS_REVIEW + AUTO_REJECTED rows back to
-// PENDING (manual decisions and AUTO_MATCHED are preserved) before enqueue.
-export interface RunMatchingRequest {
-  perform_reset?: boolean;
-}
-
-// Mirrors the backend response. `count` and `message` were dropped — use the
-// nested fields directly. `failed_playlist_ids` is sorted lexicographically
-// and capped at 50 server-side.
+// Mirrors the backend /matching/run response. The button only queues a full re-check
+// (spec 2026-10-05 §4.2, D1); results arrive as the matching workers finish.
 export interface RunMatchingResponse {
-  status: "accepted";
-  reset: {
-    performed: boolean;
-    identities_reset: number;
-    artists_reset: number;
-    matches_deleted: number;
-  };
-  enqueue: {
-    playlists_queued: number;
-    enqueue_failures: number;
-    failed_playlist_ids: string[];
-  };
+  queued: true;
 }
 
 export function useRerunMatching() {
   const queryClient = useQueryClient();
-  return useMutation<RunMatchingResponse, Error, RunMatchingRequest | void>({
-    mutationFn: (variables) => {
-      const body: RunMatchingRequest = variables ?? {};
-      return apiFetch<RunMatchingResponse>("/api/v1/matching/run", {
+  return useMutation<RunMatchingResponse, Error, void>({
+    mutationFn: () =>
+      apiFetch<RunMatchingResponse>("/api/v1/matching/run", {
         method: "POST",
-        body: JSON.stringify(body),
-      });
-    },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["matching"] });
     },
   });
+}
+
+// A re-check ("matching_recheck") or a matching fan-out ("matching") is in flight. The
+// Re-run button is disabled while true: a second press would rewind everything the first run
+// already decided and repeat the whole job.
+const MATCHING_TASK_TYPES = new Set(["matching_recheck", "matching"]);
+
+export function useMatchingRunning(): boolean {
+  const queryClient = useQueryClient();
+  const isRunning = useProgressStore((s) =>
+    s.runningTasks.some((t) => MATCHING_TASK_TYPES.has(t.task_type)),
+  );
+
+  useEffect(() => {
+    if (!isRunning) return;
+    // The run has rewound and re-matched items since the 202: refresh the queue once it ends.
+    return () => {
+      void queryClient.invalidateQueries({ queryKey: ["matching"] });
+    };
+  }, [isRunning, queryClient]);
+
+  return isRunning;
 }

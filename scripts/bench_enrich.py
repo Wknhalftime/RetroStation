@@ -28,7 +28,8 @@ works and artists rows exist from the clone, so upserts take their conflict
 path, as they do after any rescan. The bench DB (``retrostation_bench_enrich``
 by default) is separate from ``bench_scan.py``'s so both harnesses can run at
 once; the script refuses any DB name without ``bench`` in it, and the
-follow-on Huey task is always stubbed so nothing reaches the real queue.
+follow-on Huey tasks (MB enrichment and the matching
+re-check) are always stubbed so nothing reaches the real queue.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import psycopg
 from psycopg import sql as pg_sql
@@ -204,14 +206,17 @@ class ClientCounters:
 
 @contextmanager
 def follow_on_task(run: bool) -> Iterator[dict[str, Any]]:
-    """Replace ``mb_enrichment_task`` for the duration of the block.
+    """Replace ``mb_enrichment_task`` for the duration of the block, and silence the re-check.
 
     ``library_enrichment_task`` ends by calling ``mb_enrichment_task()``, which
     on a Huey task object *enqueues* it for the worker process, against
     whatever database the worker uses. Here it becomes a no-op, or, when
     ``run`` is set, an in-process ``call_local`` whose result lands in the
-    yielded dict under ``"result"``.
+    yielded dict under ``"result"``. ``mb_enrichment_task`` in turn ends by
+    queuing ``rematch_undecided_task("changed")``. That hand-off is always a
+    no-op here, so a bench run never queues a real re-check.
     """
+    from backend.tasks import matching_recheck_tasks as mrt
     from backend.tasks import mb_enrichment_tasks as met
 
     original = met.mb_enrichment_task
@@ -224,9 +229,15 @@ def follow_on_task(run: bool) -> Iterator[dict[str, Any]]:
         captured["result"] = result
         return result
 
+    def no_recheck(scope: str) -> None:
+        return None
+
     met.mb_enrichment_task = stub
     try:
-        yield captured
+        # patch.object names the attribute as a string. Reading the task into a variable
+        # would be a new unresolved-dispatch row in the event graph.
+        with mock.patch.object(mrt, "rematch_undecided_task", no_recheck):
+            yield captured
     finally:
         met.mb_enrichment_task = original
 

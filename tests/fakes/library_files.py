@@ -40,6 +40,8 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         unchanged = _stat_unchanged(existing, file)
         if unchanged:
             stored.enrichment_status = existing.enrichment_status
+            # D11 (spec 2026-10-05 §4.2): an unchanged file keeps its indexed_at.
+            stored.indexed_at = existing.indexed_at
         if file.audio_hash is None and unchanged:
             stored.audio_hash = existing.audio_hash
         # Mirrors the PG COALESCE: a fresh extraction carries no links,
@@ -63,6 +65,14 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
 
     def get_by_ids(self, ids: list[UUID]) -> list[LibraryFile]:
         return [self._data[i] for i in ids if i in self._data]
+
+    def normalized_artist_names_changed_since(self, when: datetime) -> set[str]:
+        return {
+            name
+            for f in self._data.values()
+            if (name := f.audio.normalized_artist_name)
+            and (f.indexed_at > when or (f.missing_since is not None and f.missing_since > when))
+        }
 
     def get_by_path(self, file_path: str) -> LibraryFile | None:
         return next((f for f in self._data.values() if f.file_path == file_path), None)

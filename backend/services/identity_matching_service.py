@@ -654,6 +654,8 @@ def match_identities_for_playlist(
                 reason_code=ReasonCode.ORPHANED_IDENTITY,
                 reason_detail=(f"No broadcast_artist row for id {identity.broadcast_artist_id}"),
             ):
+                # A new result replaces the old suggestion (spec 2026-10-05 §4.2).
+                repos.match_repo.delete_for_identity(identity.id)
                 needs_review += 1
             else:
                 decided_meanwhile += 1
@@ -672,6 +674,7 @@ def match_identities_for_playlist(
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=("All matching strategies exhausted — no result produced"),
             ):
+                repos.match_repo.delete_for_identity(identity.id)
                 needs_review += 1
             else:
                 decided_meanwhile += 1
@@ -688,6 +691,11 @@ def match_identities_for_playlist(
             # their decision wins, so no match row and no master recalculation.
             decided_meanwhile += 1
             continue
+
+        # The new result replaces whatever the song showed before, "no file" included. A
+        # re-check rewinds songs with their match rows kept, and matches has
+        # UNIQUE(identity_id, library_file_id) with no ON CONFLICT (spec 2026-10-05 §4.2).
+        repos.match_repo.delete_for_identity(identity.id)
 
         # Persist a matches row whenever a best candidate was scored — including
         # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces

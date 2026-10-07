@@ -1,9 +1,13 @@
+from collections.abc import Collection
 from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
+
+# The statuses a re-check rewinds (AUD-R022 D1, D2; spec 2026-10-05 §4.2).
+_UNDECIDED = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -83,6 +87,8 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
         # Match Pg semantics: only PENDING rows are flipped, and we zero out
         # any stale reason_code/reason_detail in the process.
+        # Pg also deletes the flipped songs' match rows (spec 2026-10-05 §4.2). This fake
+        # holds no match rows; tests/integration/test_matching_recheck_pg.py pins that half.
         for identity_id, identity in list(self._data.items()):
             if (
                 identity.broadcast_artist_id == broadcast_artist_id
@@ -98,6 +104,9 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
 
     def bulk_defer_by_artist(self, broadcast_artist_id: UUID) -> int:
         from backend.services.matching_reasons import format_deferred_retry
+
+        # Pg also deletes the flipped songs' match rows (spec 2026-10-05 §4.2). This fake
+        # holds no match rows; tests/integration/test_matching_recheck_pg.py pins that half.
 
         changed = 0
         for identity_id, identity in list(self._data.items()):
@@ -137,3 +146,37 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 )
                 reset += 1
         return reset
+
+    # --- Targeted re-check (spec 2026-10-05 §4.2) ----------------------------------------
+
+    def rewind_undecided(self, artist_ids: Collection[UUID] | None) -> int:
+        # Mirrors Pg: undecided songs under those artists, whatever the artist's own status,
+        # go to PENDING with tier and reason cleared. The fake holds no match rows; Pg keeps
+        # them. None means every artist; an empty collection means none.
+        wanted = None if artist_ids is None else set(artist_ids)
+        rewound = 0
+        for identity_id, identity in list(self._data.items()):
+            if identity.match_status not in _UNDECIDED:
+                continue
+            if wanted is not None and identity.broadcast_artist_id not in wanted:
+                continue
+            self._data[identity_id] = replace(
+                identity,
+                match_status=MatchStatus.PENDING,
+                match_tier=None,
+                reason_code=None,
+                reason_detail=None,
+            )
+            rewound += 1
+        return rewound
+
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        return {
+            playlist_id
+            for playlist_id, identity_ids in self._playlist_identities.items()
+            if any(
+                self._data[i].match_status == MatchStatus.PENDING
+                for i in identity_ids
+                if i in self._data
+            )
+        }

@@ -1,11 +1,12 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-05.** Checked against master a004e56 (comment audit: `audit/comment-audit.md`).
-Rulings cited here are in `audit/rulings.jsonl` (AUD-R015..R020 ACTIVE since 2026-10-05). If the
-code and this page disagree, fix one of them in the same PR. Cite decisions by id and name, never
-by line number. Streaming decision ids (`D20`, `D109`, ...) come from
-`docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is gitignored, so the repo
-cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph spec's own, separate list.
+**Status: 2026-10-06.** Checked against master ba4282a plus PR B (feat/matching-recheck)
+(comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
+(AUD-R015..R023 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
+...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
+gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
+spec's own, separate list.
 
 ## What it is
 
@@ -39,8 +40,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - `domain.library` never references streaming (D20). **Enforced.**
 
 **Known gaps** (true today, not rules to copy):
-- Routers run SQL directly: 133 `.execute()` calls in 10 router files. `routers/matching.py` is
-  1,453 lines and `routers/library/works.py` is 1,101.
+- Routers run SQL directly: 122 `.execute()` calls in 10 router files. `routers/matching.py` is
+  1,077 lines and `routers/library/works.py` is 1,101.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
@@ -48,15 +49,16 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
-- **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id
-  or nothing). Event graph 2026-10-04: 14 commands, 0 events, 0 queries, no cycles.
+- **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
+  a scope word, or nothing). Event graph 2026-10-06: 16 commands, 0 events, 0 queries, no cycles.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY) | ingest, matchers, review UI | artist / identity matching |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY) | ingest, matchers, review UI, re-check rewind | artist / identity matching |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
+| `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
@@ -68,21 +70,30 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
     `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020)
   - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
-    `mb_enrichment_task`
-  - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task`
+    `mb_enrichment_task` → `rematch_undecided_task("changed")` → `artist_matching_task` per
+    playlist with pending work → `identity_matching_task` (AUD-R022 D1)
+  - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task` →
+    `mb_enrichment_task` → `rematch_undecided_task("changed")` → (as above)
+  - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
+    `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
+    `identity_matching_task`
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
-  cue-analysis resume (every 5 min each), cue prune.
+  cue-analysis resume (every 5 min each), cue prune. Matching has no periodic reconcile: work a
+  lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
+  button).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
-  delivery is harmless only because jobs run one at a time and re-check their status column.
+  delivery is harmless only because jobs run one at a time and re-check their status column;
+  a duplicated re-check repeats its rewind and fan-out, and decided items are never touched.
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
-  enrichment pair, `task_failure_telemetry`, the tasks' own try/except, and `reported_failures`.
+  enrichment pair and the matching re-check, `task_failure_telemetry`, the tasks' own try/except,
+  and `reported_failures`.
   No Huey signals (AUD-R016).
 
 ## What is enforced in CI (`.github/workflows/ci.yml`)

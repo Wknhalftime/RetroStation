@@ -160,7 +160,7 @@ ignore_imports = [
     "backend.db.ingest_transaction -> backend.services.repository_factory",
     # routers enqueue Huey tasks; `|` makes the two independent (see the audit notes)
     "backend.routers.tasks -> backend.tasks.library_enrichment_tasks",
-    "backend.routers.matching -> backend.tasks.artist_matching_tasks",
+    "backend.routers.matching -> backend.tasks.matching_recheck_tasks",
     "backend.routers.matching -> backend.tasks.identity_matching_tasks",
     "backend.routers.library.scan -> backend.tasks.library_scan_tasks",
     "backend.routers.ingestion -> backend.tasks.ingestion_tasks",
