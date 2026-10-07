@@ -379,7 +379,9 @@ def test_the_rewind_is_committed_before_the_first_hand_off(rig: _Rig) -> None:
 
     _run("all")
 
-    assert rig.order == ["commit", "enqueue"]
+    # One commit (one transaction for both rewinds), and it lands before the first hand-off.
+    assert "enqueue" in rig.order
+    assert rig.order[: rig.order.index("enqueue")] == ["commit"]
 
 
 def test_the_rewind_runs_in_a_transaction(rig: _Rig) -> None:
