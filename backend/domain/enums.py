@@ -99,10 +99,18 @@ class TaskType(StrEnum):
     INGESTION = "ingestion"
     RULES_APPLY = "rules_apply"
     MATCHING = "matching"
+    MATCHING_RECHECK = "matching_recheck"  # AUD-R022 D1: the targeted re-check
     M3U_EXPORT = "m3u_export"
     HASH_BACKFILL = "hash_backfill"
     CUE_ANALYSIS = "cue_analysis"  # D89: the cue run's "cues ready X of Y"
     STREAM_RESOURCES = "stream_resources"  # D90: the streaming cost meter's one row
+
+
+class RecheckScope(StrEnum):
+    """What one matching re-check covers (AUD-R022 D1; spec 2026-10-05 §4.2)."""
+
+    CHANGED = "changed"  # artists of files indexed or gone missing since the last re-check
+    ALL = "all"  # every undecided artist and song (the Re-run Matching button)
 
 
 class TaskStatus(StrEnum):

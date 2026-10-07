@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from backend.domain.enums import MatchTier, TargetType
+from backend.domain.enums import MatchStatus, MatchTier, TargetType
 from backend.domain.system import StorageUnavailableError
 
 if TYPE_CHECKING:
@@ -18,6 +18,14 @@ class MatchingError(Exception):
 
 class MatchingStorageError(MatchingError, StorageUnavailableError):
     """A matching repository lost its database connection mid-operation."""
+
+
+class RecheckNotQueuedError(MatchingError):
+    """The task queue refused a matching re-check (the API answers 503)."""
+
+
+# Statuses a re-check rewinds to pending (AUD-R022 D1).
+UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
 
 
 @dataclass
