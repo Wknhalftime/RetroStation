@@ -169,8 +169,8 @@ def test_tier2_mbid_graph_exact_match() -> None:
     assert "work-enter-sandman" in work_ids
 
 
-def test_no_library_files_falls_to_needs_review() -> None:
-    """Artist is resolved but no library files exist for that MBID → NEEDS_REVIEW / UNCLASSIFIED."""
+def test_no_library_files_is_auto_rejected() -> None:
+    """Artist is resolved but no library files exist for that MBID → AUTO_REJECTED (D6)."""
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     track_identity_repo = FakeBroadcastTrackIdentityRepository()
@@ -211,7 +211,7 @@ def test_no_library_files_falls_to_needs_review() -> None:
 
     updated_identity = track_identity_repo.get_by_id(identity.id)
     assert updated_identity is not None
-    assert updated_identity.match_status == MatchStatus.NEEDS_REVIEW
+    assert updated_identity.match_status == MatchStatus.AUTO_REJECTED
     # PR 3: tier now reflects the path taken (ResolvedArtistMbidStrategy ran
     # against a resolved artist with no local files) rather than UNCLASSIFIED.
     assert updated_identity.match_tier == MatchTier.MUSICBRAINZ_ID_SEARCH

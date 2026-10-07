@@ -37,7 +37,7 @@ FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
     """End-to-end: ingest → artist matching → identity matching.
 
-    With no library files, all resolved identities should be NEEDS_REVIEW.
+    With no library files nothing matches: identities end auto_rejected (no candidate, D6).
     Uses FakeMbClient with canned responses for a few known artists.
     """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -125,7 +125,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
             or MatchStatus.NEEDS_REVIEW.value in status_counts
         )
 
-        # Step 4: Identity matching (no library → NEEDS_REVIEW)
+        # Step 4: Identity matching (no library → AUTO_REJECTED, D6)
         match_identities_for_playlist(
             playlist_id=playlist_id,
             repos=IdentityMatchingRepos(
@@ -146,7 +146,7 @@ def test_full_pipeline_kazr_csv(migrated_db: str) -> None:
         ).fetchall()
         identity_statuses = {r["match_status"]: r["count"] for r in identity_status_rows}
 
-        # Identities with resolved artists → NEEDS_REVIEW
+        # Identities with resolved artists → AUTO_REJECTED (no candidate, D6)
         total_identities = sum(identity_statuses.values())
         assert total_identities >= 300  # ~343 unique identities
 

@@ -235,7 +235,7 @@ def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
     match_repo = FakeMatchRepository()
     artist = _artist()
     _seed_artist_match(match_repo, artist.id, "mbid-m")
-    # Local file with a partial-match title (scores in 55-64 mid band)
+    # Local file with a weak title match (about 30: under the 56 song floor, D6)
     lib_repo.upsert(
         _lib_file(
             "/m/mystery.flac",
@@ -336,7 +336,7 @@ def test_tier1_step_b_tie_keeps_step_a_result() -> None:
     result = strategy.apply(identity, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW  # mid-band shared score
+    assert result.status == MatchStatus.AUTO_REJECTED  # shared score under the song floor (D6)
     assert result.tier == MatchTier.MUSICBRAINZ_ID_EXACT  # NOT _SEARCH
     assert result.library_file_id == step_a.id  # NOT step_b.id
 
@@ -393,7 +393,7 @@ def test_tier1_mb_inconclusive_returns_no_local_files_reason() -> None:
     result = strategy.apply(identity, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.reason_code == ReasonCode.NO_LOCAL_FILES
     assert result.library_file_id is None
 
@@ -689,7 +689,7 @@ def test_tier1_step_c_no_same_artist_files_returns_no_local_files() -> None:
     )
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.reason_code == ReasonCode.NO_LOCAL_FILES
     assert result.library_file_id is None
 
@@ -732,7 +732,7 @@ def test_tier1_step_b_filters_cross_artist_tagged_recording() -> None:
     )
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.reason_code == ReasonCode.NO_LOCAL_FILES
     assert result.library_file_id is None
 
@@ -781,13 +781,13 @@ def test_tier2_no_candidates_returns_no_candidates_reason() -> None:
     result = strategy.apply(identity, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.reason_code == ReasonCode.NO_CANDIDATES
     assert result.library_file_id is None
 
 
-def test_tier2_mid_confidence_needs_review_with_low_confidence_reason() -> None:
-    """Single candidate with low-similarity title lands in NEEDS_REVIEW."""
+def test_tier2_low_confidence_lone_candidate_is_auto_rejected() -> None:
+    """A lone candidate with a low-similarity title scores under 56: auto_rejected (D6)."""
     lib_repo = FakeLibraryFileRepository()
     lib_repo.upsert(
         _lib_file(
@@ -803,7 +803,7 @@ def test_tier2_mid_confidence_needs_review_with_low_confidence_reason() -> None:
     result = strategy.apply(identity, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.reason_code == ReasonCode.LOW_CONFIDENCE
 
 
@@ -1111,8 +1111,8 @@ def test_part_numbers_still_tell_songs_apart() -> None:
 
 def test_stripping_brackets_never_lifts_a_wrong_file_into_the_mid_band() -> None:
     """ "Cry Baby Cry" against "Baby It's You [Mono]" scores 48 in full and 58
-    once "[Mono]" is stripped: inside the 55-64 band, where a 5-point gap
-    over the next file auto-matches. A stripped comparison only counts when
+    once "[Mono]" is stripped: over the 56 song floor, where it would be
+    suggested for review (D6, D12). A stripped comparison only counts when
     it is a strong match on its own, so the score stays at 48."""
     lib_repo = FakeLibraryFileRepository()
     wrong = _lib_file("/b/baby.flac", track_title="Baby It's You [Mono]", artist_name="beatles")
@@ -1125,5 +1125,5 @@ def test_stripping_brackets_never_lifts_a_wrong_file_into_the_mid_band() -> None
     result = strategy.apply(_logged_identity(artist.id, "Cry Baby Cry"), artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.confidence_score < 55

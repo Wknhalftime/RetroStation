@@ -186,13 +186,13 @@
     'work_id': '',
   })
 # ---
-# name: test_score_candidates_mid_band_gap_auto_matches
+# name: test_score_candidates_mid_band_gap_goes_to_review
   dict({
     'confidence_score': 63.63636363636363,
     'library_file_id': '00000000-0000-0000-0000-000000000002',
-    'reason_code': None,
-    'reason_detail': None,
-    'status': 'auto_matched',
+    'reason_code': 'LOW_CONFIDENCE',
+    'reason_detail': 'Score 64% — below confidence threshold',
+    'status': 'needs_review',
     'tier': 'local_file_fuzzy',
     'work_id': '',
   })
@@ -236,7 +236,7 @@
     'library_file_id': '00000000-0000-0000-0000-000000000009',
     'reason_code': 'LOW_CONFIDENCE',
     'reason_detail': 'Score 33% — below confidence threshold',
-    'status': 'needs_review',
+    'status': 'auto_rejected',
     'tier': 'musicbrainz_id_search',
     'work_id': '',
   })

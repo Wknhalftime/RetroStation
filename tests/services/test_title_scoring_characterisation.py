@@ -297,7 +297,8 @@ def test_score_candidates_ambiguous_gap_three_candidates(snapshot: SnapshotAsser
     assert _serialize_result(result) == snapshot
 
 
-def test_score_candidates_mid_band_gap_auto_matches(snapshot: SnapshotAssertion) -> None:
+def test_score_candidates_mid_band_gap_goes_to_review(snapshot: SnapshotAssertion) -> None:
+    """D12: no song mid-band. 63.6 with a big lead over the runner-up goes to review."""
     top = _lib_file(2, track_title="Missing Persons")
     low = _lib_file(1, track_title="Totally Unrelated Words Here")
     result = _score_candidates("Missing", [top, low], MatchTier.LOCAL_FILE_FUZZY, 80)
