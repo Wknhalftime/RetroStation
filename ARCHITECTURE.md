@@ -1,8 +1,8 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-06.** Checked against master ba4282a plus PR B (feat/matching-recheck)
+**Status: 2026-10-07.** Checked against master 6be66cd plus PR C (feat/song-floor)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R023 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R024 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -41,7 +41,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 **Known gaps** (true today, not rules to copy):
 - Routers run SQL directly: 122 `.execute()` calls in 10 router files. `routers/matching.py` is
-  1,077 lines and `routers/library/works.py` is 1,101.
+  1,081 lines and `routers/library/works.py` is 1,101.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
