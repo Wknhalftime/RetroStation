@@ -158,7 +158,7 @@ def test_tier2_without_rejections_still_picks_the_best_work() -> None:
     assert result.library_file_id in {best.id, sibling.id}
 
 
-def test_tier2_all_candidates_rejected_goes_to_review_without_suggestion() -> None:
+def test_tier2_all_candidates_rejected_is_auto_rejected_without_suggestion() -> None:
     artist = _artist()
     only = _file(TITLE, "w1")
     song = _song(artist, rejected=(only.id,))
@@ -167,7 +167,7 @@ def test_tier2_all_candidates_rejected_goes_to_review_without_suggestion() -> No
     result = strategy.apply(song, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.library_file_id is None
     assert result.reason_code == ReasonCode.NO_CANDIDATES
 
@@ -276,7 +276,7 @@ def test_step_c_skips_the_rejected_work() -> None:
     assert result.tier == MatchTier.LOCAL_FILE_FUZZY
 
 
-def test_resolved_artist_with_every_candidate_rejected_needs_review_without_suggestion() -> None:
+def test_resolved_artist_with_every_candidate_rejected_auto_rejects_without_suggestion() -> None:
     """Steps A, B and C all come up empty after exclusions: NO_LOCAL_FILES, no suggestion."""
     matches = FakeMatchRepository()
     artist = _resolved_artist(matches)
@@ -295,7 +295,7 @@ def test_resolved_artist_with_every_candidate_rejected_needs_review_without_sugg
     result = strategy.apply(song, artist)
 
     assert result is not None
-    assert result.status == MatchStatus.NEEDS_REVIEW
+    assert result.status == MatchStatus.AUTO_REJECTED
     assert result.library_file_id is None
     assert result.reason_code == ReasonCode.NO_LOCAL_FILES
 

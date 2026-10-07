@@ -29,7 +29,7 @@ from backend.routers.matching import (
     _artist_bucket_from_identities,
     _compute_triage_bucket,
 )
-from backend.services.matching_constants import MIN_PRESENTATION_SCORE
+from backend.services.matching_constants import SONG_MIN_PRESENTATION_SCORE
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -1329,9 +1329,12 @@ class TestMatchingRun:
         (None, "blocked"),
         (0.0, "blocked"),
         (49.9, "blocked"),
-        (MIN_PRESENTATION_SCORE, "needs_attention"),  # 50.0 — boundary
-        (50.0, "needs_attention"),
-        (54.9, "needs_attention"),
+        (50.0, "blocked"),  # the artist floor no longer presents a song (D6)
+        (54.9, "blocked"),
+        (55.9, "blocked"),
+        (55.99, "blocked"),
+        (SONG_MIN_PRESENTATION_SCORE, "needs_attention"),  # 56 — boundary (D6)
+        (56.0, "needs_attention"),
         (64.9, "needs_attention"),
         (65.0, "quick_review"),  # boundary
         (79.9, "quick_review"),
@@ -1462,9 +1465,9 @@ class TestQueueResponseShape:
         assert item["triage_bucket"] == "quick_review"
 
     def test_triage_bucket_needs_attention(self, client, db_conn):
-        """Identity with confidence_score=55.0 → needs_attention bucket."""
+        """Identity with confidence_score=60.0 → needs_attention bucket (56-64, D6)."""
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
-        _insert_match_row(db_conn, identity, confidence_score=55.0)
+        _insert_match_row(db_conn, identity, confidence_score=60.0)
 
         resp = client.get("/api/v1/matching/queue")
         assert resp.status_code == 200
@@ -1813,7 +1816,7 @@ class TestProposedMatch:
         _insert_match_row(
             db_conn,
             identity,
-            confidence_score=55.0,
+            confidence_score=60.0,
             library_file_id=orphan_id,
         )
         db_conn.execute("SET session_replication_role = origin")
@@ -1930,7 +1933,7 @@ class TestProposedMatch:
         assert rows[0]["confidence_score"] == pytest.approx(1.0, abs=1e-6)
 
     def test_none_below_presentation_score(self, client, db_conn):
-        """A best guess under MIN_PRESENTATION_SCORE is not a proposal: an
+        """A best guess under SONG_MIN_PRESENTATION_SCORE is not a proposal: an
         artist with two files gets one of them offered for every unknown
         title ("We Are Shadows" → Brackish at 27%). The score still shows."""
         _, _, _, identity, _ = _seed_review_chain(db_conn)
@@ -1938,7 +1941,7 @@ class TestProposedMatch:
         _insert_match_row(
             db_conn,
             identity,
-            confidence_score=MIN_PRESENTATION_SCORE - 23,
+            confidence_score=SONG_MIN_PRESENTATION_SCORE - 23,
             library_file_id=lib_file.id,
         )
 
@@ -1946,7 +1949,7 @@ class TestProposedMatch:
         assert resp.status_code == 200
         qi = resp.json()["items"][0]["identities"][0]
         assert qi["proposed_match"] is None
-        assert qi["confidence_score"] == pytest.approx(MIN_PRESENTATION_SCORE - 23, abs=1e-4)
+        assert qi["confidence_score"] == pytest.approx(SONG_MIN_PRESENTATION_SCORE - 23, abs=1e-4)
 
 
 # ---------------------------------------------------------------------------
@@ -1970,7 +1973,7 @@ def _set_reason_code(
 
 class TestUnlikelyArtists:
     """An artist is "unlikely" when none of its review items has a guess at
-    MIN_PRESENTATION_SCORE or above and nothing was unmatched by the curator.
+    SONG_MIN_PRESENTATION_SCORE or above and nothing was unmatched by the curator.
     include_unlikely=false leaves them out; unlikely_total always counts them
     so the UI can say how many are hidden."""
 
@@ -1987,7 +1990,7 @@ class TestUnlikelyArtists:
         return artist, identity
 
     def test_default_includes_unlikely_and_counts_them(self, client, db_conn):
-        self._seed_scored(db_conn, "Likely", 55.0)
+        self._seed_scored(db_conn, "Likely", 56.0)
         self._seed_scored(db_conn, "Low Guess", 30.0)
         self._seed_scored(db_conn, "No Guess", None)
 
@@ -1998,7 +2001,7 @@ class TestUnlikelyArtists:
         assert data["unlikely_total"] == 2
 
     def test_exclude_hides_artists_without_a_likely_match(self, client, db_conn):
-        likely, _ = self._seed_scored(db_conn, "Likely", 55.0)
+        likely, _ = self._seed_scored(db_conn, "Likely", 56.0)
         self._seed_scored(db_conn, "Low Guess", 30.0)
         self._seed_scored(db_conn, "No Guess", None)
 
@@ -2010,7 +2013,7 @@ class TestUnlikelyArtists:
         assert data["unlikely_total"] == 2
 
     def test_score_at_presentation_floor_is_likely(self, client, db_conn):
-        artist, _ = self._seed_scored(db_conn, "Edge", float(MIN_PRESENTATION_SCORE))
+        artist, _ = self._seed_scored(db_conn, "Edge", float(SONG_MIN_PRESENTATION_SCORE))
 
         resp = client.get("/api/v1/matching/queue?include_unlikely=false")
         assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
@@ -2061,7 +2064,7 @@ class TestUnlikelyArtists:
         assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
 
     def test_empty_page_still_reports_counts(self, client, db_conn):
-        self._seed_scored(db_conn, "Likely", 55.0)
+        self._seed_scored(db_conn, "Likely", 56.0)
         self._seed_scored(db_conn, "Low Guess", 30.0)
 
         resp = client.get("/api/v1/matching/queue?include_unlikely=false&offset=10")
