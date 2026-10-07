@@ -1,9 +1,13 @@
+from collections.abc import Collection
 from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus, ReasonCode
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
+
+# The statuses a re-check rewinds (AUD-R022 D1, D2; spec 2026-10-05 §4.2).
+_UNDECIDED = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
 
 
 class FakeBroadcastArtistRepository(BroadcastArtistRepository):
@@ -100,3 +104,39 @@ class FakeBroadcastArtistRepository(BroadcastArtistRepository):
                 )
                 reset += 1
         return reset
+
+    # --- Targeted re-check (spec 2026-10-05 §4.2) ----------------------------------------
+
+    def ids_by_normalized_names(self, names: Collection[str]) -> list[UUID]:
+        wanted = set(names)
+        return [a.id for a in self._data.values() if a.normalized_name in wanted]
+
+    def rewind_undecided(self, names: Collection[str] | None) -> int:
+        # Mirrors Pg: undecided artists in scope go to PENDING with their reason cleared.
+        # None means every artist; an empty collection means none.
+        wanted = None if names is None else set(names)
+        rewound = 0
+        for artist_id, artist in list(self._data.items()):
+            if artist.match_status not in _UNDECIDED:
+                continue
+            if wanted is not None and artist.normalized_name not in wanted:
+                continue
+            self._data[artist_id] = replace(
+                artist,
+                match_status=MatchStatus.PENDING,
+                reason_code=None,
+                reason_detail=None,
+            )
+            rewound += 1
+        return rewound
+
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        return {
+            playlist_id
+            for playlist_id, artist_ids in self._playlist_artists.items()
+            if any(
+                self._data[i].match_status == MatchStatus.PENDING
+                for i in artist_ids
+                if i in self._data
+            )
+        }
