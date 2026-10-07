@@ -230,7 +230,7 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
 
 
 def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
-    """Step A local score in mid band → Step B MB recording search fires."""
+    """A weak Step A result (not auto-matched) → Step B MB recording search fires."""
     lib_repo = FakeLibraryFileRepository()
     match_repo = FakeMatchRepository()
     artist = _artist()
@@ -351,7 +351,7 @@ def test_tier1_step_b_strictly_better_score_wins() -> None:
     artist = _artist()
     _seed_artist_match(match_repo, artist.id, "mbid-m")
 
-    # Step A: partial match (mid-band score), forces Step B.
+    # Step A: weak partial match (not auto-matched), forces Step B.
     step_a = _lib_file(
         "/m/step_a.flac",
         track_title="enter unrelated junk extras here",
@@ -1109,7 +1109,7 @@ def test_part_numbers_still_tell_songs_apart() -> None:
     assert result.confidence_score == 100.0
 
 
-def test_stripping_brackets_never_lifts_a_wrong_file_into_the_mid_band() -> None:
+def test_stripping_brackets_never_lifts_a_wrong_file_over_the_song_floor() -> None:
     """ "Cry Baby Cry" against "Baby It's You [Mono]" scores 48 in full and 58
     once "[Mono]" is stripped: over the 56 song floor, where it would be
     suggested for review (D6, D12). A stripped comparison only counts when

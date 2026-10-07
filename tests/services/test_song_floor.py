@@ -115,8 +115,8 @@ def test_artist_zones_keep_the_55_mid_band() -> None:
     """D6 and D12 are songs only: an artist at 55.5 or 60 with a 6-point lead auto-matches."""
     assert _decide_artist_zone(55.5, 6.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
     assert _decide_artist_zone(60.0, 6.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
-    status, reason, _ = _decide_artist_zone(52.0, 100.0, 80, 10, False)
-    assert (status, reason) == (MatchStatus.NEEDS_REVIEW, ReasonCode.LOW_CONFIDENCE)
+    # The band's lower edge is inclusive and a 5-point gap suffices (a song here is floored).
+    assert _decide_artist_zone(55.0, 5.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
 
 
 # --- _score_candidates ------------------------------------------------------------------------
@@ -527,6 +527,22 @@ def test_a_tie_keeps_the_mbid_result(scores: Scores) -> None:
     assert [m.library_file_id for m in rig.matches.rows_for(song.id)] == [tagged.id]
 
 
+def test_a_tie_keeps_the_mbid_status_even_when_step_c_would_auto_match(scores: Scores) -> None:
+    """Plan note 3: a lone Step A file at 85 is needs_review (lone, under 95). Step C sees the
+    same 85 with a 15-point lead and would auto-match it; the tie keeps Step A's result."""
+    rig = _Rig(scores, resolved=True)
+    tagged = rig.file(85.0, artist_mbid=MBID)
+    rig.file(70.0)
+    song = rig.song()
+
+    rig.run()
+
+    stored = rig.stored(song)
+    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_EXACT
+    assert [m.library_file_id for m in rig.matches.rows_for(song.id)] == [tagged.id]
+
+
 def test_a_rejected_untagged_file_is_still_skipped(scores: Scores) -> None:
     rig = _Rig(scores, resolved=True)
     tagged = rig.file(60.0, artist_mbid=MBID)
@@ -554,6 +570,24 @@ def test_step_c_does_not_run_when_step_a_auto_matched(scores: Scores) -> None:
     assert [m.library_file_id for m in rig.matches.rows_for(song.id)] == [tagged.id]
     assert rig.files.name_lookups == 0
     assert mb.calls == []
+
+
+def test_step_c_does_not_run_when_step_b_auto_matched(scores: Scores) -> None:
+    rig = _Rig(scores, resolved=True)
+    step_b = rig.file(96.0, recording_mbid="rec-1")
+    rig.file(100.0)
+    song = rig.song()
+    mb = FakeMbClient(
+        recording_searches={(MBID, broadcast_title_variants(TITLE)[0]): [{"id": "rec-1"}]}
+    )
+
+    rig.run(mb)
+
+    stored = rig.stored(song)
+    assert stored.match_status == MatchStatus.AUTO_MATCHED
+    assert stored.match_tier == MatchTier.MUSICBRAINZ_ID_SEARCH
+    assert [m.library_file_id for m in rig.matches.rows_for(song.id)] == [step_b.id]
+    assert rig.files.name_lookups == 0
 
 
 @pytest.mark.parametrize("resolved", [False, True], ids=["tier2", "tier1_step_c"])
