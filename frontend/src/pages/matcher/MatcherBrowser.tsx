@@ -7,6 +7,7 @@ import { MatchStatusBadge } from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
 import {
   useMatchingQueue,
+  useMatchingRunning,
   useRerunMatching,
   useResolveArtist,
   useResolveIdentity,
@@ -110,6 +111,7 @@ export function MatcherBrowser() {
     includeUnlikely,
   );
   const rerunMatching = useRerunMatching();
+  const matchingRunning = useMatchingRunning();
   const resolveIdentity = useResolveIdentity();
   const resolveArtist = useResolveArtist();
 
@@ -280,7 +282,8 @@ export function MatcherBrowser() {
         actions={
           <button
             onClick={handleRerun}
-            disabled={rerunMatching.isPending}
+            disabled={rerunMatching.isPending || matchingRunning}
+            title={matchingRunning ? "A matching re-check is running" : undefined}
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             <RefreshCw className="h-4 w-4" />

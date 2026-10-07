@@ -1,11 +1,12 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-06.** Checked against master a004e56 (comment audit: `audit/comment-audit.md`).
-Rulings cited here are in `audit/rulings.jsonl` (AUD-R015..R020 ACTIVE since 2026-10-05,
-AUD-R023 since 2026-10-06). If the code and this page disagree, fix one of them in the same PR.
-Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`, ...) come from
-`docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is gitignored, so the repo
-cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph spec's own, separate list.
+**Status: 2026-10-06.** Checked against master ba4282a plus PR B (feat/matching-recheck)
+(comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
+(AUD-R015..R023 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
+...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
+gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
+spec's own, separate list.
 
 ## What it is
 
@@ -48,8 +49,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
-- **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id
-  or nothing). Event graph 2026-10-06: 16 commands, 0 events, 0 queries, no cycles.
+- **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
+  a scope word, or nothing). Event graph 2026-10-06: 16 commands, 0 events, 0 queries, no cycles.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
@@ -81,9 +82,12 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
-  cue-analysis resume (every 5 min each), cue prune.
+  cue-analysis resume (every 5 min each), cue prune. Matching has no periodic reconcile: work a
+  lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
+  button).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
-  delivery is harmless only because jobs run one at a time and re-check their status column.
+  delivery is harmless only because jobs run one at a time and re-check their status column;
+  a duplicated re-check repeats its rewind and fan-out, and decided items are never touched.
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
