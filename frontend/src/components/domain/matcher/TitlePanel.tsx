@@ -50,7 +50,8 @@ function partitionByReviewState(identities: QueueIdentity[]): {
 // no score at all (orphan, missing match record, deferred). Items whose match was
 // taken away also land in "blocked" with no score, but they stay: curator-unmatched
 // ones are the curator's own work in progress, and ones released by deleting a
-// missing library file must return to review (spec C2). Mirrors `likely` in the backend queue's _QUEUE_BUCKET_CTE.
+// missing library file must return to review (spec C2). Mirrors `likely` in the
+// backend queue's _QUEUE_BUCKET_CTE.
 const KEPT_WITHOUT_SCORE = new Set(["USER_UNMATCHED", "LIBRARY_FILE_REMOVED"]);
 
 function isUnlikely(identity: QueueIdentity): boolean {
