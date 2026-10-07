@@ -226,7 +226,7 @@ def test_identity_matching_repos_is_frozen() -> None:
         repos.match_repo = FakeMatchRepository()  # type: ignore[misc]
 
 
-def test_match_identities_marks_needs_review_when_engine_exhausts_all_strategies(
+def test_match_identities_auto_rejects_when_engine_exhausts_all_strategies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Defensive branch: engine.resolve() returning None still resolves the
@@ -282,7 +282,7 @@ def test_match_identities_marks_needs_review_when_engine_exhausts_all_strategies
     assert work_ids == []
     stored = identity_repo.get_by_id(identity.id)
     assert stored is not None
-    assert stored.match_status == MatchStatus.NEEDS_REVIEW
+    assert stored.match_status == MatchStatus.AUTO_REJECTED
     assert stored.match_tier == MatchTier.UNCLASSIFIED
     assert stored.reason_code == ReasonCode.NO_CANDIDATES
     assert match_repo.get_by_identity(identity.id) is None

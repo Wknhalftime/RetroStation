@@ -110,7 +110,7 @@
     }),
     'no_candidates_identity': dict({
       'match': None,
-      'match_status': 'needs_review',
+      'match_status': 'auto_rejected',
       'match_tier': 'musicbrainz_id_search',
       'reason_code': 'NO_LOCAL_FILES',
       'reason_detail': 'Artist MBID confirmed but no matching local recording found',
@@ -159,13 +159,8 @@
       'reason_detail': None,
     }),
     'step_a_lowconf_identity': dict({
-      'match': dict({
-        'confidence_score': 55.00000000000001,
-        'library_file_id': '00000000-0000-0000-0000-00000000000f',
-        'match_tier': 'musicbrainz_id_exact',
-        'work_id': None,
-      }),
-      'match_status': 'needs_review',
+      'match': None,
+      'match_status': 'auto_rejected',
       'match_tier': 'musicbrainz_id_exact',
       'reason_code': 'LOW_CONFIDENCE',
       'reason_detail': 'Score 55% — below confidence threshold',
@@ -195,13 +190,8 @@
       'reason_detail': None,
     }),
     'tier2_identity': dict({
-      'match': dict({
-        'confidence_score': 55.00000000000001,
-        'library_file_id': '00000000-0000-0000-0000-000000000012',
-        'match_tier': 'local_file_fuzzy',
-        'work_id': None,
-      }),
-      'match_status': 'needs_review',
+      'match': None,
+      'match_status': 'auto_rejected',
       'match_tier': 'local_file_fuzzy',
       'reason_code': 'LOW_CONFIDENCE',
       'reason_detail': 'Score 55% — below confidence threshold',

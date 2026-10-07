@@ -25,7 +25,10 @@ from backend.services.identity_resolution_service import (
     reject_song_suggestion,
     unmatch_song,
 )
-from backend.services.matching_constants import MIN_PRESENTATION_SCORE, QUICK_REVIEW_MIN_SCORE
+from backend.services.matching_constants import (
+    QUICK_REVIEW_MIN_SCORE,
+    SONG_MIN_PRESENTATION_SCORE,
+)
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.repository_factory import recalc_repos
 from backend.tasks.identity_matching_tasks import identity_matching_task
@@ -120,7 +123,7 @@ artist_bucket AS (
            CASE
                WHEN bool_or(ib.confidence_score >= {QUICK_REVIEW_MIN_SCORE})
                    THEN 'quick_review'
-               WHEN bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
+               WHEN bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
                             AND ib.confidence_score < {QUICK_REVIEW_MIN_SCORE})
                    THEN 'needs_attention'
                ELSE 'blocked'
@@ -130,7 +133,7 @@ artist_bucket AS (
            -- by the curator (unmatch) or by deleting its missing library file.
            -- Both delete the match rows, so it has no score, and the artist must
            -- not vanish from the default queue.
-           COALESCE(bool_or(ib.confidence_score >= {MIN_PRESENTATION_SCORE}
+           COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
                             OR ib.reason_code IN ('{_USER_UNMATCHED}',
                                                   '{_LIBRARY_FILE_REMOVED}')), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
@@ -171,15 +174,16 @@ def _normalize_search(raw: str | None) -> str | None:
 
 
 def _compute_triage_bucket(score: float | None) -> TriageBucket:
-    """Single canonical triage implementation. Import and test directly — never
+    """Single canonical song triage implementation. Import and test directly — never
     reimplement.
 
-    score < MIN_PRESENTATION_SCORE is in the token_sort_ratio stopword noise
-    band for 2-5-token titles — "blocked" means "nothing useful to show."
-    Gap-confirmed mid-band items (score 55-64, gap ≥ 5) are AUTO_MATCHED inside
-    strategies and never reach this function.
+    score < SONG_MIN_PRESENTATION_SCORE is "blocked": nothing useful to show. The matcher
+    auto-rejects such songs (AUD-R022 D6), so a blocked review song has no score (orphan,
+    missing match record, unmatched, file removed, deferred) or an old row from before the
+    floor. Songs have no mid-band auto-match (D12): every 56-64 song is "needs_attention",
+    whatever its lead over the runner-up.
     """
-    if score is None or score < MIN_PRESENTATION_SCORE:
+    if score is None or score < SONG_MIN_PRESENTATION_SCORE:
         return "blocked"
     if score >= QUICK_REVIEW_MIN_SCORE:
         return "quick_review"
@@ -255,7 +259,7 @@ class QueueIdentity(BaseModel):
             "persisted match row (orphan FK); (3) Resolution Center safety net "
             "— the persisted match would point at a different artist than the "
             "locked one and is being suppressed; (4) the best guess scores "
-            "below MIN_PRESENTATION_SCORE (triage_bucket 'blocked'), where it "
+            "below SONG_MIN_PRESENTATION_SCORE (triage_bucket 'blocked'), where it "
             "is the artist's nearest title, not a proposal — confidence_score "
             "still carries the score. (3) and (4) are additive, not breaking; "
             "membership and `total` are unchanged. Note: proposed_match may "
@@ -289,7 +293,7 @@ class MatchingQueue(BaseModel):
         default=0,
         description=(
             "Artists matching the search and bucket filters whose review "
-            "items have no guess at MIN_PRESENTATION_SCORE or above. Counted "
+            "items have no guess at SONG_MIN_PRESENTATION_SCORE or above. Counted "
             "whether or not include_unlikely lets them into `items`, so the "
             "UI can say how many it is hiding."
         ),

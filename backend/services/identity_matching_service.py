@@ -20,9 +20,8 @@ from backend.repositories.matches import MatchRepository
 from backend.services.matching_constants import (
     MB_AUTO_LINK_SCORE,
     MB_SCORE_GAP,
-    MID_BAND_GAP_THRESHOLD,
-    MID_BAND_LOWER,
-    MID_BAND_UPPER,
+    SONG_MIN_PRESENTATION_SCORE,
+    SONG_NAME_LOOKUP_LIMIT,
 )
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
@@ -47,8 +46,10 @@ class IdentityMatchResult:
     Strategies produce values; the service function owns all persistence.
     library_file_id is None ONLY when no candidate exists at all
     (reason_code in {NO_LOCAL_FILES, MISSING_MATCH_RECORD, NO_CANDIDATES}); the
-    _score_candidates helper always populates it with best_file.id. triage_bucket
-    is NOT on this dataclass — the router computes it from confidence_score.
+    _score_candidates helper always populates it with best_file.id, even for a
+    result floored to AUTO_REJECTED (AUD-R022 D6) — the service writes no match row
+    for an AUTO_REJECTED result. triage_bucket is NOT on this dataclass — the router
+    computes it from confidence_score.
     """
 
     status: MatchStatus
@@ -132,6 +133,43 @@ def _load_exclusions(
     return exclusions
 
 
+def _name_lookup_candidates(
+    library_file_repo: LibraryFileRepository,
+    artist: BroadcastArtist,
+    exclusions: CandidateExclusions,
+) -> list[LibraryFile]:
+    """Every eligible file of the artist by normalized name, tagged or not.
+
+    The repo enforces equality on normalized_artist_name; _eligible is defense-in-depth so
+    a future query loosening can't quietly reintroduce cross-artist proposals. The lookup
+    limit is a bound, not a sample (SONG_NAME_LOOKUP_LIMIT): "first 100 by id" silently
+    dropped candidates.
+    """
+    return _eligible(
+        library_file_repo.get_by_normalized_artist_name(
+            artist.normalized_name, limit=SONG_NAME_LOOKUP_LIMIT
+        ),
+        artist.normalized_name,
+        exclusions,
+    )
+
+
+def _better_of(
+    mbid_result: IdentityMatchResult | None, name_result: IdentityMatchResult | None
+) -> IdentityMatchResult | None:
+    """The higher raw score of Tier 1's MBID result and its name result (AUD-R022 D13).
+
+    Each result's status was set by _score_candidates over its own candidates, so the
+    floor applies inside each; only the raw best scores are compared here. A tie keeps
+    the MBID result: an artist-MBID link is the stronger signal.
+    """
+    if name_result is None:
+        return mbid_result
+    if mbid_result is None or name_result.confidence_score > mbid_result.confidence_score:
+        return name_result
+    return mbid_result
+
+
 def _score_candidates(
     original_title: str,
     candidates: list[LibraryFile],
@@ -148,6 +186,10 @@ def _score_candidates(
     _candidate_scores for the rule and the tie-break. Both sides are
     canonical-normalized; normalize_title_for_scoring is layered on top for
     bare "feat." clauses. Single-candidate case: gap = 100 (no competition).
+    A song auto-matches only at MB_AUTO_LINK_SCORE, or at strong_match_threshold
+    with an MB_SCORE_GAP lead: there is no song mid-band (D12). A score under
+    SONG_MIN_PRESENTATION_SCORE that does not auto-match is AUTO_REJECTED /
+    LOW_CONFIDENCE (AUD-R022 D6).
     library_file_id is ALWAYS populated with best_file.id — never None.
     work_id is the file's own work_id (real works(id) reference) and is "" when
     the linked work is unknown — it is NOT recording_id as a stand-in (that
@@ -186,24 +228,24 @@ def _score_candidates(
 
     rc: ReasonCode | None
     rd: str | None
-    # Both gap-dependent auto-match clauses require `has_competitor`: when
-    # there is no real second candidate, gap is synthesized to 100 and a
-    # lone result at score 85 would otherwise auto-match via the
-    # strong_match_threshold+gap path — exactly the "too permissive" failure the
-    # mid-band guard prevents. The MB_AUTO_LINK_SCORE (>= 95) path is
-    # unguarded because at that confidence a token match is effectively a
-    # literal identity and a lone result is still trustworthy.
-    auto_match = (
-        top_score >= MB_AUTO_LINK_SCORE
-        or (has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP)
-        or (
-            has_competitor
-            and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
-            and gap >= MID_BAND_GAP_THRESHOLD
-        )
+    # The gap-dependent auto-match clause requires `has_competitor`: when there
+    # is no real second candidate, gap is synthesized to 100 and a lone result
+    # at score 85 would otherwise auto-match via the strong_match_threshold+gap
+    # path. The MB_AUTO_LINK_SCORE (>= 95) path is unguarded because at that
+    # confidence a token match is effectively a literal identity and a lone
+    # result is still trustworthy. Songs have no mid-band auto-match (D12):
+    # 56-64 always goes to review, whatever the lead.
+    auto_match = top_score >= MB_AUTO_LINK_SCORE or (
+        has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP
     )
     if auto_match:
         status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
+    elif top_score < SONG_MIN_PRESENTATION_SCORE:
+        # The song floor (AUD-R022 D6): not worth the curator's time. The raw score is
+        # compared, so 55.99 is floored although its detail text rounds to "56%".
+        status = MatchStatus.AUTO_REJECTED
+        rc = ReasonCode.LOW_CONFIDENCE
+        rd = format_low_confidence(top_score)
     elif has_competitor and top_score >= strong_match_threshold:
         # AMBIGUOUS_GAP only applies when a real peer is close on score.
         # Lone candidates (synthetic gap=100) fall through to LOW_CONFIDENCE
@@ -294,10 +336,11 @@ class ResolvedArtistMbidStrategy:
     Step A: local library lookup by real_mbid (no API call).
     Step B: MB recording search (1 API call) — fires only when real_mbid is
             not None. Naturally skipped for true local-only artists.
-    Step C: name-based fuzzy fallback — fires when real_mbid is None (local-
-            only artist with no MB link yet), or when A and B both yield
-            nothing. Uses `artist.normalized_name` with `_eligible` to enforce
-            rejection exclusions and prevent cross-artist matches.
+    Step C: name-based fuzzy match over every file of the artist, tagged or
+            not — fires whenever A/B do not auto-match (or real_mbid is None);
+            the higher score wins and a tie keeps A/B (AUD-R022 D13). Uses
+            `artist.normalized_name` with `_eligible` to enforce rejection
+            exclusions and prevent cross-artist matches.
 
     Gate: artist.match_status in {AUTO_MATCHED, MANUAL_MATCHED}. Once inside
     the gate, apply() ALWAYS returns a non-None result. Returning None for a
@@ -371,74 +414,91 @@ class ResolvedArtistMbidStrategy:
         catalog_artist = self._catalog_repo.get_by_id(mbid)
         real_mbid: str | None = catalog_artist.mbid if catalog_artist is not None else mbid
 
-        if real_mbid:
-            # Step A — local library lookup by artist MBID.
-            candidate_files = _eligible(
-                self._library_file_repo.get_by_artist_mbid(real_mbid),
-                artist.normalized_name,
-                exclusions,
-            )
-            if candidate_files:
-                local_result = _score_candidates(
-                    identity.original_title,
-                    candidate_files,
-                    tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-                    strong_match_threshold=self._strong_match_threshold,
-                )
-                if local_result.status == MatchStatus.AUTO_MATCHED:
-                    return local_result
-                # Step B escalation: only displace Step A when MB recording
-                # search produces a strictly better score. On equal score,
-                # keep Step A — its MUSICBRAINZ_ID_EXACT tier is the more
-                # trustworthy label, and its candidate is anchored on the
-                # resolved artist MBID rather than a downstream MB recording
-                # hit (which can pull in cross-artist files when a local tag
-                # carries someone else's recording_mbid — _eligible
-                # in _mb_recording_search now enforces that as a hard guard
-                # rather than a comment). Deliberate product choice; do not
-                # "fix" without discussion.
-                mb_result = self._mb_recording_search(real_mbid, identity, artist)
-                if (
-                    mb_result is not None
-                    and mb_result.confidence_score > local_result.confidence_score
-                ):
-                    return mb_result
-                return local_result
+        # Steps A and B, keyed on the artist MBID. Skipped for a true local-only artist
+        # (real_mbid is None).
+        mbid_result = (
+            self._artist_mbid_steps(real_mbid, identity, artist, exclusions) if real_mbid else None
+        )
+        if mbid_result is not None and mbid_result.status == MatchStatus.AUTO_MATCHED:
+            return mbid_result
 
-            # Step B — MB recording search when no local files found by MBID.
-            mb_result = self._mb_recording_search(real_mbid, identity, artist)
-            if mb_result is not None:
-                return mb_result
-
-        # Step C — name-based fallback.
-        # Fires when real_mbid is None (local-only artist with no MB link yet),
-        # or when both A and B yield nothing. Uses normalized_name (not
-        # original_name): the repo now requires exact equality on
+        # Step C — name-based, over every present file of the artist, tagged or not
+        # (AUD-R022 D13). It runs whenever A/B do not auto-match, so an untagged file is
+        # never skipped because the artist has MBID-tagged ones. Uses normalized_name
+        # (not original_name): the repo requires exact equality on
         # library_files.normalized_artist_name, both produced by
         # backend.services.normalization.normalize_artist. The previous
         # original_name+substring path silently allowed cross-artist matches
-        # (e.g. files tagged "feat. <artist>") and has been retired.
-        name_candidates = _eligible(
-            self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
-            artist.normalized_name,
-            exclusions,
-        )
-        if name_candidates:
-            return _score_candidates(
+        # (e.g. files tagged "feat. <artist>") and has been retired. Local only: no
+        # MusicBrainz call.
+        name_candidates = _name_lookup_candidates(self._library_file_repo, artist, exclusions)
+        name_result = (
+            _score_candidates(
                 identity.original_title,
                 name_candidates,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 strong_match_threshold=self._strong_match_threshold,
             )
+            if name_candidates
+            else None
+        )
+        best = _better_of(mbid_result, name_result)
+        if best is not None:
+            return best
 
+        # No candidate at all: auto_rejected (AUD-R022 D6). MISSING_MATCH_RECORD above stays
+        # NEEDS_REVIEW: it is a data fault the curator should see.
         return IdentityMatchResult(
-            status=MatchStatus.NEEDS_REVIEW,
+            status=MatchStatus.AUTO_REJECTED,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             confidence_score=0.0,
             library_file_id=None,
             reason_code=ReasonCode.NO_LOCAL_FILES,
             reason_detail=("Artist MBID confirmed but no matching local recording found"),
         )
+
+    def _artist_mbid_steps(
+        self,
+        real_mbid: str,
+        identity: BroadcastTrackIdentity,
+        artist: BroadcastArtist,
+        exclusions: CandidateExclusions,
+    ) -> IdentityMatchResult | None:
+        """Step A (local files by artist MBID), escalating to Step B (MB recording search).
+
+        Returns None when neither finds an eligible candidate.
+        """
+        # Step A — local library lookup by artist MBID.
+        candidate_files = _eligible(
+            self._library_file_repo.get_by_artist_mbid(real_mbid),
+            artist.normalized_name,
+            exclusions,
+        )
+        if not candidate_files:
+            # Step B — MB recording search when no local files found by MBID.
+            return self._mb_recording_search(real_mbid, identity, artist)
+        local_result = _score_candidates(
+            identity.original_title,
+            candidate_files,
+            tier=MatchTier.MUSICBRAINZ_ID_EXACT,
+            strong_match_threshold=self._strong_match_threshold,
+        )
+        if local_result.status == MatchStatus.AUTO_MATCHED:
+            return local_result
+        # Step B escalation: only displace Step A when MB recording
+        # search produces a strictly better score. On equal score,
+        # keep Step A — its MUSICBRAINZ_ID_EXACT tier is the more
+        # trustworthy label, and its candidate is anchored on the
+        # resolved artist MBID rather than a downstream MB recording
+        # hit (which can pull in cross-artist files when a local tag
+        # carries someone else's recording_mbid — _eligible
+        # in _mb_recording_search now enforces that as a hard guard
+        # rather than a comment). Deliberate product choice; do not
+        # "fix" without discussion.
+        mb_result = self._mb_recording_search(real_mbid, identity, artist)
+        if mb_result is not None and mb_result.confidence_score > local_result.confidence_score:
+            return mb_result
+        return local_result
 
     def _mb_recording_search(
         self,
@@ -518,17 +578,15 @@ class BroadcastToLocalStrategy:
         }:
             return None
 
-        # Repo enforces equality on normalized_artist_name; _eligible
-        # is defense-in-depth so a future query loosening can't quietly
-        # reintroduce cross-artist proposals.
-        candidate_files = _eligible(
-            self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
-            artist.normalized_name,
+        candidate_files = _name_lookup_candidates(
+            self._library_file_repo,
+            artist,
             _exclusions_for(self._exclusions_by_identity, identity),
         )
         if not candidate_files:
+            # No candidate at all: auto_rejected (AUD-R022 D6).
             return IdentityMatchResult(
-                status=MatchStatus.NEEDS_REVIEW,
+                status=MatchStatus.AUTO_REJECTED,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 confidence_score=0.0,
                 library_file_id=None,
@@ -633,6 +691,7 @@ def match_identities_for_playlist(
     )
 
     auto_matched = 0
+    auto_rejected = 0
     needs_review = 0
     decided_meanwhile = 0
     work_ids: list[str] = []
@@ -665,17 +724,17 @@ def match_identities_for_playlist(
 
         if result is None:
             # Engine exhausted all strategies. Should not happen given the
-            # strategies' defensive exhaustiveness, but persist NEEDS_REVIEW so
-            # the identity is surfaced rather than stuck PENDING.
+            # strategies' defensive exhaustiveness. No candidate means AUTO_REJECTED
+            # (AUD-R022 D6), never stuck PENDING.
             if repos.track_identity_repo.update_match_status_if_pending(
                 identity.id,
-                MatchStatus.NEEDS_REVIEW,
+                MatchStatus.AUTO_REJECTED,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=("All matching strategies exhausted — no result produced"),
             ):
                 repos.match_repo.delete_for_identity(identity.id)
-                needs_review += 1
+                auto_rejected += 1
             else:
                 decided_meanwhile += 1
             continue
@@ -697,10 +756,12 @@ def match_identities_for_playlist(
         # UNIQUE(identity_id, library_file_id) with no ON CONFLICT (spec 2026-10-05 §4.2).
         repos.match_repo.delete_for_identity(identity.id)
 
-        # Persist a matches row whenever a best candidate was scored — including
-        # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
-        # the real confidence_score/triage_bucket instead of NULL/"blocked".
-        if result.library_file_id is not None:
+        # Persist a matches row for a suggestion worth showing (AUTO_MATCHED or NEEDS_REVIEW),
+        # so the resolution-center UI's LEFT JOIN matches surfaces the real
+        # confidence_score/triage_bucket. An AUTO_REJECTED result writes none (AUD-R022 D6):
+        # a row would let _release_matches pull the song back into review when its file is
+        # deleted, and would count as a suggestion for a missing file.
+        if result.library_file_id is not None and result.status != MatchStatus.AUTO_REJECTED:
             repos.match_repo.create(
                 Match(
                     id=uuid4(),
@@ -716,6 +777,8 @@ def match_identities_for_playlist(
             auto_matched += 1
             if result.work_id:
                 work_ids.append(result.work_id)
+        elif result.status == MatchStatus.AUTO_REJECTED:
+            auto_rejected += 1
         else:
             needs_review += 1
 
@@ -723,6 +786,7 @@ def match_identities_for_playlist(
         "identity_matching_complete",
         playlist_id=str(playlist_id),
         auto_matched=auto_matched,
+        auto_rejected=auto_rejected,
         needs_review=needs_review,
         decided_meanwhile=decided_meanwhile,
         work_ids_collected=len(work_ids),
