@@ -20,9 +20,8 @@ from backend.repositories.matches import MatchRepository
 from backend.services.matching_constants import (
     MB_AUTO_LINK_SCORE,
     MB_SCORE_GAP,
-    MID_BAND_GAP_THRESHOLD,
-    MID_BAND_LOWER,
-    MID_BAND_UPPER,
+    SONG_MIN_PRESENTATION_SCORE,
+    SONG_NAME_LOOKUP_LIMIT,
 )
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
@@ -47,8 +46,10 @@ class IdentityMatchResult:
     Strategies produce values; the service function owns all persistence.
     library_file_id is None ONLY when no candidate exists at all
     (reason_code in {NO_LOCAL_FILES, MISSING_MATCH_RECORD, NO_CANDIDATES}); the
-    _score_candidates helper always populates it with best_file.id. triage_bucket
-    is NOT on this dataclass — the router computes it from confidence_score.
+    _score_candidates helper always populates it with best_file.id, even for a
+    result floored to AUTO_REJECTED (AUD-R022 D6) — the service writes no match row
+    for an AUTO_REJECTED result. triage_bucket is NOT on this dataclass — the router
+    computes it from confidence_score.
     """
 
     status: MatchStatus
@@ -148,6 +149,10 @@ def _score_candidates(
     _candidate_scores for the rule and the tie-break. Both sides are
     canonical-normalized; normalize_title_for_scoring is layered on top for
     bare "feat." clauses. Single-candidate case: gap = 100 (no competition).
+    A song auto-matches only at MB_AUTO_LINK_SCORE, or at strong_match_threshold
+    with an MB_SCORE_GAP lead: there is no song mid-band (D12). A score under
+    SONG_MIN_PRESENTATION_SCORE that does not auto-match is AUTO_REJECTED /
+    LOW_CONFIDENCE (AUD-R022 D6).
     library_file_id is ALWAYS populated with best_file.id — never None.
     work_id is the file's own work_id (real works(id) reference) and is "" when
     the linked work is unknown — it is NOT recording_id as a stand-in (that
@@ -186,24 +191,24 @@ def _score_candidates(
 
     rc: ReasonCode | None
     rd: str | None
-    # Both gap-dependent auto-match clauses require `has_competitor`: when
-    # there is no real second candidate, gap is synthesized to 100 and a
-    # lone result at score 85 would otherwise auto-match via the
-    # strong_match_threshold+gap path — exactly the "too permissive" failure the
-    # mid-band guard prevents. The MB_AUTO_LINK_SCORE (>= 95) path is
-    # unguarded because at that confidence a token match is effectively a
-    # literal identity and a lone result is still trustworthy.
-    auto_match = (
-        top_score >= MB_AUTO_LINK_SCORE
-        or (has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP)
-        or (
-            has_competitor
-            and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
-            and gap >= MID_BAND_GAP_THRESHOLD
-        )
+    # The gap-dependent auto-match clause requires `has_competitor`: when there
+    # is no real second candidate, gap is synthesized to 100 and a lone result
+    # at score 85 would otherwise auto-match via the strong_match_threshold+gap
+    # path. The MB_AUTO_LINK_SCORE (>= 95) path is unguarded because at that
+    # confidence a token match is effectively a literal identity and a lone
+    # result is still trustworthy. Songs have no mid-band auto-match (D12):
+    # 56-64 always goes to review, whatever the lead.
+    auto_match = top_score >= MB_AUTO_LINK_SCORE or (
+        has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP
     )
     if auto_match:
         status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
+    elif top_score < SONG_MIN_PRESENTATION_SCORE:
+        # The song floor (AUD-R022 D6): not worth the curator's time. The raw score is
+        # compared, so 55.99 is floored although its detail text rounds to "56%".
+        status = MatchStatus.AUTO_REJECTED
+        rc = ReasonCode.LOW_CONFIDENCE
+        rd = format_low_confidence(top_score)
     elif has_competitor and top_score >= strong_match_threshold:
         # AMBIGUOUS_GAP only applies when a real peer is close on score.
         # Lone candidates (synthetic gap=100) fall through to LOW_CONFIDENCE
@@ -431,8 +436,10 @@ class ResolvedArtistMbidStrategy:
                 strong_match_threshold=self._strong_match_threshold,
             )
 
+        # No candidate at all: auto_rejected (AUD-R022 D6). MISSING_MATCH_RECORD above stays
+        # NEEDS_REVIEW: it is a data fault the curator should see.
         return IdentityMatchResult(
-            status=MatchStatus.NEEDS_REVIEW,
+            status=MatchStatus.AUTO_REJECTED,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             confidence_score=0.0,
             library_file_id=None,
@@ -520,15 +527,19 @@ class BroadcastToLocalStrategy:
 
         # Repo enforces equality on normalized_artist_name; _eligible
         # is defense-in-depth so a future query loosening can't quietly
-        # reintroduce cross-artist proposals.
+        # reintroduce cross-artist proposals. The lookup limit is a bound, not a sample
+        # (SONG_NAME_LOOKUP_LIMIT): "first 100 by id" silently dropped candidates.
         candidate_files = _eligible(
-            self._library_file_repo.get_by_normalized_artist_name(artist.normalized_name),
+            self._library_file_repo.get_by_normalized_artist_name(
+                artist.normalized_name, limit=SONG_NAME_LOOKUP_LIMIT
+            ),
             artist.normalized_name,
             _exclusions_for(self._exclusions_by_identity, identity),
         )
         if not candidate_files:
+            # No candidate at all: auto_rejected (AUD-R022 D6).
             return IdentityMatchResult(
-                status=MatchStatus.NEEDS_REVIEW,
+                status=MatchStatus.AUTO_REJECTED,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 confidence_score=0.0,
                 library_file_id=None,
@@ -633,6 +644,7 @@ def match_identities_for_playlist(
     )
 
     auto_matched = 0
+    auto_rejected = 0
     needs_review = 0
     decided_meanwhile = 0
     work_ids: list[str] = []
@@ -665,17 +677,17 @@ def match_identities_for_playlist(
 
         if result is None:
             # Engine exhausted all strategies. Should not happen given the
-            # strategies' defensive exhaustiveness, but persist NEEDS_REVIEW so
-            # the identity is surfaced rather than stuck PENDING.
+            # strategies' defensive exhaustiveness. No candidate means AUTO_REJECTED
+            # (AUD-R022 D6), never stuck PENDING.
             if repos.track_identity_repo.update_match_status_if_pending(
                 identity.id,
-                MatchStatus.NEEDS_REVIEW,
+                MatchStatus.AUTO_REJECTED,
                 MatchTier.UNCLASSIFIED,
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=("All matching strategies exhausted — no result produced"),
             ):
                 repos.match_repo.delete_for_identity(identity.id)
-                needs_review += 1
+                auto_rejected += 1
             else:
                 decided_meanwhile += 1
             continue
@@ -697,10 +709,12 @@ def match_identities_for_playlist(
         # UNIQUE(identity_id, library_file_id) with no ON CONFLICT (spec 2026-10-05 §4.2).
         repos.match_repo.delete_for_identity(identity.id)
 
-        # Persist a matches row whenever a best candidate was scored — including
-        # NEEDS_REVIEW — so the resolution-center UI's LEFT JOIN matches surfaces
-        # the real confidence_score/triage_bucket instead of NULL/"blocked".
-        if result.library_file_id is not None:
+        # Persist a matches row for a suggestion worth showing (AUTO_MATCHED or NEEDS_REVIEW),
+        # so the resolution-center UI's LEFT JOIN matches surfaces the real
+        # confidence_score/triage_bucket. An AUTO_REJECTED result writes none (AUD-R022 D6):
+        # a row would let _release_matches pull the song back into review when its file is
+        # deleted, and would count as a suggestion for a missing file.
+        if result.library_file_id is not None and result.status != MatchStatus.AUTO_REJECTED:
             repos.match_repo.create(
                 Match(
                     id=uuid4(),
@@ -716,6 +730,8 @@ def match_identities_for_playlist(
             auto_matched += 1
             if result.work_id:
                 work_ids.append(result.work_id)
+        elif result.status == MatchStatus.AUTO_REJECTED:
+            auto_rejected += 1
         else:
             needs_review += 1
 
@@ -723,6 +739,7 @@ def match_identities_for_playlist(
         "identity_matching_complete",
         playlist_id=str(playlist_id),
         auto_matched=auto_matched,
+        auto_rejected=auto_rejected,
         needs_review=needs_review,
         decided_meanwhile=decided_meanwhile,
         work_ids_collected=len(work_ids),

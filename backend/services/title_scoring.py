@@ -144,8 +144,8 @@ def _candidate_scores(
     that higher score is used: the bracket on one side was noise ("Train In
     Vain (Stand By Me)" against a tag of "Train in Vain"). Below the
     threshold a stripped comparison is ignored, because shortening both
-    titles inflates the score of the wrong file as well, and the mid-band
-    gap rule would then auto-match it ("Cry Baby Cry" against "Baby It's You
+    titles inflates the score of the wrong file as well, lifting it over the
+    56% song floor into review ("Cry Baby Cry" against "Baby It's You
     [Mono]" climbs from 48 to 58).
 
     The full-form score breaks ties, so a file whose tag carries the same
