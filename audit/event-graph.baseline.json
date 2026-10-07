@@ -1,16 +1,16 @@
 {
   "counts": {
-    "class.COMMAND": 17,
+    "class.COMMAND": 16,
     "class.EVENT": 0,
     "class.QUERY": 0,
-    "edge.ENQUEUE": 17,
+    "edge.ENQUEUE": 16,
     "edge.ENQUEUE_DEFERRED": 0,
     "edge.INLINE": 3,
     "edge.POLL": 1,
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
     "node.periodic": 4,
-    "node.producer": 19,
+    "node.producer": 18,
     "node.task": 13,
     "rule.EV01": 0,
     "rule.EV02": 3,
@@ -21,7 +21,7 @@
     "rule.EV07": 1,
     "rule.EV08": 17,
     "rule.EV09": 2,
-    "rule.EV10": 18,
+    "rule.EV10": 17,
     "unresolved_dispatch": 1
   },
   "edges": [
@@ -78,29 +78,12 @@
           "name": "playlist_id"
         }
       ],
-      "consumer": "artist_matching_task",
-      "file": "backend/routers/matching.py",
-      "guarded": false,
-      "kind": "ENQUEUE",
-      "lines": [
-        1289
-      ],
-      "message_class": "COMMAND",
-      "producer": "backend.routers.matching:_enqueue_playlists"
-    },
-    {
-      "args": [
-        {
-          "annotation": "str",
-          "name": "playlist_id"
-        }
-      ],
       "consumer": "identity_matching_task",
       "file": "backend/routers/matching.py",
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        740
+        713
       ],
       "message_class": "COMMAND",
       "producer": "backend.routers.matching:resolve_artist"
@@ -643,17 +626,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/routers/matching.py",
-      "line": 1279,
-      "subject": "backend.routers.matching:_enqueue_playlists",
-      "value": {
-        "tasks": 1
-      }
-    },
-    {
-      "class": "metric",
-      "code": "EV10",
-      "file": "backend/routers/matching.py",
-      "line": 583,
+      "line": 556,
       "subject": "backend.routers.matching:resolve_artist",
       "value": {
         "tasks": 1
@@ -817,13 +790,7 @@
       {
         "file": "backend/routers/matching.py",
         "layer": "router",
-        "line": 1279,
-        "qualname": "backend.routers.matching:_enqueue_playlists"
-      },
-      {
-        "file": "backend/routers/matching.py",
-        "layer": "router",
-        "line": 583,
+        "line": 556,
         "qualname": "backend.routers.matching:resolve_artist"
       },
       {
