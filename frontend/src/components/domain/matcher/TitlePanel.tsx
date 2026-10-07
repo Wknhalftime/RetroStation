@@ -45,12 +45,12 @@ function partitionByReviewState(identities: QueueIdentity[]): {
   return { review, resolved };
 }
 
-// A needs_review item whose best guess is below the presentation floor is
-// the artist's nearest title, not a candidate: usually a song the library
-// doesn't have. Items whose match was taken away also land in "blocked" with
-// no score, but they stay: curator-unmatched ones are the curator's own work in
-// progress, and ones released by deleting a missing library file must return to
-// review (spec C2). Mirrors `likely` in the backend queue's _QUEUE_BUCKET_CTE.
+// A needs_review item whose best guess is below the 56% song floor is a row from
+// before the floor (the matcher now auto-rejects such songs, D6), or the song has
+// no score at all (orphan, missing match record, deferred). Items whose match was
+// taken away also land in "blocked" with no score, but they stay: curator-unmatched
+// ones are the curator's own work in progress, and ones released by deleting a
+// missing library file must return to review (spec C2). Mirrors `likely` in the backend queue's _QUEUE_BUCKET_CTE.
 const KEPT_WITHOUT_SCORE = new Set(["USER_UNMATCHED", "LIBRARY_FILE_REMOVED"]);
 
 function isUnlikely(identity: QueueIdentity): boolean {

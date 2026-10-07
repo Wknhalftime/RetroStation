@@ -77,9 +77,10 @@ export function MatcherBrowser() {
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebounce(searchInput, 300);
   const [sort, setSort] = useState<QueueSort>("created_at");
-  // Artists whose every review item is a sub-50% guess (or no guess at all)
-  // are mostly songs the library doesn't have; they stay out of the list
-  // unless the curator asks for them.
+  // Artists whose review items all lack a guess at 56% or above (and were not
+  // unmatched or released by a file delete) stay out of the list unless the
+  // curator asks for them. Songs under 56% never reach review: the matcher
+  // auto-rejects them (D6).
   const [includeUnlikely, setIncludeUnlikely] = useState(false);
 
   // Switching pages can scroll the selected artist off-screen (the right-side
