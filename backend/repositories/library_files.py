@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
@@ -19,6 +20,15 @@ class LibraryFileRepository(ABC):
     def get_by_ids(self, ids: list[UUID]) -> list[LibraryFile]:
         """Batch fetch files by id, whatever their file_status. Missing ids are silently omitted.
         Empty input returns an empty list without touching the database.
+        """
+        ...
+
+    @abstractmethod
+    def normalized_artist_names_changed_since(self, when: datetime) -> set[str]:
+        """The distinct, non-empty ``normalized_artist_name`` of files indexed, or gone
+        missing, strictly after *when*: the targeted re-check's wave (spec 2026-10-05 §4.2).
+
+        ``indexed_at`` moves only for a new file or a size/mtime change (D11).
         """
         ...
 
