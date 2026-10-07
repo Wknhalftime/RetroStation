@@ -22,6 +22,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
+from backend.config import get_settings
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
@@ -187,8 +188,8 @@ def _song(
     return song
 
 
-def _suggest(conn: Conn, song: BroadcastTrackIdentity, file_id: UUID | None = None) -> None:
-    PgMatchRepository(conn).create(
+def _suggest(conn: Conn, song: BroadcastTrackIdentity, file_id: UUID | None = None) -> Match:
+    return PgMatchRepository(conn).create(
         Match(
             id=uuid4(),
             identity_id=song.id,
@@ -306,6 +307,7 @@ def test_the_watermark_is_the_start_of_the_newest_completed_run(migrated_db: str
         _progress(conn, TaskType.MATCHING_RECHECK, TaskStatus.FAILED, W + timedelta(hours=1))
         _progress(conn, TaskType.MATCHING_RECHECK, TaskStatus.RUNNING, W + timedelta(hours=2))
         _progress(conn, TaskType.MB_ENRICHMENT, TaskStatus.COMPLETED, W + timedelta(hours=3))
+        _progress(conn, TaskType.MATCHING_RECHECK, TaskStatus.TIMEOUT, W + timedelta(hours=4))
 
         repo = PgTaskProgressRepository(conn)
 
@@ -340,14 +342,16 @@ def test_artist_rewind_returns_an_undecided_artist_to_pending(
         }
 
 
+@pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("status", NOT_UNDECIDED)
 def test_artist_rewind_never_touches_a_pending_or_decided_artist(
-    migrated_db: str, status: MatchStatus
+    migrated_db: str, status: MatchStatus, scoped: bool
 ) -> None:
     with _connect(migrated_db) as conn:
         artist = _artist(conn, "ABBA", status)
+        names = {ABBA} if scoped else None
 
-        assert PgBroadcastArtistRepository(conn).rewind_undecided(None) == 0
+        assert PgBroadcastArtistRepository(conn).rewind_undecided(names) == 0
 
         assert _artist_row(conn, artist)["match_status"] == status.value
 
@@ -357,7 +361,7 @@ def test_artist_rewind_is_scoped_by_normalized_name(migrated_db: str) -> None:
         abba = _artist(conn, "ABBA", MatchStatus.NEEDS_REVIEW)
         queen = _artist(conn, "Queen", MatchStatus.NEEDS_REVIEW)
 
-        assert PgBroadcastArtistRepository(conn).rewind_undecided([ABBA]) == 1
+        assert PgBroadcastArtistRepository(conn).rewind_undecided({ABBA}) == 1
 
         assert _artist_row(conn, abba)["match_status"] == MatchStatus.PENDING.value
         assert _artist_row(conn, queen)["match_status"] == MatchStatus.NEEDS_REVIEW.value
@@ -367,7 +371,7 @@ def test_artist_rewind_of_no_names_rewinds_nothing(migrated_db: str) -> None:
     with _connect(migrated_db) as conn:
         abba = _artist(conn, "ABBA", MatchStatus.NEEDS_REVIEW)
 
-        assert PgBroadcastArtistRepository(conn).rewind_undecided([]) == 0
+        assert PgBroadcastArtistRepository(conn).rewind_undecided(set()) == 0
 
         assert _artist_row(conn, abba)["match_status"] == MatchStatus.NEEDS_REVIEW.value
 
@@ -378,17 +382,19 @@ def test_ids_by_normalized_names(migrated_db: str) -> None:
         _artist(conn, "Queen", MatchStatus.NEEDS_REVIEW)
         repo = PgBroadcastArtistRepository(conn)
 
-        assert repo.ids_by_normalized_names([ABBA, "nobody"]) == [abba.id]
-        assert repo.ids_by_normalized_names([]) == []
+        assert repo.ids_by_normalized_names({ABBA, "nobody"}) == [abba.id]
+        assert repo.ids_by_normalized_names(set()) == []
 
 
 # --- The song rewind -----------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("status", UNDECIDED)
-def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus) -> None:
+def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus, scoped: bool) -> None:
     with _connect(migrated_db) as conn:
-        song = _song(conn, _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED), "Waterloo", status)
+        artist = _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED)
+        song = _song(conn, artist, "Waterloo", status)
         _suggest(conn, song)
         rejected = uuid4()
         conn.execute(
@@ -396,7 +402,9 @@ def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus) -> No
             ([rejected], song.id),
         )
 
-        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided(None) == 1
+        artist_ids = [artist.id] if scoped else None
+
+        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided(artist_ids) == 1
 
         row = _song_row(conn, song)
         assert row["match_status"] == MatchStatus.PENDING.value
@@ -405,15 +413,18 @@ def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus) -> No
         assert _match_rows(conn, song) == 1  # the old suggestion stays until it is replaced
 
 
+@pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("status", NOT_UNDECIDED)
 def test_song_rewind_never_touches_a_pending_or_decided_song(
-    migrated_db: str, status: MatchStatus
+    migrated_db: str, status: MatchStatus, scoped: bool
 ) -> None:
     with _connect(migrated_db) as conn:
-        song = _song(conn, _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED), "Waterloo", status)
+        abba = _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED)
+        song = _song(conn, abba, "Waterloo", status)
         _suggest(conn, song)
+        artist_ids = [abba.id] if scoped else None
 
-        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided(None) == 0
+        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided(artist_ids) == 0
 
         assert _song_row(conn, song)["match_status"] == status.value
         assert _match_rows(conn, song) == 1
@@ -426,7 +437,7 @@ def test_song_rewind_is_scoped_by_broadcast_artist(migrated_db: str) -> None:
         in_scope = _song(conn, abba, "Waterloo", MatchStatus.NEEDS_REVIEW)
         outside = _song(conn, queen, "Bohemian Rhapsody", MatchStatus.NEEDS_REVIEW)
 
-        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided([abba.id]) == 1
+        assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided({abba.id}) == 1
 
         assert _song_row(conn, in_scope)["match_status"] == MatchStatus.PENDING.value
         assert _song_row(conn, outside)["match_status"] == MatchStatus.NEEDS_REVIEW.value
@@ -489,7 +500,7 @@ def test_bulk_defer_deletes_the_flipped_songs_rows_and_counts_them(migrated_db: 
         first = _song(conn, deferred_artist, "Waterloo", MatchStatus.PENDING)
         second = _song(conn, deferred_artist, "SOS", MatchStatus.PENDING)
         decided = _song(conn, deferred_artist, "Fernando", MatchStatus.AUTO_MATCHED)
-        for song in (first, second, decided):
+        for song in (first, decided):  # second has no row: 1 row deleted, 2 songs flipped
             _suggest(conn, song)
 
         changed = PgBroadcastTrackIdentityRepository(conn).bulk_defer_by_artist(deferred_artist.id)
@@ -512,7 +523,7 @@ def test_rematching_a_rewound_song_to_its_kept_file_keeps_one_row(migrated_db: s
         artist = _artist(conn, "ABBA", MatchStatus.PENDING)
         song = _song(conn, artist, "Waterloo", MatchStatus.NEEDS_REVIEW)
         kept = _file(conn, artist=ABBA, title="Waterloo")
-        _suggest(conn, song, kept.id)
+        old = _suggest(conn, song, kept.id)
         _play(conn, playlist, song)
         assert PgBroadcastTrackIdentityRepository(conn).rewind_undecided(None) == 1
 
@@ -530,6 +541,42 @@ def test_rematching_a_rewound_song_to_its_kept_file_keeps_one_row(migrated_db: s
         )
 
         rows = conn.execute(
-            "SELECT library_file_id FROM matches WHERE identity_id = %s", (song.id,)
+            "SELECT id, library_file_id FROM matches WHERE identity_id = %s", (song.id,)
         ).fetchall()
         assert [r["library_file_id"] for r in rows] == [kept.id]
+        assert rows[0]["id"] != old.id  # a new row, not the old suggestion left in place
+
+
+# --- The task end to end -------------------------------------------------------------------
+
+
+def test_the_recheck_commits_its_rewind_before_it_queues(
+    migrated_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", migrated_db)
+    get_settings.cache_clear()
+    with _connect(migrated_db) as conn:
+        playlist = _playlist(conn, _station(conn))
+        artist = _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED)
+        song = _song(conn, artist, "Waterloo", MatchStatus.NEEDS_REVIEW)
+        _suggest(conn, song)
+        _play(conn, playlist, song)
+    seen: list[tuple[str, str]] = []
+
+    def enqueue(playlist_id: str) -> None:
+        with _connect(migrated_db) as other:  # another session sees committed rows only
+            seen.append((playlist_id, _song_row(other, song)["match_status"]))
+
+    monkeypatch.setattr("backend.tasks.artist_matching_tasks.artist_matching_task", enqueue)
+    try:
+        from backend.tasks.matching_recheck_tasks import rematch_undecided_task
+
+        rematch_undecided_task.call_local("changed")
+    finally:
+        get_settings.cache_clear()
+
+    assert seen == [(str(playlist.id), MatchStatus.PENDING.value)]
+    with _connect(migrated_db) as conn:
+        assert _match_rows(conn, song) == 1  # the rewind keeps the old suggestion
+        repo = PgTaskProgressRepository(conn)
+        assert repo.last_completed_started_at(TaskType.MATCHING_RECHECK) is not None

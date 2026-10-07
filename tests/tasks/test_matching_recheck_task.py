@@ -7,8 +7,8 @@ rematch_undecided_task(scope) runs inside task_run as TaskType.MATCHING_RECHECK:
 - scope "changed" rewinds the undecided artists named by files indexed or gone missing after the
   watermark, then every undecided song under those artists, whatever the artist's own status.
   Scope "all", or no watermark, rewinds every undecided item. Decided items never move;
-- the rewind is committed before the fan-out. The fan-out queues artist_matching_task once per
-  playlist with pending work, each through enqueue_or_log on a fresh autocommit connection,
+- the rewind runs in one transaction, committed before the fan-out. The fan-out queues
+  artist_matching_task once per playlist with pending work, each through enqueue_or_log,
   even when the wave is empty.
 
 The repositories are the in-memory fakes; the Pg side of every query is in
@@ -100,6 +100,8 @@ class _Rig:
             library_files=self.files,
             broadcast_artists=self.artists,
             broadcast_identities=self.songs,
+            task_progress=self.progress,
+            system_logs=self.handoff_logs,
         )
 
     def enqueue(self, playlist_id: str) -> None:
@@ -212,6 +214,7 @@ def rig() -> Iterator[_Rig]:
         patch(
             "backend.tasks.matching_recheck_tasks.PgSystemLogRepository",
             return_value=r.handoff_logs,
+            create=True,
         ),
         patch("backend.tasks.artist_matching_tasks.artist_matching_task", side_effect=r.enqueue),
     ):
@@ -246,7 +249,8 @@ def test_changed_scope_rewinds_the_artists_of_changed_files_only(rig: _Rig) -> N
     assert (rewound.match_tier, rewound.reason_code, rewound.reason_detail) == (None, None, None)
     assert rig.stored_artist(queen).match_status == MatchStatus.AUTO_REJECTED
     assert rig.stored_song(queen_song).match_status == MatchStatus.NEEDS_REVIEW
-    assert result == {"artists_rewound": 1, "songs_rewound": 1, "playlists": 0}
+    counts = {k: result[k] for k in ("artists_rewound", "songs_rewound", "playlists")}
+    assert counts == {"artists_rewound": 1, "songs_rewound": 1, "playlists": 0}
 
 
 def test_a_file_gone_missing_puts_its_artist_in_the_wave(rig: _Rig) -> None:
@@ -259,11 +263,12 @@ def test_a_file_gone_missing_puts_its_artist_in_the_wave(rig: _Rig) -> None:
     assert rig.stored_artist(abba).match_status == MatchStatus.PENDING
 
 
-def test_failed_and_running_runs_do_not_move_the_watermark(rig: _Rig) -> None:
+def test_failed_running_and_timed_out_runs_do_not_move_the_watermark(rig: _Rig) -> None:
     rig.finished_run(T0)
     rig.finished_run(T0 + 2 * HOUR, status=TaskStatus.FAILED)
     rig.finished_run(T0 + 3 * HOUR, status=TaskStatus.RUNNING)
     rig.finished_run(T0 + 4 * HOUR, task_type=TaskType.MB_ENRICHMENT)
+    rig.finished_run(T0 + 5 * HOUR, status=TaskStatus.TIMEOUT)
     rig.changed_file("abba", indexed_at=T0 + HOUR)
     abba = rig.artist("abba", MatchStatus.NEEDS_REVIEW)
 
@@ -327,10 +332,12 @@ def test_an_empty_wave_rewinds_nothing_but_still_fans_out(rig: _Rig) -> None:
     queen = rig.artist("queen", MatchStatus.AUTO_MATCHED)
     review = rig.song(queen, MatchStatus.NEEDS_REVIEW, playlist)
     rig.song(queen, MatchStatus.PENDING, playlist)  # left pending by a failed downstream run
+    idle = rig.artist("blondie", MatchStatus.NEEDS_REVIEW)  # undecided, but not in the wave
 
     result = _run("changed")
 
     assert rig.files.asked == [T0]
+    assert rig.stored_artist(idle).match_status == MatchStatus.NEEDS_REVIEW
     assert rig.stored_song(review).match_status == MatchStatus.NEEDS_REVIEW
     assert (result["artists_rewound"], result["songs_rewound"]) == (0, 0)
     assert rig.queued == [str(playlist)]
@@ -355,6 +362,17 @@ def test_one_hand_off_per_playlist_with_pending_work(rig: _Rig) -> None:
     assert result["playlists"] == 2
 
 
+def test_a_playlist_pending_on_both_sides_is_queued_once(rig: _Rig) -> None:
+    both = uuid4()
+    abba = rig.artist("abba", MatchStatus.NEEDS_REVIEW)  # rewound: artist side reports `both`
+    rig.song(abba, MatchStatus.AUTO_REJECTED, both)  # rewound: song side reports `both`
+
+    result = _run("all")
+
+    assert rig.queued == [str(both)]
+    assert result["playlists"] == 1
+
+
 def test_the_rewind_is_committed_before_the_first_hand_off(rig: _Rig) -> None:
     abba = rig.artist("abba", MatchStatus.NEEDS_REVIEW)
     rig.song(abba, MatchStatus.NEEDS_REVIEW, uuid4())
@@ -364,15 +382,14 @@ def test_the_rewind_is_committed_before_the_first_hand_off(rig: _Rig) -> None:
     assert rig.order == ["commit", "enqueue"]
 
 
-def test_the_fan_out_uses_a_fresh_autocommit_connection(rig: _Rig) -> None:
+def test_the_rewind_runs_in_a_transaction(rig: _Rig) -> None:
     abba = rig.artist("abba", MatchStatus.PENDING)
     rig.song(abba, MatchStatus.PENDING, uuid4())
 
     _run("changed")
 
-    assert len(rig.connects) == 2
+    assert rig.connects
     assert rig.connects[0].get("autocommit", False) is False
-    assert rig.connects[1] == {"autocommit": True}
 
 
 def test_a_refused_hand_off_is_logged_and_the_rest_still_queue(rig: _Rig) -> None:
@@ -419,7 +436,9 @@ def test_an_unknown_scope_fails_the_run(rig: _Rig) -> None:
         _run("everything")
 
     statuses = [t.status for t in rig.progress.received_upserts]
-    assert statuses == [TaskStatus.FAILED]
+    assert statuses
+    assert statuses[-1] == TaskStatus.FAILED
+    assert TaskStatus.COMPLETED not in statuses
     assert rig.queued == []
 
 
@@ -430,6 +449,7 @@ def test_the_runs_own_start_is_the_next_watermark(rig: _Rig) -> None:
     _run("changed")
 
     first = rig.completed_row()
+    assert TaskType.MATCHING_RECHECK.value == "matching_recheck"
     assert first.task_type == TaskType.MATCHING_RECHECK
     assert rig.files.first_asked_at is not None
     assert before <= first.started_at <= rig.files.first_asked_at

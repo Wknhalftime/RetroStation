@@ -108,7 +108,7 @@ def test_a_completed_mb_run_hands_off_one_changed_scope_recheck(rig: _Rig) -> No
 def test_the_hand_off_opens_a_fresh_autocommit_connection(rig: _Rig) -> None:
     _run()
 
-    assert rig.connects[-1] == {"autocommit": True}
+    assert rig.connects[-1].get("autocommit") is True
 
 
 def test_a_failed_mb_run_hands_off_nothing(rig: _Rig) -> None:

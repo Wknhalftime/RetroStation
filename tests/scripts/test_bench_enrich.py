@@ -49,11 +49,12 @@ def test_follow_on_task_is_stubbed_and_restored(bench_enrich: ModuleType) -> Non
     assert mb_enrichment_tasks.mb_enrichment_task is original
 
 
-def test_recheck_hand_off_is_stubbed_and_restored(bench_enrich: ModuleType) -> None:
+@pytest.mark.parametrize("run", [False, True])
+def test_recheck_hand_off_is_stubbed_and_restored(bench_enrich: ModuleType, run: bool) -> None:
     from backend.tasks import matching_recheck_tasks
 
     original = matching_recheck_tasks.rematch_undecided_task
-    with bench_enrich.follow_on_task(run=False):
+    with bench_enrich.follow_on_task(run=run):
         # mb_enrichment_task resolves this name at call time (spec 2026-10-05 §4.2); a
         # --phase both run must find the stub, or it queues a real re-check.
         assert matching_recheck_tasks.rematch_undecided_task is not original

@@ -212,3 +212,23 @@ def test_a_song_decided_meanwhile_keeps_its_match_row(decision: MatchStatus) -> 
 
     assert run.matches.rows_for(song.id) == [old]
     assert run.matches.calls == []
+
+
+@pytest.mark.parametrize("branch", ["orphan", "engine_none"])
+def test_a_song_decided_meanwhile_keeps_its_row_on_every_branch(
+    branch: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if branch == "engine_none":
+        monkeypatch.setattr(
+            "backend.services.identity_matching_service.IdentityMatchingEngine.resolve",
+            lambda self, identity, artist: None,
+        )
+    run = _Run(with_artist=branch != "orphan")
+    run.file()
+    song, old = run.song()
+    run.songs.decide_after_read[song.id] = MatchStatus.MANUAL_MATCHED
+
+    run.run()
+
+    assert run.matches.rows_for(song.id) == [old]
+    assert run.matches.calls == []
