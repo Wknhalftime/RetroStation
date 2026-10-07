@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastArtist
@@ -88,4 +89,23 @@ class BroadcastArtistRepository(ABC):
         rows are affected; LOW_CONFIDENCE / AMBIGUOUS_GAP / etc. are left
         untouched.
         """
+        ...
+
+    @abstractmethod
+    def ids_by_normalized_names(self, names: Collection[str]) -> list[UUID]:
+        """Ids of the artists with these normalized names. Empty input returns [] without a
+        query."""
+        ...
+
+    @abstractmethod
+    def rewind_undecided(self, names: Collection[str] | None) -> int:
+        """Return undecided artists (NEEDS_REVIEW, AUTO_REJECTED) to PENDING with their reason
+        cleared; returns rows changed. *names* scopes it by normalized name: None means every
+        artist, an empty collection none. Status only: match rows and candidates stay
+        (AUD-R022 D1/D2, spec 2026-10-05 §4.2)."""
+        ...
+
+    @abstractmethod
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        """Every playlist whose plays reach a PENDING artist (the re-check's fan-out)."""
         ...

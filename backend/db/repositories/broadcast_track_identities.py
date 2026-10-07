@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from backend.db.repositories._pg_utils import (
 )
 from backend.domain.broadcast import BroadcastStorageError, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.domain.matching import UNDECIDED_STATUSES
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_reasons import format_deferred_retry
 
@@ -160,11 +162,18 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         )
 
     def bulk_reject_by_artist(self, broadcast_artist_id: UUID) -> None:
+        # The flipped songs lose their match rows in the same statement: a re-check keeps
+        # match rows when it rewinds, and a rejected song must not show an old suggestion
+        # (spec 2026-10-05 §4.2).
         self._conn.execute(
-            """UPDATE track_identities
-               SET match_status = %s, match_tier = %s,
-                   reason_code = NULL, reason_detail = NULL
-               WHERE broadcast_artist_id = %s AND match_status = %s""",
+            """WITH flipped AS (
+                   UPDATE track_identities
+                      SET match_status = %s, match_tier = %s,
+                          reason_code = NULL, reason_detail = NULL
+                    WHERE broadcast_artist_id = %s AND match_status = %s
+                RETURNING id
+               )
+               DELETE FROM matches WHERE identity_id IN (SELECT id FROM flipped)""",
             (
                 MatchStatus.AUTO_REJECTED.value,
                 MatchTier.UNCLASSIFIED.value,
@@ -174,11 +183,19 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         )
 
     def bulk_defer_by_artist(self, broadcast_artist_id: UUID) -> int:
+        # As bulk_reject_by_artist: a deferred song must not keep an old suggestion.
         cur = self._conn.execute(
-            """UPDATE track_identities
-               SET match_status = %s, match_tier = %s,
-                   reason_code = %s, reason_detail = %s
-               WHERE broadcast_artist_id = %s AND match_status = %s""",
+            """WITH flipped AS (
+                   UPDATE track_identities
+                      SET match_status = %s, match_tier = %s,
+                          reason_code = %s, reason_detail = %s
+                    WHERE broadcast_artist_id = %s AND match_status = %s
+                RETURNING id
+               ),
+               dropped AS (
+                   DELETE FROM matches WHERE identity_id IN (SELECT id FROM flipped)
+               )
+               SELECT count(*) AS changed FROM flipped""",
             (
                 MatchStatus.NEEDS_REVIEW.value,
                 MatchTier.UNCLASSIFIED.value,
@@ -188,7 +205,8 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 MatchStatus.PENDING.value,
             ),
         )
-        return cur.rowcount
+        row = cur.fetchone()
+        return int(row["changed"]) if row else 0
 
     def reset_deferred_by_artist_ids(self, artist_ids: list[UUID]) -> int:
         if not artist_ids:
@@ -212,3 +230,32 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             ),
         )
         return cur.rowcount
+
+    def rewind_undecided(self, artist_ids: Collection[UUID] | None) -> int:
+        wanted = None if artist_ids is None else list(artist_ids)
+        if wanted is not None and not wanted:
+            return 0
+        cur = self._conn.execute(
+            """UPDATE track_identities
+               SET match_status = %s, match_tier = NULL,
+                   reason_code = NULL, reason_detail = NULL
+               WHERE match_status = ANY(%s)
+                 AND (%s::uuid[] IS NULL OR broadcast_artist_id = ANY(%s::uuid[]))""",
+            (
+                MatchStatus.PENDING.value,
+                [status.value for status in UNDECIDED_STATUSES],
+                wanted,
+                wanted,
+            ),
+        )
+        return cur.rowcount
+
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT pe.playlist_id
+                 FROM play_events pe
+                 JOIN track_identities ti ON ti.id = pe.identity_id
+                WHERE ti.match_status = %s""",
+            (MatchStatus.PENDING.value,),
+        ).fetchall()
+        return {row["playlist_id"] for row in rows}

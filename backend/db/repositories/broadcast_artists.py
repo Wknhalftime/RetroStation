@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +9,7 @@ import psycopg
 from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus, ReasonCode
+from backend.domain.matching import UNDECIDED_STATUSES
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 
 
@@ -152,3 +154,41 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             ),
         )
         return cur.rowcount
+
+    def ids_by_normalized_names(self, names: Collection[str]) -> list[UUID]:
+        wanted = list(names)
+        if not wanted:
+            return []
+        rows = self._conn.execute(
+            "SELECT id FROM broadcast_artists WHERE normalized_name = ANY(%s)", (wanted,)
+        ).fetchall()
+        return [row["id"] for row in rows]
+
+    def rewind_undecided(self, names: Collection[str] | None) -> int:
+        wanted = None if names is None else list(names)
+        if wanted is not None and not wanted:
+            return 0
+        cur = self._conn.execute(
+            """UPDATE broadcast_artists
+               SET match_status = %s, reason_code = NULL, reason_detail = NULL
+               WHERE match_status = ANY(%s)
+                 AND (%s::text[] IS NULL OR normalized_name = ANY(%s::text[]))""",
+            (
+                MatchStatus.PENDING.value,
+                [status.value for status in UNDECIDED_STATUSES],
+                wanted,
+                wanted,
+            ),
+        )
+        return cur.rowcount
+
+    def playlist_ids_with_pending(self) -> set[UUID]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT pe.playlist_id
+                 FROM play_events pe
+                 JOIN track_identities ti ON ti.id = pe.identity_id
+                 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+                WHERE ba.match_status = %s""",
+            (MatchStatus.PENDING.value,),
+        ).fetchall()
+        return {row["playlist_id"] for row in rows}
