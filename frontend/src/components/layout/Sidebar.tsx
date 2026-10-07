@@ -24,6 +24,7 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   mb_enrichment: "/library",
   ingestion: "/stations",
   matching: "/matcher",
+  matching_recheck: "/matcher",
   m3u_export: "/stations",
   rules_apply: "/stations",
   // D89: a running cue run marks Settings, where the Streaming page lives,

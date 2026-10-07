@@ -11,9 +11,7 @@ import {
   useResolveArtist,
   useResolveIdentity,
   type QueueSort,
-  type RunMatchingResponse,
 } from "@/api/matcher";
-import { ConflictError } from "@/api/client";
 import { ArtistPanel } from "@/components/domain/matcher/ArtistPanel";
 import { TitlePanel } from "@/components/domain/matcher/TitlePanel";
 import { SearchSlideOver } from "@/components/domain/matcher/SearchSlideOver";
@@ -26,36 +24,10 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// Backend signals "another /matching/run is already in flight" via
-// HTTPException(409, detail="matching_run_in_progress"). apiFetch maps that to
-// a ConflictError whose message carries the raw detail string. Render a
-// friendly toast instead of the raw enum value.
-function rerunErrorMessage(err: unknown): string {
-  if (err instanceof ConflictError && err.message === "matching_run_in_progress") {
-    return "Matching is already running — please wait for the current run to finish.";
-  }
-  return errorMessage(err);
-}
-
-function rerunSuccessMessage(resp: RunMatchingResponse): string {
-  const { reset, enqueue } = resp;
-  const parts: string[] = [];
-  if (reset.performed) {
-    parts.push(
-      `Reset ${reset.identities_reset} title${reset.identities_reset === 1 ? "" : "s"}` +
-        (reset.artists_reset
-          ? ` and ${reset.artists_reset} artist${reset.artists_reset === 1 ? "" : "s"}`
-          : ""),
-    );
-  }
-  parts.push(
-    `Queued matching for ${enqueue.playlists_queued} playlist${enqueue.playlists_queued === 1 ? "" : "s"}`,
-  );
-  if (enqueue.enqueue_failures > 0) {
-    parts.push(`(${enqueue.enqueue_failures} enqueue failure${enqueue.enqueue_failures === 1 ? "" : "s"})`);
-  }
-  return parts.join(" · ");
-}
+// The button only queues a full re-check (spec 2026-10-05 §4.2, D1). The worker rewinds and
+// re-matches in the background, and the queue fills in as its runs finish.
+const RERUN_QUEUED_MESSAGE =
+  "Re-check queued: undecided artists and titles are matched again in the background.";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -283,25 +255,21 @@ export function MatcherBrowser() {
   }
 
   function handleRerun() {
-    // perform_reset=true rewinds NEEDS_REVIEW + AUTO_REJECTED rows back to
-    // PENDING and drops their stale matches before re-enqueueing — see
-    // backend RunMatchingRequest. Manual decisions and AUTO_MATCHED rows are
-    // preserved by the backend cohort filter.
-    rerunMatching.mutate(
-      { perform_reset: true },
-      {
-        onSuccess: (resp) => {
-          // Re-run can reshuffle the queue — clear the selection so the right
-          // panels don't act on a stale artist that may no longer exist.
-          setPage(1);
-          setSelectedArtistId(null);
-          setFeedback({ kind: "success", message: rerunSuccessMessage(resp) });
-        },
-        onError: (err) => {
-          setFeedback({ kind: "error", message: rerunErrorMessage(err) });
-        },
+    // Queues rematch_undecided_task("all"): every undecided artist and title goes back to
+    // pending and is matched again. Manual decisions and auto-matches are never touched.
+    rerunMatching.mutate(undefined, {
+      onSuccess: () => {
+        // The queue will reshuffle as the re-check runs: clear the selection so the right
+        // panels don't act on a stale artist.
+        setPage(1);
+        setSelectedArtistId(null);
+        setFeedback({ kind: "success", message: RERUN_QUEUED_MESSAGE });
       },
-    );
+      onError: (err) => {
+        // 503 carries the server's own "try again shortly" detail.
+        setFeedback({ kind: "error", message: errorMessage(err) });
+      },
+    });
   }
 
   return (
