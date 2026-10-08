@@ -223,7 +223,7 @@ def test_migration_0036_is_applied(migrated_db: str) -> None:
 )
 @pytest.mark.parametrize(
     ("score", "percent"),
-    [(55.0, 55), (60.4, 60), (60.5, 61), (64.0, 64), (64.99, 65)],
+    [(40.0, 40), (55.0, 55), (60.4, 60), (60.5, 61), (64.0, 64), (64.99, 65)],
 )
 def test_an_auto_match_under_65_goes_back_to_review_with_its_suggestion(
     migrated_db: str, tier: MatchTier, score: float, percent: int
@@ -243,6 +243,10 @@ def test_an_auto_match_under_65_goes_back_to_review_with_its_suggestion(
             "reason_detail": _d14_detail(percent),
         }
         assert _rows(conn, song) == before  # the suggestion is kept, untouched
+        rejected = conn.execute(
+            "SELECT rejected_file_ids FROM track_identities WHERE id = %s", (song.id,)
+        ).fetchone()
+        assert rejected is not None and rejected["rejected_file_ids"] == []
 
 
 def test_an_auto_match_at_65_stays_matched(migrated_db: str) -> None:
@@ -280,6 +284,7 @@ def test_any_other_status_under_65_is_untouched(migrated_db: str, status: MatchS
         song = _song(conn, _artist(conn), status=status)
         _row(conn, song, 60.0)
         before = (_state(conn, song), _rows(conn, song))
+        assert before[0]["match_status"] == status.value  # the seed took
 
         assert _migrate(conn) == 0
 
@@ -352,7 +357,8 @@ def test_the_rollback_restores_only_untouched_demotions(migrated_db: str) -> Non
         untouched, rewound, approved, cascaded = (
             _song(conn, artist, title) for title in ("Panama", "Jump", "Unchained", "Dance")
         )
-        for song in (untouched, rewound, approved, cascaded):
+        rejected = _song(conn, artist, "Eruption")
+        for song in (untouched, rewound, approved, cascaded, rejected):
             _row(conn, song, 60.0)
         matcher_review = _song(conn, artist, "Dreams", MatchStatus.PENDING)
         songs.update_match_status(
@@ -362,7 +368,8 @@ def test_the_rollback_restores_only_untouched_demotions(migrated_db: str) -> Non
             ReasonCode.LOW_CONFIDENCE,
             format_low_confidence(60.0),
         )
-        assert _migrate(conn) == 4
+        _row(conn, matcher_review, 60.0, tier=MatchTier.LOCAL_FILE_FUZZY)
+        assert _migrate(conn) == 5
         # A re-check rewinds one (status only, reason cleared).
         conn.execute(
             """UPDATE track_identities
@@ -383,6 +390,17 @@ def test_the_rollback_restores_only_untouched_demotions(migrated_db: str) -> Non
             (cascaded.id,),
         )
 
+        # Reject keeps the song in review: USER_UNMATCHED, text and row cleared, as
+        # identity_resolution_service.record_song_rejection writes.
+        conn.execute(
+            """UPDATE track_identities
+                  SET match_status = 'needs_review', match_tier = NULL,
+                      reason_code = 'USER_UNMATCHED', reason_detail = NULL
+                WHERE id = %s""",
+            (rejected.id,),
+        )
+        conn.execute("DELETE FROM matches WHERE identity_id = %s", (rejected.id,))
+
         conn.execute(_ROLLBACK.read_text(encoding="utf-8"))
 
         assert _state(conn, untouched) == _auto_matched()
@@ -390,6 +408,7 @@ def test_the_rollback_restores_only_untouched_demotions(migrated_db: str) -> Non
         assert _state(conn, approved)["match_status"] == MatchStatus.MANUAL_MATCHED.value
         assert _state(conn, cascaded)["match_status"] == MatchStatus.AUTO_REJECTED.value
         assert _state(conn, matcher_review)["match_status"] == MatchStatus.NEEDS_REVIEW.value
+        assert _state(conn, rejected)["reason_code"] == ReasonCode.USER_UNMATCHED.value
         applied = conn.execute(
             "SELECT 1 FROM schema_migrations WHERE version = %s", (_VERSION,)
         ).fetchone()
@@ -471,17 +490,18 @@ def test_rerun_matching_rescores_the_demoted_songs_under_the_new_rules(migrated_
             "reason_code": ReasonCode.LOW_CONFIDENCE.value,
             "reason_detail": format_low_confidence(63.63636363636363),
         }
-        assert [r[1] for r in _rows(conn, review)] == [persons.id]
+        assert [(r[1], round(r[2], 1)) for r in _rows(conn, review)] == [(persons.id, 63.6)]
         assert _state(conn, rematched)["match_status"] == MatchStatus.AUTO_MATCHED.value
         assert [(r[1], r[2]) for r in _rows(conn, rematched)] == [(teacher.id, 100.0)]
         assert _state(conn, floored)["match_status"] == MatchStatus.AUTO_REJECTED.value
         assert _rows(conn, floored) == []
 
 
-def test_a_demoted_songs_plays_stop_resolving_to_its_works_master(migrated_db: str) -> None:
+def test_a_demoted_songs_plays_stop_resolving_until_approved(migrated_db: str) -> None:
     """Playout, M3U export and cue analysis read play_file_resolution, which routes only
     auto_matched and manual_matched songs to their work's master (file_id): a demoted song's
-    plays play nothing until it is approved or re-matched (Q1 default: they stop playing)."""
+    plays play nothing until it is approved or re-matched (Q1 default: they stop playing), and
+    approving it brings them back."""
     with _connect(migrated_db) as conn:
         playlist = _playlist(conn)
         song = _song(conn, _artist(conn))
@@ -519,3 +539,15 @@ def test_a_demoted_songs_plays_stop_resolving_to_its_works_master(migrated_db: s
         _migrate(conn)
 
         assert resolved() == (None, None)
+
+        # Approve, as resolve_identity does: status and tier, then a manual row replaces the
+        # kept one.
+        conn.execute(
+            "UPDATE track_identities SET match_status = 'manual_matched', match_tier = 'manual'"
+            " WHERE id = %s",
+            (song.id,),
+        )
+        conn.execute("DELETE FROM matches WHERE identity_id = %s", (song.id,))
+        _row(conn, song, 1.0, kept.id, tier=MatchTier.MANUAL)
+
+        assert resolved() == (kept.id, master.id)
