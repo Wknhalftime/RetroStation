@@ -223,9 +223,14 @@ class NormalizationStrategy:
                     target_id=c.id,
                 )
 
-        # Fuzzy pass — restrict to MBID-bearing canonicals. If none exist,
-        # fall through so MusicBrainzApiStrategy can try.
-        with_mbid = [c for c in self._all_canonical if c.mbid is not None]
+        # Fuzzy pass — restrict to MBID-bearing canonicals, without the artists the local-artist
+        # linker gave an MBID (AUD-R026). This filter is what keeps artist matching unchanged by
+        # D15 (Lance, 2026-10-08): a linked artist never joins the fuzzy pool, even when release
+        # enrichment later confirms its MBID. It still matches by exact name, above. If none
+        # exist, fall through so MusicBrainzApiStrategy can try.
+        with_mbid = [
+            c for c in self._all_canonical if c.mbid is not None and not c.linked_by_lookup
+        ]
         if not with_mbid:
             return None
 
