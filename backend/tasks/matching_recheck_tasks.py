@@ -78,7 +78,9 @@ def rematch_undecided_task(scope: str) -> dict[str, int]:
         )
         with connect_sync(settings.database_url) as conn:
             repos = RepositoryFactory(conn)
-            names = recheck_names(recheck_scope, watermark, repos.library_files)
+            names = recheck_names(
+                recheck_scope, watermark, repos.library_files, repos.artist_linking
+            )
             counts = rewind_wave(names, repos.broadcast_artists, repos.broadcast_identities)
             # Committed before the fan-out: the matching worker reads the rewound statuses.
             conn.commit()

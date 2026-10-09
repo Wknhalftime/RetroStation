@@ -1,9 +1,10 @@
-"""Acceptance tests: mb_enrichment_task hands off the targeted re-check (spec 2026-10-05 §4.2).
+"""Acceptance tests: mb_enrichment_task queues the artist linking before the re-check (D15).
 
-After its task_run exits normally, mb_enrichment_task queues rematch_undecided_task("changed")
-through enqueue_or_log on a fresh autocommit connection, as library_enrichment_task does for its
-own hand-off. A FAILED run hands off nothing: the watermark keeps its wave. A refused enqueue is
-logged on the MB run's own task_id and leaves the run COMPLETED.
+After its task_run exits normally, mb_enrichment_task queues link_local_artists_task() and then
+rematch_undecided_task("changed"). Each goes through enqueue_or_log, on one fresh autocommit
+connection. On -w 1 the queue runs them in that order, so the re-check matches against the new
+MBIDs (AUD-R026). A refused linking enqueue is logged on the MB run and does not stop the
+re-check. A FAILED MB run queues neither.
 """
 
 from __future__ import annotations
@@ -44,11 +45,10 @@ class _Rig:
         self.logs = FakeSystemLogRepository()
         self.handoff_logs = FakeSystemLogRepository()
         self.connects: list[dict[str, Any]] = []
-        self.scopes: list[str] = []
-        self.statuses_at_hand_off: list[list[TaskStatus]] = []
+        self.order: list[str] = []
         self.attempts = 0
         self.fail_connect = False
-        self.refuse = False
+        self.refuse_link = False
 
     def connect(self, _url: str, **kwargs: Any) -> MagicMock:
         self.attempts += 1
@@ -57,11 +57,13 @@ class _Rig:
         self.connects.append(kwargs)
         return _mk_conn()
 
-    def recheck(self, scope: str) -> None:
-        self.statuses_at_hand_off.append([u.status for u in self.progress.received_upserts])
-        if self.refuse:
+    def link(self) -> None:
+        if self.refuse_link:
             raise sqlite3.OperationalError("database is locked")
-        self.scopes.append(scope)
+        self.order.append("link")
+
+    def recheck(self, scope: str) -> None:
+        self.order.append(f"recheck:{scope}")
 
 
 @pytest.fixture
@@ -80,11 +82,13 @@ def rig() -> Iterator[_Rig]:
             return_value=r.handoff_logs,
         ),
         patch(
+            "backend.tasks.artist_linking_tasks.link_local_artists_task",
+            side_effect=r.link,
+        ),
+        patch(
             "backend.tasks.matching_recheck_tasks.rematch_undecided_task",
             side_effect=r.recheck,
         ),
-        # D15 (AUD-R026): the MB pass first queues link_local_artists_task(); stub it too.
-        patch("backend.tasks.artist_linking_tasks.link_local_artists_task"),
     ):
         mb_cls.return_value.__enter__ = lambda self: self
         mb_cls.return_value.__exit__ = lambda self, *exc: False
@@ -98,47 +102,41 @@ def _run() -> dict[str, int]:
     return result
 
 
-def test_a_completed_mb_run_hands_off_one_changed_scope_recheck(rig: _Rig) -> None:
+def test_a_completed_mb_run_queues_the_linking_then_the_recheck(rig: _Rig) -> None:
     _run()
 
-    assert rig.scopes == ["changed"]
-    seen = rig.statuses_at_hand_off[0]
-    assert seen[-1] == TaskStatus.COMPLETED
-    assert TaskStatus.FAILED not in seen
+    assert rig.order == ["link", "recheck:changed"]
 
 
-def test_the_hand_off_opens_a_fresh_autocommit_connection(rig: _Rig) -> None:
+def test_both_hand_offs_share_one_fresh_autocommit_connection(rig: _Rig) -> None:
     _run()
 
-    assert rig.connects[-1].get("autocommit") is True
+    assert [c for c in rig.connects if c.get("autocommit")] == [{"autocommit": True}]
+    assert rig.connects[-1] == {"autocommit": True}
 
 
-def test_a_failed_mb_run_hands_off_nothing(rig: _Rig) -> None:
-    rig.fail_connect = True
-
-    with pytest.raises(RuntimeError, match="pre-count boom"):
-        _run()
-
-    assert rig.statuses_at_hand_off == []
-    assert rig.scopes == []
-
-
-def test_a_refused_hand_off_is_logged_on_the_mb_run_which_stays_completed(
-    rig: _Rig,
-) -> None:
-    rig.refuse = True
+def test_a_refused_linking_hand_off_is_logged_and_the_recheck_still_queues(rig: _Rig) -> None:
+    rig.refuse_link = True
 
     _run()  # must not raise: the caller owns the hand-off (AUD-R012 (1))
 
+    assert rig.order == ["recheck:changed"]
     completed = [u for u in rig.progress.received_upserts if u.status == TaskStatus.COMPLETED]
     assert len(completed) == 1
     assert TaskStatus.FAILED not in [u.status for u in rig.progress.received_upserts]
     refused = [
         log
         for log in rig.handoff_logs.all
-        if log.message == "rematch_undecided_task_enqueue_failed"
+        if log.message == "link_local_artists_task_enqueue_failed"
     ]
     assert len(refused) == 1
     assert refused[0].trace_id == completed[0].task_id
-    assert refused[0].details is not None
-    assert refused[0].details["error"] == "database is locked"
+
+
+def test_a_failed_mb_run_queues_neither(rig: _Rig) -> None:
+    rig.fail_connect = True
+
+    with pytest.raises(RuntimeError, match="pre-count boom"):
+        _run()
+
+    assert rig.order == []

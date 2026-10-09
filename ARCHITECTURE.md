@@ -1,8 +1,8 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-08.** Checked against master 903ffb1 plus D14 (feat/midband-review)
+**Status: 2026-10-09.** Checked against master 78d0902 plus D15 (feat/local-artist-mbids)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R025 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R026 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -50,7 +50,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
-  a scope word, or nothing). Event graph 2026-10-06: 16 commands, 0 events, 0 queries, no cycles.
+  a scope word, or nothing). Event graph 2026-10-09: 17 commands, 0 events, 0 queries, no cycles.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
@@ -62,6 +62,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
+| `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026) | local-artist linking (`link_local_artists_task`) |
+| `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
 | `progress_tracking` | every task envelope | `/ws` poll (0.5 s), hash-backfill liveness |
@@ -70,10 +72,13 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
     `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020)
   - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
-    `mb_enrichment_task` → `rematch_undecided_task("changed")` → `artist_matching_task` per
-    playlist with pending work → `identity_matching_task` (AUD-R022 D1)
+    `mb_enrichment_task` → `link_local_artists_task` (AUD-R026), then
+    `rematch_undecided_task("changed")` → `artist_matching_task` per playlist with pending
+    work → `identity_matching_task` (AUD-R022 D1). The MB pass queues both; on `-w 1` the
+    re-check runs after the linking, and its wave also holds the names just linked.
   - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task` →
-    `mb_enrichment_task` → `rematch_undecided_task("changed")` → (as above)
+    `mb_enrichment_task` → `link_local_artists_task`, then `rematch_undecided_task("changed")`
+    → (as above)
   - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
     `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
     `identity_matching_task`
@@ -92,9 +97,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
-  enrichment pair and the matching re-check, `task_failure_telemetry`, the tasks' own try/except,
-  and `reported_failures`.
-  No Huey signals (AUD-R016).
+  enrichment pair, the local-artist linking and the matching re-check, `task_failure_telemetry`,
+  the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016).
 
 ## What is enforced in CI (`.github/workflows/ci.yml`)
 

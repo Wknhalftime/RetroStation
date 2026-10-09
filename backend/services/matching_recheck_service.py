@@ -12,6 +12,7 @@ from datetime import datetime
 from uuid import UUID
 
 from backend.domain.enums import RecheckScope
+from backend.repositories.artist_linking import ArtistLinkingRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.library_files import LibraryFileRepository
@@ -26,16 +27,22 @@ class RewindCounts:
 
 
 def recheck_names(
-    scope: RecheckScope, watermark: datetime | None, library_files: LibraryFileRepository
+    scope: RecheckScope,
+    watermark: datetime | None,
+    library_files: LibraryFileRepository,
+    artist_linking: ArtistLinkingRepository,
 ) -> set[str] | None:
     """The normalized artist names in this re-check's wave; None means every undecided item.
 
     Scope ALL (the button) and the first run (no watermark) re-check everything. Otherwise the
-    wave is the artists of files indexed or gone missing after the watermark.
+    wave is the artists of files indexed or gone missing after the watermark, plus the artists
+    linked to a MusicBrainz ID after it (AUD-R026, D15), so their undecided songs are re-scored
+    against the new MBID, even when a later run linked them.
     """
     if scope is RecheckScope.ALL or watermark is None:
         return None
-    return library_files.normalized_artist_names_changed_since(watermark)
+    changed = library_files.normalized_artist_names_changed_since(watermark)
+    return changed | artist_linking.normalized_names_linked_since(watermark)
 
 
 def rewind_wave(

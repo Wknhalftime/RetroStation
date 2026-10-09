@@ -213,9 +213,11 @@ def follow_on_task(run: bool) -> Iterator[dict[str, Any]]:
     whatever database the worker uses. Here it becomes a no-op, or, when
     ``run`` is set, an in-process ``call_local`` whose result lands in the
     yielded dict under ``"result"``. ``mb_enrichment_task`` in turn ends by
-    queuing ``rematch_undecided_task("changed")``. That hand-off is always a
-    no-op here, so a bench run never queues a real re-check.
+    queuing ``link_local_artists_task()`` and ``rematch_undecided_task("changed")``.
+    Both hand-offs are always no-ops here, so a bench run never queues real
+    linking or a real re-check.
     """
+    from backend.tasks import artist_linking_tasks as alt
     from backend.tasks import matching_recheck_tasks as mrt
     from backend.tasks import mb_enrichment_tasks as met
 
@@ -232,11 +234,17 @@ def follow_on_task(run: bool) -> Iterator[dict[str, Any]]:
     def no_recheck(scope: str) -> None:
         return None
 
+    def no_linking() -> None:
+        return None
+
     met.mb_enrichment_task = stub
     try:
         # patch.object names the attribute as a string. Reading the task into a variable
         # would be a new unresolved-dispatch row in the event graph.
-        with mock.patch.object(mrt, "rematch_undecided_task", no_recheck):
+        with (
+            mock.patch.object(mrt, "rematch_undecided_task", no_recheck),
+            mock.patch.object(alt, "link_local_artists_task", no_linking),
+        ):
             yield captured
     finally:
         met.mb_enrichment_task = original

@@ -36,6 +36,8 @@ def _no_recheck_hand_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """mb_enrichment_task ends by queuing rematch_undecided_task("changed") (spec 2026-10-05
     §4.2). Stub it so these tests never put a re-check on the real Huey queue."""
     monkeypatch.setattr("backend.tasks.matching_recheck_tasks.rematch_undecided_task", MagicMock())
+    # D15 (AUD-R026): the MB pass first queues link_local_artists_task(); stub it too.
+    monkeypatch.setattr("backend.tasks.artist_linking_tasks.link_local_artists_task", MagicMock())
 
 
 def _mk_conn() -> MagicMock:

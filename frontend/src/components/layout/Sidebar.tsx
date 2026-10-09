@@ -22,6 +22,7 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   library_enrichment: "/library",
   hash_backfill: "/library",
   mb_enrichment: "/library",
+  artist_linking: "/library",
   ingestion: "/stations",
   matching: "/matcher",
   matching_recheck: "/matcher",

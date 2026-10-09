@@ -43,6 +43,7 @@ from backend.domain.enums import (
 )
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.system import TaskProgress
+from tests.fakes.artist_linking import FakeArtistLinkingRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
@@ -102,6 +103,7 @@ class _Rig:
             broadcast_identities=self.songs,
             task_progress=self.progress,
             system_logs=self.handoff_logs,
+            artist_linking=FakeArtistLinkingRepository(),  # D15: no artist linked, no name
         )
 
     def enqueue(self, playlist_id: str) -> None:

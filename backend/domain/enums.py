@@ -92,10 +92,22 @@ class CatalogSource(StrEnum):
     MUSICBRAINZ = "musicbrainz"
 
 
+class ArtistLinkOutcome(StrEnum):
+    """What the local-artist linker decided for one catalog artist (AUD-R026, spec D15)."""
+
+    LINKED = "linked"  # the artist took the MBID its own files' tags carry
+    AMBIGUOUS = "ambiguous"  # two or more tagged MBIDs carry the artist's name
+    TAG_MISMATCH = "tag_mismatch"  # the tags name other artists (a collaboration, an alias)
+    SPECIAL_PURPOSE = "special_purpose"  # the tags name only MusicBrainz placeholders
+    DUPLICATE = "duplicate"  # another catalog artist already holds the MBID
+    NO_EVIDENCE = "no_evidence"  # no well-formed artist-MBID tag on a present file
+
+
 class TaskType(StrEnum):
     SCAN = "scan"
     LIBRARY_ENRICHMENT = "library_enrichment"
     MB_ENRICHMENT = "mb_enrichment"
+    ARTIST_LINKING = "artist_linking"  # AUD-R026 D15: local artists gain MusicBrainz IDs
     INGESTION = "ingestion"
     RULES_APPLY = "rules_apply"
     MATCHING = "matching"
