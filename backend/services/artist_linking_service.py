@@ -85,12 +85,12 @@ def decide_link(
         data = mb_client.lookup_artist(mbid)
         if data is None:
             continue
-        name = data.get("name", "")
+        name = data.get("name") or ""
         if _is_placeholder_name(name):
             placeholders += 1
             continue
         # A merged MBID answers with the surviving artist (the client follows the redirect).
-        found = MusicBrainzId.parse(data.get("id", mbid).lower())
+        found = MusicBrainzId.parse((data.get("id") or mbid).lower())
         if found is not None and found.value in SPECIAL_PURPOSE_MBIDS:
             placeholders += 1  # a tag merged into a placeholder artist stays local
             continue

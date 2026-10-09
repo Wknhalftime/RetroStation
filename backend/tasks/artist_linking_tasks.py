@@ -7,8 +7,9 @@ linked (matching_recheck_service.recheck_names).
 One run:
 - lists the due local artists (never looked up, or with a present file indexed since);
 - decides and writes each one in its own transaction (artist_linking_service.link_artist);
-- stops early after MAX_CONSECUTIVE_FAILURES failed lookups in a row (an outage): the rest stay
-  due for the next run. Artists decided without a lookup neither count nor reset the run;
+- stops early after MAX_CONSECUTIVE_FAILURES failed artists in a row (an HTTP failure, a dropped
+  database write or a malformed payload; in practice an outage): the rest stay due for the next
+  run. Artists decided without a lookup neither count nor reset the run;
 - reports a count per outcome. It hands nothing off.
 """
 
@@ -38,8 +39,9 @@ logger = structlog.get_logger()
 FAILED = "failed"
 STOPPED_EARLY = "stopped_early"
 
-# Failed lookups in a row after which the run stops: MusicBrainz, a proxy or the network is
-# down, and every further artist would only wait out its retries and timeouts.
+# Failed artists in a row (any per-artist failure below) after which the run stops: MusicBrainz,
+# a proxy, the network or the database is down, and every further artist would only wait out
+# its retries and timeouts.
 MAX_CONSECUTIVE_FAILURES = 10
 
 # Outcomes decided without asking MusicBrainz: they neither count toward nor reset the streak.
