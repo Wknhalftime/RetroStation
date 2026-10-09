@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg.rows import DictRow
 
+from backend.db.repositories.artist_linking import PgArtistLinkingRepository
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
@@ -70,6 +71,7 @@ class CatalogRepos:
     """
 
     artists: PgArtistRepository
+    artist_linking: PgArtistLinkingRepository
     works: PgWorkRepository
     recordings: PgRecordingRepository
     matches: PgMatchRepository
@@ -129,6 +131,7 @@ class RepositoryFactory:
         )
         self.catalog = CatalogRepos(
             artists=PgArtistRepository(conn),
+            artist_linking=PgArtistLinkingRepository(conn),
             works=PgWorkRepository(conn),
             recordings=PgRecordingRepository(conn),
             matches=PgMatchRepository(conn),
@@ -156,6 +159,7 @@ class RepositoryFactory:
         self.broadcast_events = self.broadcast.events
         self.broadcast_days = self.broadcast.days
         self.artists = self.catalog.artists
+        self.artist_linking = self.catalog.artist_linking
         self.works = self.catalog.works
         self.recordings = self.catalog.recordings
         self.matches = self.catalog.matches

@@ -7,11 +7,30 @@ import psycopg
 import structlog
 
 from backend.domain.catalog import Artist
-from backend.domain.enums import CatalogSource
+from backend.domain.enums import ArtistLinkOutcome, CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 
 logger = structlog.get_logger(__name__)
+
+
+def artist_from_row(row: dict[str, Any]) -> Artist:
+    """Map an ``artists`` row (``SELECT *``) to the domain model; shared by both adapters."""
+    outcome = row.get("mb_lookup_outcome")
+    return Artist(
+        id=row["id"],
+        name=row["name"],
+        sort_name=row["sort_name"],
+        disambiguation=row.get("disambiguation"),
+        needs_enhancement=row["needs_enhancement"],
+        enhanced_at=row.get("enhanced_at"),
+        enhancement_error=row.get("enhancement_error"),
+        mbid=row.get("mbid"),
+        origin=(CatalogSource(row["origin"]) if row.get("origin") else CatalogSource.LOCAL),
+        normalized_name=row.get("normalized_name"),
+        mb_lookup_at=row.get("mb_lookup_at"),
+        mb_lookup_outcome=ArtistLinkOutcome(outcome) if outcome else None,
+    )
 
 
 class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
@@ -19,18 +38,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         self._conn = conn
 
     def _row_to_model(self, row: dict[str, Any]) -> Artist:
-        return Artist(
-            id=row["id"],
-            name=row["name"],
-            sort_name=row["sort_name"],
-            disambiguation=row.get("disambiguation"),
-            needs_enhancement=row["needs_enhancement"],
-            enhanced_at=row.get("enhanced_at"),
-            enhancement_error=row.get("enhancement_error"),
-            mbid=row.get("mbid"),
-            origin=(CatalogSource(row["origin"]) if row.get("origin") else CatalogSource.LOCAL),
-            normalized_name=row.get("normalized_name"),
-        )
+        return artist_from_row(row)
 
     def upsert(self, artist: Artist) -> Artist:
         self._conn.execute(
