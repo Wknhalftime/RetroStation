@@ -232,7 +232,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        136
+        138
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
@@ -249,7 +249,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        117
+        119
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
@@ -541,7 +541,7 @@
       "line": 40,
       "subject": "backend.tasks.matching_recheck_tasks:rematch_undecided_task",
       "value": {
-        "body_lines": 85,
+        "body_lines": 87,
         "service_calls": 3
       }
     },
@@ -739,7 +739,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/matching_recheck_tasks.py",
-      "line": 128,
+      "line": 130,
       "subject": "backend.tasks.matching_recheck_tasks:queue_recheck_all",
       "value": {
         "tasks": 1
@@ -867,7 +867,7 @@
       {
         "file": "backend/tasks/matching_recheck_tasks.py",
         "layer": "task",
-        "line": 128,
+        "line": 130,
         "qualname": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
       },
       {
@@ -1109,7 +1109,7 @@
         "schedule": "crontab(minute=\"*/4\")"
       },
       {
-        "body_lines": 85,
+        "body_lines": 87,
         "envelope": "task_run",
         "file": "backend/tasks/matching_recheck_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
