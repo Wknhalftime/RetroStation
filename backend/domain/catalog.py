@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.domain.enums import CatalogSource, VersionType
+from backend.domain.enums import ArtistLinkOutcome, CatalogSource, VersionType
 from backend.domain.system import StorageUnavailableError
 
 # Exactly the spelling MusicBrainz's lookup endpoints accept: a hyphenated
@@ -26,6 +26,10 @@ class InvalidMusicBrainzIdError(CatalogError):
 
 class CatalogStorageError(CatalogError, StorageUnavailableError):
     """A catalog repository lost its database connection mid-operation."""
+
+
+class InvalidLinkDecisionError(CatalogError):
+    """A link decision whose outcome and candidate disagree (AUD-R026)."""
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,53 @@ class Artist:
     mbid: str | None = None
     origin: CatalogSource = CatalogSource.LOCAL
     normalized_name: str | None = None
+    # D15 (AUD-R026): when the local-artist linker last looked this artist up on MusicBrainz,
+    # and what it decided. Both None until the first lookup.
+    mb_lookup_at: datetime | None = None
+    mb_lookup_outcome: ArtistLinkOutcome | None = None
+
+    @property
+    def linked_by_lookup(self) -> bool:
+        """True when the local-artist linker gave this artist its MBID (AUD-R026)."""
+        return self.mb_lookup_outcome == ArtistLinkOutcome.LINKED
+
+
+@dataclass(frozen=True)
+class ArtistLinkCandidate:
+    """One MusicBrainz artist a local artist may be linked to (AUD-R026)."""
+
+    mbid: str
+    name: str
+    sort_name: str
+    disambiguation: str | None = None
+
+    def __post_init__(self) -> None:
+        MusicBrainzId(self.mbid)  # raises InvalidMusicBrainzIdError for a malformed MBID
+
+
+@dataclass(frozen=True)
+class LinkEvidence:
+    """What the library says about one local artist (AUD-R026).
+
+    ``tag_counts``: each distinct raw artist-MBID tag value of its present files, with how many
+    present files carry it. One value may credit several artists ("a, b").
+    """
+
+    tag_counts: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True)
+class LinkDecision:
+    """The linker's decision for one artist: a candidate exactly when the outcome is LINKED."""
+
+    outcome: ArtistLinkOutcome
+    candidate: ArtistLinkCandidate | None = None
+
+    def __post_init__(self) -> None:
+        if (self.outcome == ArtistLinkOutcome.LINKED) != (self.candidate is not None):
+            raise InvalidLinkDecisionError(
+                f"outcome {self.outcome.value} with candidate {self.candidate!r}"
+            )
 
 
 @dataclass
