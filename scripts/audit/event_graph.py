@@ -116,6 +116,7 @@ class Scope:
     bindings: dict[str, Target]
     parent: Scope | None
     own: list[ast.AST]
+    node: DefNode | ast.ClassDef | None = None
 
 
 @dataclass
@@ -406,7 +407,9 @@ def build_scopes(index: Index, module: Module) -> None:
             kind = "class" if isinstance(inner, ast.ClassDef) else "def"
             bindings[inner.name] = Target(kind, module.name, f"{qual}.{inner.name}")
         kind = "class" if isinstance(node, ast.ClassDef) else "function"
-        scope = Scope(module, f"{module.name}:{qual}", kind, node.lineno, bindings, parent, body)
+        scope = Scope(
+            module, f"{module.name}:{qual}", kind, node.lineno, bindings, parent, body, node
+        )
         index.scopes[scope.qualname] = scope
         pending.extend((scope, d) for d in nested)
 
@@ -749,22 +752,42 @@ def task_scope(index: Index, task: Task) -> Scope:
     return index.scopes[f"{task.module}:{task.name}"]
 
 
+def has_handler(scope: Scope) -> bool:
+    """The scope's own body holds a try with at least one except handler."""
+    return any(isinstance(n, ast.Try | ast.TryStar) and n.handlers for n in scope.own)
+
+
+def is_catching_context_manager(index: Index, target: Target) -> bool:
+    """A ``@contextmanager`` def whose body catches (a try with a handler)."""
+    scope = index.scopes.get(f"{target.module}:{target.name}")
+    node = scope.node if scope is not None else None
+    if scope is None or not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return False
+    decorated = any(
+        (d.id if isinstance(d, ast.Name) else d.attr if isinstance(d, ast.Attribute) else "")
+        == "contextmanager"
+        for d in node.decorator_list
+    )
+    return decorated and has_handler(scope)
+
+
 def envelope(index: Index, task: Task) -> str:
     scope = task_scope(index, task)
-    called: set[str] = set()
+    called: list[Target] = []
     for node in scope.own:
         if isinstance(node, ast.With | ast.AsyncWith):
             for item in node.items:
                 if isinstance(item.context_expr, ast.Call):
                     target = index.resolve(item.context_expr.func, scope)
                     if target.kind == "def":
-                        called.add(target.name.rsplit(".", 1)[-1])
+                        called.append(target)
+    names = {t.name.rsplit(".", 1)[-1] for t in called}
     for name in ("task_run", "task_failure_telemetry"):
-        if name in called:
+        if name in names:
             return name
-    if any(isinstance(n, ast.Try | ast.TryStar) and n.handlers for n in scope.own):
-        return "own"
-    return "none"
+    if any(is_catching_context_manager(index, t) for t in called):
+        return "context"
+    return "own" if has_handler(scope) else "none"
 
 
 def body_lines(node: DefNode) -> int:
