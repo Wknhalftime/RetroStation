@@ -220,6 +220,8 @@ def test_due_artists_are_local_unlinked_and_not_looked_up_since_their_last_file(
     with _connect(migrated_db) as conn:
         never = _local(conn, "Yes")
         _looked_up(conn, _local(conn, "Boston"))
+        for outcome in ("ambiguous", "special_purpose", "duplicate", "no_evidence"):
+            _looked_up(conn, _local(conn, f"Stamped {outcome}"), outcome=outcome)
         refreshed = _local(conn, "Chicago")
         _looked_up(conn, refreshed)
         _file(conn, "Chicago", indexed_at=T0 + HOUR)
@@ -406,9 +408,9 @@ def test_names_linked_since_hold_the_catalog_name_and_matched_broadcast_names(
 ) -> None:
     with _connect(migrated_db) as conn:
         linked = _local(conn, "Nirvana")
-        exact = _broadcast(conn, "NIRVANA", MatchStatus.AUTO_MATCHED)
+        pre_link = _broadcast(conn, "NIRVANA (SEATTLE)", MatchStatus.MANUAL_MATCHED)
         manual = _broadcast(conn, "NIRVANA (UK BAND)", MatchStatus.MANUAL_MATCHED)
-        _artist_match(conn, exact, linked)  # a pre-link match: the local id
+        _artist_match(conn, pre_link, linked)  # a pre-link match: the local id
         PgArtistLinkingRepository(conn).link(linked, _candidate())
         _artist_match(conn, manual, NIRVANA)  # a post-link match: the MBID
         earlier = _local(conn, "Yes")
@@ -418,7 +420,7 @@ def test_names_linked_since_hold_the_catalog_name_and_matched_broadcast_names(
 
         names = PgArtistLinkingRepository(conn).normalized_names_linked_since(T0)
 
-    assert names == {"nirvana", "nirvana uk band"}
+    assert names == {"nirvana", "nirvana seattle", "nirvana uk band"}
 
 
 def _station(conn: Conn) -> BroadcastStation:

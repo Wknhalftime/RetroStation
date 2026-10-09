@@ -42,6 +42,7 @@ def _mbid(n: int) -> str:
 NIRVANA = _mbid(1)
 SOUNDGARDEN = _mbid(2)
 OZZY_OSBOURNE = _mbid(3)
+UNKNOWN = "125ec42a-7229-4250-afc5-e057484327fe"  # MusicBrainz's [unknown]
 NO_LINK = {outcome.value: 0 for outcome in ArtistLinkOutcome}
 
 
@@ -290,12 +291,17 @@ def test_artists_decided_without_a_lookup_do_not_reset_the_failure_count(rig: _R
     for n in range(10, 20):  # ten refused lookups, each followed by an untagged artist
         rig.mb.refuse[_mbid(n)] = 503
         rig.artist(f"Band {n}", _mbid(n))
-        rig.artist(f"Band {n} Tribute")
+        rig.artist(f"Band {n} Tribute", *([UNKNOWN] if n % 2 else []))
     nirvana = rig.artist("Nirvana", NIRVANA)  # sorts last: never reached
 
     result = _run()
 
-    assert (result["failed"], result["no_evidence"], result["stopped_early"]) == (10, 9, 1)
+    assert (
+        result["failed"],
+        result["no_evidence"],
+        result["special_purpose"],
+        result["stopped_early"],
+    ) == (10, 5, 4, 1)
     assert rig.repo.artists[nirvana.id].mbid is None
 
 

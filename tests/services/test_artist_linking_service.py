@@ -123,6 +123,14 @@ def test_a_merged_tag_mbid_links_the_surviving_artist() -> None:
     assert decision == _linked_to(4, "Boz Scaggs", sort_name="Scaggs, Boz")
 
 
+def test_a_missing_sort_name_falls_back_and_an_empty_disambiguation_is_none() -> None:
+    mb = FakeMbClient(
+        artists={_mbid(28): {"id": _mbid(28), "name": "Nirvana", "disambiguation": ""}}
+    )
+
+    assert _decide("Nirvana", mb, _tags(_mbid(28))) == _linked_to(28, "Nirvana")
+
+
 def test_a_multi_valued_tag_links_the_member_with_the_artists_name() -> None:
     mb = FakeMbClient(artists={_mbid(5): _answer(5, "Santana"), _mbid(6): _answer(6, "Rob Thomas")})
 
@@ -179,6 +187,7 @@ def test_at_most_three_tagged_mbids_are_looked_up_most_files_first() -> None:
     mb = FakeMbClient()
     evidence = LinkEvidence(
         tag_counts=(
+            (VARIOUS, 9),  # a placeholder ranked first does not take a lookup slot
             (_mbid(14), 1),
             (_mbid(15), 5),
             (f"{_mbid(16)}, {_mbid(14)}", 3),  # 14 totals 4 files over two values
