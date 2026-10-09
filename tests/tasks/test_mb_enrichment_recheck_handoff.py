@@ -83,6 +83,8 @@ def rig() -> Iterator[_Rig]:
             "backend.tasks.matching_recheck_tasks.rematch_undecided_task",
             side_effect=r.recheck,
         ),
+        # D15 (AUD-R026): the MB pass first queues link_local_artists_task(); stub it too.
+        patch("backend.tasks.artist_linking_tasks.link_local_artists_task"),
     ):
         mb_cls.return_value.__enter__ = lambda self: self
         mb_cls.return_value.__exit__ = lambda self, *exc: False
