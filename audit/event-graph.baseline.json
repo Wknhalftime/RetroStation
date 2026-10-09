@@ -417,7 +417,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/artist_linking_tasks.py",
-      "line": 60,
+      "line": 62,
       "subject": "backend.tasks.artist_linking_tasks:link_local_artists_task",
       "value": {
         "body_lines": 67,
@@ -914,7 +914,7 @@
         "file": "backend/tasks/artist_linking_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 60,
+        "line": 62,
         "module": "backend.tasks.artist_linking_tasks",
         "name": "link_local_artists_task",
         "params": [],
@@ -1176,7 +1176,7 @@
       },
       {
         "body_lines": 17,
-        "envelope": "none",
+        "envelope": "context",
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
@@ -1190,7 +1190,7 @@
       },
       {
         "body_lines": 8,
-        "envelope": "none",
+        "envelope": "context",
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "periodic",
@@ -1204,7 +1204,7 @@
       },
       {
         "body_lines": 13,
-        "envelope": "none",
+        "envelope": "context",
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
