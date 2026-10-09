@@ -96,7 +96,7 @@ class ArtistLinkOutcome(StrEnum):
     """What the local-artist linker decided for one catalog artist (AUD-R026, spec D15)."""
 
     LINKED = "linked"  # the artist took the MBID its own files' tags carry
-    AMBIGUOUS = "ambiguous"  # two tagged MBIDs both carry the artist's name
+    AMBIGUOUS = "ambiguous"  # two or more tagged MBIDs carry the artist's name
     TAG_MISMATCH = "tag_mismatch"  # the tags name other artists (a collaboration, an alias)
     SPECIAL_PURPOSE = "special_purpose"  # the tags name only MusicBrainz placeholders
     DUPLICATE = "duplicate"  # another catalog artist already holds the MBID

@@ -90,7 +90,10 @@ def decide_link(
             placeholders += 1
             continue
         # A merged MBID answers with the surviving artist (the client follows the redirect).
-        found = MusicBrainzId.parse(data.get("id", mbid))
+        found = MusicBrainzId.parse(data.get("id", mbid).lower())
+        if found is not None and found.value in SPECIAL_PURPOSE_MBIDS:
+            placeholders += 1  # a tag merged into a placeholder artist stays local
+            continue
         if found is None or normalize_artist(name) != normalized_name:
             continue
         named.setdefault(
@@ -123,7 +126,10 @@ def link_artist(
 
 
 def _is_placeholder_name(name: str) -> bool:
-    """MusicBrainz names its placeholders in brackets: "[unknown]", "[dialogue]"."""
+    """MusicBrainz names its placeholders in brackets: "[unknown]", "[dialogue]".
+
+    A real artist named in brackets is caught too and stays local: the safe direction.
+    """
     return name.startswith("[") and name.endswith("]")
 
 
