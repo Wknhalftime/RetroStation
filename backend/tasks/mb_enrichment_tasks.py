@@ -105,8 +105,9 @@ def _enhance_artist(
 ) -> ArtistEnhanceOutcome:
     """Fill in missing artist fields from a MusicBrainz artist lookup.
 
-    Artists gain an MBID only through release / recording enrichment
-    (`ArtistRepository.upsert_musicbrainz_artist`) — never here (AUD-R008).
+    Artists gain an MBID through release / recording enrichment
+    (`ArtistRepository.upsert_musicbrainz_artist`) or the local-artist linker
+    (`link_local_artists_task`, AUD-R026), never here (AUD-R008).
     `upsert_local_artist` inserts `needs_enhancement=FALSE`, so a bare local
     artist should never reach this function; if one does, it is a logic
     bug, not a work item, and is quarantined below instead of being
@@ -758,7 +759,8 @@ def mb_enrichment_task() -> dict[str, int]:
     """Fill metadata on canonical entities flagged needs_enhancement=TRUE.
 
     Processes artists, works, and recordings in sequence, each committed
-    independently.  It hands off the targeted matching re-check when it completes.
+    independently.  It hands off the local-artist linking, then the targeted matching
+    re-check, when it completes.
     """
     settings = get_settings()
 
@@ -878,19 +880,30 @@ def mb_enrichment_task() -> dict[str, int]:
         recordings_failed=recordings_failed,
     )
 
-    # Hand off the targeted re-check (AUD-R022 D1, spec 2026-10-05 §4.2): matching reads what
-    # this pass wrote. Only after a normal exit; a FAILED run hands off nothing, and the
-    # watermark keeps its wave. Guarded (AUD-R012 (1), AUD-R014) on a fresh autocommit
-    # connection, as library_enrichment_task does for its own hand-off.
+    # Hand off the local-artist linking (AUD-R026, D15), then the targeted re-check (AUD-R022
+    # D1, spec 2026-10-05 §4.2). On -w 1 the queue runs them in this order, so the re-check's
+    # wave holds the names just linked and matches against their MBIDs. A refused linking
+    # enqueue does not stop the re-check. Only after a normal exit: a FAILED run hands off
+    # nothing, and the watermark keeps its wave. Guarded (AUD-R012 (1), AUD-R014) on one fresh
+    # autocommit connection, as library_enrichment_task does for its own hand-off.
+    from backend.tasks.artist_linking_tasks import link_local_artists_task
     from backend.tasks.matching_recheck_tasks import rematch_undecided_task
 
     with connect_sync(settings.database_url, autocommit=True) as log_conn:
+        sys_log_repo = PgSystemLogRepository(log_conn)
+        enqueue_or_log(
+            link_local_artists_task,
+            task_name="link_local_artists_task",
+            caller_task_id=task_id,
+            log_category=LogCategory.ENRICHMENT,
+            sys_log_repo=sys_log_repo,
+        )
         enqueue_or_log(
             lambda: rematch_undecided_task(RecheckScope.CHANGED.value),
             task_name="rematch_undecided_task",
             caller_task_id=task_id,
             log_category=LogCategory.ENRICHMENT,
-            sys_log_repo=PgSystemLogRepository(log_conn),
+            sys_log_repo=sys_log_repo,
         )
 
     return {

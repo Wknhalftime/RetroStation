@@ -1,9 +1,9 @@
 {
   "counts": {
-    "class.COMMAND": 16,
+    "class.COMMAND": 17,
     "class.EVENT": 0,
     "class.QUERY": 0,
-    "edge.ENQUEUE": 16,
+    "edge.ENQUEUE": 17,
     "edge.ENQUEUE_DEFERRED": 0,
     "edge.INLINE": 3,
     "edge.POLL": 1,
@@ -11,7 +11,7 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 4,
     "node.producer": 18,
-    "node.task": 13,
+    "node.task": 14,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
@@ -19,7 +19,7 @@
     "rule.EV05": 0,
     "rule.EV06": 1,
     "rule.EV07": 1,
-    "rule.EV08": 17,
+    "rule.EV08": 18,
     "rule.EV09": 2,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -83,7 +83,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        713
+        717
       ],
       "message_class": "COMMAND",
       "producer": "backend.routers.matching:resolve_artist"
@@ -255,6 +255,18 @@
       "producer": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
     },
     {
+      "args": [],
+      "consumer": "link_local_artists_task",
+      "file": "backend/tasks/mb_enrichment_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        894
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
+    },
+    {
       "args": [
         {
           "annotation": "str",
@@ -266,7 +278,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        888
+        901
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
@@ -319,7 +331,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        460
+        468
       ],
       "message_class": null,
       "producer": "scripts.bench_enrich:cmd_run"
@@ -381,7 +393,7 @@
       "class": "inventory",
       "code": "EV02",
       "file": "scripts/bench_enrich.py",
-      "line": 460,
+      "line": 468,
       "subject": "scripts.bench_enrich:cmd_run -> library_enrichment_task"
     },
     {
@@ -400,6 +412,17 @@
       "file": "backend/tasks/ingestion_tasks.py",
       "line": 203,
       "subject": "backend.tasks.ingestion_tasks:ingestion_task(file_bytes)"
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/artist_linking_tasks.py",
+      "line": 60,
+      "subject": "backend.tasks.artist_linking_tasks:link_local_artists_task",
+      "value": {
+        "body_lines": 67,
+        "service_calls": 0
+      }
     },
     {
       "class": "metric",
@@ -526,10 +549,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 757,
+      "line": 758,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
-        "body_lines": 146,
+        "body_lines": 158,
         "service_calls": 0
       }
     },
@@ -626,7 +649,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/routers/matching.py",
-      "line": 556,
+      "line": 560,
       "subject": "backend.routers.matching:resolve_artist",
       "value": {
         "tasks": 1
@@ -736,10 +759,10 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 757,
+      "line": 758,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
-        "tasks": 1
+        "tasks": 2
       }
     },
     {
@@ -766,7 +789,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "scripts/bench_enrich.py",
-      "line": 434,
+      "line": 442,
       "subject": "scripts.bench_enrich:cmd_run",
       "value": {
         "tasks": 1
@@ -790,7 +813,7 @@
       {
         "file": "backend/routers/matching.py",
         "layer": "router",
-        "line": 556,
+        "line": 560,
         "qualname": "backend.routers.matching:resolve_artist"
       },
       {
@@ -856,7 +879,7 @@
       {
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "layer": "task",
-        "line": 757,
+        "line": 758,
         "qualname": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
       },
       {
@@ -880,11 +903,25 @@
       {
         "file": "scripts/bench_enrich.py",
         "layer": "script",
-        "line": 434,
+        "line": 442,
         "qualname": "scripts.bench_enrich:cmd_run"
       }
     ],
     "tasks": [
+      {
+        "body_lines": 67,
+        "envelope": "task_run",
+        "file": "backend/tasks/artist_linking_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 60,
+        "module": "backend.tasks.artist_linking_tasks",
+        "name": "link_local_artists_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
       {
         "body_lines": 89,
         "envelope": "task_failure_telemetry",
@@ -1091,12 +1128,12 @@
         "schedule": null
       },
       {
-        "body_lines": 146,
+        "body_lines": 158,
         "envelope": "task_run",
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 757,
+        "line": 758,
         "module": "backend.tasks.mb_enrichment_tasks",
         "name": "mb_enrichment_task",
         "params": [],
@@ -1190,7 +1227,7 @@
   "unresolved_dispatch": [
     {
       "file": "scripts/bench_enrich.py",
-      "line": 222,
+      "line": 224,
       "name": "mb_enrichment_task",
       "producer": "scripts.bench_enrich:follow_on_task",
       "reason": "task_as_value"
