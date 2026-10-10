@@ -52,8 +52,10 @@ durations, host names or absolute paths; `file` values are POSIX relative to the
   argument, else null), `retries` (keyword literal, default 0), `envelope`, `body_lines`,
   `registered`, `params` [{name, annotation}].
   - envelope: a `with` item calling a function resolved to a def named `task_run` ->
-    `task_run`; else `task_failure_telemetry` -> that; else a `try` with a handler in the
-    body -> `own`; else `none`. Nested defs are not the task body.
+    `task_run`; else `task_failure_telemetry` -> that; else a `with` item calling a function
+    resolved to a def decorated `@contextmanager` (by name or `contextlib.contextmanager`)
+    whose body has a `try` with a handler -> `context`; else a `try` with a handler in the
+    task body -> `own`; else `none`. Nested defs are not the task body.
   - body_lines = def `end_lineno` - first body statement `lineno` + 1.
   - registered: the task's module is imported by the app module of the task's own
     instance (an import by another instance's app does not count).

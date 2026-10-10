@@ -688,3 +688,102 @@ def test_chains_listing_shows_longest_paths_and_cycles(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert "chain_head_task -> chain_mid_task -> chain_tail_task" in proc.stdout
     assert "cyc_a_task -> cyc_b_task -> cyc_a_task" in proc.stdout
+
+
+# ---- envelope: context managers that catch the task's failures (GAP-01) ----
+
+_CM_APP = """\
+import contextlib
+from contextlib import contextmanager
+
+from huey import SqliteHuey
+
+huey = SqliteHuey(filename="cm.db", results=False)
+
+
+@contextmanager
+def reported_failures(name):
+    try:
+        yield
+    except OSError:
+        print(name)
+
+
+@contextlib.contextmanager
+def attr_reported_failures(name):
+    try:
+        yield
+    except OSError:
+        print(name)
+
+
+@contextmanager
+def timer(name):
+    yield
+
+
+@contextmanager
+def task_run(name):
+    yield
+
+
+@huey.task()
+def reported_task():
+    with reported_failures("x"):
+        work()
+
+
+@huey.task()
+def attribute_form_task():
+    with attr_reported_failures("x"):
+        work()
+
+
+@huey.task()
+def timer_task():
+    with timer("x"):
+        work()
+
+
+@huey.task()
+def timer_with_own_try_task():
+    with timer("x"):
+        try:
+            work()
+        except OSError:
+            print("own")
+
+
+@huey.task()
+def task_run_wins_task():
+    with reported_failures("x"), task_run("x"):
+        work()
+
+
+def work():
+    return None
+"""
+
+
+@pytest.fixture(scope="module")
+def cm_graph(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    root = tmp_path_factory.mktemp("cm_root")
+    (root / "cm_app.py").write_text(_CM_APP, encoding="utf-8")
+    return _analyse(root, tmp_path_factory.mktemp("cm_out"))
+
+
+@pytest.mark.parametrize(
+    ("task", "expected"),
+    [
+        ("reported_task", "context"),  # GAP-01 a
+        ("timer_task", "none"),  # GAP-01 b: a @contextmanager without try/handler
+        ("timer_with_own_try_task", "own"),  # GAP-01 c
+        ("task_run_wins_task", "task_run"),  # GAP-01 d
+        ("attribute_form_task", "context"),  # GAP-01 e: @contextlib.contextmanager
+    ],
+)
+def test_envelope_recognises_context_manager_envelopes(
+    cm_graph: Any, task: str, expected: str
+) -> None:
+    # case GAP-01
+    assert _task(cm_graph, task)["envelope"] == expected
