@@ -160,6 +160,23 @@ def test_non_live_disambiguation_does_not_change_the_version(enrich: Any) -> Non
 
 
 @pytest.mark.parametrize("enrich", _ALL_PATHS)
+def test_a_dated_studio_disambiguation_is_not_live(enrich: Any) -> None:
+    # The title rules read a leading date as a concert date; in a
+    # disambiguation it only says when the recording was made.
+    recording = _recording("It's Beginning to Look a Lot Like Christmas")
+    recording["disambiguation"] = "1951-10-01 recording"
+
+    assert enrich(recording) == VersionType.ORIGINAL
+
+
+@pytest.mark.parametrize("enrich", _ALL_PATHS)
+def test_live_anywhere_in_the_disambiguation_marks_recording_live(enrich: Any) -> None:
+    recording = _recording(disambiguation="And All That Could Have Been Live version")
+
+    assert enrich(recording) == VersionType.LIVE
+
+
+@pytest.mark.parametrize("enrich", _ALL_PATHS)
 def test_live_outranks_another_version_in_the_title(enrich: Any) -> None:
     # A remastered live recording is still live: that is the distinction
     # rotation cares about.

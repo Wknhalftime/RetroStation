@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -18,13 +19,11 @@ from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation, MbRelease
-from backend.services.normalization import (
-    classify_version_descriptor,
-    extract_version_info,
-    normalize_artist,
-)
+from backend.services.normalization import extract_version_info, normalize_artist
 
 logger = structlog.get_logger()
+
+_LIVE_WORD_RE = re.compile(r"\blive\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -103,15 +102,15 @@ def _musicbrainz_marks_live(rec_data: MbRecording) -> bool:
 
     MusicBrainz titles a live recording with the plain song name and says it
     is live elsewhere: a "live" attribute on the performance relation (only
-    lookups carry relations) or a live disambiguation (searches carry this
-    too). Only a live disambiguation is trusted; the title-suffix rules read
-    others wrongly ("album version" would be a remix).
+    lookups carry relations) or "live" in the disambiguation ("live,
+    1988-08-19: Nassau Coliseum"; searches carry this too). The title-suffix
+    rules are not used on the disambiguation: they read "album version" as a
+    remix and a bare date ("1951-10-01 recording") as a concert.
     """
     for rel in rec_data.get("relations", []):
         if rel.get("type") == "performance" and "live" in rel.get("attributes", []):
             return True
-    disambiguation = rec_data.get("disambiguation", "")
-    return classify_version_descriptor(disambiguation) == VersionType.LIVE
+    return _LIVE_WORD_RE.search(rec_data.get("disambiguation", "")) is not None
 
 
 def recording_version_type(rec_data: MbRecording) -> VersionType:
