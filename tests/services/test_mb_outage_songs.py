@@ -28,6 +28,7 @@ file failing to import.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -87,11 +88,15 @@ TRANSIENT: dict[str, BaseException] = {
     "connect_error": httpx.ConnectError("connection refused", request=_request()),
     "read_timeout": httpx.ReadTimeout("timed out", request=_request()),
     "dropped_connection": httpx.RemoteProtocolError("peer closed", request=_request()),
+    "connect_timeout": httpx.ConnectTimeout("connect timed out", request=_request()),
+    "connection_reset": httpx.ReadError("connection reset by peer", request=_request()),
 }
 PERMANENT: dict[str, BaseException] = {
     "400": _http_error(400),
     "404": _http_error(404),
     "unsupported_protocol": httpx.UnsupportedProtocol("no scheme", request=_request()),
+    "proxy_error": httpx.ProxyError("proxy refused", request=_request()),
+    "not_json": json.JSONDecodeError("Expecting value", "<html>", 0),  # a 200 with HTML
 }
 
 
@@ -99,8 +104,9 @@ class _Mb(FakeMbClient):
     """FakeMbClient whose recording search raises for chosen artist MBIDs (D16).
 
     ``errors`` maps an artist MBID to what a search under it raises; ``down`` makes every
-    search raise (a full outage). FakeMbClient records each call first, so ``searches``
-    counts the searches the run made, failed or not.
+    search raise (a full outage); ``cached`` answers those MBIDs from the client's cache,
+    counted in ``cache_hits`` as the real client does. FakeMbClient records each call
+    first, so ``searches`` counts the searches the run made, failed or not.
     """
 
     def __init__(
@@ -109,10 +115,12 @@ class _Mb(FakeMbClient):
         *,
         down: BaseException | None = None,
         recording_searches: dict[tuple[str, str], list[dict[str, Any]]] | None = None,
+        cached: set[str] | None = None,
     ) -> None:
         super().__init__(recording_searches=recording_searches)
         self.errors = errors or {}
         self.down = down
+        self.cached = cached or set()
 
     def search_recording(
         self, artist_mbid: str, title: str, limit: int = 10
@@ -121,6 +129,8 @@ class _Mb(FakeMbClient):
         error = self.down or self.errors.get(artist_mbid)
         if error is not None:
             raise error
+        if artist_mbid in self.cached:
+            self.cache_hits += 1
         return found
 
     @property
@@ -382,14 +392,16 @@ def test_songs_that_never_reach_step_b_are_decided_during_an_outage(scores: Scor
         ("FFFFFS", "DDDDDD", 5),  # after the trip, a search that would succeed is not made
         ("FFFFS", "DDDDR", 5),  # four failures do not trip it
         ("FFFFSFFFFS", "DDDDRDDDDR", 10),  # a successful search resets the count
+        ("FFFFCFFFFC", "DDDDRDDDDR", 10),  # so does an answer from the client's cache
     ],
 )
 def test_five_consecutive_failures_stop_musicbrainz_calls_for_the_rest_of_the_run(
     scores: Scores, answers: str, outcomes: str, searches: int
 ) -> None:
     """``answers``: what MusicBrainz would answer each song, in playlist order (F fails with a
-    503, S succeeds with no recording). ``outcomes``: D deferred, R decided (no candidate at
-    all: auto_rejected). Two songs that never reach Step B come last and are decided."""
+    503, S succeeds with no recording, C does so from the client's cache). ``outcomes``: D
+    deferred, R decided (no candidate at all: auto_rejected). Two songs that never reach
+    Step B come last and are decided."""
     rig = _Rig(scores)
     songs = [rig.song() for _ in answers]
     by_step_a = rig.song("One")
@@ -401,7 +413,8 @@ def test_five_consecutive_failures_stop_musicbrainz_calls_for_the_rest_of_the_ru
             rig.mbid(song): _http_error(503)
             for song, answer in zip(songs, answers, strict=True)
             if answer == "F"
-        }
+        },
+        cached={rig.mbid(s) for s, answer in zip(songs, answers, strict=True) if answer == "C"},
     )
 
     rig.run(mb)
@@ -453,11 +466,18 @@ def test_the_cut_off_is_per_run(scores: Scores) -> None:
     rig.assert_deferred(later)
 
 
-def test_the_failures_the_trip_and_the_deferrals_are_logged(scores: Scores) -> None:
+@pytest.mark.parametrize(
+    ("count", "failures", "trips", "cut_off"),
+    [(7, [1, 2, 3, 4, 5], [5], True), (4, [1, 2, 3, 4], [], False)],
+    ids=["tripped", "not_tripped"],
+)
+def test_the_failures_the_trip_and_the_deferrals_are_logged(
+    scores: Scores, count: int, failures: list[int], trips: list[int], cut_off: bool
+) -> None:
     """The worker log is the operator's only trace of an outage (no FAILED row): one warning
     per failed search, one when the cut-off trips, and the deferrals in the run summary."""
     rig = _Rig(scores)
-    for _ in range(7):
+    for _ in range(count):
         rig.song()
 
     with capture_logs() as logs:
@@ -466,10 +486,12 @@ def test_the_failures_the_trip_and_the_deferrals_are_logged(scores: Scores) -> N
     failed = [e for e in logs if e["event"] == "song_matching_mb_search_failed"]
     tripped = [e for e in logs if e["event"] == "song_matching_mb_cut_off"]
     (summary,) = [e for e in logs if e["event"] == "identity_matching_complete"]
-    assert [e["log_level"] for e in failed] == ["warning"] * 5
-    assert [e["consecutive_failures"] for e in failed] == [1, 2, 3, 4, 5]
-    assert [(e["log_level"], e["consecutive_failures"]) for e in tripped] == [("warning", 5)]
-    assert (summary["deferred"], summary["mb_cut_off"]) == (7, True)
+    assert [e["log_level"] for e in failed] == ["warning"] * len(failures)
+    assert [e["consecutive_failures"] for e in failed] == failures
+    assert [(e["log_level"], e["consecutive_failures"]) for e in tripped] == [
+        ("warning", n) for n in trips
+    ]
+    assert (summary["deferred"], summary["mb_cut_off"]) == (count, cut_off)
 
 
 # --- What still fails, and what wins -----------------------------------------------------------
@@ -608,3 +630,18 @@ def test_scope_all_rewinds_an_outage_song_once() -> None:
     counts = rewind_wave(None, seeds.artists, seeds.songs)
 
     assert counts == RewindCounts(artists=0, songs=1)
+
+
+def test_an_empty_wave_still_rewinds_the_outage_songs() -> None:
+    """A changed re-check with nothing indexed or linked since its watermark has an empty
+    wave (no artist is rewound), yet every outage song is: MusicBrainz coming back changes
+    no file, so no wave would ever name it."""
+    seeds = _Seeds()
+    playlist = uuid4()
+    matched = seeds.artist("queen", MatchStatus.AUTO_MATCHED)
+    seeds.song(matched, MatchStatus.NEEDS_REVIEW, ReasonCode.MB_UNAVAILABLE, playlist)
+
+    counts = rewind_wave(set(), seeds.artists, seeds.songs)
+
+    assert counts == RewindCounts(artists=0, songs=1)
+    assert playlists_with_pending_work(seeds.artists, seeds.songs) == {playlist}
