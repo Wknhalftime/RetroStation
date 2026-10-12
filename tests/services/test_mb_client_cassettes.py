@@ -267,6 +267,10 @@ def test_search_recordings_by_mbids_carries_enrichment_fields(
     assert STAG_RELEASE_MBID in {r["id"] for r in late_bloom["releases"]}
     # Search results carry no relations: works still need lookup_recording.
     assert "relations" not in late_bloom
+    # The disambiguation is the only live marker a search hit carries.
+    enter_sandman = found[ENTER_SANDMAN_RECORDING_MBID]
+    assert enter_sandman["disambiguation"].startswith("live, ")
+    assert late_bloom.get("disambiguation", "") == ""
     assert client.live_fetches == 1
 
 

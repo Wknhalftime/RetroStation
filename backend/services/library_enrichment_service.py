@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
 import structlog
 
 from backend.domain.catalog import MusicBrainzId, Recording
-from backend.domain.enums import EnrichmentStatus
+from backend.domain.enums import EnrichmentStatus, VersionType
 from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
@@ -21,6 +22,8 @@ from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation, M
 from backend.services.normalization import extract_version_info, normalize_artist
 
 logger = structlog.get_logger()
+
+_LIVE_WORD_RE = re.compile(r"\blive\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,30 @@ def _extract_work_from_relations(
     return None
 
 
+def _musicbrainz_marks_live(rec_data: MbRecording) -> bool:
+    """Whether MusicBrainz records this recording as a live performance.
+
+    MusicBrainz titles a live recording with the plain song name and says it
+    is live elsewhere: a "live" attribute on the performance relation (only
+    lookups carry relations) or "live" in the disambiguation ("live,
+    1988-08-19: Nassau Coliseum"; searches carry this too). The title-suffix
+    rules are not used on the disambiguation: they read "album version" as a
+    remix and a bare date ("1951-10-01 recording") as a concert.
+    """
+    for rel in rec_data.get("relations", []):
+        if rel.get("type") == "performance" and "live" in rel.get("attributes", []):
+            return True
+    return _LIVE_WORD_RE.search(rec_data.get("disambiguation", "")) is not None
+
+
+def recording_version_type(rec_data: MbRecording) -> VersionType:
+    """The version a MusicBrainz recording is: live if MusicBrainz says so, else from its title."""
+    if _musicbrainz_marks_live(rec_data):
+        return VersionType.LIVE
+    _, version_type = extract_version_info(rec_data.get("title", ""))
+    return version_type
+
+
 def _upsert_recording_with_work(
     rec_mbid: str,
     rec_data: MbRecording,
@@ -112,15 +139,13 @@ def _upsert_recording_with_work(
             artist_id=artist_id,
         )
 
-    rec_title = rec_data.get("title", "")
-    _, version_type = extract_version_info(rec_title)
     repos.recordings.upsert(
         Recording(
             id=rec_mbid,
-            title=rec_title,
+            title=rec_data.get("title", ""),
             work_id=work_id,
             duration_ms=rec_data.get("length"),
-            version_type=version_type,
+            version_type=recording_version_type(rec_data),
         )
     )
     return work_id
@@ -426,15 +451,13 @@ def enrich_by_recording_batch(
             unresolved.append(library_file)
             continue
         _upsert_artist_from_credits(rec_data.get("artist-credit", []), repos.artists)
-        rec_title = rec_data.get("title", "")
-        _, version_type = extract_version_info(rec_title)
         repos.recordings.upsert(
             Recording(
                 id=rec_mbid,
-                title=rec_title,
+                title=rec_data.get("title", ""),
                 work_id=None,
                 duration_ms=rec_data.get("length"),
-                version_type=version_type,
+                version_type=recording_version_type(rec_data),
             )
         )
         _link_file_to_recording(library_file, rec_mbid, repos.files)

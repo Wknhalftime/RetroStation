@@ -29,6 +29,7 @@ class MbWorkRef(TypedDict, total=False):
 
 class MbRelation(TypedDict, total=False):
     type: str
+    attributes: list[str]  # e.g. ["live"] on a live recording's performance relation
     work: MbWorkRef
 
 
@@ -118,6 +119,7 @@ MbRecording = TypedDict(
     {
         "id": str,
         "title": str,
+        "disambiguation": str,
         "artist-credit": list[MbArtistCredit],
         "relations": list[MbRelation],
         "releases": list[MbReleaseRef],
