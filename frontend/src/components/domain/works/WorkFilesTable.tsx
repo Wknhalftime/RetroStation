@@ -92,16 +92,27 @@ export function WorkFilesTable({
                   </button>
                 )}
 
-                {/* File name */}
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-sm",
-                    isMaster ? "font-medium text-amber-900" : "text-gray-700"
+                {/* File name, and the album it is from */}
+                <div className="min-w-0 flex-1">
+                  <div
+                    className={cn(
+                      "truncate text-sm",
+                      isMaster ? "font-medium text-amber-900" : "text-gray-700"
+                    )}
+                    title={file.file_path}
+                  >
+                    {basename(file.file_path)}
+                  </div>
+                  {file.release_title && (
+                    <div
+                      className="truncate text-xs text-gray-400"
+                      title={file.release_title}
+                      data-testid="file-album"
+                    >
+                      {file.release_title}
+                    </div>
                   )}
-                  title={file.file_path}
-                >
-                  {basename(file.file_path)}
-                </span>
+                </div>
 
                 {isMissing && (
                   <span

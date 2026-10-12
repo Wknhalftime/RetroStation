@@ -66,4 +66,54 @@ describe("WorkFilesTable", () => {
     expect(screen.getAllByText("Missing")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Set as master file" })).toHaveLength(1);
   });
+
+  it("names the album each file is from", () => {
+    const fromTwoAlbums: RecordingDetail[] = [
+      {
+        ...recordings[0],
+        files: [
+          file("22222222-2222-4222-8222-222222222222", "new.flac", "present"),
+          {
+            ...file("44444444-4444-4444-8444-444444444444", "hits.flac", "present"),
+            release_title: "Greatest Hits",
+          },
+        ],
+      },
+    ];
+    render(
+      <WorkFilesTable
+        recordings={fromTwoAlbums}
+        masterFileId={null}
+        masterMethod={null}
+        onSetMaster={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Pulp Fiction")).toBeTruthy();
+    expect(screen.getByText("Greatest Hits")).toBeTruthy();
+  });
+
+  it("shows no album line for a file without an album tag", () => {
+    const untagged: RecordingDetail[] = [
+      {
+        ...recordings[0],
+        files: [
+          {
+            ...file("22222222-2222-4222-8222-222222222222", "new.flac", "present"),
+            release_title: null,
+          },
+        ],
+      },
+    ];
+    render(
+      <WorkFilesTable
+        recordings={untagged}
+        masterFileId={null}
+        masterMethod={null}
+        onSetMaster={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("file-album")).toBeNull();
+  });
 });
