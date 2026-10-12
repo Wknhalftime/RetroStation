@@ -92,6 +92,8 @@ def _slim_recording(recording: MbRecording) -> MbRecording:
     slim: dict[str, Any] = {"id": recording.get("id"), "title": recording.get("title", "")}
     if recording.get("length") is not None:
         slim["length"] = recording["length"]
+    if recording.get("disambiguation"):
+        slim["disambiguation"] = recording["disambiguation"]  # e.g. "live, 1988-08-19"
     credits: list[dict[str, Any]] = []
     for credit in recording.get("artist-credit", []):
         artist = credit.get("artist") or {}
