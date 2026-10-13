@@ -1391,6 +1391,12 @@ def test_title_part_number_reads_digits_and_roman_numerals() -> None:
     assert title_part_number("song part iv the return") == 4
 
 
+def test_title_part_number_reads_spelled_out_numbers() -> None:
+    assert title_part_number("the look of love part one") == 1
+    assert title_part_number("the look of love part four") == 4
+    assert title_part_number("song pt twelve") == 12
+
+
 def test_title_part_number_ignores_words_that_only_look_like_parts() -> None:
     assert title_part_number("hey jude") is None
     assert title_part_number("part time lover") is None
@@ -1405,4 +1411,5 @@ def test_canonicalize_part_number_writes_one_spelling() -> None:
         "another brick in the wall part 2"
     )
     assert canonicalize_part_number("song part 2") == "song part 2"
+    assert canonicalize_part_number("the look of love part four") == "the look of love part 4"
     assert canonicalize_part_number("part time lover") == "part time lover"

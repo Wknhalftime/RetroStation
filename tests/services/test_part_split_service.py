@@ -93,6 +93,17 @@ def test_plan_names_the_files_whose_part_differs_from_the_work_title() -> None:
     ]
 
 
+def test_plan_reads_spelled_out_part_numbers() -> None:
+    repos = _make_repos()
+    work_id = _work(repos, "The Look of Love, Part One", artist="ABC")
+    _file(repos, "The Look of Love, Part One", work_id, artist="ABC")
+    four = _file(repos, "The Look of Love, Part Four", work_id, artist="ABC")
+
+    (plan,) = plan_part_splits(repos.works, repos.files)
+
+    assert plan.file_ids == (four.id,)
+
+
 def test_plan_skips_works_whose_files_agree() -> None:
     repos = _make_repos()
     work_id = _work(repos, "Song, Part II")
