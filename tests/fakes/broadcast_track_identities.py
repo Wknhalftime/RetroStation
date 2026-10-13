@@ -170,6 +170,26 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             rewound += 1
         return rewound
 
+    def rewind_mb_unavailable(self) -> int:
+        # Mirrors Pg: every NEEDS_REVIEW / MB_UNAVAILABLE song (deferred by a MusicBrainz
+        # outage), whatever its artist, goes to PENDING with tier and reason cleared (AUD-R028,
+        # D16). DEFERRED_RETRY songs keep artist matching's own reset. No match rows here.
+        rewound = 0
+        for identity_id, identity in list(self._data.items()):
+            if (
+                identity.match_status == MatchStatus.NEEDS_REVIEW
+                and identity.reason_code == ReasonCode.MB_UNAVAILABLE
+            ):
+                self._data[identity_id] = replace(
+                    identity,
+                    match_status=MatchStatus.PENDING,
+                    match_tier=None,
+                    reason_code=None,
+                    reason_detail=None,
+                )
+                rewound += 1
+        return rewound
+
     def playlist_ids_with_pending(self) -> set[UUID]:
         return {
             playlist_id
