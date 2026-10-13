@@ -1,8 +1,8 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-09.** Checked against master 78d0902 plus D15 (feat/local-artist-mbids)
+**Status: 2026-10-13.** Checked against master b11670b plus D16 (fix/mb-outage-songs)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R026 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R028 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -56,7 +56,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY) | ingest, matchers, review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE) | ingest, matchers, review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028) |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
@@ -89,7 +89,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
   cue-analysis resume (every 5 min each), cue prune. Matching has no periodic reconcile: work a
   lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
-  button).
+  button), and so does a song a MusicBrainz outage deferred (MB_UNAVAILABLE), which every
+  re-check rewinds (AUD-R028).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
   a duplicated re-check repeats its rewind and fan-out, and decided items are never touched.
