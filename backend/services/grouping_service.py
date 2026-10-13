@@ -91,8 +91,10 @@ def _fuzzy_match_work(
     """Fuzzy-match norm_base against work titles for norm_artist; return work_id or None.
 
     Titles are compared with their part number spelled one way ("pt ii" and
-    "part 2" are the same part), and a candidate with a different part number
-    is never a match: "..., Part 1" scores 96 against "..., Part II".
+    "part 2" are the same part), and a candidate with a different part number,
+    or with one where the title has none, is never a match: "..., Part 1"
+    scores 96 against "..., Part II", "The Unforgiven" 91 against "The
+    Unforgiven III".
     """
     if not norm_base:
         return None
@@ -109,8 +111,7 @@ def _fuzzy_match_work(
 
     for candidate_id, candidate_title in work_candidates:
         norm_candidate = canonicalize_part_number(normalize_title(candidate_title))
-        candidate_part = title_part_number(norm_candidate)
-        if input_part is not None and candidate_part is not None and input_part != candidate_part:
+        if title_part_number(norm_candidate) != input_part:
             continue
         if strict_input == strict_normalize(norm_candidate):
             score = 100.0

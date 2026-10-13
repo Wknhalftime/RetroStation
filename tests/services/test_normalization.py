@@ -1397,11 +1397,29 @@ def test_title_part_number_reads_spelled_out_numbers() -> None:
     assert title_part_number("song pt twelve") == 12
 
 
+def test_title_part_number_reads_a_trailing_roman_numeral() -> None:
+    """A sequel numbered without "Part": "The Unforgiven III", "Synchronicity I"."""
+    assert title_part_number("the unforgiven iii") == 3
+    assert title_part_number("synchronicity i") == 1
+    assert title_part_number("planets iv") == 4
+
+
+def test_title_part_number_reads_no_and_unspaced_pt() -> None:
+    assert title_part_number("angel dream no 2") == 2
+    assert title_part_number("da art of storytellin pt1") == 1
+
+
+def test_title_part_number_ignores_trailing_digits() -> None:
+    """A trailing number is a year or an edit label, not a sequel: "Candle in the Wind '97"."""
+    assert title_part_number("candle in the wind 97") is None
+    assert title_part_number("love dont cost a thing main rap 1") is None
+    assert title_part_number("the unforgiven") is None
+
+
 def test_title_part_number_ignores_words_that_only_look_like_parts() -> None:
     assert title_part_number("hey jude") is None
     assert title_part_number("part time lover") is None
     assert title_part_number("part of me") is None
-    assert title_part_number("parts i v") is None
     # Every letter is a roman digit, but "civil" is not a numeral.
     assert title_part_number("part civil") is None
 

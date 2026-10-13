@@ -283,10 +283,18 @@ _PART_WORDS = {
         start=1,
     )
 }
-# A part number inside a normalized title ("part 2", "pt ii", "part four").
-# Normalization has already lowercased it and dropped the "." of "Pt.". The
-# roman branch is checked by _ROMAN_NUMERAL_RE so "part civil" is not a part.
-_TITLE_PART_RE = re.compile(r"\b(?:part|pt) (\d+|[ivxlc]+|" + "|".join(_PART_WORDS) + r")\b")
+# A part number inside a normalized title: "part 2", "pt ii", "part four",
+# "no 2", "pt1". Normalization has already lowercased it and dropped the "." of
+# "Pt." and "No.". Digits may follow without a space; a roman numeral or word
+# needs one. The roman branch is checked by _ROMAN_NUMERAL_RE, so "part civil"
+# is not a part.
+_TITLE_PART_RE = re.compile(
+    r"\b(?:(?:part|pt) (?=[a-z])|(?:part|pt|no) ?(?=\d))"
+    r"(\d+|[ivxlc]+|" + "|".join(_PART_WORDS) + r")\b"
+)
+# A sequel numbered without "Part": "The Unforgiven III", "Synchronicity I".
+# Trailing digits are not read: they are years and edit labels ("'97", "#1").
+_TRAILING_ROMAN_RE = re.compile(r"\S ([ivxlc]+)$")
 _ROMAN_NUMERAL_RE = re.compile(r"c{0,3}(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})")
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
 
@@ -310,10 +318,15 @@ def title_part_number(normalized_title: str) -> int | None:
     """The part number a normalized title carries ("part ii" -> 2), or None.
 
     "Another Brick in the Wall, Part 1" and "..., Part II" are different
-    songs, though their titles differ by one character.
+    songs, though their titles differ by one character; so are "The
+    Unforgiven" and "The Unforgiven III".
     """
     match = _TITLE_PART_RE.search(normalized_title)
-    return _part_value(match.group(1)) if match else None
+    value = _part_value(match.group(1)) if match else None
+    if value is not None:
+        return value
+    trailing = _TRAILING_ROMAN_RE.search(normalized_title)
+    return _part_value(trailing.group(1)) if trailing else None
 
 
 def canonicalize_part_number(normalized_title: str) -> str:

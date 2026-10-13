@@ -115,14 +115,34 @@ def test_plan_skips_works_whose_files_agree() -> None:
     assert plan_part_splits(repos.works, repos.files) == []
 
 
-def test_plan_leaves_a_work_without_a_part_in_its_title_alone() -> None:
-    """Which part a bare "Shine On You Crazy Diamond" is, no title says."""
+def test_plan_moves_numbered_files_off_an_unnumbered_work() -> None:
+    """A numbered title never belongs on an unnumbered work, nor the reverse."""
     repos = _make_repos()
     work_id = _work(repos, "Shine On You Crazy Diamond")
-    _file(repos, "Shine On You Crazy Diamond (Part 1)", work_id)
-    _file(repos, "Shine On You Crazy Diamond (Part 2)", work_id)
+    _file(repos, "Shine On You Crazy Diamond", work_id)
+    one = _file(repos, "Shine On You Crazy Diamond (Part 1)", work_id)
+    two = _file(repos, "Shine On You Crazy Diamond (Part 2)", work_id)
 
-    assert plan_part_splits(repos.works, repos.files) == []
+    (plan,) = plan_part_splits(repos.works, repos.files)
+
+    assert plan.file_ids == tuple(sorted((one.id, two.id), key=str))
+
+
+def test_split_moves_an_unnumbered_file_off_a_numbered_work() -> None:
+    """The reported Metallica state: "The Unforgiven" on "The Unforgiven III"."""
+    repos = _make_repos()
+    work_id = _work(repos, "The Unforgiven III", artist="Metallica")
+    _file(repos, "The Unforgiven III", work_id, artist="Metallica")
+    first = _file(repos, "The Unforgiven", work_id, artist="Metallica")
+
+    (plan,) = plan_part_splits(repos.works, repos.files)
+    split_misplaced_parts(plan, repos)
+
+    moved = repos.files.get_by_id(first.id)
+    assert moved is not None and moved.work_id is not None
+    work = repos.works.get_by_id(moved.work_id)
+    assert work is not None
+    assert work.title == "The Unforgiven"
 
 
 def test_split_moves_each_part_to_its_own_work() -> None:

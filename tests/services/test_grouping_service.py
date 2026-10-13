@@ -486,3 +486,35 @@ def test_short_title_part_spellings_share_a_work() -> None:
     result = assign_work(_make_file(artist_name="Rush", track_title="Fear (Part 3)"), **repos)
     assert result is not None
     assert result.work_id == existing_work
+
+
+def _group_in_order(repos: dict, artist: str, *titles: str) -> list[str]:
+    work_ids = []
+    for title in titles:
+        result = assign_work(_make_file(artist_name=artist, track_title=title), **repos)
+        assert result is not None
+        work_ids.append(result.work_id)
+    return work_ids
+
+
+def test_a_numbered_title_never_joins_an_unnumbered_work() -> None:
+    """ "The Unforgiven" and "The Unforgiven III" are different songs, either order."""
+    for titles in (
+        ("The Unforgiven III", "The Unforgiven"),
+        ("The Unforgiven", "The Unforgiven III"),
+    ):
+        first, second = _group_in_order(_make_repos(), "Metallica", *titles)
+        assert first != second
+
+
+def test_trailing_roman_numerals_are_different_works() -> None:
+    one, two = _group_in_order(_make_repos(), "The Police", "Synchronicity I", "Synchronicity II")
+    assert one != two
+
+
+def test_a_trailing_year_does_not_split_a_song() -> None:
+    """ "'97" is a re-recording of the same song, not a sequel."""
+    plain, remake = _group_in_order(
+        _make_repos(), "Motley Crue", "Shout at the Devil", "Shout at the Devil '97"
+    )
+    assert plain == remake

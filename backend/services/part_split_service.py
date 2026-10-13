@@ -4,9 +4,10 @@ Grouping used to fuzzy-match "Another Brick in the Wall, Part 1" onto an
 existing "..., Part II" work: the titles differ by one character and scored 96
 against a threshold of 80. That is fixed going forward (see
 ``grouping_service._fuzzy_match_work``); this service repairs the works it
-left behind. Only a work whose own title names a part is planned: a bare
-"Shine On You Crazy Diamond" holding Parts 1 and 2 says nothing about which
-file belongs, so it is left for a person.
+left behind. A file belongs on its work only when both titles carry the same
+part number or neither carries one: "The Unforgiven" moves off "The
+Unforgiven III", and "Shine On You Crazy Diamond (Part 1)" off the bare
+"Shine On You Crazy Diamond".
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ from backend.repositories.matches import MatchRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.grouping_service import find_or_create_work
-from backend.services.normalization import normalize_title, title_part_number
+from backend.services.normalization import (
+    extract_version_info,
+    normalize_title,
+    title_part_number,
+)
 from backend.services.work_move_service import WorkMoveRepos, move_file_to_work
 
 logger = structlog.get_logger()
@@ -41,28 +46,24 @@ class PartSplitRepos:
 
 
 def _part_of(title: str) -> int | None:
-    return title_part_number(normalize_title(title))
+    """The part number grouping reads from a title, after stripping version tags."""
+    base_title, _ = extract_version_info(title)
+    return title_part_number(normalize_title(base_title))
 
 
-def _misplaced(work_part: int, files: list[LibraryFile]) -> tuple[LibraryFile, ...]:
-    """The files whose title names a part other than ``work_part``."""
-    return tuple(
-        f
-        for f in files
-        if (part := _part_of(f.audio.track_title or "")) is not None and part != work_part
-    )
+def _misplaced(work_part: int | None, files: list[LibraryFile]) -> tuple[LibraryFile, ...]:
+    """The files whose title's part number (or lack of one) differs from ``work_part``."""
+    return tuple(f for f in files if _part_of(f.audio.track_title or "") != work_part)
 
 
 def plan_part_splits(
     work_repo: WorkRepository,
     library_file_repo: LibraryFileRepository,
 ) -> list[PartSplitPlan]:
-    """Every local work holding files of a part other than the one its title names."""
+    """Every local work holding files whose part number differs from its title's."""
     plans: list[PartSplitPlan] = []
     for footprint in work_repo.list_local_footprints():
         work_part = _part_of(footprint.title)
-        if work_part is None:
-            continue
         misplaced = _misplaced(work_part, library_file_repo.get_by_work(footprint.id))
         if misplaced:
             plans.append(
