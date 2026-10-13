@@ -20,6 +20,9 @@ MIN_PRESENTATION_SCORE: int = 50
 SONG_MIN_PRESENTATION_SCORE: int = 56
 # Song name lookups (Tier 1 Step C, Tier 2): a bound, not a sample (D13). Dev DB max 177 files.
 SONG_NAME_LOOKUP_LIMIT: int = 1000
+# Song matching's MusicBrainz cut-off (AUD-R028, D16): after this many consecutive transient
+# recording-search failures, one run stops calling MusicBrainz and defers the songs that need it.
+SONG_MB_FAILURE_CUTOFF: int = 5
 # Triage boundary: identities with confidence ≥ this render as "quick_review".
 # Below this (but ≥ SONG_MIN_PRESENTATION_SCORE) they render as "needs_attention".
 QUICK_REVIEW_MIN_SCORE: int = 65
