@@ -2343,6 +2343,71 @@ class TestRecalculateSongMasterOrphans:
         assert row["preferred_file_id"] == lf_orphan.id
 
 
+class TestOldWorkLeftWithOnlyMissingFiles:
+    """The work a file leaves keeps only a missing file: its master must not follow the file.
+
+    The work is not deleted (a file still points at it) and no present file
+    can be picked, so a master on the moved file is dropped rather than left
+    pointing at a file on another work.
+    """
+
+    def _seed(self, db_conn, suffix: str) -> tuple[Work, LibraryFile]:
+        _, work, _, moving = _seed_canonical_chain(
+            db_conn,
+            artist_mbid=f"a-{suffix}",
+            work_mbid=f"w1-{suffix}",
+            recording_mbid=f"r1-{suffix}",
+            file_path=f"/m/{suffix}_moving.flac",
+        )
+        gone = PgLibraryFileRepository(db_conn).upsert(
+            _make_file(f"/m/{suffix}_gone.flac", recording_id=None, work_id=work.id)
+        )
+        db_conn.execute(
+            "UPDATE library_files SET file_status = 'missing' WHERE id = %s", (gone.id,)
+        )
+        PgWorkRepository(db_conn).upsert(_make_work(f"w2-{suffix}", "Other", f"a-{suffix}"))
+        PgSongMasterRepository(db_conn).upsert(
+            SongMaster(
+                id=uuid4(),
+                work_id=work.id,
+                preferred_file_id=moving.id,
+                selection_method=SelectionMethod.AUTO,
+            )
+        )
+        db_conn.commit()
+        return work, moving
+
+    def _master_file(self, db_conn, work_id: str) -> UUID | None:
+        row = db_conn.execute(
+            "SELECT preferred_file_id FROM song_masters WHERE work_id = %s", (work_id,)
+        ).fetchone()
+        return row["preferred_file_id"] if row else None
+
+    def test_reassign_drops_the_old_works_master(self, client, db_conn) -> None:
+        work, moving = self._seed(db_conn, "only-missing-rs")
+
+        resp = client.patch(
+            f"/api/v1/library/files/{moving.id}/work",
+            json={"work_id": "w2-only-missing-rs"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["old_work_deleted"] is False
+        assert self._master_file(db_conn, work.id) is None
+
+    def test_split_drops_the_old_works_master(self, client, db_conn) -> None:
+        work, moving = self._seed(db_conn, "only-missing-sp")
+
+        resp = client.post(
+            f"/api/v1/library/works/{work.id}/split",
+            json={"file_id": str(moving.id)},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["old_work_deleted"] is False
+        assert self._master_file(db_conn, work.id) is None
+
+
 # ---------------------------------------------------------------------------
 # Tests — LibraryFiles search  (/api/v1/library/files)
 # ---------------------------------------------------------------------------
