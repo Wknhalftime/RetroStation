@@ -2,6 +2,7 @@
 
 from backend.domain.enums import VersionType
 from backend.services.normalization import (
+    canonicalize_part_number,
     classify_version_descriptor,
     compute_normalized_signature,
     detect_embedded_remix,
@@ -12,6 +13,7 @@ from backend.services.normalization import (
     normalize_title,
     split_artist_string,
     strip_bracketed_groups,
+    title_part_number,
 )
 
 # ---------------------------------------------------------------------------
@@ -1374,3 +1376,40 @@ def test_strip_bracketed_groups_leaves_unbalanced_and_plain_titles_alone() -> No
 
 def test_strip_bracketed_groups_keeps_a_title_that_is_only_a_group() -> None:
     assert strip_bracketed_groups("(Untitled)") == "(Untitled)"
+
+
+# ---------------------------------------------------------------------------
+# Part numbers: "Part 1" and "Part II" are different songs
+# ---------------------------------------------------------------------------
+
+
+def test_title_part_number_reads_digits_and_roman_numerals() -> None:
+    assert title_part_number("another brick in the wall part 1") == 1
+    assert title_part_number("another brick in the wall part ii") == 2
+    assert title_part_number("another brick in the wall pt 2") == 2
+    assert title_part_number("song pt iii") == 3
+    assert title_part_number("song part iv the return") == 4
+
+
+def test_title_part_number_reads_spelled_out_numbers() -> None:
+    assert title_part_number("the look of love part one") == 1
+    assert title_part_number("the look of love part four") == 4
+    assert title_part_number("song pt twelve") == 12
+
+
+def test_title_part_number_ignores_words_that_only_look_like_parts() -> None:
+    assert title_part_number("hey jude") is None
+    assert title_part_number("part time lover") is None
+    assert title_part_number("part of me") is None
+    assert title_part_number("parts i v") is None
+    # Every letter is a roman digit, but "civil" is not a numeral.
+    assert title_part_number("part civil") is None
+
+
+def test_canonicalize_part_number_writes_one_spelling() -> None:
+    assert canonicalize_part_number("another brick in the wall pt ii") == (
+        "another brick in the wall part 2"
+    )
+    assert canonicalize_part_number("song part 2") == "song part 2"
+    assert canonicalize_part_number("the look of love part four") == "the look of love part 4"
+    assert canonicalize_part_number("part time lover") == "part time lover"

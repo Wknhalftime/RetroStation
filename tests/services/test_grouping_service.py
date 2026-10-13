@@ -440,3 +440,49 @@ def test_album_version_collapses_to_base_work() -> None:
     )
     assert result is not None
     assert result.work_id == plain_work
+
+
+def test_different_part_numbers_are_different_works() -> None:
+    """Parts 1 and 3 of a song are not versions of Part II.
+
+    Replays the reported Pink Floyd order: the live "Part II" was grouped
+    first and the three studio parts all scored 96 against it.
+    """
+    repos = _make_repos()
+    titles = [
+        "Another Brick in the Wall, Part II",
+        "Another Brick in the Wall, Part 1",
+        "Another Brick in the Wall, Part 2",
+        "Another Brick in the Wall, Part 3",
+    ]
+    work_ids = []
+    for title in titles:
+        result = assign_work(_make_file(artist_name="Pink Floyd", track_title=title), **repos)
+        assert result is not None
+        work_ids.append(result.work_id)
+    part_ii, part_1, part_2, part_3 = work_ids
+    assert part_2 == part_ii
+    assert len({part_ii, part_1, part_3}) == 3
+
+
+def test_part_number_spellings_share_a_work() -> None:
+    """ "Pt. 2" and "Part II" are the same part, spelled two ways."""
+    repos = _make_repos()
+    _, existing_work = _seed_file_in_work(
+        repos, artist_name="Pink Floyd", track_title="Another Brick in the Wall, Part II"
+    )
+    result = assign_work(
+        _make_file(artist_name="Pink Floyd", track_title="Another Brick in the Wall, Pt. 2"),
+        **repos,
+    )
+    assert result is not None
+    assert result.work_id == existing_work
+
+
+def test_short_title_part_spellings_share_a_work() -> None:
+    """A short title needs 90+; the part spelling alone must not cost the match."""
+    repos = _make_repos()
+    _, existing_work = _seed_file_in_work(repos, artist_name="Rush", track_title="Fear, Pt. III")
+    result = assign_work(_make_file(artist_name="Rush", track_title="Fear (Part 3)"), **repos)
+    assert result is not None
+    assert result.work_id == existing_work

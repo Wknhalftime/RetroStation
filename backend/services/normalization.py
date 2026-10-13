@@ -254,6 +254,78 @@ def strict_normalize(text: str) -> str:
     return re.sub(r" +", " ", stripped).strip()
 
 
+# Spelled-out part numbers: "The Look of Love, Part Four".
+_PART_WORDS = {
+    word: value
+    for value, word in enumerate(
+        [
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "eleven",
+            "twelve",
+            "thirteen",
+            "fourteen",
+            "fifteen",
+            "sixteen",
+            "seventeen",
+            "eighteen",
+            "nineteen",
+            "twenty",
+        ],
+        start=1,
+    )
+}
+# A part number inside a normalized title ("part 2", "pt ii", "part four").
+# Normalization has already lowercased it and dropped the "." of "Pt.". The
+# roman branch is checked by _ROMAN_NUMERAL_RE so "part civil" is not a part.
+_TITLE_PART_RE = re.compile(r"\b(?:part|pt) (\d+|[ivxlc]+|" + "|".join(_PART_WORDS) + r")\b")
+_ROMAN_NUMERAL_RE = re.compile(r"c{0,3}(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})")
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+
+
+def _part_value(numeral: str) -> int | None:
+    """The integer a digit, roman numeral or number word spells, or None if none."""
+    if numeral.isdigit():
+        return int(numeral)
+    if numeral in _PART_WORDS:
+        return _PART_WORDS[numeral]
+    if not _ROMAN_NUMERAL_RE.fullmatch(numeral):
+        return None
+    total = 0
+    for char, following in zip(numeral, [*numeral[1:], ""], strict=True):
+        value = _ROMAN_VALUES[char]
+        total += -value if following and _ROMAN_VALUES[following] > value else value
+    return total
+
+
+def title_part_number(normalized_title: str) -> int | None:
+    """The part number a normalized title carries ("part ii" -> 2), or None.
+
+    "Another Brick in the Wall, Part 1" and "..., Part II" are different
+    songs, though their titles differ by one character.
+    """
+    match = _TITLE_PART_RE.search(normalized_title)
+    return _part_value(match.group(1)) if match else None
+
+
+def canonicalize_part_number(normalized_title: str) -> str:
+    """Spell a normalized title's part number one way: "pt ii" -> "part 2"."""
+    match = _TITLE_PART_RE.search(normalized_title)
+    value = _part_value(match.group(1)) if match else None
+    if match is None or value is None:
+        return normalized_title
+    start, end = match.span()
+    return f"{normalized_title[:start]}part {value}{normalized_title[end:]}"
+
+
 def compute_normalized_signature(normalized_artist: str, normalized_title: str) -> str:
     """Compute deterministic 32-char hex signature for TrackIdentity (FR18).
 
