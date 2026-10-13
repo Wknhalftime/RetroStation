@@ -30,7 +30,7 @@ from backend.services.case_duplicate_service import (
     apply_case_duplicate_repair,
     plan_case_duplicate_repairs,
 )
-from backend.services.repository_factory import RepositoryFactory
+from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 
 _SAMPLE_SIZE = 10
 
@@ -92,7 +92,7 @@ def main() -> None:
         for repair in repairs:
             try:
                 with conn.transaction():
-                    apply_case_duplicate_repair(repair, repos.library_files)
+                    apply_case_duplicate_repair(repair, reconciliation_repos(repos))
             except psycopg.errors.ForeignKeyViolation:
                 # The keeper was deleted since planning; its group is moot.
                 failed += 1

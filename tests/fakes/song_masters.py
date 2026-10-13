@@ -60,6 +60,18 @@ class FakeSongMasterRepository(SongMasterRepository):
                 stranded.append(work_id)
         return sorted(stranded)
 
+    def list_work_ids_with_master_off_work(self) -> list[str]:
+        # Mirrors PgSongMasterRepository; needs the library file repo, as above.
+        files = self._library_file_repo
+        if files is None:
+            return []
+        off_work = []
+        for work_id, master in self._data.items():
+            chosen = files.get_by_id(master.preferred_file_id)
+            if chosen is not None and chosen.work_id != work_id:
+                off_work.append(work_id)
+        return sorted(off_work)
+
     def set_library_file_repo(self, repo: LibraryFileRepository) -> None:
         """Inject the library file repo the missing-master listing reads statuses from."""
         self._library_file_repo = repo

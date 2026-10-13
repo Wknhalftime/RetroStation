@@ -52,20 +52,40 @@ def _settle_previous_work(
     moved_to: str,
     repos: WorkMoveRepos,
 ) -> None:
-    """Delete the work a file just left, or re-pick its master if the work stays.
-
-    Once nothing references the work it is deleted, taking its now-stale song
-    master with it. Otherwise its master is re-picked from its own present
-    files, so it never points at the file that moved away: a manual pick on a
-    file still in the work is kept, an invalid one becomes the automatic pick,
-    and with no present file left the master is removed.
-    """
-    if repos.works.delete_if_empty(previous_work_id):
+    """Settle the work a file just left (see :func:`_settle_work`)."""
+    if _settle_work(previous_work_id, repos):
         logger.info(
             "empty_work_deleted_after_move",
             work_id=previous_work_id,
             file_id=str(file_id),
             moved_to=moved_to,
         )
-        return
-    reselect_master_from_files(previous_work_id, repos.song_masters, repos.files)
+
+
+def _settle_work(work_id: str, repos: WorkMoveRepos) -> bool:
+    """Delete a work nothing references, or else re-pick its master; whether it was deleted.
+
+    A deleted work takes its now-stale song master with it. A work that stays
+    re-picks its master from its own present files, so it never points at a
+    file on another work: a manual pick on a file still in the work is kept,
+    an invalid one becomes the automatic pick, and with no present file left
+    the master is removed.
+    """
+    if repos.works.delete_if_empty(work_id):
+        return True
+    reselect_master_from_files(work_id, repos.song_masters, repos.files)
+    return False
+
+
+def settle_misplaced_masters(repos: WorkMoveRepos) -> list[str]:
+    """Settle every work whose song master points at a file on another work; their ids.
+
+    Repairs what moves made before the work a file left was settled (#110)
+    left behind: each such work is settled as :func:`move_file_to_work`
+    settles the work a file leaves.
+    """
+    work_ids = repos.song_masters.list_work_ids_with_master_off_work()
+    for work_id in work_ids:
+        deleted = _settle_work(work_id, repos)
+        logger.info("misplaced_master_settled", work_id=work_id, work_deleted=deleted)
+    return work_ids

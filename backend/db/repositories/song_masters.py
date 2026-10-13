@@ -115,3 +115,13 @@ class PgSongMasterRepository(SongMasterRepository):
             },
         ).fetchall()
         return [r["work_id"] for r in rows]
+
+    def list_work_ids_with_master_off_work(self) -> list[str]:
+        rows = self._conn.execute(
+            """SELECT sm.work_id
+               FROM song_masters sm
+               JOIN library_files master ON master.id = sm.preferred_file_id
+               WHERE master.work_id IS DISTINCT FROM sm.work_id
+               ORDER BY sm.work_id"""
+        ).fetchall()
+        return [r["work_id"] for r in rows]
