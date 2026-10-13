@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from uuid import UUID
 
 import structlog
 
@@ -16,10 +15,10 @@ from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
-from backend.services.master_selection_service import reselect_master_from_files
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation, MbRelease
 from backend.services.normalization import extract_version_info, normalize_artist
+from backend.services.work_move_service import WorkMoveRepos, move_file_to_work
 
 logger = structlog.get_logger()
 
@@ -178,46 +177,19 @@ def _move_file_to_work(
 ) -> None:
     """Attach a file to the work MusicBrainz says its recording performs.
 
-    Grouping gave the file a local work at scan time. The file moves to the
-    MusicBrainz work and its matches follow it; the MusicBrainz work then
-    gets (or re-picks) an auto song master from the files on it. The work
-    the file left is deleted with its master once nothing references it;
-    otherwise its master is re-picked from its own present files, so it
-    never points at the moved file (see :func:`_settle_previous_work`).
+    Grouping gave the file a local work at scan time; see
+    :func:`work_move_service.move_file_to_work` for what the move settles.
     """
-    previous_work_id = library_file.work_id
-    if previous_work_id == work_id:
-        return
-    repos.files.update_work_id(library_file.id, work_id)
-    repos.matches.move_to_work(library_file.id, work_id)
-    reselect_master_from_files(work_id, repos.song_masters, repos.files)
-    if previous_work_id is not None:
-        _settle_previous_work(previous_work_id, library_file.id, work_id, repos)
-
-
-def _settle_previous_work(
-    previous_work_id: str,
-    file_id: UUID,
-    moved_to: str,
-    repos: EnrichmentRepos,
-) -> None:
-    """Delete the work a file just left, or re-pick its master if the work stays.
-
-    Once nothing references the work it is deleted, taking its now-stale song
-    master with it. Otherwise its master is re-picked from its own present
-    files, so it never points at the file that moved away: a manual pick on a
-    file still in the work is kept, an invalid one becomes the automatic pick,
-    and with no present file left the master is removed.
-    """
-    if repos.works.delete_if_empty(previous_work_id):
-        logger.info(
-            "empty_work_deleted_after_move",
-            work_id=previous_work_id,
-            file_id=str(file_id),
-            moved_to=moved_to,
-        )
-        return
-    reselect_master_from_files(previous_work_id, repos.song_masters, repos.files)
+    move_file_to_work(
+        library_file,
+        work_id,
+        WorkMoveRepos(
+            files=repos.files,
+            works=repos.works,
+            song_masters=repos.song_masters,
+            matches=repos.matches,
+        ),
+    )
 
 
 def _resolve_track_recording(

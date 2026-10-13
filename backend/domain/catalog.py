@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from backend.domain.enums import ArtistLinkOutcome, CatalogSource, VersionType
 from backend.domain.system import StorageUnavailableError
@@ -133,6 +134,19 @@ class WorkFootprint:
     artist_id: str
     file_count: int = 0
     match_count: int = 0
+
+
+@dataclass(frozen=True)
+class PartSplitPlan:
+    """Files on a local work whose title names a different part than the work's.
+
+    "Another Brick in the Wall, Part 1" on a "..., Part II" work: each file in
+    ``file_ids`` belongs on a work of its own part.
+    """
+
+    work_id: str
+    work_title: str
+    file_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True)

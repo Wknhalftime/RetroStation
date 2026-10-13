@@ -17,10 +17,12 @@ from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.normalization import (
+    canonicalize_part_number,
     extract_version_info,
     normalize_artist,
     normalize_title,
     strict_normalize,
+    title_part_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,20 +88,30 @@ def _fuzzy_match_work(
     norm_artist: str,
     work_repo: WorkRepository,
 ) -> str | None:
-    """Fuzzy-match norm_base against work titles for norm_artist; return work_id or None."""
+    """Fuzzy-match norm_base against work titles for norm_artist; return work_id or None.
+
+    Titles are compared with their part number spelled one way ("pt ii" and
+    "part 2" are the same part), and a candidate with a different part number
+    is never a match: "..., Part 1" scores 96 against "..., Part II".
+    """
     if not norm_base:
         return None
     work_candidates = work_repo.get_candidates_by_normalized_artist(norm_artist, limit=100)
     if not work_candidates:
         return None
 
+    norm_base = canonicalize_part_number(norm_base)
+    input_part = title_part_number(norm_base)
     threshold = _dynamic_threshold(len(norm_base))
     strict_input = strict_normalize(norm_base)
     best_work_id: str | None = None
     best_score = -1.0
 
     for candidate_id, candidate_title in work_candidates:
-        norm_candidate = normalize_title(candidate_title)
+        norm_candidate = canonicalize_part_number(normalize_title(candidate_title))
+        candidate_part = title_part_number(norm_candidate)
+        if input_part is not None and candidate_part is not None and input_part != candidate_part:
+            continue
         if strict_input == strict_normalize(norm_candidate):
             score = 100.0
         else:
@@ -152,6 +164,28 @@ def _create_local_work(
     return work_id
 
 
+def find_or_create_work(
+    file: LibraryFile,
+    *,
+    artist_repo: ArtistCatalogRepository,
+    work_repo: WorkRepository,
+    song_master_repo: SongMasterRepository,
+) -> str:
+    """The work a file's artist and title tags name: a fuzzy match, else a new local work.
+
+    Reads the tags only, not the audio-hash or recording-MBID shortcuts of
+    :func:`assign_work`, so it can re-place a file whose current work is wrong.
+    """
+    base_title, _ = extract_version_info(file.audio.track_title or "")
+    norm_artist = normalize_artist(file.audio.artist_name or "")
+    work_id = _fuzzy_match_work(normalize_title(base_title), norm_artist, work_repo)
+    if work_id is None:
+        work_id = _create_local_work(
+            file, base_title, norm_artist, artist_repo, work_repo, song_master_repo
+        )
+    return work_id
+
+
 def assign_work(
     file: LibraryFile,
     *,
@@ -179,16 +213,13 @@ def assign_work(
     if shortcut is not None:
         return shortcut
 
-    base_title, version_type = extract_version_info(raw_title)
-    norm_artist = normalize_artist(raw_artist)
-    norm_base = normalize_title(base_title)
-
-    work_id = _fuzzy_match_work(norm_base, norm_artist, work_repo)
-
-    if work_id is None:
-        work_id = _create_local_work(
-            file, base_title, norm_artist, artist_repo, work_repo, song_master_repo
-        )
+    _, version_type = extract_version_info(raw_title)
+    work_id = find_or_create_work(
+        file,
+        artist_repo=artist_repo,
+        work_repo=work_repo,
+        song_master_repo=song_master_repo,
+    )
 
     recording_id = recording_repo.get_or_create_local(
         work_id,
