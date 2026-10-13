@@ -383,7 +383,6 @@ class ResolvedArtistMbidStrategy:
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
-        self._mb_client = mb_client
         # Step B's search. match_identities_for_playlist passes one per run, so the
         # MusicBrainz cut-off counts across the run's songs (AUD-R028, D16).
         self._recording_search = recording_search or RecordingSearch(mb_client)
