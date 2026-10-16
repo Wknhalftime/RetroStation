@@ -24,6 +24,15 @@ class RecheckNotQueuedError(MatchingError):
     """The task queue refused a matching re-check (the API answers 503)."""
 
 
+@dataclass(frozen=True)
+class MatchOffFileWork:
+    """Matches on a file that carry another work than the file's own (or none)."""
+
+    library_file_id: UUID
+    match_work_id: str | None
+    file_work_id: str | None
+
+
 # Statuses a re-check rewinds to pending (AUD-R022 D1).
 UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
 

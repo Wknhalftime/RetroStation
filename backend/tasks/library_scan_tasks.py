@@ -50,6 +50,7 @@ from backend.services.missing_file_reconciliation_service import (
     repick_stranded_masters,
 )
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
@@ -382,7 +383,7 @@ def _run_scan(
                 song_master_repo=repos.song_masters,
             )
             if result:
-                repos.library_files.update_work_id(row.id, result.work_id)
+                place_ungrouped_file(row.id, result.work_id, repos.library_files, repos.matches)
                 if result.recording_id:
                     repos.library_files.update_recording_link(
                         row.id,

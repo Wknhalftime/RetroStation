@@ -8,6 +8,7 @@ from uuid import UUID
 import structlog
 
 from backend.domain.library import LibraryFile
+from backend.domain.matching import MatchOffFileWork
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -25,6 +26,21 @@ class WorkMoveRepos:
     works: WorkRepository
     song_masters: SongMasterRepository
     matches: MatchRepository
+
+
+def place_ungrouped_file(
+    file_id: UUID,
+    work_id: str,
+    files: LibraryFileRepository,
+    matches: MatchRepository,
+) -> None:
+    """Give a file with no work the work grouping chose; its matches take that work too.
+
+    A match stores its file's work when it is made, so one made while the file
+    had no work has none. The file left no work, so there is no master to settle.
+    """
+    files.update_work_id(file_id, work_id)
+    matches.move_to_work(file_id, work_id)
 
 
 def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRepos) -> None:
@@ -89,3 +105,19 @@ def settle_misplaced_masters(repos: WorkMoveRepos) -> list[str]:
         deleted = _settle_work(work_id, repos)
         logger.info("misplaced_master_settled", work_id=work_id, work_deleted=deleted)
     return work_ids
+
+
+def realign_match_works(repos: WorkMoveRepos) -> list[MatchOffFileWork]:
+    """Move every file's matches to the file's work, then settle each work they left.
+
+    Repairs matches that a move or grouping before this was fixed left on
+    another work, or on none. A work they left is settled as the work a file
+    leaves (see :func:`_settle_work`). Returns what was realigned.
+    """
+    off_work = repos.matches.list_off_file_work()
+    for drift in off_work:
+        repos.matches.move_to_work(drift.library_file_id, drift.file_work_id)
+    for work_id in sorted({d.match_work_id for d in off_work if d.match_work_id is not None}):
+        deleted = _settle_work(work_id, repos)
+        logger.info("match_work_left_settled", work_id=work_id, work_deleted=deleted)
+    return off_work
