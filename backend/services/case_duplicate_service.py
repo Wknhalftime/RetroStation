@@ -13,7 +13,10 @@ import os
 from collections.abc import Callable
 
 from backend.domain.library import CaseDuplicateRepair, LibraryFile
-from backend.repositories.library_files import LibraryFileRepository
+from backend.services.missing_file_reconciliation_service import (
+    ReconciliationRepos,
+    settle_fold_across_works,
+)
 
 
 def on_disk_spelling(file_path: str) -> str | None:
@@ -61,8 +64,17 @@ def plan_case_duplicate_repairs(
 
 def apply_case_duplicate_repair(
     repair: CaseDuplicateRepair,
-    file_repo: LibraryFileRepository,
+    repos: ReconciliationRepos,
 ) -> None:
-    """Fold each stale row into the keeper."""
+    """Fold each stale row into the keeper, settling the work a stale row leaves.
+
+    Grouping can put the keeper on another work than the stale row (it was
+    indexed as a new file, its tags read afresh); the fold then settles both
+    works as a missing-file fold does.
+    """
+    keeper = repos.files.get_by_id(repair.keeper_id)
     for stale_id in repair.stale_ids:
-        file_repo.merge_into(stale_id, repair.keeper_id)
+        stale = repos.files.get_by_id(stale_id)
+        repos.files.merge_into(stale_id, repair.keeper_id)
+        if stale is not None and keeper is not None:
+            settle_fold_across_works(keeper.id, stale.work_id, keeper.work_id, repos)

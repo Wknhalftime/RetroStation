@@ -267,17 +267,33 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     if not repos.files.lock_fold_pair(move.missing_id, move.successor_id):
         return False
     repos.files.merge_into(move.missing_id, move.successor_id)
-    if not move.crosses_work:
-        return True
-    repos.matches.move_to_work(move.successor_id, move.successor_work_id)
-    if move.missing_work_id is not None and move.successor_work_id is not None:
-        repos.format_overrides.move_to_work(
-            move.successor_id, move.missing_work_id, move.successor_work_id
-        )
-    if move.missing_work_id is not None:
-        reselect_master_from_files(move.missing_work_id, repos.song_masters, repos.files)
-        repos.works.delete_if_empty(move.missing_work_id)
+    settle_fold_across_works(move.successor_id, move.missing_work_id, move.successor_work_id, repos)
     return True
+
+
+def settle_fold_across_works(
+    survivor_id: UUID,
+    left_work_id: str | None,
+    survivor_work_id: str | None,
+    repos: ReconciliationRepos,
+) -> None:
+    """After a row is folded into a survivor on another work, settle both works.
+
+    ``merge_into`` re-points the folded row's matches, format overrides and
+    master at the survivor but leaves them on the work the folded row was in.
+    The matches and overrides take the survivor's work, and the work the folded
+    row left re-picks its master from its own present files (so it never points
+    at the survivor) and is deleted once nothing references it. Rows on the
+    same work need nothing.
+    """
+    if left_work_id == survivor_work_id:
+        return
+    repos.matches.move_to_work(survivor_id, survivor_work_id)
+    if left_work_id is not None and survivor_work_id is not None:
+        repos.format_overrides.move_to_work(survivor_id, left_work_id, survivor_work_id)
+    if left_work_id is not None:
+        reselect_master_from_files(left_work_id, repos.song_masters, repos.files)
+        repos.works.delete_if_empty(left_work_id)
 
 
 def repick_stranded_masters(repos: ReconciliationRepos) -> int:
