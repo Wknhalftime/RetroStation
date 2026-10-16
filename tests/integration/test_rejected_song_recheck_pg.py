@@ -72,8 +72,10 @@ def test_a_rewound_parked_song_matches_another_file_not_the_rejected_one(
         playlist = _playlist(conn, _station(conn))
         artist = _artist(conn, "ABBA", MatchStatus.PENDING)
         song = _song(conn, artist, "Waterloo", MatchStatus.NEEDS_REVIEW)
-        rejected = _file(conn, title="Waterloo")
-        other = _file(conn, title="Waterloo")
+        first, second = _file(conn, title="Waterloo"), _file(conn, title="Waterloo")
+        # Ties rank by str(id) ascending: make the rejected file the tie winner, so a broken
+        # exclusion always fails here instead of passing half the time.
+        rejected, other = sorted((first, second), key=lambda f: str(f.id))
         _park(conn, song, rejected.id)
         _play(conn, playlist, song)
 
