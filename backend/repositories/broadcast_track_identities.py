@@ -109,6 +109,15 @@ class BroadcastTrackIdentityRepository(ABC):
         ...
 
     @abstractmethod
+    def rewind_mb_unavailable(self) -> int:
+        """Return every NEEDS_REVIEW / MB_UNAVAILABLE song (deferred by a MusicBrainz outage),
+        whatever its artist, to PENDING with tier and reason cleared; returns rows changed.
+        MusicBrainz coming back changes no library file, so a re-check's wave cannot name such
+        a song (AUD-R028, D16). Other statuses that keep the reason, DEFERRED_RETRY songs and
+        artists are untouched."""
+        ...
+
+    @abstractmethod
     def playlist_ids_with_pending(self) -> set[UUID]:
         """Every playlist with a play of a PENDING song (the re-check's fan-out)."""
         ...
