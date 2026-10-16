@@ -10,7 +10,13 @@ import structlog
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import LibraryFile
-from backend.domain.matching import NO_EXCLUSIONS, CandidateExclusions, MappingRule, Match
+from backend.domain.matching import (
+    NO_EXCLUSIONS,
+    CandidateExclusions,
+    MappingRule,
+    Match,
+    MusicBrainzUnavailableError,
+)
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
@@ -26,9 +32,11 @@ from backend.services.matching_constants import (
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
+    format_mb_unavailable,
 )
 from backend.services.matching_utils import rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.recording_search import RecordingSearch
 from backend.services.title_scoring import (
     _candidate_scores,
     broadcast_title_core_variants,
@@ -45,7 +53,8 @@ class IdentityMatchResult:
 
     Strategies produce values; the service function owns all persistence.
     library_file_id is None ONLY when no candidate exists at all
-    (reason_code in {NO_LOCAL_FILES, MISSING_MATCH_RECORD, NO_CANDIDATES}); the
+    (reason_code in {NO_LOCAL_FILES, MISSING_MATCH_RECORD, NO_CANDIDATES}) or the song is
+    deferred because MusicBrainz was unavailable (MB_UNAVAILABLE, AUD-R028 D16); the
     _score_candidates helper always populates it with best_file.id, even for a
     result floored to AUTO_REJECTED (AUD-R022 D6) — the service writes no match row
     for an AUTO_REJECTED result. triage_bucket is NOT on this dataclass — the router
@@ -59,6 +68,19 @@ class IdentityMatchResult:
     work_id: str | None = None
     reason_code: ReasonCode | None = None
     reason_detail: str | None = None
+
+
+# The result for a song whose Step B could not reach MusicBrainz (AUD-R028, D16): deferred
+# whole, with no file, so nothing is decided on partial evidence and the 56% floor never
+# applies. Every re-check rewinds it (rewind_mb_unavailable).
+_MB_DEFERRAL = IdentityMatchResult(
+    status=MatchStatus.NEEDS_REVIEW,
+    tier=MatchTier.UNCLASSIFIED,
+    confidence_score=0.0,
+    library_file_id=None,
+    reason_code=ReasonCode.MB_UNAVAILABLE,
+    reason_detail=format_mb_unavailable(),
+)
 
 
 class IdentityMatchingStrategy(Protocol):
@@ -357,10 +379,13 @@ class ResolvedArtistMbidStrategy:
         strong_match_threshold: int = 80,
         *,
         exclusions_by_identity: ExclusionsByIdentity | None = None,
+        recording_search: RecordingSearch | None = None,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
-        self._mb_client = mb_client
+        # Step B's search. match_identities_for_playlist passes one per run, so the
+        # MusicBrainz cut-off counts across the run's songs (AUD-R028, D16).
+        self._recording_search = recording_search or RecordingSearch(mb_client)
         self._catalog_repo = catalog_repo
         self._strong_match_threshold = strong_match_threshold
         self._exclusions_by_identity = exclusions_by_identity or {}
@@ -513,9 +538,13 @@ class ResolvedArtistMbidStrategy:
         better than an earlier one is still chosen. Returns None only when
         no MB recording maps to any local file (or all candidates are filtered
         out by the locked-artist guard).
+
+        Raises MusicBrainzUnavailableError when MusicBrainz cannot answer (a transient
+        failure, or the run's cut-off): apply() then raises too, so Step A's result and Step C
+        are dropped and the song is deferred whole (AUD-R028, D16).
         """
         titles = broadcast_title_variants(identity.original_title)
-        recordings = self._mb_client.search_recording(artist_mbid=mbid, title=titles[0])
+        recordings = self._recording_search.search(mbid, titles[0])
         # Collect ALL local files across recordings before scoring.
         # Deduplicate by library-file id since the same file can legitimately
         # appear under multiple recording MBIDs (e.g., merged recordings).
@@ -655,6 +684,9 @@ def match_identities_for_playlist(
     Returns list of work_ids for newly AUTO_MATCHED identities so the caller
     can trigger downstream master-selection recalculation. This return
     contract is preserved from the legacy implementation.
+
+    A song whose MusicBrainz recording search fails transiently is deferred and the run
+    carries on; a permanent MusicBrainz error propagates (AUD-R028, D16).
     """
     pending = repos.track_identity_repo.get_pending_for_playlist(playlist_id)
     if not pending:
@@ -668,6 +700,8 @@ def match_identities_for_playlist(
     artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
 
     exclusions_by_identity = _load_exclusions(pending, repos.library_file_repo)
+    # One per run: the MusicBrainz cut-off counts this playlist's songs only (AUD-R028, D16).
+    recording_search = RecordingSearch(mb_client)
 
     engine = IdentityMatchingEngine(
         [
@@ -681,6 +715,7 @@ def match_identities_for_playlist(
                 repos.catalog_repo,
                 strong_match_threshold,
                 exclusions_by_identity=exclusions_by_identity,
+                recording_search=recording_search,
             ),
             BroadcastToLocalStrategy(
                 repos.library_file_repo,
@@ -693,6 +728,7 @@ def match_identities_for_playlist(
     auto_matched = 0
     auto_rejected = 0
     needs_review = 0
+    deferred = 0
     decided_meanwhile = 0
     work_ids: list[str] = []
 
@@ -720,7 +756,13 @@ def match_identities_for_playlist(
                 decided_meanwhile += 1
             continue
 
-        result = engine.resolve(identity, artist)
+        try:
+            result = engine.resolve(identity, artist)
+        except MusicBrainzUnavailableError:
+            # Step B could not reach MusicBrainz (AUD-R028, D16). The song is deferred whole
+            # through the guarded write below, which also deletes its old suggestion; the
+            # rest of the playlist carries on.
+            result = _MB_DEFERRAL
 
         if result is None:
             # Engine exhausted all strategies. Should not happen given the
@@ -779,6 +821,8 @@ def match_identities_for_playlist(
                 work_ids.append(result.work_id)
         elif result.status == MatchStatus.AUTO_REJECTED:
             auto_rejected += 1
+        elif result is _MB_DEFERRAL:
+            deferred += 1
         else:
             needs_review += 1
 
@@ -788,6 +832,8 @@ def match_identities_for_playlist(
         auto_matched=auto_matched,
         auto_rejected=auto_rejected,
         needs_review=needs_review,
+        deferred=deferred,
+        mb_cut_off=recording_search.cut_off,
         decided_meanwhile=decided_meanwhile,
         work_ids_collected=len(work_ids),
     )

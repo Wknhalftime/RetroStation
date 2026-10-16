@@ -250,6 +250,22 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         )
         return cur.rowcount
 
+    def rewind_mb_unavailable(self) -> int:
+        # Every song a MusicBrainz outage deferred, whatever its artist (AUD-R028, D16). The
+        # status guard keeps a decided song that still carries the reason where it is.
+        cur = self._conn.execute(
+            """UPDATE track_identities
+               SET match_status = %s, match_tier = NULL,
+                   reason_code = NULL, reason_detail = NULL
+               WHERE match_status = %s AND reason_code = %s""",
+            (
+                MatchStatus.PENDING.value,
+                MatchStatus.NEEDS_REVIEW.value,
+                ReasonCode.MB_UNAVAILABLE.value,
+            ),
+        )
+        return cur.rowcount
+
     def playlist_ids_with_pending(self) -> set[UUID]:
         rows = self._conn.execute(
             """SELECT DISTINCT pe.playlist_id

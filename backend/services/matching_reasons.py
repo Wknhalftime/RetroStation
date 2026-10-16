@@ -19,6 +19,7 @@ __all__ = [
     "format_ambiguous_gap",
     "format_deferred_retry",
     "format_low_confidence",
+    "format_mb_unavailable",
 ]
 
 
@@ -47,3 +48,9 @@ def format_deferred_retry() -> str:
     # same reason to child identities. "Unresolved across all matching tiers"
     # covers both without misleading curators about which path was taken.
     return "Unresolved across all matching tiers — deferred for retry on next playlist"
+
+
+def format_mb_unavailable() -> str:
+    # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16). Every re-check rewinds
+    # a deferred song, whatever its artist.
+    return "MusicBrainz unavailable — deferred for retry at the next re-check"

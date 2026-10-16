@@ -50,15 +50,20 @@ def rewind_wave(
     artists: BroadcastArtistRepository,
     songs: BroadcastTrackIdentityRepository,
 ) -> RewindCounts:
-    """Return the wave's undecided artists, then their undecided songs, to pending.
+    """Return the wave's undecided artists, then their undecided songs, then every song a
+    MusicBrainz outage deferred, to pending.
 
     Names map to artist ids first, then artists rewind, then songs. Status only: match rows
     stay, so the review screen keeps the old suggestion until a new result replaces it. None
-    means everything; an empty collection means nothing.
+    means everything; an empty collection means no artist or name-scoped song. Every
+    MB_UNAVAILABLE song is rewound whatever the wave, even an empty one (AUD-R028, D16):
+    MusicBrainz coming back changes no library file, so no wave can name it. It runs last, so
+    a song the wave already rewound is counted once. DEFERRED_RETRY songs (the artist cascade)
+    keep artist matching's per-playlist reset.
     """
     artist_ids = None if names is None else artists.ids_by_normalized_names(names)
     rewound_artists = artists.rewind_undecided(names)
-    rewound_songs = songs.rewind_undecided(artist_ids)
+    rewound_songs = songs.rewind_undecided(artist_ids) + songs.rewind_mb_unavailable()
     return RewindCounts(artists=rewound_artists, songs=rewound_songs)
 
 

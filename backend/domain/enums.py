@@ -173,6 +173,9 @@ class ReasonCode(StrEnum):
     # The matched library file was deleted from the Missing Files page (or by
     # the after-scan purge); the identity is back in review.
     LIBRARY_FILE_REMOVED = "LIBRARY_FILE_REMOVED"
+    # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16): the song is
+    # deferred, and every re-check rewinds it. DEFERRED_RETRY stays the artist cascade's.
+    MB_UNAVAILABLE = "MB_UNAVAILABLE"
 
 
 class PurgeMissingPolicy(StrEnum):

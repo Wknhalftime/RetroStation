@@ -24,6 +24,12 @@ class RecheckNotQueuedError(MatchingError):
     """The task queue refused a matching re-check (the API answers 503)."""
 
 
+class MusicBrainzUnavailableError(MatchingError):
+    """Song matching's MusicBrainz recording search could not be answered: a transient failure
+    (HTTP 429 or 5xx, a timeout, a network error) or this run's cut-off (AUD-R028, D16). The
+    song is deferred, never decided on partial evidence."""
+
+
 @dataclass(frozen=True)
 class MatchOffFileWork:
     """Matches on a file that carry another work than the file's own (or none)."""
