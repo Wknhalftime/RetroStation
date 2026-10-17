@@ -18,6 +18,16 @@ const SKIP_REASON_LABELS: Record<string, string> = {
 };
 
 const ROWS_SKIPPED = "rows_skipped";
+// A matching run that completed with some playlist stages failed (spec 2026-10-17); the
+// count is in `stages_failed`.
+const MATCHING_STAGES_FAILED = "matching_stages_failed";
+
+function formatFailedStages(progressData: Record<string, unknown>): string {
+  const failed = progressData["stages_failed"];
+  const count = typeof failed === "number" ? failed : 0;
+  const noun = count === 1 ? "playlist stage" : "playlist stages";
+  return `${count.toLocaleString()} ${noun} failed — see System Logs`;
+}
 
 function formatSkipReasons(raw: unknown): string {
   if (typeof raw !== "object" || raw === null) return "";
@@ -32,6 +42,7 @@ export function getWarningText(
 ): string | null {
   const warning = progressData["warning"];
   if (typeof warning !== "string") return null;
+  if (warning === MATCHING_STAGES_FAILED) return formatFailedStages(progressData);
   if (warning !== ROWS_SKIPPED) return WARNING_LABELS[warning] ?? warning;
 
   const skipped = progressData["skipped"];

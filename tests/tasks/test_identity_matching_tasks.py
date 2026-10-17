@@ -23,6 +23,7 @@ from uuid import uuid4
 import pytest
 
 from backend.services.identity_matching_service import IdentityMatchingRepos
+from backend.services.matching_progress import NO_PROGRESS, MatchingProgress
 from backend.tasks.identity_matching_tasks import identity_matching_task
 
 
@@ -134,11 +135,13 @@ def test_identity_matching_task_wires_repos_and_threshold(
         repos: IdentityMatchingRepos,
         mb_client: object,
         strong_match_threshold: int,
+        progress: MatchingProgress,
     ) -> list[str]:
         captured["playlist_id"] = playlist_id
         captured["repos"] = repos
         captured["mb_client"] = mb_client
         captured["strong_match_threshold"] = strong_match_threshold
+        captured["progress"] = progress
         return []
 
     monkeypatch.setattr(
@@ -150,6 +153,8 @@ def test_identity_matching_task_wires_repos_and_threshold(
     identity_matching_task.call_local(str(playlist_id))
 
     assert captured["playlist_id"] == playlist_id
+    # No run id (an upload's matching): the service gets the no-op observer.
+    assert captured["progress"] is NO_PROGRESS
     assert captured["strong_match_threshold"] == 77
     assert captured["mb_client"].ttl_days == 3650
     assert isinstance(captured["mb_client"], _FakeMbClient)

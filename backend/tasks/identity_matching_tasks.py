@@ -24,6 +24,7 @@ from backend.services.identity_matching_service import (
     match_identities_for_playlist,
 )
 from backend.services.mb_client import MusicBrainzApiClient
+from backend.tasks import _matching_run
 from backend.tasks._error_boundary import task_failure_telemetry
 from backend.tasks.huey_app import huey
 
@@ -31,16 +32,24 @@ logger = structlog.get_logger()
 
 
 @huey.task()  # type: ignore[untyped-decorator]
-def identity_matching_task(playlist_id: str) -> None:
+def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
     """Run identity matching — terminal task in the pipeline chain.
 
     Wraps the pipeline stage in `task_failure_telemetry` so any exception
     surfaces as a FAILED TaskProgress row + ERROR SystemLog before
     re-raising to Huey.
+
+    ``run_id`` names the matching run this stage reports to (spec 2026-10-17): the stage
+    finishes there once its song masters are recalculated. None for an upload's matching.
     """
     settings = get_settings()
 
-    with task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id:
+    # The stage reports to its run: counted at the start, finished on the way out, after the
+    # song masters are recalculated (spec 2026-10-17).
+    with (
+        _matching_run.matching_stage(run_id, settings.database_url) as stage,
+        task_failure_telemetry(TaskType.MATCHING, LogCategory.MATCHING) as task_id,
+    ):
         with connect_sync(settings.database_url) as conn:
             with MusicBrainzApiClient(
                 PgMusicBrainzCacheRepository(conn),
@@ -59,6 +68,7 @@ def identity_matching_task(playlist_id: str) -> None:
                     repos=repos,
                     mb_client=mb_client,
                     strong_match_threshold=settings.strong_match_threshold,
+                    progress=stage.progress,
                 )
             conn.commit()
 
