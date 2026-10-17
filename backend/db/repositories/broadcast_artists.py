@@ -9,7 +9,7 @@ import psycopg
 from backend.db.repositories._pg_utils import format_embedding, parse_embedding
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.enums import MatchStatus, ReasonCode
-from backend.domain.matching import UNDECIDED_STATUSES
+from backend.domain.matching import ARTIST_UNDECIDED_STATUSES
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 
 
@@ -175,7 +175,7 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
                  AND (%s::text[] IS NULL OR normalized_name = ANY(%s::text[]))""",
             (
                 MatchStatus.PENDING.value,
-                [status.value for status in UNDECIDED_STATUSES],
+                [status.value for status in ARTIST_UNDECIDED_STATUSES],
                 wanted,
                 wanted,
             ),

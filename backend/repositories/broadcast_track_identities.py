@@ -102,10 +102,11 @@ class BroadcastTrackIdentityRepository(ABC):
 
     @abstractmethod
     def rewind_undecided(self, artist_ids: Collection[UUID] | None) -> int:
-        """Return undecided songs (NEEDS_REVIEW, AUTO_REJECTED) under these broadcast artists,
-        whatever the artist's own status, to PENDING with tier and reason cleared; returns rows
-        changed. None means every song, an empty collection none. Status only: match rows and
-        rejected_file_ids stay (AUD-R022 D1/D2, spec 2026-10-05 §4.2)."""
+        """Return undecided songs (NEEDS_REVIEW, AUTO_REJECTED, MANUAL_REJECTED) under these
+        broadcast artists, whatever the artist's own status, to PENDING with tier and reason
+        cleared; returns rows changed. None means every song, an empty collection none. Status
+        only: match rows and rejected_file_ids stay (AUD-R022 D1/D2, spec 2026-10-05 §4.2;
+        MANUAL_REJECTED: AUD-R029, spec 2026-10-13 R1)."""
         ...
 
     @abstractmethod

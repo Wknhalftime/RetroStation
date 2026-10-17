@@ -77,10 +77,14 @@ export function MatcherBrowser() {
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebounce(searchInput, 300);
   const [sort, setSort] = useState<QueueSort>("created_at");
-  // Artists whose review items all lack a guess at 56% or above (and were not
-  // unmatched or released by a file delete) stay out of the list unless the
-  // curator asks for them. Songs under 56% never reach review: the matcher
-  // auto-rejects them (D6).
+  // Artists whose review items all lack a guess at 56% or above stay out of the list
+  // unless the curator asks for them. Exceptions that stay in: an artist the curator
+  // unmatched, and a song released by deleting its library file. A song the curator
+  // rejected is parked as manual_rejected and is out of review until the next re-check
+  // (so its artist leaves the main list). A matched artist whose songs are only
+  // auto_rejected / manual_rejected (plus matched ones) has nothing to review and is
+  // hidden here too, but is counted in the toggle (R7). Songs under 56% never reach
+  // review: the matcher auto-rejects them (D6).
   const [includeUnlikely, setIncludeUnlikely] = useState(false);
 
   // Switching pages can scroll the selected artist off-screen (the right-side
@@ -259,7 +263,9 @@ export function MatcherBrowser() {
 
   function handleRerun() {
     // Queues rematch_undecided_task("all"): every undecided artist and title goes back to
-    // pending and is matched again. Manual decisions and auto-matches are never touched.
+    // pending and is matched again. A song the curator rejected (manual_rejected) is
+    // undecided here and is re-scored without its rejected files. Matches and manually
+    // rejected artists are never touched.
     rerunMatching.mutate(undefined, {
       onSuccess: () => {
         // The queue will reshuffle as the re-check runs: clear the selection so the right

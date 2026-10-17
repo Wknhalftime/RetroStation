@@ -39,8 +39,18 @@ class MatchOffFileWork:
     file_work_id: str | None
 
 
-# Statuses a re-check rewinds to pending (AUD-R022 D1).
-UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
+# Statuses a re-check rewinds to pending (AUD-R022 D1). An artist the curator rejected
+# outright stays rejected; a song the curator rejected (manual_rejected) is re-checked on
+# every run, without its rejected files (AUD-R029, spec 2026-10-13 R1, R2).
+ARTIST_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
+    MatchStatus.NEEDS_REVIEW,
+    MatchStatus.AUTO_REJECTED,
+)
+SONG_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
+    MatchStatus.NEEDS_REVIEW,
+    MatchStatus.AUTO_REJECTED,
+    MatchStatus.MANUAL_REJECTED,
+)
 
 
 @dataclass

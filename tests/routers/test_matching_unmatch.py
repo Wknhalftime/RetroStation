@@ -73,14 +73,9 @@ def _set_identity_status(conn: psycopg.Connection, identity_id: UUID, status: Ma
 class TestUnmatchIdentity:
     @pytest.mark.parametrize(
         "source_status",
-        [
-            MatchStatus.AUTO_MATCHED,
-            MatchStatus.MANUAL_MATCHED,
-            MatchStatus.AUTO_REJECTED,
-            MatchStatus.MANUAL_REJECTED,
-        ],
+        [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED],
     )
-    def test_unmatch_finalized_identity(self, client, db_conn, source_status):
+    def test_unmatch_matched_identity_parks_it(self, client, db_conn, source_status):
         _, _, _, identity, _ = _seed_review_chain(db_conn)
         _set_identity_status(db_conn, identity.id, source_status)
         _insert_identity_match(db_conn, identity.id)
@@ -89,7 +84,7 @@ class TestUnmatchIdentity:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(identity.id)
-        assert data["match_status"] == "needs_review"
+        assert data["match_status"] == "manual_rejected"
 
         row = db_conn.execute(
             "SELECT match_status, match_tier, reason_code, reason_detail "
@@ -97,7 +92,7 @@ class TestUnmatchIdentity:
             (identity.id,),
         ).fetchone()
         assert row is not None
-        assert row["match_status"] == "needs_review"
+        assert row["match_status"] == "manual_rejected"
         assert row["match_tier"] is None
         assert row["reason_code"] == "USER_UNMATCHED"
         assert row["reason_detail"] is None
@@ -106,6 +101,17 @@ class TestUnmatchIdentity:
             "SELECT id FROM matches WHERE identity_id = %s", (identity.id,)
         ).fetchone()
         assert match_row is None
+
+    @pytest.mark.parametrize(
+        "rejected_status",
+        [MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED],
+    )
+    def test_unmatch_rejected_identity_returns_409(self, client, db_conn, rejected_status):
+        _, _, _, identity, _ = _seed_review_chain(db_conn)
+        _set_identity_status(db_conn, identity.id, rejected_status)
+
+        resp = client.post(f"/api/v1/matching/identities/{identity.id}/unmatch")
+        assert resp.status_code == 409
 
     @pytest.mark.parametrize(
         "blocked_status",

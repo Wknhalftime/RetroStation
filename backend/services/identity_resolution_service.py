@@ -106,7 +106,6 @@ class SongNotRejectableError(IdentityResolutionError):
 
 _MATCHED = (MatchStatus.AUTO_MATCHED.value, MatchStatus.MANUAL_MATCHED.value)
 _IN_REVIEW = (MatchStatus.PENDING.value, MatchStatus.NEEDS_REVIEW.value)
-_UNMATCHABLE = (*_MATCHED, MatchStatus.AUTO_REJECTED.value, MatchStatus.MANUAL_REJECTED.value)
 
 
 async def _lock_song_status(conn: AsyncConnection[Any], identity_id: UUID) -> str:
@@ -131,10 +130,12 @@ async def _matched_file_ids(conn: AsyncConnection[Any], identity_id: UUID) -> li
 async def record_song_rejection(
     conn: AsyncConnection[Any], identity_id: UUID, library_file_ids: Sequence[UUID]
 ) -> None:
-    """Record rejected files and return the song to review, inside the caller's transaction.
+    """Record rejected files and park the song, inside the caller's transaction.
 
-    The one write behind both Reject and Unmatch (AUD-R022, D3/D5). The first statement locks
-    the row, so a worker's uncommitted match insert cannot survive the delete that follows.
+    The one write behind both Reject and Unmatch (AUD-R022, D3/D5). The song becomes
+    manual_rejected / USER_UNMATCHED and leaves review until the next matching run re-checks
+    it without these files (AUD-R029, spec 2026-10-13 R2, R6). The first statement locks the
+    row, so a worker's uncommitted match insert cannot survive the delete that follows.
     """
     await conn.execute(
         """UPDATE track_identities
@@ -149,7 +150,7 @@ async def record_song_rejection(
             WHERE id = %s""",
         (
             list(library_file_ids),
-            MatchStatus.NEEDS_REVIEW.value,
+            MatchStatus.MANUAL_REJECTED.value,
             ReasonCode.USER_UNMATCHED.value,
             identity_id,
         ),
@@ -176,14 +177,13 @@ async def reject_song_suggestion(
 
 
 async def unmatch_song(conn: AsyncConnection[Any], identity_id: UUID) -> None:
-    """Unmatch: back to review; a matched song's file(s) are recorded as rejected (D5)."""
+    """Unmatch: a matched song is parked and its file(s) recorded as rejected (D5, R6)."""
     status = await _lock_song_status(conn, identity_id)
-    if status not in _UNMATCHABLE:
+    if status not in _MATCHED:
         raise SongNotRejectableError(
-            f"Identity {identity_id} is in {status!r}; only finalized matches can be unmatched"
+            f"Identity {identity_id} is in {status!r}; only matched songs can be unmatched"
         )
-    files = await _matched_file_ids(conn, identity_id) if status in _MATCHED else []
-    await record_song_rejection(conn, identity_id, files)
+    await record_song_rejection(conn, identity_id, await _matched_file_ids(conn, identity_id))
 
 
 async def persist_manual_match(

@@ -97,10 +97,10 @@ export function useResolveIdentity() {
   });
 }
 
-// Unmatch reverts a finalized match (auto/manual matched or rejected) back to
-// NEEDS_REVIEW with reason_code=USER_UNMATCHED. The matches row is hard-deleted
-// server-side. Unmatching an artist cascades to ALL child identities regardless
-// of status — see backend/routers/matching.py::unmatch_artist.
+// Unmatch takes a matched song's match away: the song is parked as manual_rejected
+// (reason USER_UNMATCHED) with its file recorded as rejected, and the next matching
+// run re-checks it. Unmatching an artist cascades to ALL child identities regardless
+// of status, back to needs_review — see backend/routers/matching.py::unmatch_artist.
 
 interface UnmatchVariables {
   id: string;

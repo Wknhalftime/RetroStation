@@ -6,8 +6,9 @@ from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 
-# The statuses a re-check rewinds (AUD-R022 D1, D2; spec 2026-10-05 §4.2).
-_UNDECIDED = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
+# The statuses a re-check rewinds (AUD-R022 D1, D2; spec 2026-10-05 §4.2), plus a song the
+# curator rejected, which is re-checked on every run (spec 2026-10-13 R1).
+_UNDECIDED = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED)
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
