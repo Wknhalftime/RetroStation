@@ -27,8 +27,10 @@ cue-out 200.2 s, -6.079 dB); its fades are illustrative. New names are read as a
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -183,6 +185,14 @@ def test_the_check_reads_the_computed_threshold(monkeypatch: pytest.MonkeyPatch)
     assert not isinstance(below, autocue.Silent)
 
 
+def test_the_threshold_is_written_as_no_bare_52() -> None:
+    """S1: computed from the target, never a bare 52 (also not as the constant's value, which
+    the comparison test above cannot see while the target is -18)."""
+    tree = ast.parse(Path(autocue.__file__).read_text(encoding="utf-8"))
+    numbers = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)]
+    assert [v for v in numbers if isinstance(v, int | float) and abs(v) == 52] == []
+
+
 # --- The record (record_analysis) --------------------------------------------------------------
 
 
@@ -282,6 +292,17 @@ def test_a_silent_file_is_not_analysed_again_and_is_logged_once(rig: CueRig) -> 
     assert rig.analyser.order() == [silent.path]
     assert again is None
     assert rig.store.analyses[silent.audio_hash].audio_silent is True
+    assert len(events(rig.logs, "stream_cue_analysis_silent")) == 1
+
+
+def test_a_twin_of_silent_audio_is_not_analysed_again_in_the_same_run(rig: CueRig) -> None:
+    """D61 within one run: twins playing today, read once in the priority set and met in
+    separate batches, share one analysis and one warning (the run records the silent audio)."""
+    first = rig.add("a.flac", playing_on=[date(1995, 3, 14)])
+    second = rig.add("b.flac", playing_on=[date(1995, 3, 14)], audio=first.audio_hash)
+    rig.analyser.results = {first.path: SILENT_STUB, second.path: SILENT_STUB}
+    rig.run(batch_size=1)
+    assert rig.analyser.order() == [first.path]
     assert len(events(rig.logs, "stream_cue_analysis_silent")) == 1
 
 

@@ -18,7 +18,7 @@ wires it.
 from __future__ import annotations
 
 from collections.abc import Iterator, MutableMapping, Sequence
-from datetime import date
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -39,7 +39,7 @@ from backend.domain.streaming import (
     ScheduleItem,
     StreamTiming,
 )
-from backend.domain.tune_in import next_item, walk_forward
+from backend.domain.tune_in import next_item, tune_in, walk_forward
 from backend.services.repository_factory import RepositoryFactory
 from tests.integration import stream_seed as seed
 from tests.integration.stream_seed import DAY, Conn, at
@@ -243,6 +243,8 @@ def test_a_silent_song_resolves_to_no_file_and_the_walk_skips_it(conn: Conn) -> 
     assert walk_forward(load_day, Landing(ItemRef(DAY, 1), 0), timing) == Landing(
         ItemRef(DAY, 2), 0
     )
+    tuned = tune_in(load_day, DAY.year, datetime.combine(DAY, time(8, 6)), timing)
+    assert tuned.landing == Landing(ItemRef(DAY, 2), 0)  # tune-in during it: the next song
 
 
 def test_a_missing_file_is_unavailable_before_it_is_silent(conn: Conn) -> None:
@@ -254,6 +256,19 @@ def test_a_missing_file_is_unavailable_before_it_is_silent(conn: Conn) -> None:
         [item] = get_day(conn, st)
     assert item.file is None
     assert warnings(logs) == [("schedule_file_unavailable", str(event), str(missing))]
+
+
+def test_an_invalid_file_is_invalid_before_it_is_silent(conn: Conn) -> None:
+    """One warning per play, in order: file validity (D18) comes before silence."""
+    st = seed.station(conn)
+    bad = silent_master(conn)
+    # The column has no CHECK, so a raw UPDATE stores the impossible value.
+    conn.execute("UPDATE library_files SET duration_ms = -1 WHERE id = %s", (bad,))
+    event = seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), bad)
+    with capture_logs() as logs:
+        [item] = get_day(conn, st)
+    assert item.file is None
+    assert warnings(logs) == [("schedule_file_invalid", str(event), str(bad))]
 
 
 def test_a_failed_row_that_is_not_silent_still_plays(conn: Conn) -> None:
@@ -278,6 +293,16 @@ def test_the_re_read_of_a_silent_row_gives_its_fallback_cues(conn: Conn) -> None
         cues = RepositoryFactory(conn).streaming.schedule.file_cues(silent)
     assert cues == FALLBACK
     assert [e for e in logs if e["log_level"] == "warning"] == []
+
+
+def test_a_silent_row_takes_its_audio_out_of_the_cue_work(conn: Conn) -> None:
+    """Proposal test 4 on PostgreSQL (D61): the stored silent row settles its audio, so the
+    library backlog, the priority set and a report (D79) never offer the file again."""
+    st = seed.station(conn)
+    silent = silent_master(conn)
+    seed.matched_play(conn, seed.playlist(conn, st), at("08:00"), silent)
+    work = RepositoryFactory(conn).streaming.cue_work
+    assert (work.library(None, 10), work.scheduled([DAY]), work.reported(silent)) == ([], [], None)
 
 
 # --- The export's resolution read (S7) ---------------------------------------------------------

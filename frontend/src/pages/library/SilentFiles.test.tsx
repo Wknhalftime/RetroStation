@@ -16,7 +16,7 @@ const BLANK = {
   artist: "No Artist",
   title: "Blank",
   album: "HitDisc 883B",
-  path: "D:\\Music\\HitDisc 883B\\No Artist - Blank.flac",
+  path: "D:\\Music\\rips\\track01.flac",
   duration_ms: 6000,
   reasons: ["silent"],
   bitrate_kbps: 1,
@@ -27,7 +27,7 @@ const TESTIMONY = {
   artist: "Mary J. Blige",
   title: "Testimony",
   album: "No More Drama",
-  path: "D:\\Music\\No More Drama\\Mary J. Blige - Testimony.flac",
+  path: "D:\\Music\\rips\\track07.flac",
   duration_ms: 298666,
   reasons: ["low_bitrate", "short_cued_span"],
   bitrate_kbps: 17,
@@ -38,7 +38,7 @@ const LONG_SILENCE = {
   artist: "Some Band",
   title: "Hidden Silence",
   album: "Some Album",
-  path: "D:\\Music\\Some Album\\Some Band - Hidden Silence.flac",
+  path: "D:\\Music\\rips\\track12.flac",
   duration_ms: 120000,
   reasons: ["silent", "low_bitrate"],
   bitrate_kbps: 2,
@@ -89,6 +89,9 @@ describe("silent files page", () => {
     expect(both).toContain("Silent: no audio (skipped on air)");
     expect(both).toContain("Low bitrate: 2 kb/s");
     expect(screen.getAllByRole("row")).toHaveLength(4); // the heading row and one per file
+    for (const heading of ["Artist", "Title", "Album", "Path", "Duration"])
+      expect(screen.getByRole("columnheader", { name: heading })).toBeTruthy();
+    expect(screen.queryByText("No silent or nearly silent files found.")).toBeNull();
     expect(screen.getByText(/2 silent, 1 nearly silent/)).toBeTruthy();
     expect(mockedApiFetch).toHaveBeenCalledWith(URL);
   });

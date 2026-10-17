@@ -69,15 +69,19 @@ def cued(conn: Conn, cue_in_ms: int, cue_out_ms: int, **file: Any) -> UUID:
     return file_id
 
 
-def silent(conn: Conn, **file: Any) -> UUID:
+def silent(conn: Conn, *, duration_ms: int = 6_000, **file: Any) -> UUID:
     audio = seed.audio_hash()
-    file_id = tagged(conn, audio=audio, duration_ms=6_000, file_size=1_000, **file)
+    file_id = tagged(conn, audio=audio, duration_ms=duration_ms, file_size=1_000, **file)
     seed.cue_row(conn, audio, **SILENT_ROW)
     return file_id
 
 
 def candidates(conn: Conn) -> dict[UUID, Any]:
-    return {e.file_id: e for e in RepositoryFactory(conn).streaming.silent_files.candidates()}
+    """The adapter's candidates by file id; each file is offered once (one row per file)."""
+    entries = RepositoryFactory(conn).streaming.silent_files.candidates()
+    by_id = {e.file_id: e for e in entries}
+    assert len(by_id) == len(entries), "a file is offered more than once"
+    return by_id
 
 
 def test_the_report_reads_each_listed_file_and_nothing_else(conn: Conn) -> None:
@@ -89,6 +93,7 @@ def test_the_report_reads_each_listed_file_and_nothing_else(conn: Conn) -> None:
     )
     expected = {
         silent(conn): (reason.SILENT,),
+        silent(conn, duration_ms=120_000): (reason.SILENT, reason.LOW_BITRATE),  # once, both
         cued(conn, 188_500, 200_200, duration_ms=298_666, file_size=632_875): (
             reason.LOW_BITRATE,
             reason.SHORT_CUED_SPAN,
