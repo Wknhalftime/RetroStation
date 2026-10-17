@@ -66,6 +66,20 @@ _UNMATCHABLE_STATUSES: list[str] = [
 _USER_UNMATCHED: str = ReasonCode.USER_UNMATCHED.value
 _LIBRARY_FILE_REMOVED: str = ReasonCode.LIBRARY_FILE_REMOVED.value
 
+
+def _sql_in_list(statuses: tuple[MatchStatus, ...]) -> str:
+    """Quoted, comma-joined enum values for a trusted SQL ``IN (...)`` list."""
+    return ", ".join(f"'{status.value}'" for status in statuses)
+
+
+# Interpolated into _QUEUE_BUCKET_CTE (trusted enum values, never user input).
+_MATCHED_ARTIST_STATUSES_SQL: str = _sql_in_list(
+    (MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED)
+)
+_REJECTED_SONG_STATUSES_SQL: str = _sql_in_list(
+    (MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED)
+)
+
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
 # bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
 # count all reference the same filtered set. Thresholds come from
@@ -73,14 +87,18 @@ _LIBRARY_FILE_REMOVED: str = ReasonCode.LIBRARY_FILE_REMOVED.value
 # module-level ints and enum values, never user input.
 _QUEUE_BUCKET_CTE = f"""
 artist_base AS (
-    -- Surface artists in two cases:
+    -- Surface artists in three cases:
     --   1) The artist itself is review-relevant (PENDING / NEEDS_REVIEW), or
     --   2) The artist is resolved (e.g. AUTO_MATCHED) but at least one child
     --      track_identity is review-relevant. Without (2), a curator has no
     --      way to reach a NEEDS_REVIEW child whose parent the matcher already
-    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45).
+    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45), or
+    --   3) The artist is matched and has a song the matcher or the curator
+    --      rejected -- nothing to review, so never likely: it stays reachable
+    --      behind 'Show N artists with no likely match' (spec 2026-10-13 R7,
+    --      AUD-R029).
     -- The identity_best CTE below independently filters identities to
-    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) still
+    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) or (3) still
     -- produces the correct triage bucket (its resolved siblings do not
     -- inflate the headline).
     -- The search predicate sits here (vs. the page query) so pagination,
@@ -97,7 +115,13 @@ artist_base AS (
             SELECT 1 FROM track_identities ti
             WHERE ti.broadcast_artist_id = ba.id
               AND ti.match_status = ANY(%s)
-        ))
+        )
+        OR (ba.match_status IN ({_MATCHED_ARTIST_STATUSES_SQL})
+            AND EXISTS (
+                SELECT 1 FROM track_identities ti
+                WHERE ti.broadcast_artist_id = ba.id
+                  AND ti.match_status IN ({_REJECTED_SONG_STATUSES_SQL})
+            )))
       AND (%s::text IS NULL OR ba.original_name ILIKE '%%' || %s || '%%' ESCAPE '!')
 ),
 identity_best AS (

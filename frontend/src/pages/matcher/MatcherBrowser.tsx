@@ -81,8 +81,10 @@ export function MatcherBrowser() {
   // unless the curator asks for them. Exceptions that stay in: an artist the curator
   // unmatched, and a song released by deleting its library file. A song the curator
   // rejected is parked as manual_rejected and is out of review until the next re-check
-  // (so its artist leaves the queue). Songs under 56% never reach review: the matcher
-  // auto-rejects them (D6).
+  // (so its artist leaves the main list). A matched artist whose songs are only
+  // auto_rejected / manual_rejected (plus matched ones) has nothing to review and is
+  // hidden here too, but is counted in the toggle (R7). Songs under 56% never reach
+  // review: the matcher auto-rejects them (D6).
   const [includeUnlikely, setIncludeUnlikely] = useState(false);
 
   // Switching pages can scroll the selected artist off-screen (the right-side
