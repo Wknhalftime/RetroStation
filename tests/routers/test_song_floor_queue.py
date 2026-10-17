@@ -2,7 +2,9 @@
 
 The router buckets and the SQL CTE (bucket and `likely`) both start "needs_attention" at
 SONG_MIN_PRESENTATION_SCORE (56); 65+ is "quick_review". The queue lists only pending /
-needs_review work, so a song the matcher floored to auto_rejected leaves it.
+needs_review work, so a song the matcher floored to auto_rejected leaves it; its matched
+artist then stays reachable behind "Show N artists with no likely match" (spec 2026-10-13
+R7).
 """
 
 from __future__ import annotations
@@ -97,17 +99,19 @@ def test_a_proposal_is_shown_from_the_floor_up(
     assert (song["proposed_match"] is not None) is shown
 
 
-def test_an_artist_whose_only_open_song_was_floored_leaves_the_queue(
+def test_an_artist_whose_only_open_song_was_floored_is_hidden_but_reachable(
     client: TestClient, db_conn: Conn
 ) -> None:
     artist = _insert_artist(db_conn, original_name="Floored", match_status=MatchStatus.AUTO_MATCHED)
     _insert_identity(db_conn, artist, "Gone", MatchStatus.AUTO_REJECTED)
 
-    data = client.get(QUEUE).json()
+    data = client.get(f"{QUEUE}?include_unlikely=false").json()
 
     assert data["items"] == []
     assert data["total"] == 0
-    assert data["unlikely_total"] == 0
+    assert data["unlikely_total"] == 1
+    listed = client.get(f"{QUEUE}?include_unlikely=true").json()["items"]
+    assert [item["id"] for item in listed] == [str(artist.id)]
 
 
 def test_a_floored_song_is_listed_as_resolved_beside_an_open_one(
