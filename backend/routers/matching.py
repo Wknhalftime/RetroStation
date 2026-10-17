@@ -129,13 +129,12 @@ artist_bucket AS (
                ELSE 'blocked'
            END AS bucket,
            -- Likely = worth a curator's time by default: a review item with a
-           -- guess at the presentation floor, or one whose match was taken away:
-           -- by the curator (unmatch) or by deleting its missing library file.
-           -- Both delete the match rows, so it has no score, and the artist must
-           -- not vanish from the default queue.
+           -- guess at the presentation floor, one released by deleting its missing
+           -- library file (no score, spec C2), or an artist the curator unmatched.
+           -- A song the curator rejected is manual_rejected and out of the queue
+           -- until a re-check (spec 2026-10-13 R4).
            COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
-                            OR ib.reason_code IN ('{_USER_UNMATCHED}',
-                                                  '{_LIBRARY_FILE_REMOVED}')), FALSE)
+                            OR ib.reason_code = '{_LIBRARY_FILE_REMOVED}'), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
                AS likely
     FROM artist_base a
@@ -197,8 +196,8 @@ def _artist_bucket_from_identities(
 
     Only identities whose own ``match_status`` is still review-relevant
     (PENDING / NEEDS_REVIEW) contribute to the bucket — resolved children
-    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) represent work the curator has
-    already completed and must not inflate the headline. Within the
+    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) are out of review — decided, or parked
+    until the next re-check — and must not inflate the headline. Within the
     review-relevant subset, the reduction surfaces the most actionable child:
     quick_review > needs_attention > blocked. If there are no review-relevant
     children, the artist is "blocked".
