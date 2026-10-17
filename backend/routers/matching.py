@@ -1029,7 +1029,8 @@ async def run_matching(_token: Token) -> dict[str, bool]:
 
     The worker's ``rematch_undecided_task("all")`` rewinds undecided items to pending and hands
     every playlist with pending work to artist matching (AUD-R022 D1, spec 2026-10-05 §4.2).
-    Manual decisions and auto-matches are never touched (D2). Any request body is ignored.
+    Matches and rejected artists are never touched (D2); a song the curator rejected is
+    re-checked (spec 2026-10-13 R1). Any request body is ignored.
 
     Raises:
         HTTPException: 503 if the task queue refuses the job.

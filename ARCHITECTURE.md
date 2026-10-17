@@ -82,6 +82,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
     `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
     `identity_matching_task`
+  - The rewind takes undecided artists (`needs_review`, `auto_rejected`) and undecided songs
+    (those two plus `manual_rejected`: a song the curator rejected waits for the next run,
+    then is re-scored without its rejected files; spec 2026-10-13 R1)
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
@@ -93,7 +96,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   re-check rewinds (AUD-R028).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
-  a duplicated re-check repeats its rewind and fan-out, and decided items are never touched.
+  a duplicated re-check repeats its rewind and fan-out, and matches and rejected artists are
+  never touched.
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.

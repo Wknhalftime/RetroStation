@@ -13,7 +13,7 @@ from backend.db.repositories._pg_utils import (
 )
 from backend.domain.broadcast import BroadcastStorageError, BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
-from backend.domain.matching import UNDECIDED_STATUSES
+from backend.domain.matching import SONG_UNDECIDED_STATUSES
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_reasons import format_deferred_retry
 
@@ -243,7 +243,7 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                  AND (%s::uuid[] IS NULL OR broadcast_artist_id = ANY(%s::uuid[]))""",
             (
                 MatchStatus.PENDING.value,
-                [status.value for status in UNDECIDED_STATUSES],
+                [status.value for status in SONG_UNDECIDED_STATUSES],
                 wanted,
                 wanted,
             ),
