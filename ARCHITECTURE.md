@@ -47,6 +47,17 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - import-linter carries 7 baseline ignores.
 - New code should not add to any of these.
 
+## Derived counts kept by triggers
+
+- `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
+  station, identity). Triggers on `play_events` (insert / delete / update / truncate) and on
+  `playlists` (delete, station change) keep it equal, so no service writes it and no task
+  reconciles it. The station missing-matches report reads it instead of scanning every play.
+- It is not a work list: no task reads it, so it is not in the status-column table below.
+- The check is `tests/integration/test_station_identity_plays_pg.py`, which compares it with
+  the count after every kind of write. This is the only trigger-maintained table; a second one
+  copies this one's shape (statement-level triggers with transition tables).
+
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
