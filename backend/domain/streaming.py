@@ -158,6 +158,8 @@ class CueAnalysis:
     Keyed by the library's ``AudioHash``: every file that shares the audio shares the
     cues, and no file needs to exist for the analysis to be stored. ``analysis_failed``
     records that ``cues`` are fallback values; it is data and changes nothing on read.
+    ``audio_silent`` records that the analysis measured no audio at all (D111): such a row
+    always holds fallback values, and schedule resolution gives its songs no file.
     """
 
     audio_hash: AudioHash
@@ -165,6 +167,7 @@ class CueAnalysis:
     loudness_lufs: float | None
     analysis_failed: bool
     analyser_version: int
+    audio_silent: bool = False
 
     def __post_init__(self) -> None:
         if self.analyser_version < 1:
@@ -174,6 +177,11 @@ class CueAnalysis:
         if self.loudness_lufs is not None and not math.isfinite(self.loudness_lufs):
             raise InvalidStreamValueError(
                 f"CueAnalysis.loudness_lufs must be finite, got {self.loudness_lufs}"
+            )
+        if self.audio_silent and not self.analysis_failed:
+            raise InvalidStreamValueError(
+                "CueAnalysis.audio_silent requires analysis_failed: a silent row holds "
+                "fallback values (D111)"
             )
 
 
