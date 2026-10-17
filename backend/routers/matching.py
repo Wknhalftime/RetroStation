@@ -132,7 +132,7 @@ artist_bucket AS (
            -- guess at the presentation floor, one released by deleting its missing
            -- library file (no score, spec C2), or an artist the curator unmatched.
            -- A song the curator rejected is manual_rejected and out of the queue
-           -- until a re-check (spec 2026-10-13 R4).
+           -- until a re-check (AUD-R029, spec 2026-10-13 R4).
            COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
                             OR ib.reason_code = '{_LIBRARY_FILE_REMOVED}'), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
@@ -876,7 +876,7 @@ async def resolve_identity(
     else:
         # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song is parked as
         # manual_rejected with the file recorded, and the next matching run re-checks it
-        # without that file and its work (spec 2026-10-13 R2, R6).
+        # without that file and its work (AUD-R029, spec 2026-10-13 R2, R6).
         try:
             await reject_song_suggestion(conn, identity_id, body.library_file_id)
         except IdentityNotFoundError as exc:
@@ -1003,7 +1003,7 @@ async def unmatch_identity(
     Per-song unmatch — does not touch sibling identities or the parent
     artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
     A matched song's file(s) are recorded as rejected (AUD-R022, D5).
-    The song becomes manual_rejected until the next matching run (spec 2026-10-13 R6).
+    The song becomes manual_rejected until the next matching run (AUD-R029, spec 2026-10-13 R6).
 
     Raises:
         HTTPException: 404 if the identity does not exist.
@@ -1030,7 +1030,7 @@ async def run_matching(_token: Token) -> dict[str, bool]:
     The worker's ``rematch_undecided_task("all")`` rewinds undecided items to pending and hands
     every playlist with pending work to artist matching (AUD-R022 D1, spec 2026-10-05 §4.2).
     Matches and rejected artists are never touched (D2); a song the curator rejected is
-    re-checked (spec 2026-10-13 R1). Any request body is ignored.
+    re-checked (AUD-R029, spec 2026-10-13 R1). Any request body is ignored.
 
     Raises:
         HTTPException: 503 if the task queue refuses the job.

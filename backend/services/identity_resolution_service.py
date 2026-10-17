@@ -134,8 +134,8 @@ async def record_song_rejection(
 
     The one write behind both Reject and Unmatch (AUD-R022, D3/D5). The song becomes
     manual_rejected / USER_UNMATCHED and leaves review until the next matching run re-checks
-    it without these files (spec 2026-10-13 R2, R6). The first statement locks the row, so a
-    worker's uncommitted match insert cannot survive the delete that follows.
+    it without these files (AUD-R029, spec 2026-10-13 R2, R6). The first statement locks the
+    row, so a worker's uncommitted match insert cannot survive the delete that follows.
     """
     await conn.execute(
         """UPDATE track_identities

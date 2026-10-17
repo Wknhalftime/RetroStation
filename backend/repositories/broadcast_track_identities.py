@@ -106,7 +106,7 @@ class BroadcastTrackIdentityRepository(ABC):
         broadcast artists, whatever the artist's own status, to PENDING with tier and reason
         cleared; returns rows changed. None means every song, an empty collection none. Status
         only: match rows and rejected_file_ids stay (AUD-R022 D1/D2, spec 2026-10-05 §4.2;
-        MANUAL_REJECTED: spec 2026-10-13 R1)."""
+        MANUAL_REJECTED: AUD-R029, spec 2026-10-13 R1)."""
         ...
 
     @abstractmethod

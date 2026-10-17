@@ -2,7 +2,7 @@
 
 **Status: 2026-10-13.** Checked against master b11670b plus D16 (fix/mb-outage-songs)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R028 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R029 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -82,9 +82,6 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
     `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
     `identity_matching_task`
-  - The rewind takes undecided artists (`needs_review`, `auto_rejected`) and undecided songs
-    (those two plus `manual_rejected`: a song the curator rejected waits for the next run,
-    then is re-scored without its rejected files; spec 2026-10-13 R1)
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
@@ -94,6 +91,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
   button), and so does a song a MusicBrainz outage deferred (MB_UNAVAILABLE), which every
   re-check rewinds (AUD-R028).
+- **Every re-check's rewind** takes undecided artists (`needs_review`, `auto_rejected`) and
+  undecided songs (those two plus `manual_rejected`): a song the curator rejected waits for
+  the next run, then is re-scored without its rejected files. A manually rejected artist is
+  never rewound (AUD-R029).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
   a duplicated re-check repeats its rewind and fan-out, and matches and rejected artists are

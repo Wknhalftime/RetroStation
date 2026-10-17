@@ -220,9 +220,11 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   // so the queue's broadened CTE (which now surfaces auto_matched parents
   // with review-needing children) doesn't strand the curator on the
   // "Resolve the artist first" placeholder. Excludes auto_rejected /
-  // manual_rejected: rejected parents have all non-protected children
-  // cascaded to AUTO_REJECTED by resolve_artist, so a rejected parent with
-  // pending/needs_review children is unreachable in steady state.
+  // manual_rejected: resolve_artist cascades a rejection to the children, but
+  // the song re-check rewinds undecided children (needs_review, auto_rejected
+  // and manual_rejected) to pending whatever their artist's status, so a
+  // rejected parent can show pending/needs_review children after a re-check.
+  // They stay behind "Resolve the artist first" until the artist is resolved.
   const artistResolved =
     artist !== null &&
     (artist.match_status === "auto_matched" || artist.match_status === "manual_matched");
