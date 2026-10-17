@@ -2,7 +2,7 @@
 
 **Status: 2026-10-13.** Checked against master b11670b plus D16 (fix/mb-outage-songs)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R029 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R030 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -51,6 +51,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
   a scope word, or nothing). Event graph 2026-10-09: 17 commands, 0 events, 0 queries, no cycles.
+  One exception (AUD-R030): a matching stage of a re-check's run also carries the run's id
+  (`artist_matching_task(playlist_id, run_id)` → `identity_matching_task(playlist_id, run_id)`),
+  so it can report to the run's progress row. The id is optional: an upload's matching has none.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
@@ -66,6 +69,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
+| the matching run's `progress_tracking` row (`matching`, `stages_left` / `stages_failed`, AUD-R030) | the re-check opens it; each matching stage refreshes it and finishes its stage; the last stage closes it | the matching stages, `/ws` |
 | `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark) |
 
 - **Flows:**
@@ -81,7 +85,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
     → (as above)
   - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
     `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
-    `identity_matching_task`
+    `identity_matching_task`. Every re-check with playlists to queue is one matching run: its
+    stages carry the run id and report to one `matching` progress row (AUD-R030)
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
@@ -104,7 +109,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   while a run is in progress wins.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, the local-artist linking and the matching re-check, `task_failure_telemetry`,
-  the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016).
+  the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016). A matching
+  run's row spans many tasks (AUD-R030): `tasks/_matching_run` opens it from the re-check
+  (`run_fan_out`) and reports each stage to it (`matching_stage`); the matching services only
+  tick a `MatchingProgress` observer. Its writes are telemetry and never stop matching.
 
 ## What is enforced in CI (`.github/workflows/ci.yml`)
 
