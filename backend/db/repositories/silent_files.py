@@ -24,12 +24,14 @@ from backend.repositories.silent_files import SilentFileReportRepository
 # The domain's rules (SilentFileEntry.reasons) as a pre-filter, in the same integer arithmetic
 # (bits per millisecond is kb/s), so the two agree at every boundary; the domain names the
 # reasons. Present files only, one row per file (twins of silent audio are each listed). A
-# fallback (failed) row's span is no signal, so cued_span_ms is NULL for it.
+# fallback (failed) row's span is no signal, so cued_span_ms is NULL for it. A backwards cue row
+# (cue-out before cue-in) reads as a zero span rather than a negative one the report would reject.
 _CANDIDATES_SQL = """
 SELECT f.id, f.file_path, f.artist_name, f.track_title, f.release_title,
        f.duration_ms, f.file_size,
        COALESCE(c.audio_silent, false) AS audio_silent,
-       CASE WHEN NOT c.analysis_failed THEN c.cue_out_ms - c.cue_in_ms END AS cued_span_ms
+       CASE WHEN NOT c.analysis_failed THEN GREATEST(c.cue_out_ms - c.cue_in_ms, 0) END
+           AS cued_span_ms
   FROM library_files f
   LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
  WHERE f.file_status = 'present'
