@@ -31,6 +31,7 @@ from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
 
@@ -226,9 +227,11 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                         song_master_repo=repos.song_masters,
                     )
                     if grouping:
-                        repos.library_files.update_work_id(
+                        place_ungrouped_file(
                             lf.id,
                             grouping.work_id,
+                            repos.library_files,
+                            repos.matches,
                         )
                         if grouping.recording_id:
                             repos.library_files.update_recording_link(

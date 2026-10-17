@@ -44,3 +44,11 @@ class SongMasterRepository(ABC):
         Manual masters are left for the user to change, even on a missing file.
         """
         ...
+
+    @abstractmethod
+    def list_work_ids_with_master_off_work(self) -> list[str]:
+        """Works whose master's file is attached to another work, or to none, by id.
+
+        Manual masters included: a pick outside its work is invalid either way.
+        """
+        ...
