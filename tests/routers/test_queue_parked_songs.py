@@ -1,13 +1,13 @@
-"""Acceptance: a parked song keeps its artist off the Resolution Center list (spec 2026-10-13 R4).
+"""Acceptance: a parked song keeps its artist off the main Resolution Center list (spec
+2026-10-13 R4, R7).
 
-The list holds an artist when it, or one of its songs, is pending or needs_review. A song the
-curator rejected is manual_rejected (parked), which is neither, until a re-check puts it back
-in review with a guess at the presentation floor.
+The main list holds an artist when it, or one of its songs, is pending or needs_review with a
+likely guess. A song the curator rejected is manual_rejected (parked): its artist is hidden by
+default but stays reachable behind "Show N artists with no likely match" (R7), until a
+re-check puts the song back in review with a guess at the presentation floor.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from backend.domain.enums import MatchStatus, ReasonCode
 from backend.services.matching_constants import SONG_MIN_PRESENTATION_SCORE
@@ -21,16 +21,14 @@ def _listed(client, include_unlikely: bool) -> list[str]:
     return [item["id"] for item in resp.json()["items"]]
 
 
-@pytest.mark.parametrize("include_unlikely", [True, False])
-def test_an_artist_whose_only_open_song_is_parked_is_not_listed(
-    client, db_conn, include_unlikely: bool
-) -> None:
+def test_an_artist_whose_only_open_song_is_parked_is_hidden_by_default(client, db_conn) -> None:
     artist = _insert_artist(db_conn, "Parked Artist", MatchStatus.AUTO_MATCHED)
     _insert_identity(db_conn, artist, "Rejected Song", MatchStatus.MANUAL_REJECTED)
     _insert_identity(db_conn, artist, "Matched Song", MatchStatus.AUTO_MATCHED)
     db_conn.commit()
 
-    assert str(artist.id) not in _listed(client, include_unlikely)
+    assert str(artist.id) not in _listed(client, include_unlikely=False)
+    assert str(artist.id) in _listed(client, include_unlikely=True)
 
 
 def test_the_artist_returns_when_a_recheck_puts_the_song_back_in_review(client, db_conn) -> None:
