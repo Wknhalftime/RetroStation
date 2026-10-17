@@ -566,7 +566,7 @@ def test_the_recheck_commits_its_rewind_before_it_queues(
         _play(conn, playlist, song)
     seen: list[tuple[str, str]] = []
 
-    def enqueue(playlist_id: str) -> None:
+    def enqueue(playlist_id: str, run_id: str | None = None) -> None:
         with _connect(migrated_db) as other:  # another session sees committed rows only
             seen.append((playlist_id, _song_row(other, song)["match_status"]))
 
