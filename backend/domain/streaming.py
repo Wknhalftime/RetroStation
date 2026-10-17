@@ -415,6 +415,86 @@ class CueCoverage:
         return self.analysable - self.settled
 
 
+NEARLY_SILENT_MIN_DURATION_MS = 30_000
+"""The nearly-silent signals apply to files over 30 s (issue #146): shorter files are skits and
+interludes, whose size and span say little (S6)."""
+
+NEARLY_SILENT_MAX_KBPS = 64
+"""Issue #146's low-bitrate signature: under 64 kb/s on disk (file_size * 8 / duration_ms).
+FLAC shrinks near-silence to almost nothing. Dev, 2026-10-16: 1 file (Testimony, 17 kb/s); the
+next lowest is 182 kb/s."""
+
+NEARLY_SILENT_MAX_CUED_PERCENT = 10
+"""A real cue row whose span is under 10 % of the file: autocue found only a short audible
+stretch. Dev, 2026-10-16: 1 file (Testimony, 3.9 %); the next lowest is 22.7 %."""
+
+
+class SilenceReason(StrEnum):
+    """Why a file is on the Library Silent Files report (S6)."""
+
+    SILENT = "silent"
+    LOW_BITRATE = "low_bitrate"
+    SHORT_CUED_SPAN = "short_cued_span"
+
+
+@dataclass(frozen=True)
+class SilentFileEntry:
+    """What the library and the cue store say about one present file, for the report (S6).
+
+    ``audio_silent`` is the D111 marker on its audio's cue row. ``cued_span_ms`` is a real
+    (not fallback) cue row's ``cue_out_ms - cue_in_ms``; None with no row or a fallback row.
+    """
+
+    file_id: UUID
+    path: str
+    artist: str | None
+    title: str | None
+    album: str | None
+    duration_ms: int | None
+    file_size: int | None
+    audio_silent: bool
+    cued_span_ms: int | None
+
+    def bitrate_kbps(self) -> int | None:
+        """The file's size over its length, in whole kb/s; None when either is unknown."""
+        if self.file_size is None or self.duration_ms is None or self.duration_ms <= 0:
+            return None
+        return round(self.file_size * 8 / self.duration_ms)
+
+    def reasons(self) -> tuple[SilenceReason, ...]:
+        """Why the report lists the file, silent first; empty when it does not."""
+        found = [SilenceReason.SILENT] if self.audio_silent else []
+        return (*found, *self._nearly_silent())
+
+    def _nearly_silent(self) -> tuple[SilenceReason, ...]:
+        """The nearly-silent signals, in integer arithmetic so the Pg pre-filter agrees."""
+        duration = self.duration_ms
+        if duration is None or duration <= NEARLY_SILENT_MIN_DURATION_MS:
+            return ()
+        found: list[SilenceReason] = []
+        if self.file_size is not None and self.file_size * 8 < NEARLY_SILENT_MAX_KBPS * duration:
+            found.append(SilenceReason.LOW_BITRATE)
+        span = self.cued_span_ms
+        if span is not None and span * 100 < NEARLY_SILENT_MAX_CUED_PERCENT * duration:
+            found.append(SilenceReason.SHORT_CUED_SPAN)
+        return tuple(found)
+
+
+@dataclass(frozen=True)
+class SilentFileReport:
+    """The Library Silent Files report (S6): the listed files, silent first."""
+
+    files: tuple[SilentFileEntry, ...]
+
+    @property
+    def silent(self) -> int:
+        return sum(1 for entry in self.files if SilenceReason.SILENT in entry.reasons())
+
+    @property
+    def nearly_silent(self) -> int:
+        return len(self.files) - self.silent
+
+
 MAX_CLIP_BYTES = 25 * 2**20
 """The largest sign-off clip accepted, in bytes: exactly 25 MiB, 26 214 400 (PG3, M4)."""
 
