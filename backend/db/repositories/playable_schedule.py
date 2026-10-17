@@ -29,7 +29,8 @@ logger = structlog.get_logger()
 #   0.4-0.7 s until the 0030 play_date index exists, and about 10 ms with it.
 #   The join is LEFT: if the view ever drops a play, the play is returned unresolved
 #   rather than vanishing and shifting every later position (ItemRef.index).
-# - Cues are the final file's audio's row, if any (D20): no stat or version check.
+# - Cues are the final file's audio's row, if any (D20): no stat or version check. A row
+#   marked silent (D111) gives the play no file; with no row, audio_silent reads false.
 _DAY_SQL = """
 SELECT dp.play_event_id AS event_id,
        dp.logged_at,
@@ -38,7 +39,8 @@ SELECT dp.play_event_id AS event_id,
        res.matched_file_id, res.work_id, res.file_id, res.file_status, res.source,
        f.file_path, f.duration_ms,
        c.audio_hash AS cued_audio,
-       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db
+       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db,
+       COALESCE(c.audio_silent, false) AS audio_silent
 FROM station_day_plays dp
 JOIN track_identities ti ON ti.id = dp.identity_id
 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
@@ -120,11 +122,12 @@ def _to_item(row: DictRow) -> ScheduleItem:
 
 
 def _to_file(row: DictRow) -> PlayableFile | None:
-    """The resolved file, or none: no master (D22), unmatched (silent, no warning), not
-    present (D21) or invalid (D18).
+    """The resolved file, or none: no master (D22), unmatched (no warning), not present
+    (D21), invalid (D18) or its audio measured silent (D111).
 
-    The checks run in order: no master, availability, file validity, cues. The first that
-    fails ends them, so a bad file's cues are never read.
+    The checks run in order: no master, availability, file validity, silence, cues. The first
+    that fails ends them, so a play logs at most one warning and a bad file's cues are never
+    read.
     """
     if row["file_id"] is None and row["matched_file_id"] is not None:
         _warn_no_master(row)
@@ -143,6 +146,9 @@ def _to_file(row: DictRow) -> PlayableFile | None:
     file = _to_valid_file(row)
     if file is None:
         return None
+    if row["audio_silent"]:
+        _warn_silent(row)
+        return None
     return dataclasses.replace(file, cues=_to_cues(row))
 
 
@@ -153,6 +159,18 @@ def _warn_no_master(row: DictRow) -> None:
         event_id=str(row["event_id"]),
         matched_file_id=str(row["matched_file_id"]),
         work_id=row["work_id"],
+    )
+
+
+def _warn_silent(row: DictRow) -> None:
+    """Log the D111 warning: the final file's audio was measured silent, so the play gets no
+    file and tune-in and the walk skip it."""
+    logger.warning(
+        "schedule_file_silent",
+        event_id=str(row["event_id"]),
+        file_id=str(row["file_id"]),
+        path=row["file_path"],
+        source=row["source"],
     )
 
 

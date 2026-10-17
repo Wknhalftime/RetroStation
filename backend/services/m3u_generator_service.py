@@ -3,7 +3,8 @@
 Which file plays for each play event is curation's view ``play_file_resolution`` (spec D17):
 the override for the station's format, else the song master of the matched file's work, else
 no file (D22). The export adds no resolution rules of its own. It writes a play only when
-that final file is ``present`` (D21), in the order the caller gives the events.
+that final file is ``present`` (D21) and its audio is not silent (D111, S7), in the order
+the caller gives the events.
 """
 
 from __future__ import annotations
@@ -78,8 +79,13 @@ def _entry(
     rewrite: _PathRewrite,
 ) -> list[str]:
     """The EXTINF and path lines for one play, or none when it has no playable file."""
-    # A missing or deleted file's path would be a dead entry in the player (D21).
-    if resolution.file_id is None or resolution.file_status != FileStatus.PRESENT:
+    # A missing or deleted file's path would be a dead entry in the player (D21), and a silent
+    # file's would be dead air (D111, S7).
+    if (
+        resolution.file_id is None
+        or resolution.file_status != FileStatus.PRESENT
+        or resolution.audio_silent
+    ):
         return []
     identity = repos.track_identities.get_by_id(event.identity_id)
     library_file = repos.library_files.get_by_id(resolution.file_id)
