@@ -66,7 +66,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
-| `progress_tracking` | every task envelope | `/ws` poll (0.5 s), hash-backfill liveness |
+| `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark) |
 
 - **Flows:**
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
@@ -87,7 +87,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
-  cue-analysis resume (every 5 min each), cue prune. Matching has no periodic reconcile: work a
+  cue-analysis resume (every 5 min each), cue prune, progress prune (daily). Matching has no periodic reconcile: work a
   lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
   button), and so does a song a MusicBrainz outage deferred (MB_UNAVAILABLE), which every
   re-check rewinds (AUD-R028).
