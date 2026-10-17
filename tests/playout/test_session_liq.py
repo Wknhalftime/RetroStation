@@ -209,6 +209,32 @@ def _max_volume(ffmpeg_stderr: str) -> float:
     return float(match.group(1))
 
 
+def band_loudness_lufs(mp3: Path, frequency: int) -> float:
+    """Integrated loudness (EBU R128) of the recording band-passed at ``frequency``."""
+    band = f"bandpass=f={frequency}:width_type=q:width=10"
+    stderr = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(mp3),
+            "-af",
+            f"{band},{band},ebur128",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    ).stderr
+    # ebur128 logs a running I: per frame and then its summary; the last one is the summary.
+    found = re.findall(r"I:\s+(-?[0-9.]+) LUFS", stderr)
+    assert found, stderr
+    return float(found[-1])
+
+
 def test_plays_items_in_order_with_intro(
     tmp_path: Path, liquidsoap_exe: Path, liq_cache: Path, job: object
 ) -> None:
@@ -365,8 +391,8 @@ def test_gain_is_applied_and_output_peak_is_limited(
         path = make_tone("ffmpeg", tmp_path / f"g{frequency}.flac", ToneSpec(frequency, 12))
         return StubItem(path=long_path(path), span_s=12, title=f"{frequency} Hz", gain_db=gain_db)
 
-    # Tones are -12 dBFS. -20/-10 dB stays under the compressor threshold (-18 dBFS);
-    # +18 dB drives the chain 6 dB over full scale.
+    # Tones are -12 dBFS; with the -20/-10 dB item gains they reach the chain at -32.7 and
+    # -20.7 LUFS (K-weighting lifts 1500 Hz by 2 dB). +18 dB drives it 6 dB over full scale.
     items = [tone(500, -20.0), tone(1500, -10.0), tone(3000, 18.0)]
     setup = setup_for(liquidsoap_exe, liq_cache, tmp_path)
     session = start_stubbed_session(job, stub_session(items), setup)
@@ -374,8 +400,13 @@ def test_gain_is_applied_and_output_peak_is_limited(
     recording = tmp_path / "out.mp3"
     record_for(response, 3 * 12 - 2 * START_NEXT_S + 2, recording)
     response.close()
-    quiet, louder = band_peak_db(recording, 500), band_peak_db(recording, 1500)
-    assert quiet == pytest.approx(-32.0, abs=1.5)
-    assert louder - quiet == pytest.approx(10.0, abs=1.0)
+    quiet, louder = band_loudness_lufs(recording, 500), band_loudness_lufs(recording, 1500)
+    # The AGC (target -16 LUFS, at most +10 dB) lifts the quiet item (measured -23.4 LUFS)
+    # and brings the louder one to its target (measured -15.0 LUFS)...
+    assert quiet >= -27.0, f"the AGC did not lift the quiet item: {quiet} LUFS"
+    assert louder == pytest.approx(-16.0, abs=3.0)
+    # ...but the item gain still sets them apart (measured 8.4 LU).
+    assert louder - quiet >= 5.0
+    # Peaks are a sample-level limit, so dBFS, not LUFS.
     assert peak_db(recording) <= -0.5
     session.process.wait(timeout=10)
