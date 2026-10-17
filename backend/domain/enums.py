@@ -169,6 +169,8 @@ class ReasonCode(StrEnum):
     MB_SEARCH_INCONCLUSIVE = "MB_SEARCH_INCONCLUSIVE"
     MISSING_MATCH_RECORD = "MISSING_MATCH_RECORD"
     ORPHANED_IDENTITY = "ORPHANED_IDENTITY"
+    # The curator rejected or unmatched the song (manual_rejected, parked until the next run),
+    # or unmatched its artist (children back to needs_review).
     USER_UNMATCHED = "USER_UNMATCHED"
     # The matched library file was deleted from the Missing Files page (or by
     # the after-scan purge); the identity is back in review.

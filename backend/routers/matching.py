@@ -875,8 +875,9 @@ async def resolve_identity(
                     exc_info=True,
                 )
     else:
-        # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song goes back to review
-        # with the file recorded, and the matcher skips it and its work from now on.
+        # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song is parked as
+        # manual_rejected with the file recorded, and the next matching run re-checks it
+        # without that file and its work (spec 2026-10-13 R2, R6).
         try:
             await reject_song_suggestion(conn, identity_id, body.library_file_id)
         except IdentityNotFoundError as exc:
@@ -887,7 +888,7 @@ async def resolve_identity(
             ) from exc
         except SongNotRejectableError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
+        return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
     return ResolveResult(id=identity_id, match_status=new_status.value)
 
@@ -998,16 +999,16 @@ async def unmatch_identity(
     conn: DbConn,
     _token: Token,
 ) -> ResolveResult:
-    """Revert a finalized identity match back to NEEDS_REVIEW.
+    """Take a matched song's match away and park it.
 
     Per-song unmatch — does not touch sibling identities or the parent
     artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
     A matched song's file(s) are recorded as rejected (AUD-R022, D5).
+    The song becomes manual_rejected until the next matching run (spec 2026-10-13 R6).
 
     Raises:
         HTTPException: 404 if the identity does not exist.
-        HTTPException: 409 if the identity's current ``match_status`` is
-            not in :data:`backend.services.identity_resolution_service._UNMATCHABLE`.
+        HTTPException: 409 if the identity is not auto_matched or manual_matched.
     """
     try:
         await unmatch_song(conn, identity_id)
@@ -1015,7 +1016,7 @@ async def unmatch_identity(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SongNotRejectableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
+    return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
 
 # ---------------------------------------------------------------------------
