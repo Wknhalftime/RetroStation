@@ -9,6 +9,7 @@ import psycopg
 from backend.domain.enums import TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
+from backend.repositories.task_progress_retention import TaskProgressRetention
 
 UPSERT_SQL = """INSERT INTO progress_tracking
    (task_id, task_type, status, progress_data, started_at, updated_at, completed_at)
@@ -35,7 +36,7 @@ def upsert_params(task: TaskProgress) -> tuple[object, ...]:
     )
 
 
-class PgTaskProgressRepository(TaskProgressRepository):
+class PgTaskProgressRepository(TaskProgressRepository, TaskProgressRetention):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
@@ -122,3 +123,17 @@ class PgTaskProgressRepository(TaskProgressRepository):
         ).fetchone()
         started: datetime | None = row["started_at"] if row else None
         return started
+
+    def delete_finished_before(self, cutoff: datetime) -> int:
+        result = self._conn.execute(
+            """DELETE FROM progress_tracking
+                WHERE status <> %s
+                  AND coalesce(completed_at, updated_at) < %s
+                  AND task_id NOT IN (
+                      SELECT DISTINCT ON (task_type) task_id
+                        FROM progress_tracking
+                       WHERE status = %s
+                       ORDER BY task_type, started_at DESC)""",
+            (TaskStatus.RUNNING.value, cutoff, TaskStatus.COMPLETED.value),
+        )
+        return result.rowcount

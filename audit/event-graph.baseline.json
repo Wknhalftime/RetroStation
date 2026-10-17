@@ -6,11 +6,11 @@
     "edge.ENQUEUE": 17,
     "edge.ENQUEUE_DEFERRED": 0,
     "edge.INLINE": 3,
-    "edge.POLL": 1,
+    "edge.POLL": 0,
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
-    "node.periodic": 4,
-    "node.producer": 18,
+    "node.periodic": 5,
+    "node.producer": 17,
     "node.task": 14,
     "rule.EV01": 0,
     "rule.EV02": 3,
@@ -19,8 +19,8 @@
     "rule.EV05": 0,
     "rule.EV06": 1,
     "rule.EV07": 1,
-    "rule.EV08": 18,
-    "rule.EV09": 2,
+    "rule.EV08": 19,
+    "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
   },
@@ -170,7 +170,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        552
+        553
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -182,7 +182,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        545
+        546
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -194,7 +194,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        335
+        338
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
@@ -215,7 +215,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        113
+        114
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_watcher_poll"
@@ -335,18 +335,6 @@
       ],
       "message_class": null,
       "producer": "scripts.bench_enrich:cmd_run"
-    },
-    {
-      "args": [],
-      "consumer": "table:progress_tracking",
-      "file": "backend/websocket.py",
-      "guarded": false,
-      "kind": "POLL",
-      "lines": [
-        61
-      ],
-      "message_class": null,
-      "producer": "backend.websocket:websocket_endpoint"
     }
   ],
   "header": {
@@ -505,7 +493,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 429,
+      "line": 430,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "body_lines": 168,
@@ -516,18 +504,18 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 124,
+      "line": 125,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
-        "body_lines": 260,
-        "service_calls": 2
+        "body_lines": 262,
+        "service_calls": 3
       }
     },
     {
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 60,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "body_lines": 60,
@@ -565,6 +553,17 @@
       "value": {
         "body_lines": 79,
         "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/progress_prune_tasks.py",
+      "line": 33,
+      "subject": "backend.tasks.progress_prune_tasks:progress_prune_task",
+      "value": {
+        "body_lines": 7,
+        "service_calls": 0
       }
     },
     {
@@ -615,15 +614,8 @@
       "class": "inventory",
       "code": "EV09",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 60,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll"
-    },
-    {
-      "class": "inventory",
-      "code": "EV09",
-      "file": "backend/websocket.py",
-      "line": 37,
-      "subject": "backend.websocket:websocket_endpoint"
     },
     {
       "class": "metric",
@@ -709,7 +701,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 429,
+      "line": 430,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "tasks": 2
@@ -719,7 +711,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 124,
+      "line": 125,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
         "tasks": 1
@@ -729,7 +721,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 60,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "tasks": 1
@@ -849,19 +841,19 @@
       {
         "file": "backend/tasks/library_scan_tasks.py",
         "layer": "task",
-        "line": 429,
+        "line": 430,
         "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 124,
+        "line": 125,
         "qualname": "backend.tasks.library_watcher_tasks:library_scan_files_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 60,
+        "line": 61,
         "qualname": "backend.tasks.library_watcher_tasks:library_watcher_poll"
       },
       {
@@ -893,12 +885,6 @@
         "layer": "task",
         "line": 256,
         "qualname": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
-      },
-      {
-        "file": "backend/websocket.py",
-        "layer": "other",
-        "line": 37,
-        "qualname": "backend.websocket:websocket_endpoint"
       },
       {
         "file": "scripts/bench_enrich.py",
@@ -1058,7 +1044,7 @@
         "file": "backend/tasks/library_scan_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 429,
+        "line": 430,
         "module": "backend.tasks.library_scan_tasks",
         "name": "library_scan_task",
         "params": [
@@ -1072,12 +1058,12 @@
         "schedule": null
       },
       {
-        "body_lines": 260,
+        "body_lines": 262,
         "envelope": "own",
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 124,
+        "line": 125,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_scan_files_task",
         "params": [
@@ -1100,7 +1086,7 @@
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "periodic",
-        "line": 60,
+        "line": 61,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_watcher_poll",
         "params": [],
@@ -1159,6 +1145,20 @@
         "registered": true,
         "retries": 0,
         "schedule": null
+      },
+      {
+        "body_lines": 7,
+        "envelope": "none",
+        "file": "backend/tasks/progress_prune_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "periodic",
+        "line": 33,
+        "module": "backend.tasks.progress_prune_tasks",
+        "name": "progress_prune_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"30\", hour=\"4\")"
       },
       {
         "body_lines": 2,
