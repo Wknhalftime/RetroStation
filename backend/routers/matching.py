@@ -155,7 +155,8 @@ artist_bucket AS (
            -- Likely = worth a curator's time by default: a review item with a
            -- guess at the presentation floor, one released by deleting its missing
            -- library file (no score, spec C2), or an artist the curator unmatched.
-           -- A song the curator rejected is manual_rejected and out of the queue
+           -- A song the curator rejected is manual_rejected and out of the main list
+           -- (its artist stays reachable behind the no-likely-match toggle, R7)
            -- until a re-check (AUD-R029, spec 2026-10-13 R4).
            COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
                             OR ib.reason_code = '{_LIBRARY_FILE_REMOVED}'), FALSE)
@@ -316,7 +317,9 @@ class MatchingQueue(BaseModel):
         default=0,
         description=(
             "Artists matching the search and bucket filters whose review "
-            "items have no guess at SONG_MIN_PRESENTATION_SCORE or above. Counted "
+            "items have no guess at SONG_MIN_PRESENTATION_SCORE or above, plus "
+            "matched artists whose only non-matched songs are rejected (spec "
+            "2026-10-13 R7, AUD-R029). Counted "
             "whether or not include_unlikely lets them into `items`, so the "
             "UI can say how many it is hiding."
         ),
