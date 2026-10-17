@@ -903,13 +903,13 @@ class TestResolveIdentity:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["match_status"] == "needs_review"
+        assert data["match_status"] == "manual_rejected"
 
         id_row = db_conn.execute(
             "SELECT match_status FROM track_identities WHERE id = %s", (identity.id,)
         ).fetchone()
         assert id_row is not None
-        assert id_row["match_status"] == "needs_review"
+        assert id_row["match_status"] == "manual_rejected"
 
     def test_manual_match_replaces_existing_match(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
