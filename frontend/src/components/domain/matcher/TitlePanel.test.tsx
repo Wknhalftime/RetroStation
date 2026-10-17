@@ -389,7 +389,7 @@ describe("TitlePanel sectioning + sorting", () => {
     window.localStorage.clear();
   });
 
-  it("partitions identities into Needs Review and Resolved sections with counts", () => {
+  it("partitions identities into Needs Review, No likely match and Resolved with counts", () => {
     const identities = [
       makeIdentityWithId("01", { match_status: "needs_review", original_title: "A — review" }),
       makeIdentityWithId("02", { match_status: "auto_matched", original_title: "B — auto" }),
@@ -403,7 +403,8 @@ describe("TitlePanel sectioning + sorting", () => {
     );
     // Section headers carry a parenthesised count of items in their group.
     expect(screen.getByRole("heading", { name: /Needs Review \(2\)/i })).toBeDefined();
-    expect(screen.getByRole("heading", { name: /Resolved \(3\)/i })).toBeDefined();
+    expect(screen.getByRole("heading", { name: /Resolved \(2\)/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /No likely match \(1\)/i })).toBeDefined();
   });
 
   it("Resolved section is collapsed by default and toggles aria-expanded on click", () => {
@@ -449,9 +450,9 @@ describe("TitlePanel sectioning + sorting", () => {
   it("sorts Needs Review by triage_bucket priority then confidence DESC", () => {
     const identities = [
       makeIdentityWithId("01", {
-        original_title: "Blocked-unmatched",
+        original_title: "Blocked-released",
         triage_bucket: "blocked",
-        reason_code: "USER_UNMATCHED",
+        reason_code: "LIBRARY_FILE_REMOVED",
         confidence_score: null,
       }),
       makeIdentityWithId("02", {
@@ -482,7 +483,7 @@ describe("TitlePanel sectioning + sorting", () => {
     );
     // jsdom doesn't lay out, so we assert DOM source order via
     // compareDocumentPosition: each subsequent title must follow the previous.
-    const expectedOrder = ["Quick-92", "Quick-70", "Attention-60", "Blocked-unmatched", "Pending-row"];
+    const expectedOrder = ["Quick-92", "Quick-70", "Attention-60", "Blocked-released", "Pending-row"];
     const nodes = expectedOrder.map((t) => screen.getByText(t));
     for (let i = 1; i < nodes.length; i++) {
       const rel = nodes[i - 1].compareDocumentPosition(nodes[i]);
@@ -535,7 +536,7 @@ describe("TitlePanel sectioning + sorting", () => {
     const header = screen.getByRole("button", { name: /Resolved/i });
     expect(header.textContent).toContain("2 auto");
     expect(header.textContent).toContain("1 manual");
-    expect(header.textContent).toContain("1 rejected");
+    expect(header.textContent).not.toContain("rejected");
   });
 });
 
@@ -563,7 +564,7 @@ describe("TitlePanel Unmatch action", () => {
     expect(unmatchMutateMock).toHaveBeenCalledWith({ id: target.id });
   });
 
-  it("renders an Unmatch button on every resolved status (matched and rejected)", () => {
+  it("renders Unmatch on matched rows only; rejected songs are not in Resolved", () => {
     const identities = [
       makeIdentityWithId("01", { match_status: "auto_matched", original_title: "AutoM" }),
       makeIdentityWithId("02", { match_status: "manual_matched", original_title: "ManualM" }),
@@ -578,8 +579,8 @@ describe("TitlePanel Unmatch action", () => {
 
     expect(screen.getByRole("button", { name: /Unmatch AutoM/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Unmatch ManualM/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Unmatch AutoR/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Unmatch ManualR/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Unmatch AutoR/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Unmatch ManualR/i })).toBeNull();
   });
 
   it("disables the Unmatch button while either mutation is pending", () => {
@@ -681,7 +682,7 @@ describe("TitlePanel unlikely matches", () => {
     expect(screen.getByText("Not in library")).toBeDefined();
   });
 
-  it("keeps a curator-unmatched title in Needs Review", () => {
+  it("puts an unscored curator-unmatched title under No likely match", () => {
     const identities = [
       makeIdentity({
         original_title: "Paperdoll",
@@ -694,7 +695,7 @@ describe("TitlePanel unlikely matches", () => {
       <TitlePanel artist={makeArtist(identities)} onFileSearch={vi.fn()} />,
       { wrapper: wrapperFor(makeClient()) }
     );
-    expect(screen.getByRole("heading", { name: /Needs Review \(1\)/i })).toBeDefined();
-    expect(screen.queryByRole("button", { name: /No likely match/i })).toBeNull();
+    expect(screen.getByRole("heading", { name: /Needs Review \(0\)/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /No likely match \(1\)/i })).toBeDefined();
   });
 });

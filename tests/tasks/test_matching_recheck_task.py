@@ -53,7 +53,9 @@ from tests.fakes.task_progress import FakeTaskProgressRepository
 REPO = Path(__file__).resolve().parents[2]
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
-DECIDED = [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED]
+# Never rewound: matches, and an artist the curator rejected (below). A song the curator
+# rejected is re-checked on every run (spec 2026-10-13 R1).
+DECIDED = [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED]
 
 
 class _WaveFiles(FakeLibraryFileRepository):
@@ -314,6 +316,18 @@ def test_decided_artists_and_songs_are_never_rewound(rig: _Rig, status: MatchSta
     assert rig.stored_song(song).match_status == status
     assert rig.stored_song(song).reason_code == ReasonCode.LOW_CONFIDENCE
     assert (result["artists_rewound"], result["songs_rewound"]) == (0, 0)
+
+
+def test_a_rejected_song_is_rewound_but_a_rejected_artist_is_not(rig: _Rig) -> None:
+    artist = rig.artist("abba", MatchStatus.MANUAL_REJECTED)
+    song = rig.song(artist, MatchStatus.MANUAL_REJECTED)
+
+    result = _run("all")
+
+    assert rig.stored_artist(artist).match_status == MatchStatus.MANUAL_REJECTED
+    assert rig.stored_song(song).match_status == MatchStatus.PENDING
+    assert rig.stored_song(song).reason_code is None
+    assert (result["artists_rewound"], result["songs_rewound"]) == (0, 1)
 
 
 def test_songs_follow_an_artist_in_the_wave_whatever_its_status(rig: _Rig) -> None:

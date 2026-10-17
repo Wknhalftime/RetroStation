@@ -1973,9 +1973,9 @@ def _set_reason_code(
 
 class TestUnlikelyArtists:
     """An artist is "unlikely" when none of its review items has a guess at
-    SONG_MIN_PRESENTATION_SCORE or above and nothing was unmatched by the curator.
-    include_unlikely=false leaves them out; unlikely_total always counts them
-    so the UI can say how many are hidden."""
+    SONG_MIN_PRESENTATION_SCORE or above, none was released by deleting its library file,
+    and the curator did not unmatch the artist. include_unlikely=false leaves them out;
+    unlikely_total always counts them so the UI can say how many are hidden."""
 
     def _seed_scored(
         self,
@@ -2047,14 +2047,16 @@ class TestUnlikelyArtists:
         assert data["total"] == 0
         assert data["unlikely_total"] == 1
 
-    def test_user_unmatched_identity_stays_visible(self, client, db_conn):
-        """Unmatch deletes the match rows, so the score is gone; the artist
-        must not vanish from under the curator who just clicked Unmatch."""
-        artist, identity = self._seed_scored(db_conn, "Unmatched Song", None)
+    def test_a_song_level_user_unmatched_no_longer_keeps_the_artist_likely(self, client, db_conn):
+        """A song the curator rejects is parked as manual_rejected, out of the queue (spec
+        2026-10-13 R4); a needs_review song with USER_UNMATCHED and no score is just an
+        unscored item."""
+        _, identity = self._seed_scored(db_conn, "Unmatched Song", None)
         _set_reason_code(db_conn, "track_identities", identity.id, "USER_UNMATCHED")
 
-        resp = client.get("/api/v1/matching/queue?include_unlikely=false")
-        assert [i["id"] for i in resp.json()["items"]] == [str(artist.id)]
+        data = client.get("/api/v1/matching/queue?include_unlikely=false").json()
+        assert data["items"] == []
+        assert data["unlikely_total"] == 1
 
     def test_user_unmatched_artist_stays_visible(self, client, db_conn):
         artist, _ = self._seed_scored(db_conn, "Unmatched Artist", None)

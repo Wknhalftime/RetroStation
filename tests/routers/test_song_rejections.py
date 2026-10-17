@@ -1,11 +1,12 @@
 """Acceptance tests: Reject and Unmatch record (song, file) rejections
-(spec 2026-10-05 §4.1).
+(spec 2026-10-05 §4.1) and park the song (spec 2026-10-13 R2, R6).
 
 Status matrix for Reject: unknown id 404; pending / needs_review need the shown
 file (422 without it); auto_matched / manual_matched record every non-null
-matched file and ignore the body; auto_rejected / manual_rejected give 409. Both
-actions leave the song needs_review / USER_UNMATCHED with tier and detail
-cleared and its match rows deleted (D3, D4, D5, D8).
+matched file and ignore the body; auto_rejected / manual_rejected give 409. Unmatch
+works on auto_matched / manual_matched only (409 otherwise). Both actions leave the song
+manual_rejected / USER_UNMATCHED with tier and detail cleared and its match rows deleted
+(D3, D4, D5, D8; R6), and the API answers match_status "manual_rejected".
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ REJECT = {"match_status": "manual_rejected"}
 def _song(db_conn: psycopg.Connection[Any], status: MatchStatus) -> Any:
     _, _, artist, _, _ = _seed_review_chain(db_conn)
     song = _insert_identity(db_conn, artist, original_title="Shown Song", match_status=status)
-    # Non-null tier / reason / detail, so "cleared" in _assert_back_in_review proves the write.
+    # Non-null tier / reason / detail, so "cleared" in _assert_parked proves the write.
     db_conn.execute(
         """UPDATE track_identities
            SET match_tier = %s, reason_code = %s, reason_detail = %s WHERE id = %s""",
@@ -59,9 +60,9 @@ def _match_rows(db_conn: psycopg.Connection[Any], identity_id: UUID) -> int:
     return int(row["n"])
 
 
-def _assert_back_in_review(db_conn: psycopg.Connection[Any], identity_id: UUID) -> dict[str, Any]:
+def _assert_parked(db_conn: psycopg.Connection[Any], identity_id: UUID) -> dict[str, Any]:
     row = _row(db_conn, identity_id)
-    assert row["match_status"] == MatchStatus.NEEDS_REVIEW.value
+    assert row["match_status"] == MatchStatus.MANUAL_REJECTED.value
     assert row["reason_code"] == ReasonCode.USER_UNMATCHED.value
     assert row["match_tier"] is None
     assert row["reason_detail"] is None
@@ -89,8 +90,8 @@ def test_reject_records_the_shown_suggestion(client, db_conn, status: MatchStatu
     resp = _reject(client, song.id, shown.id)
 
     assert resp.status_code == 200
-    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
-    row = _assert_back_in_review(db_conn, song.id)
+    assert resp.json()["match_status"] == MatchStatus.MANUAL_REJECTED.value
+    row = _assert_parked(db_conn, song.id)
     assert list(row["rejected_file_ids"]) == [shown.id]
 
 
@@ -122,13 +123,24 @@ def test_reject_records_a_file_id_the_library_no_longer_has(client, db_conn) -> 
     assert list(_row(db_conn, song.id)["rejected_file_ids"]) == [gone]
 
 
-def test_rejecting_the_same_file_twice_records_it_once(client, db_conn) -> None:
+def test_rejecting_an_already_rejected_file_records_it_once(client, db_conn) -> None:
+    song = _song(db_conn, MatchStatus.NEEDS_REVIEW)
+    shown = _insert_library_file(db_conn)
+    _store_rejection(db_conn, song.id, shown.id)
+    db_conn.commit()
+
+    assert _reject(client, song.id, shown.id).status_code == 200
+
+    assert list(_row(db_conn, song.id)["rejected_file_ids"]) == [shown.id]
+
+
+def test_rejecting_a_parked_song_again_is_409(client, db_conn) -> None:
     song = _song(db_conn, MatchStatus.NEEDS_REVIEW)
     shown = _insert_library_file(db_conn)
     db_conn.commit()
 
     assert _reject(client, song.id, shown.id).status_code == 200
-    assert _reject(client, song.id, shown.id).status_code == 200
+    assert _reject(client, song.id, shown.id).status_code == 409
 
     assert list(_row(db_conn, song.id)["rejected_file_ids"]) == [shown.id]
 
@@ -164,18 +176,18 @@ def test_reject_matched_song_records_every_matched_file_and_ignores_the_body(
     resp = _reject(client, song.id, uuid4())
 
     assert resp.status_code == 200
-    row = _assert_back_in_review(db_conn, song.id)
+    row = _assert_parked(db_conn, song.id)
     assert set(row["rejected_file_ids"]) == {first.id, second.id}
 
 
-def test_reject_matched_song_without_a_file_row_still_returns_it_to_review(client, db_conn) -> None:
+def test_reject_matched_song_without_a_file_row_still_parks_it(client, db_conn) -> None:
     song = _song(db_conn, MatchStatus.AUTO_MATCHED)
     _insert_match_row(db_conn, song, 99.0, library_file_id=None)
     db_conn.commit()
 
     assert _reject(client, song.id, None).status_code == 200
 
-    row = _assert_back_in_review(db_conn, song.id)
+    row = _assert_parked(db_conn, song.id)
     assert list(row["rejected_file_ids"]) == []
 
 
@@ -198,8 +210,8 @@ def test_reject_matched_song_keeps_earlier_rejections_and_adds_the_matched_file(
     resp = _reject(client, song.id, uuid4())
 
     assert resp.status_code == 200
-    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
-    row = _assert_back_in_review(db_conn, song.id)
+    assert resp.json()["match_status"] == MatchStatus.MANUAL_REJECTED.value
+    row = _assert_parked(db_conn, song.id)
     assert set(row["rejected_file_ids"]) == {earlier, matched.id}
 
 
@@ -235,8 +247,8 @@ def test_unmatch_matched_song_records_its_file(client, db_conn, status: MatchSta
     resp = client.post(f"/api/v1/matching/identities/{song.id}/unmatch")
 
     assert resp.status_code == 200
-    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
-    row = _assert_back_in_review(db_conn, song.id)
+    assert resp.json()["match_status"] == MatchStatus.MANUAL_REJECTED.value
+    row = _assert_parked(db_conn, song.id)
     assert list(row["rejected_file_ids"]) == [matched.id]
 
 
@@ -250,30 +262,27 @@ def test_unmatch_matched_song_keeps_earlier_rejections_and_adds_its_file(client,
     resp = client.post(f"/api/v1/matching/identities/{song.id}/unmatch")
 
     assert resp.status_code == 200
-    assert resp.json()["match_status"] == MatchStatus.NEEDS_REVIEW.value
-    row = _assert_back_in_review(db_conn, song.id)
+    assert resp.json()["match_status"] == MatchStatus.MANUAL_REJECTED.value
+    row = _assert_parked(db_conn, song.id)
     assert set(row["rejected_file_ids"]) == {earlier, matched.id}
 
 
-def test_unmatch_auto_rejected_song_records_nothing(client, db_conn) -> None:
-    song = _song(db_conn, MatchStatus.AUTO_REJECTED)
+@pytest.mark.parametrize("status", [MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED])
+def test_unmatch_of_a_rejected_song_is_409_and_changes_nothing(
+    client, db_conn, status: MatchStatus
+) -> None:
+    song = _song(db_conn, status)
     weak_guess = _insert_library_file(db_conn)
     _insert_match_row(db_conn, song, 30.0, library_file_id=weak_guess.id)
     db_conn.commit()
 
-    assert client.post(f"/api/v1/matching/identities/{song.id}/unmatch").status_code == 200
+    assert client.post(f"/api/v1/matching/identities/{song.id}/unmatch").status_code == 409
 
-    row = _assert_back_in_review(db_conn, song.id)
+    row = _row(db_conn, song.id)
+    assert row["match_status"] == status.value
+    assert row["reason_code"] == ReasonCode.LOW_CONFIDENCE.value
     assert list(row["rejected_file_ids"]) == []
-
-
-def test_unmatch_legacy_manual_rejected_frees_it_without_recording(client, db_conn) -> None:
-    song = _song(db_conn, MatchStatus.MANUAL_REJECTED)
-
-    assert client.post(f"/api/v1/matching/identities/{song.id}/unmatch").status_code == 200
-
-    row = _assert_back_in_review(db_conn, song.id)
-    assert list(row["rejected_file_ids"]) == []
+    assert _match_rows(db_conn, song.id) == 1
 
 
 @pytest.mark.parametrize("status", [MatchStatus.PENDING, MatchStatus.NEEDS_REVIEW])
