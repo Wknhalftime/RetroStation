@@ -28,6 +28,7 @@ from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientPr
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 from backend.services.streaming.cue_editor import CueEditorPorts, ReadPeaks
+from backend.services.streaming.liner_cues import LinerCuePorts
 from backend.services.streaming.liners import LinerPorts, liner_folder
 from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
@@ -236,6 +237,18 @@ def get_liner_ports(repos: SyncRepos) -> LinerPorts:
         probe=partial(probe_clip, role="a liner"),
         commit=_liner_commit(repos),
         clock=lambda: datetime.now(UTC),
+    )
+
+
+def get_liner_cue_ports(repos: SyncRepos) -> LinerCuePorts:
+    """The liner cue editor's ports (LR11): the request's liner and cue repositories, the
+    liners root under ``STREAM_WORK_DIR`` and the liner commit (a lost connection becomes
+    ``LinerStorageError``)."""
+    return LinerCuePorts(
+        liners=repos.broadcast.liners,
+        cues=repos.streaming.cues,
+        folder=liner_folder(get_settings().stream_work_dir),
+        commit=_liner_commit(repos),
     )
 
 
