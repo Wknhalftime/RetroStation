@@ -12,6 +12,25 @@ import {
   useDeleteFormatOverride,
 } from "@/api/works";
 import { useArtistDetail } from "@/api/artists";
+import { ValidationError } from "@/api/client";
+
+/** The text to show for a refused master change: the server's reason where it gave one. */
+function errorText(error: Error): string {
+  if (error instanceof ValidationError) {
+    // FastAPI sends a list of {msg}; a hand-raised 422 sends a plain string.
+    const detail: unknown = error.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (Array.isArray(detail)) {
+      const reasons = detail
+        .map((item: unknown) =>
+          typeof item === "object" && item !== null && "msg" in item ? String(item.msg) : ""
+        )
+        .filter(Boolean);
+      if (reasons.length > 0) return reasons.join(" ");
+    }
+  }
+  return error.message;
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -57,6 +76,16 @@ export function AssociatedWorks() {
   // ---------------------------------------------------------------------------
 
   const masterFileId = work.song_master?.preferred_file_id ?? null;
+  const masterError = setMaster.error ?? revertMaster.error;
+
+  const chooseMaster = (fileId: string) => {
+    revertMaster.reset();
+    setMaster.mutate({ preferred_file_id: fileId });
+  };
+  const revertToAuto = () => {
+    setMaster.reset();
+    revertMaster.mutate();
+  };
   const masterMethod = work.song_master?.selection_method ?? null;
 
   const masterBannerText = work.song_master
@@ -95,7 +124,7 @@ export function AssociatedWorks() {
           work.song_master ? (
             <button
               type="button"
-              onClick={() => revertMaster.mutate()}
+              onClick={revertToAuto}
               disabled={revertMaster.isPending}
               className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60"
             >
@@ -114,6 +143,13 @@ export function AssociatedWorks() {
         </div>
       )}
 
+      {/* Why the last master change failed */}
+      {masterError && (
+        <p role="alert" className="rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          Could not change the master file: {errorText(masterError)}
+        </p>
+      )}
+
       {/* Files table */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
@@ -123,7 +159,7 @@ export function AssociatedWorks() {
           recordings={work.recordings}
           masterFileId={masterFileId}
           masterMethod={masterMethod}
-          onSetMaster={(fileId) => setMaster.mutate({ preferred_file_id: fileId })}
+          onSetMaster={chooseMaster}
         />
       </section>
 

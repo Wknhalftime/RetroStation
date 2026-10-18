@@ -16,6 +16,22 @@ class CurationStorageError(CurationError, StorageUnavailableError):
     """A curation repository lost its database connection mid-operation."""
 
 
+class MasterChoiceError(CurationError):
+    """A file cannot be made a work's master by hand."""
+
+
+class MasterWorkNotFoundError(MasterChoiceError):
+    """The work to choose a master for does not exist."""
+
+
+class MasterFileNotOnWorkError(MasterChoiceError):
+    """The file is neither on the work nor shown on its page through a shared recording."""
+
+
+class MasterFileMissingError(MasterChoiceError):
+    """The file is no longer on disk, so it cannot be a master."""
+
+
 @dataclass
 class SongMaster:
     id: UUID
