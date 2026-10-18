@@ -29,6 +29,7 @@ from backend.services.matching_constants import (
     SONG_MIN_PRESENTATION_SCORE,
     SONG_NAME_LOOKUP_LIMIT,
 )
+from backend.services.matching_progress import NO_PROGRESS, MatchingProgress, ticking
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
@@ -675,6 +676,7 @@ def match_identities_for_playlist(
     repos: IdentityMatchingRepos,
     mb_client: MusicBrainzClientProtocol,
     strong_match_threshold: int = 80,
+    progress: MatchingProgress = NO_PROGRESS,
 ) -> list[str]:
     """Resolve pending identities for a playlist.
 
@@ -687,6 +689,8 @@ def match_identities_for_playlist(
 
     A song whose MusicBrainz recording search fails transiently is deferred and the run
     carries on; a permanent MusicBrainz error propagates (AUD-R028, D16).
+
+    ``progress`` ticks once per pending song, after its result is written (spec 2026-10-17).
     """
     pending = repos.track_identity_repo.get_pending_for_playlist(playlist_id)
     if not pending:
@@ -732,7 +736,7 @@ def match_identities_for_playlist(
     decided_meanwhile = 0
     work_ids: list[str] = []
 
-    for identity in pending:
+    for identity in ticking(pending, progress):
         artist = artists_by_id.get(identity.broadcast_artist_id)
         if artist is None:
             # Persist a terminal NEEDS_REVIEW so the orphan surfaces in review

@@ -23,6 +23,7 @@ from uuid import uuid4
 import pytest
 
 from backend.services.artist_matching_service import ArtistMatchingRepos, ArtistMatchThresholds
+from backend.services.matching_progress import NO_PROGRESS, MatchingProgress
 from backend.tasks.artist_matching_tasks import artist_matching_task
 
 
@@ -140,11 +141,13 @@ def test_artist_matching_task_wires_repos_and_thresholds(
         repos: ArtistMatchingRepos,
         mb_client: object,
         thresholds: ArtistMatchThresholds,
+        progress: MatchingProgress,
     ) -> None:
         captured["playlist_id"] = playlist_id
         captured["repos"] = repos
         captured["mb_client"] = mb_client
         captured["thresholds"] = thresholds
+        captured["progress"] = progress
 
     monkeypatch.setattr(
         "backend.tasks.artist_matching_tasks.match_artists_for_playlist",
@@ -155,6 +158,8 @@ def test_artist_matching_task_wires_repos_and_thresholds(
     artist_matching_task.call_local(str(playlist_id))
 
     assert captured["playlist_id"] == playlist_id
+    # No run id (an upload's matching): the service gets the no-op observer.
+    assert captured["progress"] is NO_PROGRESS
     assert isinstance(captured["mb_client"], _FakeMbClient)
     assert captured["mb_client"].ttl_days == 3650
 

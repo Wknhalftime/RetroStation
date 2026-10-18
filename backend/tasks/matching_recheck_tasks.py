@@ -7,8 +7,9 @@ The two producers:
 One run:
 - reads the watermark;
 - rewinds the wave's undecided artists and songs to pending, and commits;
-- hands every playlist with pending work to ``artist_matching_task``, which hands on to
-  identity matching.
+- opens the matching run's progress row (spec 2026-10-17) and hands every playlist with
+  pending work to ``artist_matching_task(playlist_id, run_id)``, which hands on to identity
+  matching. The row stays RUNNING until the run's last stage ends.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from backend.services.matching_recheck_service import (
     rewind_wave,
 )
 from backend.services.repository_factory import RepositoryFactory
+from backend.tasks import _matching_run
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
@@ -46,85 +48,95 @@ def rematch_undecided_task(scope: str) -> dict[str, int]:
     run's watermark.
     """
     settings = get_settings()
-    task_id = ""
-    playlist_ids: list[UUID] = []
-    summary: dict[str, int] = {}
+    # Whatever way this ends, a stage of the run it opened but never queued is finished
+    # as failed, so the run's row closes.
+    with _matching_run.run_fan_out(settings.database_url) as run:
+        task_id = ""
+        playlist_ids: list[UUID] = []
+        summary: dict[str, int] = {}
 
-    config = TaskRunConfig(
-        task_type=TaskType.MATCHING_RECHECK,
-        log_category=LogCategory.MATCHING,
-        messages=TaskLifecycleMessages(
-            started="matching_recheck_started",
-            completed="matching_recheck_completed",
-            failed="matching_recheck_failed",
-        ),
-        read_progress=lambda: (0, 0),
-    )
-
-    with task_run(settings.database_url, config) as handle:
-        task_id = handle.task_id
-        recheck_scope = RecheckScope(scope)
-        handle.report_running(
-            progress_data={"processed": 0, "total": 0, "scope": recheck_scope.value}
+        config = TaskRunConfig(
+            task_type=TaskType.MATCHING_RECHECK,
+            log_category=LogCategory.MATCHING,
+            messages=TaskLifecycleMessages(
+                started="matching_recheck_started",
+                completed="matching_recheck_completed",
+                failed="matching_recheck_failed",
+            ),
+            read_progress=lambda: (0, 0),
         )
-        # handle.started_at was taken before any query. Once this run's COMPLETED row is
-        # written, it is the next run's watermark. FAILED and RUNNING rows never count.
-        watermark = handle.progress_repo.last_completed_started_at(TaskType.MATCHING_RECHECK)
-        handle.log_started(
-            details={
-                "scope": recheck_scope.value,
-                "watermark": watermark.isoformat() if watermark is not None else None,
+
+        with task_run(settings.database_url, config) as handle:
+            task_id = handle.task_id
+            recheck_scope = RecheckScope(scope)
+            handle.report_running(
+                progress_data={"processed": 0, "total": 0, "scope": recheck_scope.value}
+            )
+            # handle.started_at was taken before any query. Once this run's COMPLETED row is
+            # written, it is the next run's watermark. FAILED and RUNNING rows never count.
+            watermark = handle.progress_repo.last_completed_started_at(TaskType.MATCHING_RECHECK)
+            handle.log_started(
+                details={
+                    "scope": recheck_scope.value,
+                    "watermark": watermark.isoformat() if watermark is not None else None,
+                }
+            )
+            with connect_sync(settings.database_url) as conn:
+                repos = RepositoryFactory(conn)
+                names = recheck_names(
+                    recheck_scope, watermark, repos.library_files, repos.artist_linking
+                )
+                counts = rewind_wave(names, repos.broadcast_artists, repos.broadcast_identities)
+                # Committed before the fan-out: the matching worker reads the rewound statuses.
+                conn.commit()
+                playlist_ids = sorted(
+                    playlists_with_pending_work(
+                        repos.broadcast_artists, repos.broadcast_identities
+                    ),
+                    key=str,
+                )
+            # The run's row opens now, counted after the rewind's commit, while this re-check's
+            # own row is still RUNNING: the bottom bar never shows a gap (spec 2026-10-17).
+            run.open(len(playlist_ids))
+            summary = {
+                "artists_rewound": counts.artists,
+                "songs_rewound": counts.songs,
+                "playlists": len(playlist_ids),
             }
-        )
-        with connect_sync(settings.database_url) as conn:
-            repos = RepositoryFactory(conn)
-            names = recheck_names(
-                recheck_scope, watermark, repos.library_files, repos.artist_linking
-            )
-            counts = rewind_wave(names, repos.broadcast_artists, repos.broadcast_identities)
-            # Committed before the fan-out: the matching worker reads the rewound statuses.
-            conn.commit()
-            playlist_ids = sorted(
-                playlists_with_pending_work(repos.broadcast_artists, repos.broadcast_identities),
-                key=str,
-            )
-        summary = {
-            "artists_rewound": counts.artists,
-            "songs_rewound": counts.songs,
-            "playlists": len(playlist_ids),
-        }
-        details: dict[str, object] = {
-            "scope": recheck_scope.value,
-            "wave_names": None if names is None else len(names),
-            **summary,
-        }
-        handle.set_completed(
-            progress_data={"processed": 1, "total": 1, **details},
-            details=details,
-        )
-
-    logger.info("matching_recheck_task_complete", task_id=task_id, scope=scope, **summary)
-
-    # Hand each playlist with pending work to artist matching, even when the wave was empty:
-    # items left pending by a failed downstream run are retried this way. Guarded per
-    # playlist (AUD-R012 (1), AUD-R014) on a fresh autocommit connection, after the envelope,
-    # as library_enrichment_task does. The run is already COMPLETED; a refused enqueue is
-    # logged on its task_id.
-    from backend.tasks.artist_matching_tasks import artist_matching_task
-
-    with connect_sync(settings.database_url, autocommit=True) as log_conn:
-        sys_log_repo = PgSystemLogRepository(log_conn)
-        for playlist_id in playlist_ids:
-            pid = str(playlist_id)
-            enqueue_or_log(
-                lambda: artist_matching_task(pid),  # noqa: B023 - called at once
-                task_name="artist_matching_task",
-                caller_task_id=task_id,
-                log_category=LogCategory.MATCHING,
-                sys_log_repo=sys_log_repo,
+            details: dict[str, object] = {
+                "scope": recheck_scope.value,
+                "wave_names": None if names is None else len(names),
+                **summary,
+            }
+            handle.set_completed(
+                progress_data={"processed": 1, "total": 1, **details},
+                details=details,
             )
 
-    return summary
+        logger.info("matching_recheck_task_complete", task_id=task_id, scope=scope, **summary)
+
+        # Hand each playlist with pending work to artist matching, even when the wave was empty:
+        # items left pending by a failed downstream run are retried this way. Guarded per
+        # playlist (AUD-R012 (1), AUD-R014) on a fresh autocommit connection, after the envelope,
+        # as library_enrichment_task does. The run is already COMPLETED; a refused enqueue is
+        # logged on its task_id, and ends its stage of the matching run, failed.
+        from backend.tasks.artist_matching_tasks import artist_matching_task
+
+        with connect_sync(settings.database_url, autocommit=True) as log_conn:
+            sys_log_repo = PgSystemLogRepository(log_conn)
+            for playlist_id in playlist_ids:
+                pid = str(playlist_id)
+                enqueue_or_log(
+                    lambda: artist_matching_task(pid, run.run_id),  # noqa: B023 - called at once
+                    task_name="artist_matching_task",
+                    caller_task_id=task_id,
+                    log_category=LogCategory.MATCHING,
+                    sys_log_repo=sys_log_repo,
+                    on_failure=run.refused,
+                )
+                run.accounted()
+
+        return summary
 
 
 def queue_recheck_all() -> None:

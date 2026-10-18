@@ -26,6 +26,7 @@ from backend.services.matching_constants import (
     MID_BAND_UPPER,
     MIN_PRESENTATION_SCORE,
 )
+from backend.services.matching_progress import NO_PROGRESS, MatchingProgress, ticking
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_deferred_retry,
@@ -658,6 +659,7 @@ def match_artists_for_playlist(
     repos: ArtistMatchingRepos,
     mb_client: MusicBrainzClientProtocol,
     thresholds: ArtistMatchThresholds = _DEFAULT_ARTIST_MATCH_THRESHOLDS,
+    progress: MatchingProgress = NO_PROGRESS,
 ) -> None:
     """Resolve PENDING artists. Tier order:
 
@@ -670,7 +672,8 @@ def match_artists_for_playlist(
     artist_matching_task's reset paths).
 
     Persistence lives here, not in strategies. AUTO_REJECTED cascade
-    preserved from legacy.
+    preserved from legacy. ``progress`` ticks once per pending artist, after its result is
+    persisted (spec 2026-10-17).
     """
     pending = repos.broadcast_artist_repo.get_pending_for_playlist(playlist_id)
     rules = repos.rules_repo.list_ordered()
@@ -702,7 +705,7 @@ def match_artists_for_playlist(
         )
 
         written_ids: set[UUID] = set()
-        for broadcast_artist in pending:
+        for broadcast_artist in ticking(pending, progress):
             if _persist_artist_result(
                 broadcast_artist,
                 resolved[broadcast_artist.id],
