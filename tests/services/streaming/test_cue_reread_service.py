@@ -147,11 +147,11 @@ async def test_stored_cues_that_would_leave_the_song_unplayable_are_not_played(
     tmp_path: Path,
 ) -> None:
     """D86(b), at the service (audit SF-1): a re-read that would leave the song unplayable
-    under D9 is ignored; the song keeps its tune-in values, cue-out and gain included, and
-    is not reported."""
+    under D9 is ignored (a 6 s span, under D9's 4 + 3 = 7 s; D112: the fade-in never counts);
+    the song keeps its tune-in values, cue-out and gain included, and is not reported."""
     reporting = make_reporting_rig(tmp_path)
     _, later = schedule(reporting, song("06:00:00", cues=ANALYSED), song("06:03:20", cues=ANALYSED))
-    reporting.schedule.stored[file_of(later)] = CuePoints(0, 9_000, 3_000, 4_000, 0, -3.0)
+    reporting.schedule.stored[file_of(later)] = CuePoints(0, 6_000, 3_000, 4_000, 0, -3.0)
     sid = await reporting.rig.open()
     await reporting.rig.item(sid, 0)
     sent = await reporting.rig.item(sid, 1)

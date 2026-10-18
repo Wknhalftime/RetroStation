@@ -1,4 +1,5 @@
-"""Task 1 acceptance tests: streaming value objects (spec: Domain, D9, D11)."""
+"""Task 1 acceptance tests: streaming value objects (spec: Domain, D9 as amended by D112,
+D11)."""
 
 from __future__ import annotations
 
@@ -88,31 +89,32 @@ def test_span_falls_back_to_duration_then_zero() -> None:
     assert file(None).span_ms() == 0
 
 
-def test_min_span_uses_cached_fades_else_defaults() -> None:
-    assert file(240_000, cues(fade_in_ms=2000, fade_out_ms=5000)).min_span_ms(TIMING) == 10_000
-    assert file(240_000).min_span_ms(TIMING) == 3000 + 4000 + 3000
+def test_min_span_uses_the_cached_fade_out_else_the_default() -> None:
+    # D112: no song fades in, so a stored fade-in never counts.
+    assert file(240_000, cues(fade_in_ms=2000, fade_out_ms=5000)).min_span_ms(TIMING) == 8_000
+    assert file(240_000).min_span_ms(TIMING) == 4000 + 3000
 
 
 def test_tail_fits_needs_min_span_left() -> None:
     track = file(240_000)
-    assert track.tail_fits(230_000, TIMING)
-    assert not track.tail_fits(230_001, TIMING)
+    assert track.tail_fits(233_000, TIMING)
+    assert not track.tail_fits(233_001, TIMING)
 
 
 def test_tail_is_measured_from_cue_in() -> None:
-    track = file(240_000, cues())  # span 180_000, min span 10_000
-    assert track.tail_fits(170_000, TIMING)
-    assert not track.tail_fits(170_001, TIMING)
+    track = file(240_000, cues())  # span 180_000, min span 8_000
+    assert track.tail_fits(172_000, TIMING)
+    assert not track.tail_fits(172_001, TIMING)
 
 
 def test_file_shorter_than_min_span_is_unplayable() -> None:
-    assert not file(9_999).is_playable(TIMING)
-    assert file(10_000).is_playable(TIMING)
+    assert not file(6_999).is_playable(TIMING)
+    assert file(7_000).is_playable(TIMING)
     assert not file(None).is_playable(TIMING)
 
 
 def test_fades_longer_than_span_are_valid_but_unplayable() -> None:
-    assert not file(240_000, cues(cue_in_ms=0, cue_out_ms=8000)).is_playable(TIMING)
+    assert not file(240_000, cues(cue_in_ms=0, cue_out_ms=7999)).is_playable(TIMING)
 
 
 def test_schedule_item_without_file_is_unplayable() -> None:

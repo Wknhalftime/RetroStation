@@ -2,10 +2,10 @@
 
 Spec: For PR D and PR E ("reads the hash before analysing and stores nothing if the hash
 changed meanwhile"); D52 (the fallback row: cue_in 0, cue_out = duration_ms, start_next 0,
-default fades, gain_db -8, analysis_failed); D53 (loudness_lufs NULL); D54 (start_next_ms =
-liq_cross_end_duration); D55 (a failure with no duration_ms stores nothing and is retried
-every run, so it is logged quietly); D68 (a malformed result line fails only its file, with
-a fallback row and the field named).
+the default fade-out and no fade-in (D112), gain_db -8, analysis_failed); D53 (loudness_lufs
+NULL); D54 (start_next_ms = liq_cross_end_duration); D55 (a failure with no duration_ms
+stores nothing and is retried every run, so it is logged quietly); D68 (a malformed result
+line fails only its file, with a fallback row and the field named).
 """
 
 from __future__ import annotations
@@ -33,6 +33,9 @@ FALLBACK_GAIN_DB = -8.0
 
 FALLBACK_START_NEXT_MS = 0
 """D52: the fallback row has no overlap with the next item."""
+
+FALLBACK_FADE_IN_MS = 0
+"""D112: no song fades in, so the fallback row stores no fade-in."""
 
 
 class CueRecord(StrEnum):
@@ -65,7 +68,7 @@ def fallback_points(duration_ms: int | None, timing: StreamTiming) -> CuePoints 
     return CuePoints(
         cue_in_ms=0,
         cue_out_ms=duration_ms,
-        fade_in_ms=timing.default_fade_in_ms,
+        fade_in_ms=FALLBACK_FADE_IN_MS,
         fade_out_ms=timing.default_fade_out_ms,
         start_next_ms=FALLBACK_START_NEXT_MS,
         gain_db=FALLBACK_GAIN_DB,
