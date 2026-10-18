@@ -10,10 +10,12 @@ from psycopg.rows import DictRow
 
 from backend.domain.enums import FileStatus
 from backend.domain.streaming import (
+    CueMarkers,
     CuePoints,
     InvalidStreamValueError,
     PlayableFile,
     ScheduleItem,
+    edited_cues,
 )
 from backend.repositories.playable_schedule import PlayableScheduleRepository
 
@@ -29,7 +31,10 @@ logger = structlog.get_logger()
 #   0.4-0.7 s until the 0030 play_date index exists, and about 10 ms with it.
 #   The join is LEFT: if the view ever drops a play, the play is returned unresolved
 #   rather than vanishing and shifting every later position (ItemRef.index).
-# - Cues are the final file's audio's row, if any (D20): no stat or version check.
+# - Cues are the final file's audio's row, if any (D20): no stat or version check. A manual
+#   edit for the same audio (stream_cue_edits, keyed like stream_cues, so twin files share it
+#   and a re-hash drops it) is joined beside it and wins; the reader only hands both to the
+#   domain's edited_cues.
 _DAY_SQL = """
 SELECT dp.play_event_id AS event_id,
        dp.logged_at,
@@ -38,7 +43,8 @@ SELECT dp.play_event_id AS event_id,
        res.matched_file_id, res.work_id, res.file_id, res.file_status, res.source,
        f.file_path, f.duration_ms,
        c.audio_hash AS cued_audio,
-       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db
+       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db,
+       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms
 FROM station_day_plays dp
 JOIN track_identities ti ON ti.id = dp.identity_id
 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
@@ -50,22 +56,29 @@ LEFT JOIN LATERAL (
 ) res ON true
 LEFT JOIN library_files f ON f.id = res.file_id
 LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
+LEFT JOIN stream_cue_edits e ON e.audio_hash = f.audio_hash
 WHERE dp.station_id = %(station_id)s
   AND dp.play_date = %(day)s
 ORDER BY dp.position
 """
 
 _FILE_CUES_SQL = """
-SELECT c.audio_hash, c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms,
-       c.gain_db
+SELECT f.audio_hash,
+       c.audio_hash AS cued_audio,
+       c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db,
+       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms
 FROM library_files f
-JOIN stream_cues c ON c.audio_hash = f.audio_hash
+LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
+LEFT JOIN stream_cue_edits e ON e.audio_hash = f.audio_hash
 WHERE f.id = %(file_id)s
+  AND (c.audio_hash IS NOT NULL OR e.audio_hash IS NOT NULL)
 """
-"""The per-song re-read (D85): ``library_files`` by its primary key, then ``stream_cues`` by
-its primary key ``audio_hash`` (D20: cues belong to the audio). It goes through the file id,
-not a hash carried on ``PlayableFile``, because the player never sees a hash (D79) and this
-reads the file's *current* hash, so a hash a retag cleared correctly answers no cues."""
+"""The per-song re-read (D85): ``library_files`` by its primary key, then ``stream_cues`` and
+``stream_cue_edits`` by their primary key ``audio_hash`` (D20: cues belong to the audio). Both
+joins are LEFT and the WHERE keeps the file's row when either exists, so a manual edit with no
+autocue row still answers cues. It goes through the file id, not a hash carried on
+``PlayableFile``, because the player never sees a hash (D79) and this reads the file's
+*current* hash, so a hash a retag cleared correctly answers no cues."""
 
 _MAX_WARNED_RE_READ_HASHES = 4_096
 """Bounds the warn-once memory below to about 240 hours of distinct songs (review M5)."""
@@ -102,11 +115,12 @@ class PgPlayableScheduleRepository(PlayableScheduleRepository):
         row = self._conn.execute(_FILE_CUES_SQL, {"file_id": file_id}).fetchone()
         if row is None:
             return None
+        stored: CuePoints | None = None
         try:
-            return _points(row)
+            stored = _stored_points(row)
         except InvalidStreamValueError as error:
             _log_reread_invalid(file_id, row["audio_hash"], error)
-            return None
+        return _with_edit(row, stored)
 
 
 def _to_item(row: DictRow) -> ScheduleItem:
@@ -187,12 +201,35 @@ def _points(row: DictRow) -> CuePoints:
     )
 
 
-def _to_cues(row: DictRow) -> CuePoints | None:
-    """The audio's cue points, or none. A row that fails validation is logged, not raised."""
+def _stored_points(row: DictRow) -> CuePoints | None:
+    """The autocue row's points, or none when the audio has no row; raises on an invalid row."""
     if row["cued_audio"] is None:
         return None
+    return _points(row)
+
+
+def _with_edit(row: DictRow, stored: CuePoints | None) -> CuePoints | None:
+    """The audio's manual edit played over ``stored``, or ``stored`` itself with no edit.
+
+    ``stored`` is none when the audio has no autocue row or its row failed validation (an
+    invalid row counts as no row, so a valid edit over it plays at the no-cues gain).
+    """
+    if row["edited_audio"] is None:
+        return stored
+    markers = CueMarkers(
+        start_ms=row["start_ms"],
+        eom_ms=row["eom_ms"],
+        fade_at_ms=row["fade_at_ms"],
+        stop_ms=row["stop_ms"],
+    )
+    return edited_cues(markers, stored)
+
+
+def _to_cues(row: DictRow) -> CuePoints | None:
+    """The audio's cue points, or none. A row that fails validation is logged, not raised."""
+    stored: CuePoints | None = None
     try:
-        return _points(row)
+        stored = _stored_points(row)
     except InvalidStreamValueError as error:
         logger.warning(
             "schedule_cues_invalid",
@@ -200,4 +237,4 @@ def _to_cues(row: DictRow) -> CuePoints | None:
             file_id=str(row["file_id"]),
             error=str(error),
         )
-        return None
+    return _with_edit(row, stored)
