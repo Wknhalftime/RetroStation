@@ -15,14 +15,16 @@ from backend.db.repositories.stream_cue_coverage import (
     BoundedCueCoverageRepository,
 )
 from backend.db.sync_conn import commit_or_unavailable
-from backend.domain.streaming import ClipStorageError
+from backend.domain.streaming import ClipStorageError, StreamTiming
 from backend.domain.system import StorageUnavailableError
+from backend.playout.peaks import PeakSettings, read_peaks
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.streaming.cue_editor import CueEditorPorts, ReadPeaks
 from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
@@ -214,3 +216,21 @@ def get_cue_coverage() -> CueCoverageRepository:
     failure could never reach the route's own try/except; coordinator review, PR G2 Task 6).
     """
     return BoundedCueCoverageRepository(get_settings().database_url, COVERAGE_READ_BOUNDS)
+
+
+def get_cue_editor_ports(repos: SyncRepos) -> CueEditorPorts:
+    """The cue editor's ports, on the request's connection: files, stored cues and edits."""
+    return CueEditorPorts(
+        files=repos.library_files, cues=repos.streaming.cues, edits=repos.streaming.edits
+    )
+
+
+def get_peak_reader() -> ReadPeaks:
+    """The waveform's peak reader: FFmpeg from ``settings.ffmpeg_path``, read per call."""
+    settings = PeakSettings(ffmpeg=get_settings().ffmpeg_path)
+    return lambda path: read_peaks(path, settings)
+
+
+def get_stream_timing() -> StreamTiming:
+    """The radio's timing: the editor checks an edit against what the radio will play."""
+    return StreamTiming()
