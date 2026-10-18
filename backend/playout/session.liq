@@ -473,8 +473,28 @@ s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
 s = filter.iir.eq.peak(frequency=5209., gain=2., q=0.29, s)
 # Gentle compression; the long release keeps it from pumping on the beat
 s = compress(threshold=-14., ratio=2., attack=30., release=800., s)
-# Final limiter, in place of the Optimod's clipper
+# Peak control, in place of the Optimod's clipper. This compressor has no lookahead, so the
+# first millisecond of each hit gets through it (+0.3 dBFS on Killing in the Name).
 s = compress(threshold=-1.5, ratio=20., attack=1., release=80., s)
+# Ceiling: ffmpeg's lookahead limiter (5 ms) at -2 dBFS. The MP3 encode adds up to 1.5 dB on
+# dense material, so -2 keeps what listeners decode near -1 dBFS (measured 2026-10-18).
+def lookahead_limit(s) =
+  raw =
+    ffmpeg.raw.encode.audio(
+      %ffmpeg(%audio.raw(sample_format = "flt", sample_rate = 44100, channels = 2)), s
+    )
+  def mkfilter(graph) =
+    a = ffmpeg.filter.audio.input(graph, source.tracks(raw).audio)
+    a =
+      ffmpeg.filter.alimiter(
+        graph, limit=lin_of_dB(-2.), attack=5., release=50., level=false, a
+      )
+    source({audio=ffmpeg.filter.audio.output(graph, a)})
+  end
+  ffmpeg.raw.decode.audio(ffmpeg.filter.create(mkfilter))
+end
+# A filter graph's output is fallible; mksafe plays silence if it ever stops.
+s = mksafe(lookahead_limit(s))
 
 o =
   output.harbor(
