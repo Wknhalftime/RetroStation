@@ -72,9 +72,11 @@ def test_an_invalid_row_means_no_cues_and_is_logged(conn: Conn) -> None:
 LOOKED_UP_BY = {
     "library_files": re.compile(r"\bid = "),
     "stream_cues": re.compile(r"\baudio_hash = "),
+    "stream_cue_edits": re.compile(r"\baudio_hash = "),
 }
-"""How each table must be reached: ``library_files`` by its id, ``stream_cues`` by its
-``audio_hash`` (both primary keys)."""
+"""How each table must be reached: ``library_files`` by its id, ``stream_cues`` and the
+manual ``stream_cue_edits`` (cue editor, 2026-10-17) by their ``audio_hash`` (all primary
+keys)."""
 
 
 def test_the_read_is_served_by_indexes(conn: Conn) -> None:
@@ -90,7 +92,7 @@ def test_the_read_is_served_by_indexes(conn: Conn) -> None:
     plans = [plan_of(conn, query, params) for query, params in recorder.statements]
     nodes = [n for plan in plans for n in walk(plan)]
     relations = {str(n["Relation Name"]) for n in nodes if "Relation Name" in n}
-    assert relations == {"library_files", "stream_cues"}
+    assert relations == {"library_files", "stream_cues", "stream_cue_edits"}
     assert [n["Node Type"] for n in nodes if n["Node Type"] == "Seq Scan"] == []
     for node in nodes:
         key = LOOKED_UP_BY.get(str(node.get("Relation Name")))

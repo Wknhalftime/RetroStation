@@ -13,7 +13,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.domain.streaming import InvalidStreamValueError, ScheduleItem, StreamTiming
+from backend.domain.streaming import (
+    NO_CUES_GAIN_DB,
+    InvalidStreamValueError,
+    ScheduleItem,
+    StreamTiming,
+)
 from backend.playout.liquidsoap_process import long_path
 
 __all__ = [
@@ -28,9 +33,6 @@ __all__ = [
 
 NO_CUES_START_NEXT_MS = 0
 """D23: a no-cues song has no overlap with the next item."""
-
-NO_CUES_GAIN_DB = 0.0
-"""D23: a no-cues song plays at its recorded level, unchanged."""
 
 
 @dataclass(frozen=True)

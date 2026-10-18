@@ -70,6 +70,26 @@ class ClipStorageError(SignOffError):
     """The clip or its setting could not be stored (I3): a disk or database failure."""
 
 
+class CueEditError(StreamingError):
+    """Base class for the cue editor's refusals and read failures."""
+
+
+class CueEditFileNotFoundError(CueEditError):
+    """The file to edit is not in the library."""
+
+
+class CueFileNotEditableError(CueEditError):
+    """The file has no audio hash, so its cues have nothing to be stored under (D20)."""
+
+
+class CueEditRejectedError(CueEditError):
+    """The edit's markers cannot be played: the domain's own playability rule says no (C4)."""
+
+
+class CueAudioUnreadableError(CueEditError):
+    """The file's audio could not be read to serve it to the editor."""
+
+
 def to_ms(delta: timedelta) -> int:
     """Whole milliseconds in ``delta``, exactly (no float rounding)."""
     return delta // _ONE_MS
@@ -124,6 +144,79 @@ class CuePoints:
             )
         if not math.isfinite(self.gain_db):
             raise InvalidStreamValueError(f"CuePoints.gain_db must be finite, got {self.gain_db}")
+
+
+NO_CUES_GAIN_DB = 0.0
+"""D23: a no-cues song plays at its recorded level, unchanged."""
+
+
+@dataclass(frozen=True)
+class CueMarkers:
+    """The four cue markers a person edits, as positions in ms from the start of the file.
+
+    ``fade_at_ms`` is a position (where the fade-out begins); ``CuePoints.fade_out_ms`` is a
+    length. EOM and the fade position may sit in either order (R1).
+    """
+
+    start_ms: int
+    eom_ms: int
+    fade_at_ms: int
+    stop_ms: int
+
+    def __post_init__(self) -> None:
+        _require_non_negative("CueMarkers", start_ms=self.start_ms)
+        if not self.start_ms < self.eom_ms <= self.stop_ms:
+            raise InvalidStreamValueError(
+                f"CueMarkers must satisfy start < eom <= stop, got start={self.start_ms}, "
+                f"eom={self.eom_ms}, stop={self.stop_ms}"
+            )
+        if not self.start_ms <= self.fade_at_ms <= self.stop_ms:
+            raise InvalidStreamValueError(
+                f"CueMarkers.fade_at_ms must be within start..stop "
+                f"({self.start_ms}..{self.stop_ms}), got {self.fade_at_ms}"
+            )
+
+    @classmethod
+    def from_points(cls, points: CuePoints) -> CueMarkers:
+        """The markers a song opens with (C2, C5): EOM where the next deck starts, the fade
+        where the fade-out begins, held within the span when the fade is longer than it."""
+        return cls(
+            start_ms=points.cue_in_ms,
+            eom_ms=points.cue_out_ms - points.start_next_ms,
+            fade_at_ms=max(points.cue_in_ms, points.cue_out_ms - points.fade_out_ms),
+            stop_ms=points.cue_out_ms,
+        )
+
+    def to_points(self, gain_db: float) -> CuePoints:
+        """The engine's points for these markers (C1, C3): no fade-in, the fade-out a length
+        from ``fade_at_ms`` to Stop (zero is a hard stop), the next deck starting at EOM."""
+        return CuePoints(
+            cue_in_ms=self.start_ms,
+            cue_out_ms=self.stop_ms,
+            fade_in_ms=0,
+            fade_out_ms=self.stop_ms - self.fade_at_ms,
+            start_next_ms=self.stop_ms - self.eom_ms,
+            gain_db=gain_db,
+        )
+
+
+def no_cue_points(duration_ms: int, timing: StreamTiming) -> CuePoints:
+    """What the radio plays for a song with no cues (D23), with no fade-in (C3, C5)."""
+    return CuePoints(
+        cue_in_ms=0,
+        cue_out_ms=duration_ms,
+        fade_in_ms=0,
+        fade_out_ms=timing.default_fade_out_ms,
+        start_next_ms=0,
+        gain_db=NO_CUES_GAIN_DB,
+    )
+
+
+def edited_cues(markers: CueMarkers, stored: CuePoints | None) -> CuePoints:
+    """The points an edit plays: every position from ``markers``, the gain from the stored
+    row, or the no-cues gain when the song has none (R5)."""
+    gain_db = NO_CUES_GAIN_DB if stored is None else stored.gain_db
+    return markers.to_points(gain_db)
 
 
 CUE_ANALYSER_VERSION = 1

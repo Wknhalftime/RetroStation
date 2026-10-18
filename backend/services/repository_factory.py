@@ -28,6 +28,7 @@ from backend.db.repositories.playable_schedule import PgPlayableScheduleReposito
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.silent_files import PgSilentFileReportRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
+from backend.db.repositories.stream_cue_edits import PgStreamCueEditRepository
 from backend.db.repositories.stream_cue_work import PgCueWorkRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
@@ -93,9 +94,9 @@ class SystemRepos:
 
 @dataclass
 class StreamingRepos:
-    """Tune-in streaming repositories: the cue cache, the playable schedule reader, and the
-    cue pre-computation work reader (``cue_work``), and the Library Silent Files report's read
-    (``silent_files``, S6).
+    """Tune-in streaming repositories: the cue cache, the playable schedule reader, the
+    cue pre-computation work reader (``cue_work``), the Library Silent Files report's read
+    (``silent_files``, S6), and the manual cue edits (``edits``).
 
     The reader checks no cue freshness (D20): a cue row for the final file's audio is used as
     it is, whatever its ``analyser_version``.
@@ -105,6 +106,7 @@ class StreamingRepos:
     schedule: PgPlayableScheduleRepository
     cue_work: PgCueWorkRepository
     silent_files: PgSilentFileReportRepository
+    edits: PgStreamCueEditRepository
 
 
 class RepositoryFactory:
@@ -153,6 +155,7 @@ class RepositoryFactory:
             schedule=PgPlayableScheduleRepository(conn),
             cue_work=PgCueWorkRepository(conn),
             silent_files=PgSilentFileReportRepository(conn),
+            edits=PgStreamCueEditRepository(conn),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility

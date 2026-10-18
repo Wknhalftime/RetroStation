@@ -1,6 +1,7 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-17.** Checked against master 260a04e plus D111 (feat/silent-files)
+**Status: 2026-10-17.** Checked against master 260a04e plus D111 (feat/silent-files); the
+"Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
 (AUD-R015..R030 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -57,6 +58,17 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The check is `tests/integration/test_station_identity_plays_pg.py`, which compares it with
   the count after every kind of write. This is the only trigger-maintained table; a second one
   copies this one's shape (statement-level triggers with transition tables).
+
+## Tune-in cues: manual edits beat autocue
+
+- `stream_cue_edits` (migration 0041) holds a song's manual cue markers, keyed by `audio_hash`
+  like `stream_cues`. No task purges or prunes it: the analyser purge and the orphan prune
+  delete only from `stream_cues`, so an edit is never lost to a re-analysis.
+- Both radio cue reads prefer an edit over the autocue row: the day read and the per-song D85
+  re-read in `db/repositories/playable_schedule.py`. The reader joins both rows by key and the
+  domain's `edited_cues` decides.
+- The checks are `tests/integration/test_stream_cue_edits_pg.py::test_purge_and_prune_leave_edits`
+  and the reader tests in `tests/integration/test_playable_schedule_edits.py`.
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
