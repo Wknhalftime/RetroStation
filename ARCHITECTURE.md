@@ -3,7 +3,7 @@
 **Status: 2026-10-17.** Checked against master 260a04e plus D111 (feat/silent-files); the
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
 feat/cue-editor-api, the editor API (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R030 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph

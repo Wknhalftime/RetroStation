@@ -23,6 +23,7 @@ from backend.repositories.broadcast_track_identities import BroadcastTrackIdenti
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.recording_search_reach import RecordingSearchReachRepository
 from backend.services.matching_constants import (
     MB_AUTO_LINK_SCORE,
     MB_SCORE_GAP,
@@ -358,7 +359,9 @@ class ResolvedArtistMbidStrategy:
 
     Step A: local library lookup by real_mbid (no API call).
     Step B: MB recording search (1 API call) — fires only when real_mbid is
-            not None. Naturally skipped for true local-only artists.
+            not None. Naturally skipped for true local-only artists. Also skipped when
+            the artist has no file Step B could add (RecordingSearchReachRepository,
+            asked once per artist per run): the search could not change the result.
     Step C: name-based fuzzy match over every file of the artist, tagged or
             not — fires whenever A/B do not auto-match (or real_mbid is None);
             the higher score wins and a tie keeps A/B (AUD-R022 D13). Uses
@@ -381,12 +384,16 @@ class ResolvedArtistMbidStrategy:
         *,
         exclusions_by_identity: ExclusionsByIdentity | None = None,
         recording_search: RecordingSearch | None = None,
+        recording_search_reach: RecordingSearchReachRepository | None = None,
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
         # Step B's search. match_identities_for_playlist passes one per run, so the
         # MusicBrainz cut-off counts across the run's songs (AUD-R028, D16).
         self._recording_search = recording_search or RecordingSearch(mb_client)
+        # Step B's pre-check; None searches for every song that reaches Step B.
+        self._recording_search_reach = recording_search_reach
+        self._reach_by_artist: dict[tuple[str, str], bool] = {}
         self._catalog_repo = catalog_repo
         self._strong_match_threshold = strong_match_threshold
         self._exclusions_by_identity = exclusions_by_identity or {}
@@ -542,8 +549,11 @@ class ResolvedArtistMbidStrategy:
 
         Raises MusicBrainzUnavailableError when MusicBrainz cannot answer (a transient
         failure, or the run's cut-off): apply() then raises too, so Step A's result and Step C
-        are dropped and the song is deferred whole (AUD-R028, D16).
+        are dropped and the song is deferred whole (AUD-R028, D16). A song whose artist has
+        no file the search could add makes no call, so an outage never defers it (AUD-R031).
         """
+        if not self._search_could_add_a_file(mbid, artist):
+            return None
         titles = broadcast_title_variants(identity.original_title)
         recordings = self._recording_search.search(mbid, titles[0])
         # Collect ALL local files across recordings before scoring.
@@ -576,6 +586,23 @@ class ResolvedArtistMbidStrategy:
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             strong_match_threshold=self._strong_match_threshold,
         )
+
+    def _search_could_add_a_file(self, mbid: str, artist: BroadcastArtist) -> bool:
+        """Whether the artist has a file Step B could add to Step A's, asked once per run.
+
+        Step B keeps only present files with the artist's normalized name that carry a
+        recording_mbid. A file tagged with the artist MBID is already Step A's candidate, and
+        its score does not depend on the other candidates, so finding it again never beats
+        Step A (profile 2026-10-18: 11,778 searches, 0 songs won).
+        """
+        if self._recording_search_reach is None:
+            return True
+        key = (artist.normalized_name, mbid)
+        if key not in self._reach_by_artist:
+            self._reach_by_artist[key] = self._recording_search_reach.has_file_beyond_artist_mbid(
+                artist.normalized_name, mbid
+            )
+        return self._reach_by_artist[key]
 
 
 class BroadcastToLocalStrategy:
@@ -669,6 +696,8 @@ class IdentityMatchingRepos:
     library_file_repo: LibraryFileRepository
     rules_repo: MappingRuleRepository
     catalog_repo: ArtistCatalogRepository
+    # Step B's pre-check (AUD-R031). None: every song that reaches Step B searches.
+    recording_search_reach: RecordingSearchReachRepository | None = None
 
 
 def match_identities_for_playlist(
@@ -720,6 +749,7 @@ def match_identities_for_playlist(
                 strong_match_threshold,
                 exclusions_by_identity=exclusions_by_identity,
                 recording_search=recording_search,
+                recording_search_reach=repos.recording_search_reach,
             ),
             BroadcastToLocalStrategy(
                 repos.library_file_repo,
