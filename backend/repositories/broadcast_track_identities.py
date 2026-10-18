@@ -23,8 +23,9 @@ class BroadcastTrackIdentityRepository(ABC):
 
     @abstractmethod
     def get_pending_for_playlist(self, playlist_id: UUID) -> list[BroadcastTrackIdentity]:
-        """Identities linked to this playlist's events with match_status=PENDING
-        and their log_artist already resolved."""
+        """Identities linked to this playlist's events with match_status=PENDING, each once.
+
+        Their embedding is not loaded (None): matching never reads it (AUD-R020)."""
         ...
 
     @abstractmethod

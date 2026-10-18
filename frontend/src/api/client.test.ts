@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { apiFetch, EmptyResponseError, ApiError } from "./client";
+import {
+  API_BASE,
+  ApiError,
+  AuthError,
+  ConflictError,
+  EmptyResponseError,
+  ServerError,
+  apiFetch,
+  apiFetchBytes,
+} from "./client";
 
 interface MockResponse {
   response: Response;
@@ -100,5 +109,66 @@ describe("apiFetch — parseJsonBody", () => {
     );
     const data = await apiFetch<{ ok: boolean }>("/x");
     expect(data).toEqual({ ok: true });
+  });
+});
+
+// Cue editor PR 3, Task 10: a GET that returns the raw bytes (the editor's audio), with the
+// token header and the same error mapping as apiFetch.
+describe("apiFetchBytes", () => {
+  it("sends a GET with the X-Airwave-Token header and returns the bytes", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Uint8Array([1, 2, 3, 250]), { status: 200 }));
+
+    const bytes = await apiFetchBytes("/api/v1/library/files/abc/audio");
+
+    expect(Array.from(new Uint8Array(bytes))).toEqual([1, 2, 3, 250]);
+    expect(bytes.byteLength).toBe(4);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe(`${API_BASE}/api/v1/library/files/abc/audio`);
+    expect(init?.method ?? "GET").toBe("GET");
+    expect(new Headers(init?.headers).get("X-Airwave-Token")).toBe("dev-token");
+  });
+
+  it("does not parse the body as JSON", async () => {
+    // Bytes that are not valid UTF-8 or JSON must come back untouched.
+    const raw = new Uint8Array([0xff, 0xfe, 0x00, 0x7b]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(raw, { status: 200 }));
+    const bytes = await apiFetchBytes("/x");
+    expect(Array.from(new Uint8Array(bytes))).toEqual([0xff, 0xfe, 0x00, 0x7b]);
+  });
+
+  it("throws ApiError carrying the server's detail on a 404", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "This song is not in the library." }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    const failure = await apiFetchBytes("/x").then(
+      () => null,
+      (err: unknown) => err
+    );
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).status).toBe(404);
+    expect((failure as ApiError).message).toBe("This song is not in the library.");
+  });
+
+  it("maps the other statuses the way apiFetch does", async () => {
+    const respond = (status: number, detail: string) =>
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ detail }), {
+          status,
+          headers: { "content-type": "application/json" },
+        })
+      );
+
+    respond(401, "no");
+    await expect(apiFetchBytes("/x")).rejects.toBeInstanceOf(AuthError);
+    respond(409, "not fingerprinted");
+    await expect(apiFetchBytes("/x")).rejects.toBeInstanceOf(ConflictError);
+    respond(503, "unavailable");
+    await expect(apiFetchBytes("/x")).rejects.toBeInstanceOf(ServerError);
   });
 });

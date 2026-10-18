@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, apiGetBlob, apiUpload } from "@/api/client";
+import { apiFetch, apiFetchBytes, apiUpload } from "@/api/client";
 import {
   LinerAddedSchema,
   LinerLibrarySchema,
@@ -26,9 +26,11 @@ export function useStationLiners(stationId: string) {
   });
 }
 
-// The stored file, for the tab's preview (GET .../liners/{liner_id}/audio).
-export function fetchLinerAudio(stationId: string, linerId: string): Promise<Blob> {
-  return apiGetBlob(`${linersPath(stationId)}/${linerId}/audio`);
+// The stored file, for the tab's preview (GET .../liners/{liner_id}/audio). The bytes come
+// through the shared apiFetchBytes and are wrapped in an untyped Blob for the tab's object
+// URL; the audio element sniffs the format from the bytes.
+export async function fetchLinerAudio(stationId: string, linerId: string): Promise<Blob> {
+  return new Blob([await apiFetchBytes(`${linersPath(stationId)}/${linerId}/audio`)]);
 }
 
 // ---------------------------------------------------------------------------

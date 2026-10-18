@@ -145,14 +145,16 @@ export async function apiDownload(path: string, body?: unknown): Promise<Blob> {
 }
 
 // ---------------------------------------------------------------------------
-// apiGetBlob — GET that returns a Blob (audio for preview)
+// apiFetchBytes — GET that returns the raw body (audio); same error mapping as apiFetch
 // ---------------------------------------------------------------------------
 
-export async function apiGetBlob(path: string): Promise<Blob> {
+export async function apiFetchBytes(path: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
     headers: { "X-Airwave-Token": TOKEN },
+    signal,
   });
 
   if (!res.ok) await throwForStatus(res);
-  return res.blob();
+  return res.arrayBuffer();
 }
