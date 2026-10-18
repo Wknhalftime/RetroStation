@@ -37,7 +37,8 @@ export function useSetMaster(workId: string) {
         body: JSON.stringify(body),
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: workKey(workId) });
+      // Every work: crowning a file shown from another work moves it off that one.
+      void queryClient.invalidateQueries({ queryKey: ["works"] });
       void queryClient.invalidateQueries({ queryKey: ["artists"] });
     },
   });

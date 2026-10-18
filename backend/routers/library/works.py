@@ -5,23 +5,39 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_token, get_db_connection
+from backend.dependencies import get_current_token, get_db_connection, get_master_choice_repos
+from backend.domain.curation import (
+    MasterFileMissingError,
+    MasterFileNotOnWorkError,
+    MasterWorkNotFoundError,
+)
 from backend.domain.enums import CatalogSource, FileStatus, TargetType
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+from backend.services.master_choice_service import MasterChoiceRepos, choose_master
 from backend.services.master_selection_service import score_file_row
 
 router = APIRouter()
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
+ChoiceRepos = Annotated[MasterChoiceRepos, Depends(get_master_choice_repos)]
 
 
 # ---------------------------------------------------------------------------
 # Schemas — work detail
 # ---------------------------------------------------------------------------
+
+
+class OtherWorkRef(BaseModel):
+    """The work a file is on, when a work's page shows it through a shared recording."""
+
+    id: str
+    title: str
+    artist_name: str
 
 
 class FileInfo(BaseModel):
@@ -34,6 +50,7 @@ class FileInfo(BaseModel):
     release_title: str | None
     enrichment_status: str
     file_status: FileStatus
+    other_work: OtherWorkRef | None = None
 
 
 class RecordingDetail(BaseModel):
@@ -300,7 +317,9 @@ async def _release_work_matches(conn: AsyncConnection[Any], work_id: str) -> Non
     )
 
 
-def _file_info(row: dict[str, Any], *, duration_ms: int | None) -> FileInfo:
+def _file_info(
+    row: dict[str, Any], *, duration_ms: int | None, other_work: OtherWorkRef | None = None
+) -> FileInfo:
     """Map a library_files row to FileInfo.
 
     ``duration_ms`` is resolved by the caller because the three call sites
@@ -318,6 +337,18 @@ def _file_info(row: dict[str, Any], *, duration_ms: int | None) -> FileInfo:
         release_title=row.get("release_title"),
         enrichment_status=row["enrichment_status"],
         file_status=row["file_status"],
+        other_work=other_work,
+    )
+
+
+def _other_work(row: dict[str, Any], work_id: str) -> OtherWorkRef | None:
+    """The work a listed file is on, when that is not the work whose page lists it."""
+    if row["file_work_id"] is None or row["file_work_id"] == work_id:
+        return None
+    return OtherWorkRef(
+        id=row["file_work_id"],
+        title=row["file_work_title"],
+        artist_name=row["file_work_artist_name"],
     )
 
 
@@ -340,9 +371,14 @@ async def _work_recordings(
             lf.track_title,
             lf.release_title,
             lf.enrichment_status,
-            lf.file_status
+            lf.file_status,
+            lf.work_id      AS file_work_id,
+            fw.title        AS file_work_title,
+            fa.name         AS file_work_artist_name
         FROM recordings r
         LEFT JOIN library_files lf ON lf.recording_id = r.id
+        LEFT JOIN works fw ON fw.id = lf.work_id
+        LEFT JOIN artists fa ON fa.id = fw.artist_id
         WHERE r.id IN (
             SELECT id FROM recordings WHERE work_id = %s
             UNION
@@ -368,7 +404,11 @@ async def _work_recordings(
             }
         if row["file_id"] is not None:
             recordings_map[rid]["files"].append(
-                _file_info(row, duration_ms=row.get("file_duration_ms"))
+                _file_info(
+                    row,
+                    duration_ms=row.get("file_duration_ms"),
+                    other_work=_other_work(row, work_id),
+                )
             )
 
     recordings = [
@@ -555,58 +595,28 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
 
 @router.put("/works/{work_id}/master", response_model=SongMasterResponse)
 async def set_work_master(
-    work_id: str, body: SetMasterRequest, conn: DbConn, _token: Token
+    work_id: str, body: SetMasterRequest, repos: ChoiceRepos, _token: Token
 ) -> SongMasterResponse:
-    """Manually set the preferred file for a work (UPSERT)."""
-    work_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (work_id,))
-    if await work_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
-        )
+    """Make a file the work's manual master (UPSERT).
 
-    file_cur = await conn.execute(
-        "SELECT file_status FROM library_files WHERE id = %s AND work_id = %s",
-        (body.preferred_file_id, work_id),
-    )
-    file_row = await file_cur.fetchone()
-    if file_row is None:
+    A file the work's page shows from another work (a shared recording) is moved onto
+    this work first.
+    """
+    try:
+        master = await run_in_threadpool(choose_master, work_id, body.preferred_file_id, repos)
+    except MasterWorkNotFoundError as missing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(missing)) from missing
+    except (MasterFileNotOnWorkError, MasterFileMissingError) as refused:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
-        )
-    if file_row["file_status"] != FileStatus.PRESENT:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {body.preferred_file_id} is missing from disk",
-        )
-
-    master_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO song_masters
-            (id, work_id, preferred_file_id, selection_method, score, updated_at)
-        VALUES (%s, %s, %s, 'manual', NULL, now())
-        ON CONFLICT (work_id) DO UPDATE SET
-            preferred_file_id = EXCLUDED.preferred_file_id,
-            selection_method  = 'manual',
-            score             = NULL,
-            updated_at        = now()
-        """,
-        (master_id, work_id, body.preferred_file_id),
-    )
-
-    row_cur = await conn.execute("SELECT * FROM song_masters WHERE work_id = %s", (work_id,))
-    row = await row_cur.fetchone()
-    if row is None:
-        raise RuntimeError("Expected row after INSERT")
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
     return SongMasterResponse(
-        id=row["id"],
-        work_id=row["work_id"],
-        preferred_file_id=row["preferred_file_id"],
-        selection_method=row["selection_method"],
-        score=row.get("score"),
-        updated_at=row["updated_at"],
+        id=master.id,
+        work_id=master.work_id,
+        preferred_file_id=master.preferred_file_id,
+        selection_method=master.selection_method,
+        score=master.score,
+        updated_at=master.updated_at,
     )
 
 

@@ -4,6 +4,15 @@ import { z } from "zod";
 // File info
 // ---------------------------------------------------------------------------
 
+// The work a file is on, when a work's page shows it through a shared recording.
+export const OtherWorkRefSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist_name: z.string(),
+});
+
+export type OtherWorkRef = z.infer<typeof OtherWorkRefSchema>;
+
 export const FileInfoSchema = z.object({
   id: z.string().uuid(),
   file_path: z.string(),
@@ -14,6 +23,7 @@ export const FileInfoSchema = z.object({
   release_title: z.string().nullable(),
   enrichment_status: z.string(),
   file_status: z.enum(["present", "missing", "deleted"]),
+  other_work: OtherWorkRefSchema.nullish(),
 });
 
 export type FileInfo = z.infer<typeof FileInfoSchema>;
