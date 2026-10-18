@@ -15,9 +15,9 @@ from backend.domain.streaming import (
     NO_CUES_GAIN_DB,
     CueAudioUnreadableError,
     CueEditError,
+    CueEditFileNotFoundError,
     CueEditRejectedError,
     CueFileNotEditableError,
-    CueFileNotFoundError,
     CueMarkers,
     CuePoints,
     InvalidStreamValueError,
@@ -171,7 +171,7 @@ def test_edited_cues_without_stored_row_use_no_cues_gain():
 @pytest.mark.parametrize(
     "error",
     [
-        CueFileNotFoundError,
+        CueEditFileNotFoundError,
         CueFileNotEditableError,
         CueEditRejectedError,
         CueAudioUnreadableError,
