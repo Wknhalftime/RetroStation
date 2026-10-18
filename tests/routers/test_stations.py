@@ -918,3 +918,128 @@ class TestMissingMatchesReport:
         assert data["total"] == 1
         assert data["items"][0]["play_count"] == 5
         assert data["items"][0]["impact_pct"] == pytest.approx(100.0, abs=0.01)
+
+    # ------------------------------------------------------------------
+    # Play counts follow every way play_events change
+    # ------------------------------------------------------------------
+
+    def test_identity_on_two_stations_counts_this_station_only(self, client, db_conn):
+        """One identity played on two stations: each report counts only its own plays."""
+        station_a = _insert_station(db_conn, "KAZR-FM")
+        station_b = _insert_station(db_conn, "KIOA-FM")
+        _, identity = _insert_artist_and_identity(db_conn, "The Clash", "London Calling")
+        _insert_play_events_for_identity(
+            db_conn, identity, _insert_playlist(db_conn, station_a), n=3
+        )
+        _insert_play_events_for_identity(
+            db_conn, identity, _insert_playlist(db_conn, station_b), n=8
+        )
+
+        item_a = client.get(self._url(station_a.id)).json()["items"][0]
+        item_b = client.get(self._url(station_b.id)).json()["items"][0]
+
+        assert (item_a["play_count"], item_b["play_count"]) == (3, 8)
+
+    def test_duplicate_play_is_counted_once(self, client, db_conn):
+        """A repeated CSV row hits ON CONFLICT DO NOTHING and adds no play."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        identity = _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=2)
+        _insert_play_events_for_identity(db_conn, identity, playlist, n=2)
+
+        item = client.get(self._url(station.id)).json()["items"][0]
+
+        assert item["play_count"] == 2
+
+    def test_plays_inserted_in_one_statement_are_all_counted(self, client, db_conn):
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        _, identity = _insert_artist_and_identity(db_conn, "Abba", "Waterloo")
+        db_conn.execute(
+            """INSERT INTO play_events (identity_id, playlist_id, played_at)
+               SELECT %s, %s, %s::timestamptz + make_interval(mins => g)
+               FROM generate_series(1, 25) AS g""",
+            (identity.id, playlist.id, datetime(2001, 1, 1, tzinfo=UTC)),
+        )
+        db_conn.commit()
+
+        item = client.get(self._url(station.id)).json()["items"][0]
+
+        assert item["play_count"] == 25
+
+    def test_deleted_plays_are_not_counted(self, client, db_conn):
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        identity = _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=5)
+        _insert_identity_with_events(db_conn, playlist, "Zappa", "Inca Roads", n_events=5)
+        db_conn.execute(
+            """DELETE FROM play_events
+               WHERE identity_id = %s AND played_at < %s""",
+            (identity.id, datetime(2001, 1, 1, 0, 0, 2, tzinfo=UTC)),
+        )
+        db_conn.commit()
+
+        by_artist = {i["artist_name"]: i for i in client.get(self._url(station.id)).json()["items"]}
+
+        assert by_artist["Abba"]["play_count"] == 3
+        assert by_artist["Abba"]["impact_pct"] == pytest.approx(37.5, abs=0.01)
+
+    def test_identity_whose_plays_are_all_deleted_drops_out(self, client, db_conn):
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        identity = _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=2)
+        _insert_identity_with_events(db_conn, playlist, "Zappa", "Inca Roads", n_events=1)
+        db_conn.execute("DELETE FROM play_events WHERE identity_id = %s", (identity.id,))
+        db_conn.commit()
+
+        data = client.get(self._url(station.id)).json()
+
+        assert data["total"] == 1
+        assert [i["artist_name"] for i in data["items"]] == ["Zappa"]
+
+    def test_deleted_playlist_takes_its_plays_with_it(self, client, db_conn):
+        """Deleting a playlist cascades to its plays; the other playlist's plays stay."""
+        station = _insert_station(db_conn, "KAZR-FM")
+        morning = _insert_playlist(db_conn, station, name="morning.csv")
+        evening = _insert_playlist(db_conn, station, name="evening.csv")
+        _, identity = _insert_artist_and_identity(db_conn, "The Clash", "London Calling")
+        _insert_play_events_for_identity(db_conn, identity, morning, n=3)
+        _insert_play_events_for_identity(db_conn, identity, evening, n=2)
+        db_conn.execute("DELETE FROM playlists WHERE id = %s", (morning.id,))
+        db_conn.commit()
+
+        item = client.get(self._url(station.id)).json()["items"][0]
+
+        assert item["play_count"] == 2
+
+    def test_playlist_moved_to_another_station_moves_its_plays(self, client, db_conn):
+        station_a = _insert_station(db_conn, "KAZR-FM")
+        station_b = _insert_station(db_conn, "KIOA-FM")
+        playlist = _insert_playlist(db_conn, station_a)
+        _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=4)
+        db_conn.execute(
+            "UPDATE playlists SET station_id = %s WHERE id = %s", (station_b.id, playlist.id)
+        )
+        db_conn.commit()
+
+        data_a = client.get(self._url(station_a.id)).json()
+        data_b = client.get(self._url(station_b.id)).json()
+
+        assert data_a["total"] == 0
+        assert [i["play_count"] for i in data_b["items"]] == [4]
+
+    def test_play_moved_to_another_identity_moves_its_count(self, client, db_conn):
+        station = _insert_station(db_conn, "KAZR-FM")
+        playlist = _insert_playlist(db_conn, station)
+        source = _insert_identity_with_events(db_conn, playlist, "Abba", "Waterloo", n_events=3)
+        target = _insert_identity_with_events(db_conn, playlist, "Zappa", "Inca Roads", n_events=0)
+        db_conn.execute(
+            "UPDATE play_events SET identity_id = %s WHERE identity_id = %s",
+            (target.id, source.id),
+        )
+        db_conn.commit()
+
+        data = client.get(self._url(station.id)).json()
+
+        assert data["total"] == 1
+        assert [(i["artist_name"], i["play_count"]) for i in data["items"]] == [("Zappa", 3)]

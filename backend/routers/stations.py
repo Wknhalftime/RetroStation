@@ -388,6 +388,10 @@ async def get_missing_matches_report(
     all identities in the report) × 100, using a SQL window function so the
     denominator is always the full unfiltered set regardless of the page being
     requested.
+
+    Play counts come from station_identity_plays (migration 0040), which
+    triggers keep equal to the station's play_events count per identity, so
+    neither query scans play_events.
     """
     await _require_station(conn, station_id)
 
@@ -400,19 +404,14 @@ async def get_missing_matches_report(
     count_cur = await conn.execute(
         """
         SELECT COUNT(*) AS total
-        FROM (
-            SELECT ti.id
-            FROM track_identities ti
-            JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
-            JOIN play_events       pe ON pe.identity_id = ti.id
-            JOIN playlists         pl ON pl.id = pe.playlist_id
-            WHERE pl.station_id = %s
-              AND (
-                  ti.match_status = ANY(%s)
-                  OR ba.match_status = ANY(%s)
-              )
-            GROUP BY ti.id
-        ) sub
+        FROM station_identity_plays sip
+        JOIN track_identities  ti ON ti.id = sip.identity_id
+        JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
+        WHERE sip.station_id = %s
+          AND (
+              ti.match_status = ANY(%s)
+              OR ba.match_status = ANY(%s)
+          )
         """,
         (station_id, unresolved, unresolved),
     )
@@ -430,21 +429,15 @@ async def get_missing_matches_report(
                 ba.original_name     AS artist_name,
                 ti.original_title    AS track_title,
                 ti.match_status      AS track_status,
-                COUNT(pe.id)         AS play_count
-            FROM track_identities ti
+                sip.play_count       AS play_count
+            FROM station_identity_plays sip
+            JOIN track_identities  ti ON ti.id = sip.identity_id
             JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
-            JOIN play_events       pe ON pe.identity_id = ti.id
-            JOIN playlists         pl ON pl.id = pe.playlist_id
-            WHERE pl.station_id = %s
+            WHERE sip.station_id = %s
               AND (
                   ti.match_status = ANY(%s)
                   OR ba.match_status = ANY(%s)
               )
-            GROUP BY
-                ti.id,
-                ba.original_name,
-                ti.original_title,
-                ti.match_status
         )
         SELECT
             identity_id,
