@@ -462,9 +462,11 @@ s = add(id="main_and_bell", normalize=false, [main, source.drop.metadata(bell)])
 # Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
 # compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
 # with a lookahead outputs nothing but silence in most runs.
-# AGC: slow gain riding toward -16 LUFS, gated at -40 like the Optimod
+# AGC: slow gain riding toward -16 LUFS. Songs arrive at -18 LUFS (liq_amplify), so the
+# gate at -33 holds the gain through gaps 15 dB below that; at -40 the AGC rode up to
+# +10 dB in a sub-second stop and the next hit came out 7 LU hot (Killing in the Name).
 s = normalize(
-  target=-16., lufs=true, up=6., down=1.2, gain_min=-10., gain_max=10., threshold=-40.,
+  target=-16., lufs=true, up=6., down=1.2, gain_min=-10., gain_max=10., threshold=-33.,
   track_sensitive=false, s
 )
 # EQ: a wide peak stands in for the +2 dB bass shelf; 2 oct = Q 0.67, 3.8 oct = Q 0.29
