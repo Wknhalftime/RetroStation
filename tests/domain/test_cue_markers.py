@@ -57,6 +57,20 @@ def test_from_points_clamps_a_fade_longer_than_the_span_to_start():
     assert CueMarkers.from_points(points) == CueMarkers(1_000, 3_000, 1_000, 3_000)
 
 
+def test_from_points_opens_a_failed_row_at_file_end_with_4s_fade():
+    """R3, C5, C3: a D52 fallback row (stored fade-in 3 s) opens like an unanalysed song."""
+    failed = CuePoints(
+        cue_in_ms=0,
+        cue_out_ms=252_893,
+        fade_in_ms=3_000,
+        fade_out_ms=4_000,
+        start_next_ms=0,
+        gain_db=-8.0,
+    )
+
+    assert CueMarkers.from_points(failed) == CueMarkers(0, 252_893, 248_893, 252_893)
+
+
 def test_to_points_maps_markers_to_engine_values():
     """R2, C1: Start, Stop, Stop - Fade-out and Stop - EOM become the engine's four values."""
     devil = CueMarkers(start_ms=0, eom_ms=271_000, fade_at_ms=270_500, stop_ms=271_800)

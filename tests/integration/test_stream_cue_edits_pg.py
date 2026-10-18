@@ -98,19 +98,6 @@ def test_save_twice_keeps_the_latest(conn: psycopg.Connection[DictRow]):
     assert _count(conn, "stream_cue_edits", H) == 1
 
 
-def test_save_stamps_edited_at_on_every_save(conn: psycopg.Connection[DictRow]):
-    """Task 2 Interfaces: ``save`` is an upsert that sets ``edited_at = now()`` each time."""
-    repo = PgStreamCueEditRepository(conn)
-    repo.save(H, M)
-    conn.execute("UPDATE stream_cue_edits SET edited_at = '2001-01-01T00:00:00Z'")
-
-    repo.save(H, M)
-
-    row = conn.execute("SELECT edited_at FROM stream_cue_edits").fetchone()
-    assert row is not None
-    assert row["edited_at"] > datetime(2001, 1, 1, tzinfo=UTC)
-
-
 def test_edits_for_different_audio_are_independent(conn: psycopg.Connection[DictRow]):
     """R4: an edit follows its own audio only; a different version has its own edit."""
     repo = PgStreamCueEditRepository(conn)

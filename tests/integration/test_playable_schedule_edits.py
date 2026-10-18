@@ -14,6 +14,7 @@ the identity's match, the file's work and that work's master (``song_masters``).
 from __future__ import annotations
 
 from collections.abc import Generator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -62,6 +63,18 @@ EDITED = CuePoints(
     start_next_ms=6_000,
     gain_db=-11.63,
 )
+
+# The same edit over a song with no autocue row: the no-cues gain (D23).
+EDITED_AT_NO_CUES_GAIN = CuePoints(
+    cue_in_ms=9_000,
+    cue_out_ms=247_100,
+    fade_in_ms=0,
+    fade_out_ms=7_100,
+    start_next_ms=6_000,
+    gain_db=0.0,
+)
+# An autocue row as the analyser stores it today: with a 3 s fade-in (C3 removes it on read).
+HERETIC_WITH_FADE_IN = replace(HERETIC, fade_in_ms=3_000)
 
 DAY = date(2001, 1, 1)
 T0 = datetime(2001, 1, 1, 12, 0, tzinfo=UTC)
@@ -216,16 +229,19 @@ def test_edit_without_autocue_row_plays_at_no_cues_gain(conn: psycopg.Connection
     [item] = _day(conn, station_id)
 
     assert item.file is not None
-    assert item.file.cues == EDIT.to_points(0.0)
+    assert item.file.cues == EDITED_AT_NO_CUES_GAIN
 
 
 def test_edit_takes_the_gain_of_a_failed_analysis_row(conn: psycopg.Connection[DictRow]):
-    """R5, plan note 6: an edit never changes loudness, including a D52 fallback row's -8 dB."""
-    station_id, _ = _single_play(conn, H)
+    """R5, plan note 6, C3: an edit plays at a D52 fallback row's -8 dB.
+
+    The stored row's 3 s fade-in never reaches the edit: both reads give fade-in 0.
+    """
+    station_id, file_id = _single_play(conn, H)
     fallback = CuePoints(
         cue_in_ms=0,
         cue_out_ms=250_000,
-        fade_in_ms=0,
+        fade_in_ms=3_000,
         fade_out_ms=4_000,
         start_next_ms=0,
         gain_db=-8.0,
@@ -240,11 +256,20 @@ def test_edit_takes_the_gain_of_a_failed_analysis_row(conn: psycopg.Connection[D
         )
     )
     _edit(conn, H, EDIT)
+    expected = CuePoints(
+        cue_in_ms=9_000,
+        cue_out_ms=247_100,
+        fade_in_ms=0,
+        fade_out_ms=7_100,
+        start_next_ms=6_000,
+        gain_db=-8.0,
+    )
 
     [item] = _day(conn, station_id)
 
     assert item.file is not None
-    assert item.file.cues == EDIT.to_points(-8.0)
+    assert item.file.cues == expected
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == expected
 
 
 def test_no_edit_reads_autocue_unchanged(conn: psycopg.Connection[DictRow]):
@@ -289,7 +314,7 @@ def test_an_edit_leaves_other_songs_on_autocue(conn: psycopg.Connection[DictRow]
 def test_reread_uses_the_edit(conn: psycopg.Connection[DictRow]):
     """R5: the D85 re-read of a file's cues returns the edit, not autocue's row."""
     _, file_id = _single_play(conn, H)
-    _autocue(conn, H, HERETIC)
+    _autocue(conn, H, HERETIC_WITH_FADE_IN)
     _edit(conn, H, EDIT)
 
     assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDITED
@@ -300,7 +325,7 @@ def test_reread_with_edit_and_no_autocue_row(conn: psycopg.Connection[DictRow]):
     _, file_id = _single_play(conn, H)
     _edit(conn, H, EDIT)
 
-    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDIT.to_points(0.0)
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDITED_AT_NO_CUES_GAIN
 
 
 def test_reread_without_edit_reads_autocue_unchanged(conn: psycopg.Connection[DictRow]):
@@ -333,7 +358,7 @@ def test_twin_files_share_one_edit(conn: psycopg.Connection[DictRow]):
     second_identity, second_file = _song(conn, H)
     _play(conn, first_identity, playlist_id, 0)
     _play(conn, second_identity, playlist_id, 1)
-    _autocue(conn, H, HERETIC)
+    _autocue(conn, H, HERETIC_WITH_FADE_IN)
     _edit(conn, H, EDIT)
 
     items = _day(conn, station_id)
@@ -397,3 +422,86 @@ def test_edit_does_not_make_a_missing_file_playable(conn: psycopg.Connection[Dic
     [item] = _day(conn, station_id)
 
     assert item.file is None
+
+
+def _insert_invalid_autocue_row(conn: psycopg.Connection[DictRow], audio_hash: AudioHash) -> None:
+    """A ``stream_cues`` row that fails domain validation (start_next >= span).
+
+    The table has no CHECK on the cue columns, so such a row can exist (0030).
+    """
+    conn.execute(
+        """INSERT INTO stream_cues (audio_hash, cue_in_ms, cue_out_ms, fade_in_ms, fade_out_ms,
+                                    start_next_ms, gain_db, analyser_version)
+           VALUES (%s, 5000, 6000, 0, 0, 2000, -11.63, 1)""",
+        (str(audio_hash),),
+    )
+
+
+def test_day_read_edit_wins_over_an_invalid_autocue_row(conn: psycopg.Connection[DictRow]):
+    """R5, anti-goal 2, Goal 3 (controller ruling): an autocue row that fails validation is
+    treated as no row, so the day read plays the edit at the no-cues gain."""
+    station_id, _ = _single_play(conn, H)
+    _insert_invalid_autocue_row(conn, H)
+    _edit(conn, H, EDIT)
+
+    [item] = _day(conn, station_id)
+
+    assert item.file is not None
+    assert item.file.cues == EDITED_AT_NO_CUES_GAIN
+
+
+def test_reread_edit_wins_over_an_invalid_autocue_row(conn: psycopg.Connection[DictRow]):
+    """R5, anti-goal 2, Goal 3 (controller ruling): the D85 re-read also treats an invalid
+    autocue row as no row and plays the edit at the no-cues gain."""
+    _, file_id = _single_play(conn, H)
+    _insert_invalid_autocue_row(conn, H)
+    _edit(conn, H, EDIT)
+
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDITED_AT_NO_CUES_GAIN
+
+
+def test_purge_under_an_edit_drops_to_no_cues_gain(conn: psycopg.Connection[DictRow]):
+    """R4, R5, Review Focus 2: after the analyser purge removes the autocue row, the radio
+    still plays the edit, now at the no-cues gain."""
+    station_id, file_id = _single_play(conn, H)
+    _autocue(conn, H, HERETIC)
+    _edit(conn, H, EDIT)
+    PgStreamCueRepository(conn).purge_other_versions(2)
+
+    [item] = _day(conn, station_id)
+
+    assert item.file is not None
+    assert item.file.cues == EDITED_AT_NO_CUES_GAIN
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDITED_AT_NO_CUES_GAIN
+
+
+def test_reset_returns_the_radio_to_autocue(conn: psycopg.Connection[DictRow]):
+    """R4, R5: after Reset to automatic (edit deleted) both reads give autocue's values."""
+    station_id, file_id = _single_play(conn, H)
+    _autocue(conn, H, HERETIC)
+    _edit(conn, H, EDIT)
+    PgStreamCueEditRepository(conn).delete(H)
+
+    [item] = _day(conn, station_id)
+
+    assert item.file is not None
+    assert item.file.cues == HERETIC
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == HERETIC
+
+
+def test_moved_file_keeps_its_edit(conn: psycopg.Connection[DictRow]):
+    """R4, Review Focus 1: a file that is moved or renamed keeps its hash, so keeps its edit."""
+    station_id, file_id = _single_play(conn, H)
+    _autocue(conn, H, HERETIC)
+    _edit(conn, H, EDIT)
+    conn.execute(
+        "UPDATE library_files SET file_path = '/music/moved/renamed.flac' WHERE id = %s",
+        (file_id,),
+    )
+
+    [item] = _day(conn, station_id)
+
+    assert item.file is not None
+    assert item.file.path == "/music/moved/renamed.flac"
+    assert item.file.cues == EDITED
+    assert PgPlayableScheduleRepository(conn).file_cues(file_id) == EDITED
