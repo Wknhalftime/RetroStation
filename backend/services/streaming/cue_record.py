@@ -5,7 +5,9 @@ changed meanwhile"); D52 (the fallback row: cue_in 0, cue_out = duration_ms, sta
 the default fade-out and no fade-in (D112), gain_db -8, analysis_failed); D53 (loudness_lufs
 NULL); D54 (start_next_ms = liq_cross_end_duration); D55 (a failure with no duration_ms
 stores nothing and is retried every run, so it is logged quietly); D68 (a malformed result
-line fails only its file, with a fallback row and the field named).
+line fails only its file, with a fallback row and the field named); D111 (silent audio gets
+the fallback row marked audio_silent, logged once as stream_cue_analysis_silent when it is
+stored, never as a failure).
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 import structlog
 
@@ -24,7 +27,7 @@ from backend.domain.streaming import (
     StreamTiming,
 )
 from backend.repositories.stream_cues import StreamCueRepository
-from backend.services.streaming.autocue import Unusable, autocue_points
+from backend.services.streaming.autocue import Silent, Unusable, autocue_points
 
 logger = structlog.get_logger()
 
@@ -43,6 +46,7 @@ class CueRecord(StrEnum):
 
     ANALYSED = "analysed"
     FAILED = "failed"
+    SILENT = "silent"
     NO_DURATION = "no_duration"
     CHANGED = "changed"
 
@@ -75,37 +79,62 @@ def fallback_points(duration_ms: int | None, timing: StreamTiming) -> CuePoints 
     )
 
 
+def _verdict(autocued: Autocued) -> CuePoints | Silent | Unusable:
+    """What autocue said: a rejected line's reason as is (D68), or its metadata read."""
+    if isinstance(autocued.metadata, Unusable):
+        return autocued.metadata
+    return autocue_points(autocued.metadata)
+
+
+def _warn(event: str, candidate: CueCandidate, reason: str) -> None:
+    """One warning naming the file, its audio and the reason."""
+    logger.warning(
+        event,
+        file_id=str(candidate.file_id),
+        path=candidate.path,
+        audio_hash=str(candidate.audio_hash),
+        reason=reason,
+    )
+
+
+def _stored(
+    store: StreamCueRepository, analysis: CueAnalysis, file_id: UUID, outcome: CueRecord
+) -> CueRecord:
+    """``outcome`` once ``analysis`` is stored under the hash read before analysing; CHANGED,
+    with nothing stored, when the file no longer carries that hash."""
+    if not store.store_if_current(analysis, file_id):
+        return CueRecord.CHANGED
+    return outcome
+
+
 def record_analysis(
     store: StreamCueRepository, timing: StreamTiming, autocued: Autocued
 ) -> CueRecord:
     """Analyse one candidate and write the one result that matters (D20): the cues, or a
-    fallback row, under the audio hash read before analysing."""
+    fallback row (marked silent for silent audio, D111), under the audio hash read before
+    analysing."""
     candidate = autocued.candidate
-    if isinstance(autocued.metadata, Unusable):
-        result: CuePoints | Unusable = autocued.metadata
-    else:
-        result = autocue_points(autocued.metadata)
-    if isinstance(result, Unusable):
-        fallback = fallback_points(candidate.duration_ms, timing)
-        if fallback is None:
-            logger.debug(
-                "stream_cue_analysis_failed_no_duration",
-                file_id=str(candidate.file_id),
-                path=candidate.path,
-                reason=result.reason,
-            )
-            return CueRecord.NO_DURATION
-        logger.warning(
-            "stream_cue_analysis_failed",
+    verdict = _verdict(autocued)
+    if isinstance(verdict, CuePoints):
+        cued = CueAnalysis(candidate.audio_hash, verdict, None, False, CUE_ANALYSER_VERSION)
+        return _stored(store, cued, candidate.file_id, CueRecord.ANALYSED)
+    fallback = fallback_points(candidate.duration_ms, timing)
+    if fallback is None:
+        logger.debug(
+            "stream_cue_analysis_failed_no_duration",
             file_id=str(candidate.file_id),
             path=candidate.path,
-            audio_hash=str(candidate.audio_hash),
-            reason=result.reason,
+            reason=verdict.reason,
         )
-        points, failed = fallback, True
-    else:
-        points, failed = result, False
-    analysis = CueAnalysis(candidate.audio_hash, points, None, failed, CUE_ANALYSER_VERSION)
-    if not store.store_if_current(analysis, candidate.file_id):
-        return CueRecord.CHANGED
-    return CueRecord.FAILED if failed else CueRecord.ANALYSED
+        return CueRecord.NO_DURATION
+    silent = isinstance(verdict, Silent)
+    if not silent:
+        _warn("stream_cue_analysis_failed", candidate, verdict.reason)
+    row = CueAnalysis(
+        candidate.audio_hash, fallback, None, True, CUE_ANALYSER_VERSION, audio_silent=silent
+    )
+    kept = CueRecord.SILENT if silent else CueRecord.FAILED
+    outcome = _stored(store, row, candidate.file_id, kept)
+    if outcome is CueRecord.SILENT:
+        _warn("stream_cue_analysis_silent", candidate, verdict.reason)
+    return outcome

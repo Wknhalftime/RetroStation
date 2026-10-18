@@ -3,7 +3,8 @@
 Cues belong to the audio, not the file: an analysis names the library's ``AudioHash`` and
 carries no file identity and no file stat. ``analyser_version`` is recorded, never checked.
 
-Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``.
+Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``. Re-locked under
+D111 (2026-10-16): the analysis also carries ``audio_silent``, a fact about the audio.
 """
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ def test_is_keyed_by_the_audio_alone() -> None:
         "loudness_lufs",
         "analysis_failed",
         "analyser_version",
+        "audio_silent",
     ]
 
 

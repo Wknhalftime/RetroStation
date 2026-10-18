@@ -7,6 +7,7 @@ are found by name.
 
 Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``. Re-locked under
 D66 (PR E1): the nullable ``orphaned_at`` column of the two-strike prune (D56).
+Re-locked under D111 (2026-10-16): ``audio_silent``, the silent marker, NOT NULL.
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ def test_columns_types_and_nullability(conn: Conn) -> None:
         "analysis_failed": ("boolean", "NO"),
         "analysed_at": ("timestamp with time zone", "NO"),
         "orphaned_at": ("timestamp with time zone", "YES"),
+        "audio_silent": ("boolean", "NO"),
     }
 
 

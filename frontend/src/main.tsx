@@ -10,6 +10,7 @@ import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
 import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import { LibraryStatus } from "@/pages/library/LibraryStatus";
 import { MissingFiles } from "@/pages/library/MissingFiles";
+import { SilentFiles } from "@/pages/library/SilentFiles";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
@@ -40,6 +41,7 @@ const router = createBrowserRouter([
       },
       { path: "library", element: <LibraryStatus /> },
       { path: "library/missing", element: <MissingFiles /> },
+      { path: "library/silent", element: <SilentFiles /> },
       { path: "library/artists", element: <ArtistBrowser /> },
       { path: "library/artists/:artist_id", element: <ArtistDetail /> },
       {
