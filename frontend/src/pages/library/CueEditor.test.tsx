@@ -5,7 +5,7 @@
 // schemas and hooks run. Canvas drawing is not tested (jsdom has no 2D context; the pane skips
 // drawing on a null context), and neither is the preview's Web Audio scheduling.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -141,6 +141,102 @@ function serve(options: Options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// A fake Web Audio (jsdom has none): records what the preview schedules
+// ---------------------------------------------------------------------------
+
+/**
+ * Installs a permissive `AudioContext` on the window. "now" decodes at once; "manual" holds every
+ * decode until `finishDecode()`. It records only the observable schedule: where each source
+ * starts, and what the gain is told to do.
+ */
+function installAudio(decode: "now" | "manual" = "now") {
+  const starts: { when: number; offset: number; duration: number }[] = [];
+  const sets: [number, number][] = [];
+  const ramps: [number, number][] = [];
+  let decodes = 0;
+  const pending: (() => void)[] = [];
+  const decoded = { duration: 250, sampleRate: 44_100, numberOfChannels: 2, length: 11_025_000 };
+
+  class Param {
+    value = 1;
+    setValueAtTime(value: number, time: number) {
+      sets.push([value, time]);
+      return this;
+    }
+    linearRampToValueAtTime(value: number, time: number) {
+      ramps.push([value, time]);
+      return this;
+    }
+    cancelScheduledValues() {
+      return this;
+    }
+  }
+  class AudioNode {
+    connect<T>(node: T) {
+      return node;
+    }
+    disconnect() {}
+  }
+  class Source extends AudioNode {
+    buffer: unknown = null;
+    onended: (() => void) | null = null;
+    start(when = 0, offset = 0, duration = Number.NaN) {
+      starts.push({ when, offset, duration });
+    }
+    stop() {}
+    addEventListener() {}
+    removeEventListener() {}
+  }
+  class Gain extends AudioNode {
+    gain = new Param();
+  }
+  class Context {
+    currentTime = 10;
+    state = "running";
+    destination = new AudioNode();
+    createBufferSource() {
+      return new Source();
+    }
+    createGain() {
+      return new Gain();
+    }
+    decodeAudioData(_bytes: ArrayBuffer, onDecoded?: (buffer: unknown) => void) {
+      decodes += 1;
+      if (decode === "now") {
+        onDecoded?.(decoded);
+        return Promise.resolve(decoded);
+      }
+      return new Promise((resolve) => {
+        pending.push(() => {
+          onDecoded?.(decoded);
+          resolve(decoded);
+        });
+      });
+    }
+    resume() {
+      return Promise.resolve();
+    }
+    close() {
+      return Promise.resolve();
+    }
+  }
+  vi.stubGlobal("AudioContext", Context);
+
+  return {
+    starts,
+    sets,
+    ramps,
+    decodes: () => decodes,
+    finishDecode: () => pending.splice(0).forEach((finish) => finish()),
+    /** When the last source was started: its `when`, or the clock's now (10 s) if it said 0. */
+    t0: () => {
+      const last = starts[starts.length - 1];
+      return last && last.when > 0 ? last.when : 10;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Rendering and reading the page
 // ---------------------------------------------------------------------------
 
@@ -168,11 +264,16 @@ async function openEditor() {
   return view;
 }
 
-/** The table row for a marker: the row whose first cell is the marker's name. */
+/**
+ * The table row for a marker: the row whose first cell leads with the marker's name. The cell may
+ * carry a colour dot before the name or a note after it; "Start", "EOM", "Fade-out" and "Stop"
+ * never begin one another, so the first match is the right one.
+ */
 function markerRow(name: "Start" | "EOM" | "Fade-out" | "Stop"): HTMLElement {
+  const leading = new RegExp(`^[^A-Za-z]*${name}(?![A-Za-z-])`);
   const row = screen
     .getAllByRole("row")
-    .find((candidate) => candidate.children[0]?.textContent?.trim() === name);
+    .find((candidate) => leading.test(candidate.children[0]?.textContent?.trim() ?? ""));
   if (!row) throw new Error(`no table row for ${name}`);
   return row;
 }
@@ -191,13 +292,17 @@ function times() {
   };
 }
 
-/** The "Automatic was" column (fourth cell) of each marker's row. */
+/** The "Automatic was" column (the last cell) of each marker's row. */
 function automaticWas() {
+  const last = (name: "Start" | "EOM" | "Fade-out" | "Stop") => {
+    const row = markerRow(name);
+    return cellText(row, row.children.length - 1);
+  };
   return {
-    start: cellText(markerRow("Start"), 3),
-    eom: cellText(markerRow("EOM"), 3),
-    fadeOut: cellText(markerRow("Fade-out"), 3),
-    stop: cellText(markerRow("Stop"), 3),
+    start: last("Start"),
+    eom: last("EOM"),
+    fadeOut: last("Fade-out"),
+    stop: last("Stop"),
   };
 }
 
@@ -278,8 +383,10 @@ describe("CueEditor: opening (R8)", () => {
     serve();
     await openEditor();
 
-    // The view says 250 s (4:10); the waveform says 249 s (4:09).
-    expect(screen.getByText("Heretic Anthem · 4:10 · FLAC")).toBeTruthy();
+    // The view says 250 s (4:10); the waveform says 249 s (4:09). The title may be wrapped in
+    // markup (the mockup bolds it), so read the page's text rather than one element's.
+    const text = (document.body.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain("Heretic Anthem · 4:10 · FLAC");
   });
 
   it("lays out the marker table: headers, four marker rows, six nudge buttons each", async () => {
@@ -319,6 +426,7 @@ describe("CueEditor: opening (R8)", () => {
 
   it("asks the API for this file's view, waveform and audio, with the token", async () => {
     const api = serve();
+    installAudio();
     await openEditor();
 
     await waitFor(() => {
@@ -467,6 +575,8 @@ describe("CueEditor: Reset to automatic (R8, R7)", () => {
     await waitFor(() => expect(times()).toEqual(AUTOMATIC_TIMES));
     expect(screen.getByText("Automatic")).toBeTruthy();
     expect(screen.queryByText("Manual")).toBeNull();
+    // The editor is read again after the DELETE.
+    await waitFor(() => expect(api.editorReads().length).toBeGreaterThanOrEqual(2));
   });
 
   it("Reset discards nudges that were never saved", async () => {
@@ -513,12 +623,12 @@ describe("CueEditor: a song that cannot be opened (R8, R7)", () => {
   });
 });
 
-describe("CueEditor: the audio preview (R8)", () => {
+describe("CueEditor: the audio preview (R8, C1, anti-goal 2)", () => {
   it("preview buttons are disabled while audio is not ready", async () => {
-    // jsdom has no AudioContext, so the preview can never become ready.
+    // No AudioContext at all (the default here), so the preview can never become ready.
     const api = serve();
     await openEditor();
-    await waitFor(() => expect(api.calls.map((c) => c.path)).toContain(AUDIO_PATH));
+    await waitFor(() => expect(api.calls.map((c) => c.path)).toContain(WAVEFORM_PATH));
 
     expect(button("▶ Play from Start").disabled).toBe(true);
     expect(button("▶ Play End cue").disabled).toBe(true);
@@ -526,6 +636,7 @@ describe("CueEditor: the audio preview (R8)", () => {
 
   it("preview buttons are disabled while the audio is still loading", async () => {
     serve({ audio: "pending" });
+    installAudio();
     await openEditor();
 
     expect(button("▶ Play from Start").disabled).toBe(true);
@@ -534,9 +645,74 @@ describe("CueEditor: the audio preview (R8)", () => {
 
   it("says Loading audio… while the audio loads", async () => {
     serve({ audio: "pending" });
+    installAudio();
     await openEditor();
 
     expect((await screen.findAllByText("Loading audio…")).length).toBeGreaterThan(0);
+  });
+
+  it("the preview becomes ready only once the audio has decoded", async () => {
+    serve();
+    const audio = installAudio("manual");
+    await openEditor();
+    await waitFor(() => expect(audio.decodes()).toBeGreaterThanOrEqual(1));
+
+    expect(button("▶ Play from Start").disabled).toBe(true);
+    expect(button("▶ Play End cue").disabled).toBe(true);
+
+    await act(async () => {
+      audio.finishDecode();
+    });
+
+    await waitFor(() => expect(button("▶ Play from Start").disabled).toBe(false));
+    expect(button("▶ Play End cue").disabled).toBe(false);
+  });
+
+  // Heretic Anthem: Start 0, EOM and Fade-out 241.1 s, Stop 247.1 s. The End view opens on
+  // [247.1 - 12, 247.1 + 1] = [235.1 s, 248.1 s].
+  async function openWithAudio() {
+    serve();
+    const audio = installAudio();
+    await openEditor();
+    await waitFor(() => expect(button("▶ Play End cue").disabled).toBe(false));
+    return audio;
+  }
+
+  it("Play End cue plays from the End view's left edge to Stop with the C1 fade", async () => {
+    const audio = await openWithAudio();
+
+    fireEvent.click(button("▶ Play End cue"));
+
+    const start = audio.starts[audio.starts.length - 1];
+    expect(start.offset).toBeCloseTo(235.1, 6);
+    expect(start.duration).toBeCloseTo(12.0, 6);
+    // Full gain until Fade-out (6.0 s in), then down to silence exactly at Stop (12.0 s in).
+    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 6.0, 6)]);
+    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
+  });
+
+  it("Play from Start plays Start to Stop with the C1 fade", async () => {
+    const audio = await openWithAudio();
+
+    fireEvent.click(button("▶ Play from Start"));
+
+    const start = audio.starts[audio.starts.length - 1];
+    expect(start.offset).toBeCloseTo(0, 6);
+    expect(start.duration).toBeCloseTo(247.1, 6);
+    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 241.1, 6)]);
+    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 247.1, 6)]);
+  });
+
+  it("the preview plays the displayed, unsaved markers", async () => {
+    const audio = await openWithAudio();
+    fireEvent.click(nudgeButton("Fade-out", "-1"));
+    expect(times().fadeOut).toBe("4:00.100");
+
+    fireEvent.click(button("▶ Play End cue"));
+
+    // Fade-out is now 240.1 s: 5.0 s after the End view's left edge; Stop is still 12.0 s in.
+    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 5.0, 6)]);
+    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
   });
 });
 
@@ -544,6 +720,9 @@ describe("CueEditor: silent audio (ruling I1)", () => {
   it("shows the note and disables Save while Reset stays enabled", async () => {
     const api = serve({ analysis: "silent", manual: MANUAL });
     const { container } = await openEditor();
+
+    // Change something first, so a Save that is only disabled "while nothing changed" fails.
+    fireEvent.click(nudgeButton("EOM", "+0.1"));
 
     expect(screen.getByText(SILENT_NOTE)).toBeTruthy();
     expect(button("Save").disabled).toBe(true);
@@ -564,10 +743,16 @@ describe("CueEditor: silent audio (ruling I1)", () => {
     await waitFor(() => expect(api.deletes()).toHaveLength(1));
   });
 
-  it("does not show the note for a song that was measured", async () => {
-    serve({ analysis: "measured" });
-    await openEditor();
+  // C5: songs without a real analysis are editable like any other.
+  it.each(["measured", "failed", "waiting"] as const)(
+    "a %s song shows no silent note and can be saved",
+    async (analysis) => {
+      serve({ analysis });
+      await openEditor();
 
-    expect(screen.queryByText(SILENT_NOTE)).toBeNull();
-  });
+      expect(screen.queryByText(SILENT_NOTE)).toBeNull();
+      fireEvent.click(nudgeButton("EOM", "+0.1"));
+      expect(button("Save").disabled).toBe(false);
+    }
+  );
 });

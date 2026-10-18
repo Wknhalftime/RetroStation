@@ -38,7 +38,8 @@ describe("WorkFilesTable", () => {
         masterFileId={null}
         masterMethod={null}
         onSetMaster={vi.fn()}
-      />
+      />,
+      { wrapper: MemoryRouter }
     );
 
     expect(screen.getAllByText("Missing")).toHaveLength(1);
@@ -61,7 +62,8 @@ describe("WorkFilesTable", () => {
         masterFileId={null}
         masterMethod={null}
         onSetMaster={vi.fn()}
-      />
+      />,
+      { wrapper: MemoryRouter }
     );
 
     expect(screen.getAllByText("Missing")).toHaveLength(1);
@@ -87,7 +89,8 @@ describe("WorkFilesTable", () => {
         masterFileId={null}
         masterMethod={null}
         onSetMaster={vi.fn()}
-      />
+      />,
+      { wrapper: MemoryRouter }
     );
 
     expect(screen.getByText("Pulp Fiction")).toBeTruthy();
@@ -112,7 +115,8 @@ describe("WorkFilesTable", () => {
         masterFileId={null}
         masterMethod={null}
         onSetMaster={vi.fn()}
-      />
+      />,
+      { wrapper: MemoryRouter }
     );
 
     expect(screen.queryByTestId("file-album")).toBeNull();

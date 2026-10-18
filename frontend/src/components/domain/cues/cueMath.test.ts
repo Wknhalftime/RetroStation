@@ -191,6 +191,26 @@ describe("zoomView", () => {
   });
 });
 
+describe("zoomView stays inside the file (Review Focus 5)", () => {
+  it("when the zoomed view cannot keep the point's fraction at either end", () => {
+    const cases: [View, number][] = [
+      // Zooming out around the middle would start at -4 000.
+      [zoomView({ from: 1_000, to: 11_000 }, 6_000, 2, D), 6_000],
+      // Zooming out near the end would finish at 294 000, past the file.
+      [zoomView({ from: 275_000, to: 285_000 }, 276_000, 2, D), 276_000],
+    ];
+    for (const [v, at] of cases) {
+      expect(v.from).toBeGreaterThanOrEqual(0);
+      expect(v.to).toBeLessThanOrEqual(D);
+      expect(v.to - v.from).toBeGreaterThanOrEqual(MIN_SPAN_MS - 1e-6);
+      expect(v.to - v.from).toBeLessThanOrEqual(D);
+      // Whether it shifts or clips, the point being zoomed on stays in view.
+      expect(v.from).toBeLessThanOrEqual(at);
+      expect(v.to).toBeGreaterThanOrEqual(at);
+    }
+  });
+});
+
 describe("panView", () => {
   it("moves the view by the delta and keeps its span", () => {
     expect(panView({ from: 1_000, to: 6_000 }, 500, D)).toEqual({ from: 1_500, to: 6_500 });
@@ -413,6 +433,13 @@ describe("peaksForView", () => {
 
   it("reads only the buckets inside the view", () => {
     expect(Array.from(peaksForView(peaks, 4, { from: 500, to: 1_000 }, 2))).toEqual([3, 4]);
+  });
+
+  it("draws columns past the last peak empty (ruling)", () => {
+    // 1 000 ms of peaks; the views run to 1 500 ms. The old "nearest bucket" wording would read
+    // the last bucket (4) for the columns past it.
+    expect(Array.from(peaksForView(peaks, 4, { from: 500, to: 1_500 }, 4))).toEqual([3, 4, 0, 0]);
+    expect(Array.from(peaksForView(peaks, 4, { from: 0, to: 1_500 }, 3))).toEqual([9, 4, 0]);
   });
 
   it("fills columns narrower than a bucket from their nearest bucket", () => {
