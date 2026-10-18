@@ -3,7 +3,8 @@
 // audio). The page is exercised through the DOM and the requests it sends: `fetch` is stubbed
 // with a small fake of the PR 2 API (backend/routers/library/cues.py), so the real client,
 // schemas and hooks run. Canvas drawing is not tested (jsdom has no 2D context; the pane skips
-// drawing on a null context), and neither is the preview's Web Audio scheduling.
+// drawing on a null context). The preview's Web Audio schedule is tested against a fake
+// AudioContext (installAudio): what each source plays and how the gain ramps.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -683,12 +684,15 @@ describe("CueEditor: the audio preview (R8, C1, anti-goal 2)", () => {
 
     fireEvent.click(button("▶ Play End cue"));
 
-    const start = audio.starts[audio.starts.length - 1];
-    expect(start.offset).toBeCloseTo(235.1, 6);
-    expect(start.duration).toBeCloseTo(12.0, 6);
-    // Full gain until Fade-out (6.0 s in), then down to silence exactly at Stop (12.0 s in).
-    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 6.0, 6)]);
-    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
+    // Read inside waitFor: a preview may await the context (resume) before it starts.
+    await waitFor(() => {
+      const start = audio.starts[audio.starts.length - 1];
+      expect(start.offset).toBeCloseTo(235.1, 6);
+      expect(start.duration).toBeCloseTo(12.0, 6);
+      // Full gain until Fade-out (6.0 s in), then down to silence exactly at Stop (12.0 s in).
+      expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 6.0, 6)]);
+      expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
+    });
   });
 
   it("Play from Start plays Start to Stop with the C1 fade", async () => {
@@ -696,11 +700,13 @@ describe("CueEditor: the audio preview (R8, C1, anti-goal 2)", () => {
 
     fireEvent.click(button("▶ Play from Start"));
 
-    const start = audio.starts[audio.starts.length - 1];
-    expect(start.offset).toBeCloseTo(0, 6);
-    expect(start.duration).toBeCloseTo(247.1, 6);
-    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 241.1, 6)]);
-    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 247.1, 6)]);
+    await waitFor(() => {
+      const start = audio.starts[audio.starts.length - 1];
+      expect(start.offset).toBeCloseTo(0, 6);
+      expect(start.duration).toBeCloseTo(247.1, 6);
+      expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 241.1, 6)]);
+      expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 247.1, 6)]);
+    });
   });
 
   it("the preview plays the displayed, unsaved markers", async () => {
@@ -711,8 +717,10 @@ describe("CueEditor: the audio preview (R8, C1, anti-goal 2)", () => {
     fireEvent.click(button("▶ Play End cue"));
 
     // Fade-out is now 240.1 s: 5.0 s after the End view's left edge; Stop is still 12.0 s in.
-    expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 5.0, 6)]);
-    expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
+    await waitFor(() => {
+      expect(audio.sets).toContainEqual([1, expect.closeTo(audio.t0() + 5.0, 6)]);
+      expect(audio.ramps).toContainEqual([0, expect.closeTo(audio.t0() + 12.0, 6)]);
+    });
   });
 });
 
