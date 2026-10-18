@@ -16,6 +16,10 @@ The end of the schedule (D26): the user's sign-off clip is read when the schedul
 at tune-in (PG4), and plays after the last song; a clip that cannot play still signs the
 station off once the last song has started, and never cuts that song short (PG5).
 
+Station liners (LR6-LR10): after every N songs a session hands out a liner, from its own count
+and shuffle; the cadence is read at tune-in, and the liners when one is due. Liners are
+timeless: a reconnect or bookmark during one points at the next song's top.
+
 One instance per app, built at the composition root. Repository reads run in worker threads;
 all session state is mutated on the event loop (the day memo is the one exception, and it
 carries its own lock).
@@ -36,7 +40,8 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from backend.domain.liners import Shuffle
+from backend.domain.broadcast import BroadcastStation
+from backend.domain.liners import PlayableLiner, Shuffle, liner_due, next_liner
 from backend.domain.streaming import (
     Bookmark,
     CuePoints,
@@ -49,6 +54,7 @@ from backend.domain.streaming import (
     PlayableFile,
     ScheduleItem,
     SignOff,
+    StreamReadError,
     StreamTiming,
     TuneIn,
 )
@@ -109,6 +115,8 @@ from backend.services.streaming.sessions import (
     StreamSession,
     memoised_day_loader,
     schedule_finished,
+    song_heard,
+    songs_since_liner,
 )
 from backend.services.streaming.sign_off import SIGN_OFF_KEY, stored_sign_off
 from backend.services.streaming.watchdog import PlayingSpan, freeze_deadline
@@ -267,15 +275,15 @@ class OpenedStream:
 # ---- worker-thread steps (repository reads and the domain's schedule walks) ----------------
 
 
-def _station_and_limit(repos: ReposFactory, call_letters: str) -> tuple[UUID | None, str | None]:
-    """The station with these call letters, in any case (D72), and the raw listener limit."""
+def _station_and_limit(
+    repos: ReposFactory, call_letters: str
+) -> tuple[BroadcastStation | None, str | None]:
+    """The station with these call letters, in any case (D72), and the raw listener limit.
+    The station is read whole: a tune-in keeps its liner cadence (LR7)."""
     with repos() as opened:
         station = opened.stations.get_by_call_letters(call_letters)
         setting = opened.settings.get(MAX_SESSIONS_KEY)
-    return (
-        None if station is None else station.id,
-        None if setting is None else setting.value,
-    )
+    return station, None if setting is None else setting.value
 
 
 def _channel(request: ListenRequest, station_id: UUID) -> BookmarkKey | None:
@@ -377,6 +385,19 @@ def _log_resume(session_id: str, placed: _Placement) -> None:
         )
 
 
+def _station_liners(repos: ReposFactory, station_id: UUID) -> list[PlayableLiner]:
+    """The station's playable liners as stored now (LR4), in the reader's order; none without
+    a liner reader. One connection per use.
+
+    Raises:
+        StreamReadError: the database could not answer in time (D88).
+    """
+    with repos() as opened:
+        if opened.liners is None:
+            return []
+        return opened.liners.playable(station_id)
+
+
 def _user_sign_off(repos: ReposFactory) -> SignOff | None:
     """The user's sign-off clip as stored now (PG4), or ``None``; one connection per use.
 
@@ -463,15 +484,16 @@ def _left_at(
     (D11, measured on the elapsed clock: D47), or the landing when nothing has started
     (D30); ``None`` if the session never finished opening (no engine), so a close during
     ``open`` bookmarks nothing. Unlike ``live_position`` (D109), it folds the time played
-    into the offset and falls back to the landing, since a bookmark stores one point."""
+    into the offset and falls back to the landing, since a bookmark stores one point. Left
+    during a liner, it points at the end of the song before it: the next song's top (LR9)."""
     if session.engine is None or session.clock_offset is None or session.landing is None:
         return None
     committed = session.committed
-    if committed is not None and isinstance(committed.assigned, Assigned):
-        playing = committed.assigned
-        heard = elapsed_now - committed.started_at
-        landing = Landing(playing.ref, playing.offset_ms).advanced_by(heard)
-        item = playing.item
+    heard = None if committed is None else song_heard(committed, elapsed_now)
+    if heard is not None:
+        song, played = heard
+        landing = Landing(song.ref, song.offset_ms).advanced_by(played)
+        item = song.item
     else:
         landing = session.landing
         item = _landing_item(session, landing)
@@ -588,13 +610,13 @@ class StreamService:
     async def open(self, request: ListenRequest) -> OpenedStream:
         """Admit, place and start one listener's session; the handle relays its audio. A
         keyed tune-in is told on its channel as it goes (D78a)."""
-        station_id, raw_limit = await asyncio.to_thread(
+        station, raw_limit = await asyncio.to_thread(
             _station_and_limit, self._ports.repos, request.call_letters
         )
-        if station_id is None:
+        if station is None:
             raise StationNotFoundError(f"no station has the call letters {request.call_letters!r}")
         channel, session_id, session = self._admit_told(
-            station_id, raw_limit, request
+            station, raw_limit, request
         )  # no await before
         opened = False
         # D78b: an unexpected failure, including StreamUnavailableError, is never "stopped".
@@ -631,15 +653,15 @@ class StreamService:
             logger.exception("stream_open_abandon_stop_failed", session_id=session_id)
 
     def _admit_told(
-        self, station_id: UUID, raw_limit: str | None, request: ListenRequest
+        self, station: BroadcastStation, raw_limit: str | None, request: ListenRequest
     ) -> tuple[BookmarkKey | None, str, StreamSession]:
         """Take a slot under the parsed limit, telling the refusal (D27: a bad limit setting
         is ``unavailable``; D10: ``busy``) before it is raised. The caller tells ``tuning`` on
         the returned channel, inside its own try/finally, so the slot is freed if that fails."""
-        channel = _channel(request, station_id)
+        channel = _channel(request, station.id)
         try:
             limit = self._listener_limit(raw_limit)
-            session_id, session = self._admit(station_id, limit, request)
+            session_id, session = self._admit(station, limit, request)
         except InvalidStreamSettingError:
             self._refuse(channel, StatusKind.UNAVAILABLE)
             raise
@@ -670,16 +692,20 @@ class StreamService:
             raise
 
     def _admit(
-        self, station_id: UUID, limit: int, request: ListenRequest
+        self, station: BroadcastStation, limit: int, request: ListenRequest
     ) -> tuple[str, StreamSession]:
-        """Take a slot, atomically: nothing awaits between the check and the insert (D42)."""
+        """Take a slot, atomically: nothing awaits between the check and the insert (D42).
+        The session keeps the cadence read at tune-in; a later change is for new tune-ins
+        (LR7)."""
         if len(self._sessions) >= limit:
             raise StationBusyError(f"all {limit} listener slots are taken")
         session = StreamSession(
-            load_day=_day_loader(self._ports.repos, station_id),
+            load_day=_day_loader(self._ports.repos, station.id),
             opened_at=self._elapsed(),
-            bookmark_key=_channel(request, station_id),
+            bookmark_key=_channel(request, station.id),
             token=secrets.token_urlsafe(32),
+            station_id=station.id,
+            liner_cadence=station.liner_cadence,
         )
         session_id = uuid4().hex
         self._sessions[session_id] = session
@@ -802,13 +828,13 @@ class StreamService:
 
         Raises ``StationNotFoundError``, ``InvalidStreamSettingError`` (D27, logged) or
         ``SubscriptionLimitError``."""
-        station_id, raw_limit = await asyncio.to_thread(
+        station, raw_limit = await asyncio.to_thread(
             _station_and_limit, self._ports.repos, request.call_letters
         )
-        if station_id is None:
+        if station is None:
             raise StationNotFoundError(f"no station has the call letters {request.call_letters!r}")
         limit = self._listener_limit(raw_limit)
-        channel = BookmarkKey(request.listener_key, station_id, request.year)
+        channel = BookmarkKey(request.listener_key, station.id, request.year)
         return self._feed.subscribe(channel, _SUBSCRIPTIONS_PER_SLOT * limit)
 
     # ---- the item contract -------------------------------------------------------------------
@@ -821,20 +847,32 @@ class StreamService:
         if served is not None:
             return served
         if call.seq == 0:
-            await self._await_placement(call, session)
-            session = self._authorised(call)  # a failed open has removed the session
-            landing = await asyncio.to_thread(
-                _landing_assigned, session.load_day, self._placed(call, session)
-            )
-            return self._assign(call, self._authorised(call), landing)
+            return await self._landing(call, session)
+        return await self._after_landing(call, session)
+
+    async def _landing(self, call: ItemCall, session: StreamSession) -> ItemPayload:
+        """seq 0: the landing, once placement has published it."""
+        await self._await_placement(call, session)
+        session = self._authorised(call)  # a failed open has removed the session
+        landing = await asyncio.to_thread(
+            _landing_assigned, session.load_day, self._placed(call, session)
+        )
+        return self._assign(call, self._authorised(call), landing)
+
+    async def _after_landing(self, call: ItemCall, session: StreamSession) -> ItemPayload:
+        """A later seq (plan note 8): the walk to the next song comes first, so the end of the
+        schedule signs off and no liner plays right before it (LR10); then a liner, when one
+        is due after the song before, else that next song."""
         previous = session.assigned[call.seq - 1]
         if isinstance(previous, FinalClip):  # the end marker already follows the clip
             raise EndOfScheduleError(f"session {call.session_id}: the final clip was the last")
-        if isinstance(previous, LinerSlot):  # the schedule goes on after the song it followed
-            previous = previous.after
+        # After a liner the schedule goes on from the song it followed.
+        walked_from = previous.after if isinstance(previous, LinerSlot) else previous
         timing = self._config.timing
         try:
-            following = await asyncio.to_thread(_following, session.load_day, previous.ref, timing)
+            following = await asyncio.to_thread(
+                _following, session.load_day, walked_from.ref, timing
+            )
         except EndOfScheduleError:
             # The domain's documented end of the schedule (D26, D39): recorded, then answered.
             # A failed clip read propagates before anything is recorded, so the engine's
@@ -844,8 +882,53 @@ class StreamService:
             if final is None:
                 raise
             return final
+        if isinstance(previous, Assigned):  # the slot before was a song, never a liner
+            liner = await self._liner_after(call, session, previous)
+            if liner is not None:
+                return liner  # the song walked to is walked again for the next seq
         following = await self._with_stored_cues(following)  # D85; never seq 0 (D86c)
         return self._assign(call, self._authorised(call), following)
+
+    async def _liner_after(
+        self, call: ItemCall, session: StreamSession, song: Assigned
+    ) -> ItemPayload | None:
+        """``call.seq``'s liner, when the session's cadence is due after ``song`` (LR7) and
+        the rotation has one to play (LR8); ``None`` plays the next song. The rotation moves
+        on, on the event loop, only when the liner is stored for the seq."""
+        station_id, root = session.station_id, self._config.liners_dir
+        if station_id is None or root is None:
+            return None
+        if not liner_due(songs_since_liner(session, call.seq), session.liner_cadence):
+            return None
+        liners = await self._playable_liners(call, station_id)
+        session = self._authorised(call)
+        served = self._served(session, call.seq)  # a concurrent request may have assigned it
+        if served is not None:
+            return served
+        ids = [liner.liner_id for liner in liners]
+        picked, rotation = next_liner(session.liner_rotation, ids, self._ports.shuffle)
+        if picked is None:
+            return None  # an empty library: the song plays, quietly (LR10)
+        liner = liners[ids.index(picked)]
+        path = root / str(station_id) / liner.file_name
+        slot = LinerSlot(liner, path, song, _sent_span_ms(song, self._config.timing))
+        session.liner_rotation = rotation
+        return self._assign(call, session, slot)
+
+    async def _playable_liners(self, call: ItemCall, station_id: UUID) -> list[PlayableLiner]:
+        """The station's playable liners, read now in a worker thread. A read that fails is
+        logged and reads as none (plan note 9, D88): a liner never holds up the music."""
+        try:
+            return await asyncio.to_thread(_station_liners, self._ports.repos, station_id)
+        except StreamReadError as unread:
+            logger.warning(
+                "stream_liner_read_failed",
+                session_id=call.session_id,
+                seq=call.seq,
+                station_id=str(station_id),
+                error=str(unread),
+            )
+            return []
 
     async def _with_stored_cues(self, assigned: Assigned) -> Assigned:
         """D85: the song as stored now, or as read at tune-in when the read fails. Stored
@@ -900,14 +983,18 @@ class StreamService:
             raise UnknownItemError(f"session {call.session_id}: not placed")
         return session.landing
 
-    def _assign(self, call: ItemCall, session: StreamSession, assigned: Assigned) -> ItemPayload:
-        """Store ``call.seq``'s assignment and answer its payload; a new one is noticed once."""
+    def _assign(
+        self, call: ItemCall, session: StreamSession, assigned: Assigned | LinerSlot
+    ) -> ItemPayload:
+        """Store ``call.seq``'s assignment and answer its payload; a new song is noticed once
+        (a liner's cues are its own, LR4)."""
         served = self._served(session, call.seq)  # a concurrent request may have assigned it
         if served is not None:
             return served
         payload = _payload(call.seq, assigned, self._config.timing)
         session.assigned[call.seq] = assigned
-        self._notice(call, assigned)
+        if isinstance(assigned, Assigned):
+            self._notice(call, assigned)
         return payload
 
     def _notice(self, call: ItemCall, assigned: Assigned) -> None:

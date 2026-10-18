@@ -30,6 +30,7 @@ __all__ = [
     "StreamSession",
     "memoised_day_loader",
     "schedule_finished",
+    "song_heard",
     "songs_since_liner",
 ]
 
@@ -147,6 +148,21 @@ def schedule_finished(session: StreamSession) -> bool:
         return False
     last_to_play = session.end_seq - (2 if session.final_failed else 1)
     return committed.seq >= last_to_play  # a clip reported started, then failed
+
+
+def song_heard(committed: Committed, elapsed_now: datetime) -> tuple[Assigned, timedelta] | None:
+    """The committed song and how much of it has played at ``elapsed_now`` (an elapsed-clock
+    reading), or ``None`` for the sign-off clip, which has no place in the log.
+
+    Liners are timeless (LR9, plan note 12): while one plays, the song it follows has played
+    its whole sent span, so the listener is at the top of the next song and no liner time is
+    counted."""
+    playing = committed.assigned
+    if isinstance(playing, LinerSlot):
+        return playing.after, timedelta(milliseconds=playing.after_span_ms)
+    if isinstance(playing, Assigned):
+        return playing, elapsed_now - committed.started_at
+    return None
 
 
 def songs_since_liner(session: StreamSession, before_seq: int) -> int:
