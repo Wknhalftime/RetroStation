@@ -2,7 +2,8 @@
 
 Spec: Cue pre-computation; D20 (needs analysis; an analyser change purges its old rows);
 D52/D55 (the fallback row; no duration, retried); D57 (an unreadable or changed file stores
-nothing); D59 (one summary log; an idle run leaves no trace); D61 (the first file with no
+nothing); D59 (one summary log, with silent files counted apart from failed ones, S5; an idle
+run leaves no trace); D61 (the first file with no
 outcome is the stall and gets a fallback row; the files after it go back, untried); D62
 (today's and tomorrow's playlists first); D63 (batches of 8, a bounded run); D64 (an unknown
 stored stat trusts the hash); D67 (each file's duration reaches the analyser); D68 (a
@@ -68,7 +69,9 @@ _UNREADABLE = "unreadable"
 _NONE_NEEDED = "none_needed"
 """D79: the reported file's audio already has a row, or there is nothing to report on."""
 
-_STORED = frozenset({CueRecord.ANALYSED, CueRecord.FAILED})
+_STORED = frozenset({CueRecord.ANALYSED, CueRecord.FAILED, CueRecord.SILENT})
+"""Outcomes that store a row: the audio is settled and not analysed again (D20, D61, D111)."""
+
 _NOTHING_READY = BatchAnalysis(metadata={}, stalled=None)
 _STALLED = Unusable("analyser stalled or died on this file (D61)")
 
@@ -154,8 +157,9 @@ class _Run:
         self.counts.update(outcomes)
 
     def stored(self) -> int:
-        """How much audio this run has stored: analysed, or a fallback row."""
-        return self.counts[CueRecord.ANALYSED] + self.counts[CueRecord.FAILED]
+        """How much audio this run has stored: analysed, a fallback row, or a silent row (all
+        processed for the cue meter, D89a)."""
+        return sum(self.counts[outcome] for outcome in _STORED)
 
 
 def _purge_other_versions(ports: CueRunPorts) -> None:
@@ -285,7 +289,8 @@ def _run_batch(
 
 
 def _log_summary(run: _Run, paused: bool) -> None:
-    """D59: the run's counts as one event; an idle run leaves no trace. I2: a run that stores
+    """D59: the run's counts as one event, silent apart from failed (S5); an idle run leaves no
+    trace. I2: a run that stores
     nothing and is not paused logs at debug, not info, so a stuck unreadable or changed file
     does not spam System Logs every cadence."""
     if not run.tried:
@@ -295,6 +300,7 @@ def _log_summary(run: _Run, paused: bool) -> None:
         "stream_cue_run",
         analysed=run.counts[CueRecord.ANALYSED],
         failed=run.counts[CueRecord.FAILED],
+        silent=run.counts[CueRecord.SILENT],
         no_duration=run.counts[CueRecord.NO_DURATION],
         changed=run.counts[CueRecord.CHANGED],
         unreadable=run.counts[_UNREADABLE],

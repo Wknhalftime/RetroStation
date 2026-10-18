@@ -4,7 +4,8 @@ One row per audio hash. An upsert needs no library file to exist: a row for audi
 longer (or not yet) in the library is harmless.
 
 Approved acceptance tests for D20; locked in ``.claude/frozen-tests.json``. Re-locked under
-D66 (PR E1): an upsert leaves ``orphaned_at`` NULL.
+D66 (PR E1): an upsert leaves ``orphaned_at`` NULL. Re-locked under D111 (2026-10-16): an upsert
+stores ``audio_silent``.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ def as_row(a: CueAnalysis) -> dict[str, Any]:
         "gain_db": a.cues.gain_db,
         "analyser_version": a.analyser_version,
         "analysis_failed": a.analysis_failed,
+        "audio_silent": a.audio_silent,
         "orphaned_at": None,
     }
 
