@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.domain.liners import LinerCadence
 from backend.domain.system import StorageUnavailableError
 
 _STATION_CHANGE_FIELDS = frozenset({"call_letters", "name", "city", "format_name"})
@@ -52,6 +53,7 @@ class BroadcastStation:
     city: str | None = None
     format_name: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    liner_cadence: LinerCadence | None = None
 
 
 @dataclass
