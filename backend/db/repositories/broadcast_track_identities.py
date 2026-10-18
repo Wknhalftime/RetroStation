@@ -89,12 +89,20 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         # handles the unresolved-artist path (artist PENDING/NEEDS_REVIEW) and
         # gating the SQL on AUTO/MANUAL artists would strand those identities
         # with no matching path ever running in production.
+        # EXISTS instead of DISTINCT, and no embedding column: matching never reads the
+        # vector (AUD-R020), and DISTINCT li.* sorted it and parsed it per song (~200 ms a
+        # stage on the 2026-10-18 profile).
         rows = self._conn.execute(
-            """SELECT DISTINCT li.* FROM track_identities li
-               JOIN play_events le ON le.identity_id = li.id
-               WHERE le.playlist_id = %s
-                 AND li.match_status = %s""",
-            (playlist_id, MatchStatus.PENDING.value),
+            """SELECT li.id, li.broadcast_artist_id, li.original_title, li.normalized_title,
+                      li.normalized_signature, li.match_status, li.match_tier, li.created_at,
+                      li.reason_code, li.reason_detail, li.rejected_file_ids
+                 FROM track_identities li
+                WHERE li.match_status = %s
+                  AND EXISTS (
+                      SELECT 1 FROM play_events le
+                       WHERE le.identity_id = li.id AND le.playlist_id = %s
+                  )""",
+            (MatchStatus.PENDING.value, playlist_id),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
