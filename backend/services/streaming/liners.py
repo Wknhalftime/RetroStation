@@ -18,14 +18,18 @@ helpers are pure paths. ``add_liner`` runs the storage order of Task 4:
 This upload's partial is always discarded, and a failure after step 5 discards the installed
 file. A disk failure is a ``LinerStorageError``. Every command commits its own writes through
 ``LinerPorts.commit``. A file a delete cannot remove (one a live engine holds open) is logged
-as ``stream_liner_cleanup_failed`` and left behind.
+as ``stream_liner_cleanup_failed`` and left behind; ``sweep_station_liners``, run after each
+add and delete, removes it once it is older than ``PARTIAL_MAX_AGE``, along with a crash's
+leftovers (Task 12a).
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +43,7 @@ from backend.domain.broadcast import BroadcastStation, UnknownStationError
 from backend.domain.enums import AudioHashKind
 from backend.domain.library import AudioHash
 from backend.domain.liners import (
+    LINER_FILE_NAME,
     MAX_LINER_BYTES,
     MAX_LINER_NAME,
     LinerCadence,
@@ -52,7 +57,7 @@ from backend.domain.streaming import ClipFormat, ProbedClip
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 from backend.repositories.station_liners import StationLinerRepository
 from backend.services.audio_hash import compute_audio_hash
-from backend.services.streaming.sign_off import ClipProbe, ClipUpload
+from backend.services.streaming.sign_off import PARTIAL_MAX_AGE, ClipProbe, ClipUpload
 
 logger = structlog.get_logger(__name__)
 
@@ -60,6 +65,9 @@ _LINERS_DIR = "liners"
 _PARTIAL_SUFFIX = ".partial"
 _FALLBACK_NAME = "liner"
 _CLEANUP_FAILED = "stream_liner_cleanup_failed"
+_PARTIAL_NAME = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.partial$"
+)
 
 
 def liner_folder(work_dir: Path) -> Path:
@@ -140,6 +148,8 @@ def add_liner(ports: LinerPorts, station_id: UUID, upload: ClipUpload) -> LinerA
         The new liner's id (``ADDED``), or the id of the station's liner that already has
         this audio (``DUPLICATE``; nothing new is kept).
 
+    The station's folder is swept afterwards (``sweep_station_liners``).
+
     Raises:
         UnknownStationError: no station has ``station_id``; nothing is written.
         LinerTooLargeError: the upload is larger than ``MAX_LINER_BYTES``; nothing is written.
@@ -163,6 +173,7 @@ def add_liner(ports: LinerPorts, station_id: UUID, upload: ClipUpload) -> LinerA
     finally:
         if added is None or added.outcome is UploadOutcome.DUPLICATE:
             _discard(installed.path)
+    sweep_station_liners(ports, station_id)
     return added
 
 
@@ -180,7 +191,8 @@ def rename_liner(ports: LinerPorts, station_id: UUID, liner_id: UUID, name: str)
 
 
 def delete_liner(ports: LinerPorts, station_id: UUID, liner_id: UUID) -> None:
-    """Remove the liner's row and commit, then its file, best effort (LR3).
+    """Remove the liner's row and commit, then its file, best effort, then sweep the
+    station's folder (LR3, Task 12a).
 
     Raises:
         LinerNotFoundError: the station has no liner ``liner_id``.
@@ -189,6 +201,22 @@ def delete_liner(ports: LinerPorts, station_id: UUID, liner_id: UUID) -> None:
     ports.liners.delete(liner_id)
     ports.commit()
     _discard(_station_folder(ports.folder, station_id) / liner.file_name)
+    sweep_station_liners(ports, station_id)
+
+
+def sweep_station_liners(ports: LinerPorts, station_id: UUID) -> None:
+    """Remove the station folder's leftovers, best effort (LR3, Task 12a): files named like a
+    liner whose row is gone (a delete's file the engine held open, or a crash between install
+    and commit), and partials. Each goes only once older than ``PARTIAL_MAX_AGE``, so a
+    concurrent upload's files are never touched; nothing else is. A failure is logged as
+    ``stream_liner_cleanup_failed``, never raised.
+    """
+    # Ages are file mtimes against the real clock, as the sign-off sweep judges them; the
+    # ports' clock only stamps rows.
+    oldest_kept = time.time() - PARTIAL_MAX_AGE.total_seconds()
+    for entry in _folder_entries(_station_folder(ports.folder, station_id)):
+        if _is_leftover(ports.liners, station_id, entry, oldest_kept):
+            _discard(entry)
 
 
 def list_liners(ports: LinerPorts, station_id: UUID) -> LinerLibrary:
@@ -238,12 +266,19 @@ def discard_station_liners(folder: Path, station_id: UUID) -> None:
     failure is logged; a station with no folder is not an error (LR3)."""
     station_folder = _station_folder(folder, station_id)
     # The exists() check sits inside the try: a failed stat is logged like a failed delete,
-    # since the station's row is already committed when this runs.
+    # since the station's row is already committed when this runs. The removal itself goes
+    # entry by entry: each failure (a file an engine holds open) is logged and the rest go.
     try:
         if station_folder.exists():
-            shutil.rmtree(station_folder)
+            shutil.rmtree(station_folder, onexc=_log_cleanup_failure)
     except OSError as failed:
         logger.warning(_CLEANUP_FAILED, path=str(station_folder), error=str(failed))
+
+
+def _log_cleanup_failure(
+    _function: Callable[..., object], path: str, failed: BaseException
+) -> None:
+    logger.warning(_CLEANUP_FAILED, path=path, error=str(failed))
 
 
 def liner_audio_hash(path: Path) -> AudioHash:
@@ -344,6 +379,42 @@ def _hash_installed(path: Path) -> AudioHash:
         return liner_audio_hash(path)
     except OSError as failed:
         raise LinerStorageError(f"the liner could not be read back: {failed}") from failed
+
+
+def _folder_entries(folder: Path) -> list[Path]:
+    """The folder's entries; none when it is missing or cannot be listed (logged)."""
+    if not folder.is_dir():
+        return []
+    try:
+        return list(folder.iterdir())
+    except OSError as failed:
+        logger.warning(_CLEANUP_FAILED, path=str(folder), error=str(failed))
+        return []
+
+
+def _is_leftover(
+    liners: StationLinerRepository, station_id: UUID, entry: Path, oldest_kept: float
+) -> bool:
+    """A partial, or a liner-named file with no row of this station's, last modified before
+    ``oldest_kept``. The row is looked up only for an old file."""
+    if _PARTIAL_NAME.fullmatch(entry.name) is not None:
+        return _modified_before(entry, oldest_kept)
+    if LINER_FILE_NAME.fullmatch(entry.name) is not None:
+        return _modified_before(entry, oldest_kept) and not _stored(liners, station_id, entry)
+    return False
+
+
+def _modified_before(entry: Path, oldest_kept: float) -> bool:
+    try:
+        return entry.stat().st_mtime < oldest_kept
+    except OSError:
+        return False  # gone already, or unreadable: the next sweep looks again
+
+
+def _stored(liners: StationLinerRepository, station_id: UUID, entry: Path) -> bool:
+    """Whether a row of the station's names ``entry`` as its file."""
+    liner = liners.get(UUID(entry.stem))
+    return liner is not None and (liner.station_id, liner.file_name) == (station_id, entry.name)
 
 
 def _discard(path: Path) -> None:
