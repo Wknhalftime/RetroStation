@@ -84,7 +84,12 @@ from backend.services.streaming.bookmarks import (
     bookmark_still_valid,
 )
 from backend.services.streaming.cue_reports import IgnoredReports, NoCueMemory, NoCueReports
-from backend.services.streaming.cue_reread import CueRereadLimits, CueRereads, Unread
+from backend.services.streaming.cue_reread import (
+    BoundedReads,
+    CueRereadLimits,
+    CueRereads,
+    Unread,
+)
 from backend.services.streaming.errors import (
     InvalidStreamSettingError,
     SessionTokenError,
@@ -146,6 +151,9 @@ _SUBSCRIPTIONS_PER_SLOT = 2
 """Now-playing subscriptions allowed per listener slot, app-wide (D78b with D42)."""
 _PLACEMENT_WAIT_S = 5.0
 """How long seq 0 waits for placement: below Liquidsoap's 10 s ``http.get`` timeout."""
+_LINER_READ_FAILURES = (StreamReadError, InvalidLinerValueError, InvalidStreamValueError)
+"""What a failed liner read may raise and still play the song (D88; review M2: a stored row
+the domain rejects)."""
 
 
 @dataclass(frozen=True)
@@ -175,8 +183,9 @@ class StreamPorts:
     time (D47); ``clock`` then only places listeners. ``None`` measures elapsed time on
     ``clock`` too, which is how the D2 rigs drive every duration with one clock."""
     cue_reread_repos: ReposFactory | None = None
-    """The re-read's own connections (D85), with short lock and statement limits; ``None``
-    re-reads through ``repos``, as the D2 rigs do."""
+    """The re-read's own connections (D85), with short lock and statement limits, which the
+    liner read uses too (#171 review M1); ``None`` reads both through ``repos``, as the D2
+    rigs do."""
     sleep: Sleep = asyncio.sleep
     """Waits on the loop's monotonic clock (D47); the 1 s now-playing delay uses it. Tests
     inject a gate."""
@@ -220,7 +229,8 @@ class StreamServiceConfig:
     no_cue_memory: int = 4096
     """How many files a run of the app remembers having reported (D82, D87(c))."""
     cue_reread: CueRereadLimits = field(default_factory=CueRereadLimits)
-    """How long a song's stored-cue re-read may take and how many run at once (D85, D86(c))."""
+    """How long a song's stored-cue re-read may take and how many run at once (D85, D86(c));
+    the liner read has the same limits, with its own count (#171 review M1)."""
 
     def __post_init__(self) -> None:
         if self.no_cue_memory < 1:
@@ -491,7 +501,7 @@ def _left_at(
     (D30); ``None`` if the session never finished opening (no engine), so a close during
     ``open`` bookmarks nothing. Unlike ``live_position`` (D109), it folds the time played
     into the offset and falls back to the landing, since a bookmark stores one point. Left
-    during a liner, it points at the end of the song before it: the next song's top (LR9)."""
+    during a liner, it points at the top of the song the stream walked to after it (LR9)."""
     if session.engine is None or session.clock_offset is None or session.landing is None:
         return None
     committed = session.committed
@@ -567,6 +577,9 @@ class StreamService:
         self._no_cues = NoCueMemory(config.no_cue_memory)
         reread_repos = ports.repos if ports.cue_reread_repos is None else ports.cue_reread_repos
         self._rereads = CueRereads(partial(_stored_cues, reread_repos), config.cue_reread)
+        self._liner_reads: BoundedReads[UUID, list[PlayableLiner]] = BoundedReads(
+            partial(_station_liners, reread_repos), config.cue_reread
+        )
 
     # ---- queries ---------------------------------------------------------------------------
 
@@ -889,18 +902,20 @@ class StreamService:
                 raise
             return final
         if isinstance(previous, Assigned):  # the slot before was a song, never a liner
-            liner = await self._liner_after(call, session, previous)
+            liner = await self._liner_after(call, session, previous, following)
             if liner is not None:
                 return liner  # the song walked to is walked again for the next seq
         following = await self._with_stored_cues(following)  # D85; never seq 0 (D86c)
         return self._assign(call, self._authorised(call), following)
 
     async def _liner_after(
-        self, call: ItemCall, session: StreamSession, song: Assigned
+        self, call: ItemCall, session: StreamSession, song: Assigned, next_song: Assigned
     ) -> ItemPayload | None:
         """``call.seq``'s liner, when the session's cadence is due after ``song`` (LR7) and
-        the rotation has one to play (LR8); ``None`` plays the next song. The rotation moves
-        on, on the event loop, only when the liner is stored for the seq."""
+        the rotation has one to play (LR8); ``None`` plays the next song. ``next_song`` is
+        the song walked to after ``song``, kept on the slot to place a listener during the
+        liner (LR9). The rotation moves on, on the event loop, only when the liner is stored
+        for the seq."""
         station_id, root = session.station_id, self._config.liners_dir
         if station_id is None or root is None:
             return None
@@ -917,28 +932,32 @@ class StreamService:
             return None  # an empty library: the song plays, quietly (LR10)
         liner = liners[ids.index(picked)]
         path = root / str(station_id) / liner.file_name
-        slot = LinerSlot(liner, path, song, _sent_span_ms(song, self._config.timing))
+        slot = LinerSlot(liner, path, song, _sent_span_ms(song, self._config.timing), next_song)
         payload = self._assign(call, session, slot)
         if session.assigned.get(call.seq) is slot:  # stored here, not by a concurrent request
             session.liner_rotation = rotation
         return payload
 
     async def _playable_liners(self, call: ItemCall, station_id: UUID) -> list[PlayableLiner]:
-        """The station's playable liners, read now in a worker thread. A read that fails is
-        logged and reads as none (plan note 9, D88), and so does a stored row the domain
-        rejects: a liner never holds up the music."""
-        try:
-            return await asyncio.to_thread(_station_liners, self._ports.repos, station_id)
-        except (StreamReadError, InvalidLinerValueError, InvalidStreamValueError) as unread:
-            logger.warning(
-                "stream_liner_read_failed",
-                session_id=call.session_id,
-                seq=call.seq,
-                station_id=str(station_id),
-                error_type=type(unread).__name__,
-                error=str(unread),
-            )
-            return []
+        """The station's playable liners, read now on the re-read's connections and bounded
+        like it (D86(c), #171 review M1). A read that is busy, late or failed is logged and
+        reads as none (plan note 9, D88), and so does a stored row the domain rejects: a
+        liner never holds up the music. Any other failure fails the item, as before."""
+        answer = await self._liner_reads.read(station_id)
+        if not isinstance(answer, Unread):
+            return answer
+        error = answer.error
+        if error is not None and not isinstance(error, _LINER_READ_FAILURES):
+            raise error
+        logger.warning(
+            "stream_liner_read_failed",
+            session_id=call.session_id,
+            seq=call.seq,
+            station_id=str(station_id),
+            error_type=answer.reason if error is None else type(error).__name__,
+            error=answer.reason if error is None else str(error),
+        )
+        return []
 
     async def _with_stored_cues(self, assigned: Assigned) -> Assigned:
         """D85: the song as stored now, or as read at tune-in when the read fails. Stored

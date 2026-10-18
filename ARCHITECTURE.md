@@ -112,18 +112,23 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (`FinalClip`) and a liner (`LinerSlot`, plan note 8). The walk to the next song runs first,
   so the end of the schedule signs off and no liner plays right before it; then, if the seq
   before was a song and the cadence is due, the station's playable liners are read in a worker
-  thread. A failed read (`StreamReadError`, or a row the domain rejects) is a warning and the
-  song plays; an empty library plays the song quietly. A liner that fails to load is skipped
+  thread, on the cue re-read's short-lived connections and under its bounds (`BoundedReads`
+  in `cue_reread.py`: 0.5 s, at most 2 at once, D86(c)), so a slow database never holds the
+  slot near the engine's 10 s fetch timeout. A busy, late or failed read (`StreamReadError`,
+  or a row the domain rejects) is a warning and the song plays; an empty library plays the
+  song quietly. A liner that fails to load is skipped
   and still resets the count.
 - The count and the rotation belong to the listener session, from tune-in: the cadence is read
   with the station at tune-in, the landing is song 1, and the shuffle (`LinerRotation`,
   `next_liner` in `domain/liners.py`) moves on only on the event loop, once the slot is stored.
   A reconnect starts both over.
 - Liners are timeless to placement (`sessions.song_heard`): during a liner, the reconnect live
-  position (D109) and the bookmark (`_left_at`) both take the song before it as played to its
-  end, so they land at the next song's top. Only the freeze watchdog follows the liner's own
+  position (D109) and the bookmark (`_left_at`) both land at the top of the song the stream
+  walked to after the song before it (`LinerSlot.next_song`), so neither a D80 landing nor a
+  D85 re-read can move that point. Only the freeze watchdog follows the liner's own
   span. A liner shows no title.
-- The checks are `tests/services/streaming/test_liner_playout.py` (rig `liner_rig.py`).
+- The checks are `tests/services/streaming/test_liner_playout.py` (rig `liner_rig.py`),
+  `test_liner_read_bounds.py` and `test_liner_walked_position.py` (rig `liner_reads_rig.py`).
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
