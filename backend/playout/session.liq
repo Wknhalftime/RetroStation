@@ -19,6 +19,7 @@ settings.log.stdout := true
 settings.log.file := false
 settings.log.level := 3
 settings.harbor.bind_addrs := ["127.0.0.1"]
+%include "agc.liq"
 
 session_id = environment.get("SESSION_ID")
 port = int_of_string(environment.get("HARBOR_PORT"))
@@ -462,13 +463,11 @@ s = add(id="main_and_bell", normalize=false, [main, source.drop.metadata(bell)])
 # Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
 # compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
 # with a lookahead outputs nothing but silence in most runs.
-# AGC: slow gain riding toward -16 LUFS. Songs arrive at -18 LUFS (liq_amplify), so the
-# gate at -33 holds the gain through gaps 15 dB below that; at -40 the AGC rode up to
-# +10 dB in a sub-second stop and the next hit came out 7 LU hot (Killing in the Name).
-s = normalize(
-  target=-16., lufs=true, up=6., down=1.2, gain_min=-10., gain_max=10., threshold=-33.,
-  track_sensitive=false, s
-)
+# AGC (agc.liq): windowed and gated like the Optimod's. Songs arrive at -18 LUFS
+# (liq_amplify), so the idle gain is +2 dB, and the gate at -33 sits 15 dB below program:
+# through a stop or a pause the gain drifts toward idle instead of riding up into the next
+# hit (Killing in the Name, 1:31).
+s = agc(target=-16., idle=2., threshold=-33., s)
 # EQ: a wide peak stands in for the +2 dB bass shelf; 2 oct = Q 0.67, 3.8 oct = Q 0.29
 s = filter.iir.eq.peak(frequency=100., gain=2., q=0.5, s)
 s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
