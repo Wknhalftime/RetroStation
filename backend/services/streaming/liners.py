@@ -54,6 +54,7 @@ from backend.domain.liners import (
     StationLiner,
 )
 from backend.domain.streaming import ClipFormat, ProbedClip
+from backend.domain.system import StorageUnavailableError
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 from backend.repositories.station_liners import StationLinerRepository
 from backend.services.audio_hash import compute_audio_hash
@@ -208,15 +209,20 @@ def sweep_station_liners(ports: LinerPorts, station_id: UUID) -> None:
     """Remove the station folder's leftovers, best effort (LR3, Task 12a): files named like a
     liner whose row is gone (a delete's file the engine held open, or a crash between install
     and commit), and partials. Each goes only once older than ``PARTIAL_MAX_AGE``, so a
-    concurrent upload's files are never touched; nothing else is. A failure is logged as
-    ``stream_liner_cleanup_failed``, never raised.
+    concurrent upload's files are never touched; nothing else is. The station's stored file
+    names are read once, and only when an old liner-named file is there; when that read fails,
+    every liner file is kept. A failure is logged as ``stream_liner_cleanup_failed``, never
+    raised.
     """
     # Ages are file mtimes against the real clock, as the sign-off sweep judges them; the
     # ports' clock only stamps rows.
     oldest_kept = time.time() - PARTIAL_MAX_AGE.total_seconds()
-    for entry in _folder_entries(_station_folder(ports.folder, station_id)):
-        if _is_leftover(ports.liners, station_id, entry, oldest_kept):
-            _discard(entry)
+    entries = _folder_entries(_station_folder(ports.folder, station_id))
+    old = [entry for entry in entries if _modified_before(entry, oldest_kept)]
+    partials = [entry for entry in old if _PARTIAL_NAME.fullmatch(entry.name) is not None]
+    liner_named = [entry for entry in old if LINER_FILE_NAME.fullmatch(entry.name) is not None]
+    for entry in partials + _orphans(ports.liners, station_id, liner_named):
+        _discard(entry)
 
 
 def list_liners(ports: LinerPorts, station_id: UUID) -> LinerLibrary:
@@ -392,16 +398,20 @@ def _folder_entries(folder: Path) -> list[Path]:
         return []
 
 
-def _is_leftover(
-    liners: StationLinerRepository, station_id: UUID, entry: Path, oldest_kept: float
-) -> bool:
-    """A partial, or a liner-named file with no row of this station's, last modified before
-    ``oldest_kept``. The row is looked up only for an old file."""
-    if _PARTIAL_NAME.fullmatch(entry.name) is not None:
-        return _modified_before(entry, oldest_kept)
-    if LINER_FILE_NAME.fullmatch(entry.name) is not None:
-        return _modified_before(entry, oldest_kept) and not _stored(liners, station_id, entry)
-    return False
+def _orphans(
+    liners: StationLinerRepository, station_id: UUID, liner_named: list[Path]
+) -> list[Path]:
+    """The files in ``liner_named`` that no row of the station's names, read in one query (none
+    when there is nothing to check). A lost connection is logged and keeps every file: an
+    unknown is never deleted."""
+    if not liner_named:
+        return []
+    try:
+        stored = {entry.liner.file_name for entry in liners.list_for_station(station_id)}
+    except StorageUnavailableError as lost:
+        logger.warning(_CLEANUP_FAILED, station_id=str(station_id), error=str(lost))
+        return []
+    return [entry for entry in liner_named if entry.name not in stored]
 
 
 def _modified_before(entry: Path, oldest_kept: float) -> bool:
@@ -409,12 +419,6 @@ def _modified_before(entry: Path, oldest_kept: float) -> bool:
         return entry.stat().st_mtime < oldest_kept
     except OSError:
         return False  # gone already, or unreadable: the next sweep looks again
-
-
-def _stored(liners: StationLinerRepository, station_id: UUID, entry: Path) -> bool:
-    """Whether a row of the station's names ``entry`` as its file."""
-    liner = liners.get(UUID(entry.stem))
-    return liner is not None and (liner.station_id, liner.file_name) == (station_id, entry.name)
 
 
 def _discard(path: Path) -> None:
