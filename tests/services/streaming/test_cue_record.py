@@ -2,10 +2,10 @@
 
 Spec: For PR D and PR E ("reads the hash before analysing and stores nothing if the hash
 changed meanwhile"); D52 (the fallback row: cue_in 0, cue_out = duration_ms, start_next 0,
-default fades, gain_db -8, analysis_failed); D53 (loudness_lufs NULL); D55 (a failure with
-no duration_ms stores nothing and is retried every run); D68 (a malformed result line
-fails only its file, with a fallback row and the field named); review minor "repeated failure
-alerts" (a retried failure must not flood system_logs).
+the default fade-out and no fade-in (D112), gain_db -8, analysis_failed); D53 (loudness_lufs
+NULL); D55 (a failure with no duration_ms stores nothing and is retried every run); D68 (a
+malformed result line fails only its file, with a fallback row and the field named); review
+minor "repeated failure alerts" (a retried failure must not flood system_logs).
 """
 
 from __future__ import annotations
@@ -66,7 +66,8 @@ def test_an_analysis_is_stored_under_the_audio_hash_read_before_analysing() -> N
 
 
 def test_a_failed_analysis_stores_a_fallback_row() -> None:
-    """D52: cue_in 0, cue_out = duration_ms, start_next 0, default fades, -8 dB, failed."""
+    """D52: cue_in 0, cue_out = duration_ms, start_next 0, the default fade-out and no
+    fade-in (D112), -8 dB, failed."""
     store = store_with_file()
     record = record_analysis(store, StreamTiming(), Autocued(candidate(200_000), {}))
     assert record == CueRecord.FAILED
@@ -76,7 +77,7 @@ def test_a_failed_analysis_stores_a_fallback_row() -> None:
             cues=CuePoints(
                 cue_in_ms=0,
                 cue_out_ms=200_000,
-                fade_in_ms=3_000,
+                fade_in_ms=0,
                 fade_out_ms=4_000,
                 start_next_ms=0,
                 gain_db=-8.0,
@@ -88,13 +89,14 @@ def test_a_failed_analysis_stores_a_fallback_row() -> None:
     }
 
 
-def test_the_fallback_fades_are_the_stream_timing_defaults() -> None:
-    """Spec: "Fades come from the cached cue points, or from StreamTiming defaults"."""
+def test_the_fallback_fade_out_is_the_stream_timing_default() -> None:
+    """Spec: "Fades come from the cached cue points, or from StreamTiming defaults"; D112:
+    there is no fade-in, whatever the timing."""
     store = store_with_file()
-    timing = StreamTiming(default_fade_in_ms=1_000, default_fade_out_ms=2_000)
+    timing = StreamTiming(default_fade_out_ms=2_000)
     record_analysis(store, timing, Autocued(candidate(), {**VAN_HALEN, "liq_cue_in": "x"}))
     cues = store.analyses[AUDIO].cues
-    assert (cues.fade_in_ms, cues.fade_out_ms) == (1_000, 2_000)
+    assert (cues.fade_in_ms, cues.fade_out_ms) == (0, 2_000)
 
 
 def test_a_failed_analysis_is_logged_with_the_file_and_the_reason() -> None:

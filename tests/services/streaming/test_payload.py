@@ -1,7 +1,7 @@
 """What the backend sends Liquidsoap for one item (spec: contract annotations; Engine "always
 send a valid liq_cue_out greater than liq_cue_in"; D23 no-cues songs "sn_rem = 0 and
 liq_amplify = 0.0 dB, sent explicitly. cue_out = duration_ms"; "Paths are sent with the
-\\\\?\\ prefix"; D26 the final hook)."""
+\\\\?\\ prefix"; D26 the final hook; D112 "liq_fade_in" is always zero)."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def test_a_cued_item_sends_its_cue_points_in_seconds() -> None:
         "item_seq": "7",
         "liq_cue_in": "1.500",
         "liq_cue_out": "181.000",
-        "liq_fade_in": "2.000",
+        "liq_fade_in": "0.000",
         "liq_fade_out": "5.000",
         "sn_rem": "4.500",
         "liq_amplify": "-6.2 dB",
@@ -72,7 +72,7 @@ def test_a_song_without_cues_plays_to_its_end_with_no_overlap_and_no_gain_change
         "item_seq": "3",
         "liq_cue_in": "0.000",
         "liq_cue_out": "200.000",
-        "liq_fade_in": "3.000",
+        "liq_fade_in": "0.000",
         "liq_fade_out": "4.000",
         "sn_rem": "0.000",
         "liq_amplify": "0.0 dB",
@@ -83,7 +83,7 @@ def test_a_song_without_cues_plays_to_its_end_with_no_overlap_and_no_gain_change
 
 @pytest.mark.parametrize(
     ("cues", "offset_ms"),
-    [(None, 0), (None, 100_000), (None, 190_000), (CUES, 0), (CUES, 169_500)],
+    [(None, 0), (None, 100_000), (None, 193_000), (CUES, 0), (CUES, 171_500)],
 )
 def test_cue_out_is_always_after_cue_in(cues: CuePoints | None, offset_ms: int) -> None:
     # The largest offsets are the last landings D9 allows: exactly the minimum span is left.
