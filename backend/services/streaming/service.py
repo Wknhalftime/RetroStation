@@ -41,7 +41,13 @@ from uuid import UUID, uuid4
 import structlog
 
 from backend.domain.broadcast import BroadcastStation
-from backend.domain.liners import PlayableLiner, Shuffle, liner_due, next_liner
+from backend.domain.liners import (
+    InvalidLinerValueError,
+    PlayableLiner,
+    Shuffle,
+    liner_due,
+    next_liner,
+)
 from backend.domain.streaming import (
     Bookmark,
     CuePoints,
@@ -912,20 +918,24 @@ class StreamService:
         liner = liners[ids.index(picked)]
         path = root / str(station_id) / liner.file_name
         slot = LinerSlot(liner, path, song, _sent_span_ms(song, self._config.timing))
-        session.liner_rotation = rotation
-        return self._assign(call, session, slot)
+        payload = self._assign(call, session, slot)
+        if session.assigned.get(call.seq) is slot:  # stored here, not by a concurrent request
+            session.liner_rotation = rotation
+        return payload
 
     async def _playable_liners(self, call: ItemCall, station_id: UUID) -> list[PlayableLiner]:
         """The station's playable liners, read now in a worker thread. A read that fails is
-        logged and reads as none (plan note 9, D88): a liner never holds up the music."""
+        logged and reads as none (plan note 9, D88), and so does a stored row the domain
+        rejects: a liner never holds up the music."""
         try:
             return await asyncio.to_thread(_station_liners, self._ports.repos, station_id)
-        except StreamReadError as unread:
+        except (StreamReadError, InvalidLinerValueError, InvalidStreamValueError) as unread:
             logger.warning(
                 "stream_liner_read_failed",
                 session_id=call.session_id,
                 seq=call.seq,
                 station_id=str(station_id),
+                error_type=type(unread).__name__,
                 error=str(unread),
             )
             return []

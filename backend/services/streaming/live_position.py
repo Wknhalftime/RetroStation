@@ -32,7 +32,8 @@ class LivePosition:
     session_id: str
     """The open session it was read from."""
     started: Landing
-    """The committed item, at the offset it started playing from."""
+    """The committed item at the offset it started playing from; during a liner, the song
+    before the liner (the walk then spends its full sent span, LR9)."""
     event_id: UUID
     """The play the session found at ``started.ref`` when it read its day."""
     heard: timedelta
