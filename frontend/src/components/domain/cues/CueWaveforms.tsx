@@ -50,7 +50,8 @@ export function CueWaveforms(props: CueWaveformsProps) {
   const startRange = previewRange("start", markers, views.end);
   const endRange = previewRange("end", markers, views.end);
   const playhead = preview.playheadMs === null ? "—" : formatMs(preview.playheadMs);
-  const eomLit = preview.playheadMs !== null && preview.playheadMs >= markers.eom;
+  const eomLit =
+    preview.eomReached || (preview.playheadMs !== null && preview.playheadMs >= markers.eom);
   const shared = {
     peaks,
     perSecond,

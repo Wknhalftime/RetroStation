@@ -12,6 +12,8 @@ export interface CuePreview {
   error: string | null;
   /** Where the preview is in the song while it plays, in ms; null when stopped. */
   playheadMs: number | null;
+  /** True once the playhead reached EOM (or the end, when EOM is at Stop); until play or stop. */
+  eomReached: boolean;
   play(range: View, markers: Markers): void;
   stop(): void;
 }
@@ -59,6 +61,7 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
   const [decoded, setDecoded] = useState<Decoded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
+  const [eomReached, setEomReached] = useState(false);
   const playing = useRef<Playing | null>(null);
 
   const stopCurrent = useCallback(() => {
@@ -89,6 +92,7 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
       stopCurrent();
       setDecoded(null);
       setPlayheadMs(null);
+      setEomReached(false);
       void ctx.close();
     };
   }, [audio, stopCurrent]);
@@ -96,6 +100,7 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
   const stop = useCallback(() => {
     stopCurrent();
     setPlayheadMs(null);
+    setEomReached(false);
   }, [stopCurrent]);
 
   const play = useCallback(
@@ -103,6 +108,7 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
       // Nothing to play (e.g. the End view lies at or after Stop): never start a source.
       if (!decoded || !(range.to > range.from)) return;
       stopCurrent();
+      setEomReached(false);
       const { ctx, buffer } = decoded;
       // A context made before any click starts suspended; its clock stands still until resumed,
       // so a schedule made now on currentTime still holds.
@@ -120,6 +126,8 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
       playing.current = current;
       const finish = () => {
         if (playing.current !== current) return;
+        // Running to the end of the range passes EOM when EOM is at or before that end.
+        if (range.to >= markers.eom) setEomReached(true);
         stopCurrent();
         setPlayheadMs(null);
       };
@@ -132,6 +140,7 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
           finish();
           return;
         }
+        if (ms >= markers.eom) setEomReached(true);
         setPlayheadMs(ms);
         current.frame = requestAnimationFrame(tick);
       };
@@ -140,5 +149,5 @@ export function useCuePreview(audio: ArrayBuffer | undefined): CuePreview {
     [decoded, stopCurrent]
   );
 
-  return { ready: decoded !== null, error, playheadMs, play, stop };
+  return { ready: decoded !== null, error, playheadMs, eomReached, play, stop };
 }

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatDuration } from "@/lib/utils";
@@ -110,6 +110,15 @@ function CueEditorBody({ fileId, editor }: { fileId: string; editor: CueEditorVi
 
   const isManual = !sameMarkers(markers, automatic);
   const dirty = !sameMarkers(markers, saved);
+  const busy = save.isPending || reset.isPending;
+
+  // Closing the tab or reloading with unsaved edits asks the browser to confirm first.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const waveformError = waveform.error ? errorText(waveform.error) : peaks.error;
   let status: string | null = null;
   if (audio.error) status = `The audio couldn't be loaded: ${errorText(audio.error)}`;
@@ -166,7 +175,7 @@ function CueEditorBody({ fileId, editor }: { fileId: string; editor: CueEditorVi
           <button
             type="button"
             onClick={onSave}
-            disabled={silent || !dirty || save.isPending}
+            disabled={silent || !dirty || busy}
             className={cn(BUTTON, "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700")}
           >
             Save
@@ -174,12 +183,12 @@ function CueEditorBody({ fileId, editor }: { fileId: string; editor: CueEditorVi
           <button
             type="button"
             onClick={onReset}
-            disabled={reset.isPending}
+            disabled={busy}
             className={cn(BUTTON, "border-gray-300 bg-white text-gray-700 hover:bg-gray-50")}
           >
             Reset to automatic
           </button>
-          {(save.isPending || reset.isPending) && <Spinner className="h-4 w-4 text-indigo-500" />}
+          {busy && <Spinner className="h-4 w-4 text-indigo-500" />}
         </div>
         {save.error && (
           <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -199,23 +208,34 @@ function CueEditorBody({ fileId, editor }: { fileId: string; editor: CueEditorVi
 export function CueEditor() {
   const { file_id: fileId = "" } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const editor = useCueEditor(fileId);
 
   let body;
-  if (editor.isError) {
+  if (editor.data) {
+    // A failed background refetch keeps the data: show the editor (and its unsaved edits) as is.
+    body = (
+      <>
+        {editor.isError && (
+          <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+            Couldn't refresh this song's cues. {errorText(editor.error)}
+          </p>
+        )}
+        <CueEditorBody key={fileId} fileId={fileId} editor={editor.data} />
+      </>
+    );
+  } else if (editor.isError) {
     body = (
       <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
         {errorText(editor.error)}
       </p>
     );
-  } else if (!editor.data) {
+  } else {
     body = (
       <div className="flex justify-center py-12">
         <Spinner className="h-6 w-6 text-indigo-500" />
       </div>
     );
-  } else {
-    body = <CueEditorBody key={fileId} fileId={fileId} editor={editor.data} />;
   }
 
   return (
@@ -223,7 +243,8 @@ export function CueEditor() {
       <div>
         <button
           type="button"
-          onClick={() => navigate(-1)}
+          // "default" is the first entry of this session: nothing in the app to go back to.
+          onClick={() => (location.key === "default" ? navigate("/library") : navigate(-1))}
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="h-4 w-4" />

@@ -45,9 +45,12 @@ type Drag =
   | { kind: "move"; which: BoxKey; grabMs: number; startBox: View }
   | { kind: "resize"; which: BoxKey; edge: "from" | "to" };
 
+// Per 100 wheel units (one mouse notch): zoom by these factors, pan by this fraction of the view.
 const ZOOM_IN = 0.8;
 const ZOOM_OUT = 1.25;
 const PAN_FRACTION = 0.1;
+const NOTCH = 100;
+const LINE_UNITS = 33; // a Firefox notch is 3 lines: about one 100-unit notch
 const BOX_ORDER: readonly BoxKey[] = ["end", "start"];
 
 /** Where the pointer is across the canvas; null while the canvas has no width (msAt is NaN). */
@@ -127,19 +130,16 @@ export function WaveformPane(props: WaveformPaneProps) {
       if (!onView || !at) return;
       e.preventDefault();
       // Shift + wheel arrives as deltaX in some browsers.
-      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      const raw = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      const delta = e.deltaMode === 1 ? raw * LINE_UNITS : raw;
       if (delta === 0) return;
       const pan = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
       const next = pan
-        ? panView(
-            current,
-            Math.sign(delta) * (current.to - current.from) * PAN_FRACTION,
-            durationMs
-          )
+        ? panView(current, (delta / NOTCH) * (current.to - current.from) * PAN_FRACTION, durationMs)
         : zoomView(
             current,
             msAt(at.x, at.width, current),
-            delta > 0 ? ZOOM_OUT : ZOOM_IN,
+            (delta > 0 ? ZOOM_OUT : ZOOM_IN) ** (Math.abs(delta) / NOTCH),
             durationMs
           );
       // Several wheel events can land before the next render: build on the view just asked for.
