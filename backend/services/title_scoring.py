@@ -14,6 +14,7 @@ reason to change.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from rapidfuzz.fuzz import token_sort_ratio
 
@@ -124,10 +125,19 @@ def normalize_title_for_scoring(title: str) -> str:
     return t.strip()
 
 
-def _candidate_titles(f: LibraryFile) -> tuple[str, ...]:
-    """The library file's normalized title forms for scoring; see
-    library_title_variants for why the stored normalized_title comes first."""
-    return library_title_variants(f.audio.track_title, f.audio.normalized_title)
+@lru_cache(maxsize=65536)
+def _scoring_titles(track_title: str | None, normalized_title: str | None) -> tuple[str, ...]:
+    """A library file's title forms, ready to score; see library_title_variants for why the
+    stored normalized_title comes first.
+
+    Cached by title: a stage scores each of an artist's files against every song of the
+    artist, and the forms depend on the titles alone (profile 2026-10-18). The bound holds
+    a whole library's titles (33k files on dev).
+    """
+    return tuple(
+        normalize_title_for_scoring(t)
+        for t in library_title_variants(track_title, normalized_title)
+    )
 
 
 def _candidate_scores(
@@ -153,7 +163,7 @@ def _candidate_scores(
     brackets are stripped ("Hello (Live)" picks the live file over "Hello"
     when both reach 100).
     """
-    libs = [normalize_title_for_scoring(t) for t in _candidate_titles(f)]
+    libs = _scoring_titles(f.audio.track_title, f.audio.normalized_title)
     exact = float(token_sort_ratio(full_bcs[0], libs[0]))
     full = max(float(token_sort_ratio(bc, libs[0])) for bc in full_bcs)
     stripped = max(float(token_sort_ratio(bc, lib)) for bc in full_bcs + core_bcs for lib in libs)
