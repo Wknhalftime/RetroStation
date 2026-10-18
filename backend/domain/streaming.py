@@ -179,9 +179,11 @@ class CueAnalysis:
 
 @dataclass(frozen=True)
 class StreamTiming:
-    """Timing rules shared by tune-in, the walk and next-item selection."""
+    """Timing rules shared by tune-in, the walk and next-item selection.
 
-    default_fade_in_ms: int = 3000
+    There is no fade-in to time (D112): every song starts at full level.
+    """
+
     default_fade_out_ms: int = 4000
     margin_ms: int = 3000
     window: timedelta = timedelta(hours=3)
@@ -190,7 +192,6 @@ class StreamTiming:
     def __post_init__(self) -> None:
         _require_non_negative(
             "StreamTiming",
-            default_fade_in_ms=self.default_fade_in_ms,
             default_fade_out_ms=self.default_fade_out_ms,
             margin_ms=self.margin_ms,
         )
@@ -222,10 +223,10 @@ class PlayableFile:
         return self.duration_ms or 0
 
     def min_span_ms(self, timing: StreamTiming) -> int:
-        """Shortest audible stretch that fades in and out cleanly (spec D9)."""
-        fade_in = self.cues.fade_in_ms if self.cues else timing.default_fade_in_ms
+        """Shortest audible stretch that fades out cleanly (spec D9); a stored fade-in is
+        never played, so it never counts (D112)."""
         fade_out = self.cues.fade_out_ms if self.cues else timing.default_fade_out_ms
-        return fade_in + fade_out + timing.margin_ms
+        return fade_out + timing.margin_ms
 
     def tail_fits(self, offset_ms: int, timing: StreamTiming) -> bool:
         """Whether starting ``offset_ms`` after cue-in leaves the minimum span (D9)."""
