@@ -458,6 +458,16 @@ filler.on_track(
 main = fallback(id="main_or_filler", track_sensitive=false, [layers, filler])
 # The bell is silent and its metadata is dropped: it only has to be pulled every frame.
 s = add(id="main_and_bell", normalize=false, [main, source.drop.metadata(bell)])
+# The AGC must never see an item's gain: the decks have applied liq_amplify already. On
+# 2.4.5 normalize ends with amplify(), whose override defaults to "liq_amplify", so a track
+# boundary carrying it would replace the AGC gain with the item gain (applied twice, AGC
+# off: -28.5 LUFS instead of -16, measured feeding a deck straight in). add() hides deck
+# boundaries today; this holds without it (test_session_liq_agc.py). Not
+# settings.amplify.metadata := null: other operators rely on that default.
+def drop_item_gain(m) =
+  list.filter(fun (kv) -> fst(kv) != "liq_amplify", m)
+end
+s = metadata.map(id="no_item_gain", update=false, drop_item_gain, s)
 # ---- processing, modelled on an Optimod preset ----
 # Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
 # compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
