@@ -31,10 +31,11 @@ logger = structlog.get_logger()
 #   0.4-0.7 s until the 0030 play_date index exists, and about 10 ms with it.
 #   The join is LEFT: if the view ever drops a play, the play is returned unresolved
 #   rather than vanishing and shifting every later position (ItemRef.index).
-# - Cues are the final file's audio's row, if any (D20): no stat or version check. A manual
-#   edit for the same audio (stream_cue_edits, keyed like stream_cues, so twin files share it
-#   and a re-hash drops it) is joined beside it and wins; the reader only hands both to the
-#   domain's edited_cues.
+# - Cues come from the final file's audio (D20): its stream_cues row, if any, with no stat or
+#   version check, and its manual edit, if any (stream_cue_edits, keyed like stream_cues, so
+#   twin files share it and a re-hash drops it), which wins. Both are joined by key and the
+#   reader only hands them to the domain's edited_cues. The edit join is a LATERAL fenced with
+#   OFFSET 0 so the planner always probes its primary key, whatever the table's statistics.
 _DAY_SQL = """
 SELECT dp.play_event_id AS event_id,
        dp.logged_at,
@@ -56,7 +57,12 @@ LEFT JOIN LATERAL (
 ) res ON true
 LEFT JOIN library_files f ON f.id = res.file_id
 LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
-LEFT JOIN stream_cue_edits e ON e.audio_hash = f.audio_hash
+LEFT JOIN LATERAL (
+    SELECT x.audio_hash, x.start_ms, x.eom_ms, x.fade_at_ms, x.stop_ms
+    FROM stream_cue_edits x
+    WHERE x.audio_hash = f.audio_hash
+    OFFSET 0
+) e ON true
 WHERE dp.station_id = %(station_id)s
   AND dp.play_date = %(day)s
 ORDER BY dp.position
@@ -69,16 +75,23 @@ SELECT f.audio_hash,
        e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms
 FROM library_files f
 LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
-LEFT JOIN stream_cue_edits e ON e.audio_hash = f.audio_hash
+LEFT JOIN LATERAL (
+    SELECT x.audio_hash, x.start_ms, x.eom_ms, x.fade_at_ms, x.stop_ms
+    FROM stream_cue_edits x
+    WHERE x.audio_hash = f.audio_hash
+    OFFSET 0
+) e ON true
 WHERE f.id = %(file_id)s
   AND (c.audio_hash IS NOT NULL OR e.audio_hash IS NOT NULL)
 """
 """The per-song re-read (D85): ``library_files`` by its primary key, then ``stream_cues`` and
-``stream_cue_edits`` by their primary key ``audio_hash`` (D20: cues belong to the audio). Both
-joins are LEFT and the WHERE keeps the file's row when either exists, so a manual edit with no
-autocue row still answers cues. It goes through the file id, not a hash carried on
-``PlayableFile``, because the player never sees a hash (D79) and this reads the file's
-*current* hash, so a hash a retag cleared correctly answers no cues."""
+``stream_cue_edits`` by their primary key ``audio_hash`` (D20: cues belong to the audio). The
+edit lookup is a LATERAL fenced with OFFSET 0 so a tiny or emptied table's statistics cannot
+turn it into a scan with a join filter. Both joins are LEFT and the WHERE keeps the file's row
+when either exists, so a manual edit with no autocue row still answers cues. It goes through
+the file id, not a hash carried on ``PlayableFile``, because the player never sees a hash (D79)
+and this reads the file's *current* hash, so a hash a retag cleared correctly answers no
+cues."""
 
 _MAX_WARNED_RE_READ_HASHES = 4_096
 """Bounds the warn-once memory below to about 240 hours of distinct songs (review M5)."""
@@ -216,6 +229,8 @@ def _with_edit(row: DictRow, stored: CuePoints | None) -> CuePoints | None:
     """
     if row["edited_audio"] is None:
         return stored
+    # No try: the DB CHECK stream_cue_edits_order mirrors CueMarkers.__post_init__, so a stored
+    # edit row is always valid; change the two together.
     markers = CueMarkers(
         start_ms=row["start_ms"],
         eom_ms=row["eom_ms"],
