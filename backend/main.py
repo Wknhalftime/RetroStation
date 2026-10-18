@@ -68,7 +68,12 @@ from backend.services.streaming.service import (
 from backend.services.streaming.sign_off import sign_off_folder
 from backend.services.streaming.watchdog import run_freeze_watchdog
 from backend.tasks.stream_cue_tasks import request_cue_analysis
-from backend.websocket import websocket_endpoint
+from backend.websocket import (
+    POLL_INTERVAL_SECONDS,
+    ProgressFeed,
+    poll_progress,
+    websocket_endpoint,
+)
 
 logger = structlog.get_logger()
 
@@ -427,12 +432,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.server_host = settings.server_host
     streaming, meter = await _prepare_meter(settings, meter_connect(settings.database_url))
     app.state.stream_service = None if streaming is None else streaming.service
+    progress_feed = ProgressFeed(partial(poll_progress, pool), POLL_INTERVAL_SECONDS)
+    progress_feed.start()
+    app.state.progress_feed = progress_feed
 
     try:
         yield
     finally:
-        await _shutdown(meter, streaming)
-        await close_pool()
+        try:
+            await _shutdown(meter, streaming)
+        finally:
+            await progress_feed.stop()
+            await close_pool()
 
 
 app = FastAPI(title="RetroStation", lifespan=lifespan)
@@ -486,4 +497,4 @@ async def health() -> dict[str, str]:
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time task progress broadcast."""
-    await websocket_endpoint(websocket)
+    await websocket_endpoint(websocket, websocket.app.state.progress_feed)

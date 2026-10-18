@@ -4,9 +4,10 @@
   when either changed, so a full scan's wave holds only truly changed files.
 - The wave: the distinct, non-empty artist names of files indexed or gone missing strictly
   after a time. The watermark: the started_at of the newest COMPLETED row of one task type.
-- The rewinds: needs_review and auto_rejected go to pending, with reasons (and the song tier)
-  cleared. Match rows and rejections are kept. None means everything; an empty collection
-  means nothing. Pending and decided rows are never touched.
+- The rewinds: artists in needs_review or auto_rejected, and songs in needs_review,
+  auto_rejected or manual_rejected (spec 2026-10-13 R1), go to pending, with reasons (and the
+  song tier) cleared. Match rows and rejections are kept. None means everything; an empty
+  collection means nothing. Pending and decided rows, and a rejected artist, are never touched.
 - The fan-out sets. The artist cascades delete the flipped songs' match rows.
 - The replacement lets a rewound song re-match the very file it kept:
   UNIQUE(identity_id, library_file_id), with no ON CONFLICT.
@@ -67,13 +68,15 @@ Conn = psycopg.Connection[Any]
 W = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 LONG_AGO = datetime(2020, 1, 1, tzinfo=UTC)
 ABBA = normalize_artist("ABBA")
-UNDECIDED = [MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED]
-NOT_UNDECIDED = [
+ARTIST_UNDECIDED = [MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED]
+ARTIST_NOT_UNDECIDED = [
     MatchStatus.PENDING,
     MatchStatus.AUTO_MATCHED,
     MatchStatus.MANUAL_MATCHED,
     MatchStatus.MANUAL_REJECTED,
 ]
+SONG_UNDECIDED = [MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED]
+SONG_NOT_UNDECIDED = [MatchStatus.PENDING, MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED]
 
 
 def _connect(url: str) -> Conn:
@@ -326,7 +329,7 @@ def test_no_completed_run_means_no_watermark(migrated_db: str) -> None:
 # --- The artist rewind ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("status", UNDECIDED)
+@pytest.mark.parametrize("status", ARTIST_UNDECIDED)
 def test_artist_rewind_returns_an_undecided_artist_to_pending(
     migrated_db: str, status: MatchStatus
 ) -> None:
@@ -343,7 +346,7 @@ def test_artist_rewind_returns_an_undecided_artist_to_pending(
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-@pytest.mark.parametrize("status", NOT_UNDECIDED)
+@pytest.mark.parametrize("status", ARTIST_NOT_UNDECIDED)
 def test_artist_rewind_never_touches_a_pending_or_decided_artist(
     migrated_db: str, status: MatchStatus, scoped: bool
 ) -> None:
@@ -390,7 +393,7 @@ def test_ids_by_normalized_names(migrated_db: str) -> None:
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-@pytest.mark.parametrize("status", UNDECIDED)
+@pytest.mark.parametrize("status", SONG_UNDECIDED)
 def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus, scoped: bool) -> None:
     with _connect(migrated_db) as conn:
         artist = _artist(conn, "ABBA", MatchStatus.AUTO_MATCHED)
@@ -414,7 +417,7 @@ def test_song_rewind_is_status_only(migrated_db: str, status: MatchStatus, scope
 
 
 @pytest.mark.parametrize("scoped", [False, True])
-@pytest.mark.parametrize("status", NOT_UNDECIDED)
+@pytest.mark.parametrize("status", SONG_NOT_UNDECIDED)
 def test_song_rewind_never_touches_a_pending_or_decided_song(
     migrated_db: str, status: MatchStatus, scoped: bool
 ) -> None:
@@ -563,7 +566,7 @@ def test_the_recheck_commits_its_rewind_before_it_queues(
         _play(conn, playlist, song)
     seen: list[tuple[str, str]] = []
 
-    def enqueue(playlist_id: str) -> None:
+    def enqueue(playlist_id: str, run_id: str | None = None) -> None:
         with _connect(migrated_db) as other:  # another session sees committed rows only
             seen.append((playlist_id, _song_row(other, song)["match_status"]))
 

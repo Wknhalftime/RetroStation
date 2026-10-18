@@ -102,7 +102,8 @@ class BroadcastArtistRepository(ABC):
         """Return undecided artists (NEEDS_REVIEW, AUTO_REJECTED) to PENDING with their reason
         cleared; returns rows changed. *names* scopes it by normalized name: None means every
         artist, an empty collection none. Status only: match rows and candidates stay
-        (AUD-R022 D1/D2, spec 2026-10-05 §4.2)."""
+        (AUD-R022 D1/D2, spec 2026-10-05 §4.2). An artist the curator rejected
+        (MANUAL_REJECTED) is never rewound."""
         ...
 
     @abstractmethod

@@ -1,7 +1,9 @@
 """The targeted re-check of undecided matching: its wave, its rewind, its fan-out set.
 
-AUD-R022 D1/D2, spec 2026-10-05 §4.2. Only needs_review and auto_rejected go back to pending;
-auto_matched, manual_matched and manual_rejected are never touched.
+AUD-R022 D1/D2, spec 2026-10-05 §4.2, AUD-R029. Artists in needs_review or
+auto_rejected go back to pending; songs in those two or manual_rejected do (a song the curator
+rejected is re-checked without its rejected files). auto_matched and manual_matched are never
+touched, nor is an artist the curator rejected.
 """
 
 from __future__ import annotations

@@ -30,8 +30,27 @@ class MusicBrainzUnavailableError(MatchingError):
     song is deferred, never decided on partial evidence."""
 
 
-# Statuses a re-check rewinds to pending (AUD-R022 D1).
-UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED)
+@dataclass(frozen=True)
+class MatchOffFileWork:
+    """Matches on a file that carry another work than the file's own (or none)."""
+
+    library_file_id: UUID
+    match_work_id: str | None
+    file_work_id: str | None
+
+
+# Statuses a re-check rewinds to pending (AUD-R022 D1). An artist the curator rejected
+# outright stays rejected; a song the curator rejected (manual_rejected) is re-checked on
+# every run, without its rejected files (AUD-R029, spec 2026-10-13 R1, R2).
+ARTIST_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
+    MatchStatus.NEEDS_REVIEW,
+    MatchStatus.AUTO_REJECTED,
+)
+SONG_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
+    MatchStatus.NEEDS_REVIEW,
+    MatchStatus.AUTO_REJECTED,
+    MatchStatus.MANUAL_REJECTED,
+)
 
 
 @dataclass

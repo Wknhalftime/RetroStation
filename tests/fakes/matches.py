@@ -1,13 +1,33 @@
 from dataclasses import replace
 from uuid import UUID
 
-from backend.domain.matching import Match
+from backend.domain.matching import Match, MatchOffFileWork
+from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 
 
 class FakeMatchRepository(MatchRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, Match] = {}
+        # Files' works are the library file repo's; tests wire one in via
+        # set_library_file_repo for the off-work listing.
+        self._library_file_repo: LibraryFileRepository | None = None
+
+    def set_library_file_repo(self, repo: LibraryFileRepository) -> None:
+        """Inject the library file repo the off-work listing reads files' works from."""
+        self._library_file_repo = repo
+
+    def list_off_file_work(self) -> list[MatchOffFileWork]:
+        # Mirrors PgMatchRepository; without a library file repo nothing is known.
+        files = self._library_file_repo
+        if files is None:
+            return []
+        found = set()
+        for match in self._data.values():
+            file = files.get_by_id(match.library_file_id) if match.library_file_id else None
+            if file is not None and match.work_id != file.work_id:
+                found.add(MatchOffFileWork(file.id, match.work_id, file.work_id))
+        return sorted(found, key=lambda d: (str(d.library_file_id), d.match_work_id or ""))
 
     def create(self, match: Match) -> Match:
         self._data[match.id] = match

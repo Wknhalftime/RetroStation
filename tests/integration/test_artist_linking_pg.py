@@ -508,7 +508,8 @@ def test_the_changed_recheck_rewinds_the_songs_of_an_artist_linked_after_its_wat
         more_than = _song(conn, boston, "More Than a Feeling")
         _played(conn, playlist, more_than)
     monkeypatch.setattr(
-        "backend.tasks.artist_matching_tasks.artist_matching_task", lambda playlist_id: None
+        "backend.tasks.artist_matching_tasks.artist_matching_task",
+        lambda playlist_id, run_id=None: None,
     )
     try:
         from backend.tasks.matching_recheck_tasks import rematch_undecided_task

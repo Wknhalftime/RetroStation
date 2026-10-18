@@ -134,6 +134,20 @@ class TestListPlaylists:
         assert len(data) == 1
         assert data[0]["event_count"] == 1
 
+    def test_event_count_is_per_playlist_and_zero_when_empty(self, client, db_conn):
+        station = _insert_station(db_conn)
+        busy = _insert_playlist(db_conn, station=station, name="busy.csv")
+        _insert_playlist(db_conn, station=station, name="empty.csv")
+        artist = _insert_artist(db_conn)
+        identity = _insert_identity(db_conn, artist)
+        _insert_event(db_conn, busy, identity, datetime(2026, 1, 1, 8, tzinfo=UTC))
+        _insert_event(db_conn, busy, identity, datetime(2026, 1, 1, 9, tzinfo=UTC))
+
+        resp = client.get(f"/api/v1/playlists?station_id={station.id}")
+        assert resp.status_code == 200
+        counts = {p["name"]: p["event_count"] for p in resp.json()}
+        assert counts == {"busy.csv": 2, "empty.csv": 0}
+
     def test_requires_station_id(self, client):
         resp = client.get("/api/v1/playlists")
         assert resp.status_code == 422

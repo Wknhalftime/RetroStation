@@ -458,8 +458,23 @@ filler.on_track(
 main = fallback(id="main_or_filler", track_sensitive=false, [layers, filler])
 # The bell is silent and its metadata is dropped: it only has to be pulled every frame.
 s = add(id="main_and_bell", normalize=false, [main, source.drop.metadata(bell)])
-s = compress(threshold=-18., ratio=3., attack=20., release=300., s)
-s = limit(threshold=-1., s)
+# ---- processing, modelled on an Optimod preset ----
+# Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
+# compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
+# with a lookahead outputs nothing but silence in most runs.
+# AGC: slow gain riding toward -16 LUFS, gated at -40 like the Optimod
+s = normalize(
+  target=-16., lufs=true, up=6., down=1.2, gain_min=-10., gain_max=10., threshold=-40.,
+  track_sensitive=false, s
+)
+# EQ: a wide peak stands in for the +2 dB bass shelf; 2 oct = Q 0.67, 3.8 oct = Q 0.29
+s = filter.iir.eq.peak(frequency=100., gain=2., q=0.5, s)
+s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
+s = filter.iir.eq.peak(frequency=5209., gain=2., q=0.29, s)
+# Gentle compression; the long release keeps it from pumping on the beat
+s = compress(threshold=-14., ratio=2., attack=30., release=800., s)
+# Final limiter, in place of the Optimod's clipper
+s = compress(threshold=-1.5, ratio=20., attack=1., release=80., s)
 
 o =
   output.harbor(

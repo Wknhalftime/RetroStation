@@ -66,6 +66,20 @@ _UNMATCHABLE_STATUSES: list[str] = [
 _USER_UNMATCHED: str = ReasonCode.USER_UNMATCHED.value
 _LIBRARY_FILE_REMOVED: str = ReasonCode.LIBRARY_FILE_REMOVED.value
 
+
+def _sql_in_list(statuses: tuple[MatchStatus, ...]) -> str:
+    """Quoted, comma-joined enum values for a trusted SQL ``IN (...)`` list."""
+    return ", ".join(f"'{status.value}'" for status in statuses)
+
+
+# Interpolated into _QUEUE_BUCKET_CTE (trusted enum values, never user input).
+_MATCHED_ARTIST_STATUSES_SQL: str = _sql_in_list(
+    (MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED)
+)
+_REJECTED_SONG_STATUSES_SQL: str = _sql_in_list(
+    (MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED)
+)
+
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
 # bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
 # count all reference the same filtered set. Thresholds come from
@@ -73,14 +87,18 @@ _LIBRARY_FILE_REMOVED: str = ReasonCode.LIBRARY_FILE_REMOVED.value
 # module-level ints and enum values, never user input.
 _QUEUE_BUCKET_CTE = f"""
 artist_base AS (
-    -- Surface artists in two cases:
+    -- Surface artists in three cases:
     --   1) The artist itself is review-relevant (PENDING / NEEDS_REVIEW), or
     --   2) The artist is resolved (e.g. AUTO_MATCHED) but at least one child
     --      track_identity is review-relevant. Without (2), a curator has no
     --      way to reach a NEEDS_REVIEW child whose parent the matcher already
-    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45).
+    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45), or
+    --   3) The artist is matched and has a song the matcher or the curator
+    --      rejected -- nothing to review, so never likely: it stays reachable
+    --      behind 'Show N artists with no likely match' (spec 2026-10-13 R7,
+    --      AUD-R029).
     -- The identity_best CTE below independently filters identities to
-    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) still
+    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) or (3) still
     -- produces the correct triage bucket (its resolved siblings do not
     -- inflate the headline).
     -- The search predicate sits here (vs. the page query) so pagination,
@@ -97,7 +115,13 @@ artist_base AS (
             SELECT 1 FROM track_identities ti
             WHERE ti.broadcast_artist_id = ba.id
               AND ti.match_status = ANY(%s)
-        ))
+        )
+        OR (ba.match_status IN ({_MATCHED_ARTIST_STATUSES_SQL})
+            AND EXISTS (
+                SELECT 1 FROM track_identities ti
+                WHERE ti.broadcast_artist_id = ba.id
+                  AND ti.match_status IN ({_REJECTED_SONG_STATUSES_SQL})
+            )))
       AND (%s::text IS NULL OR ba.original_name ILIKE '%%' || %s || '%%' ESCAPE '!')
 ),
 identity_best AS (
@@ -129,13 +153,13 @@ artist_bucket AS (
                ELSE 'blocked'
            END AS bucket,
            -- Likely = worth a curator's time by default: a review item with a
-           -- guess at the presentation floor, or one whose match was taken away:
-           -- by the curator (unmatch) or by deleting its missing library file.
-           -- Both delete the match rows, so it has no score, and the artist must
-           -- not vanish from the default queue.
+           -- guess at the presentation floor, one released by deleting its missing
+           -- library file (no score, spec C2), or an artist the curator unmatched.
+           -- A song the curator rejected is manual_rejected and out of the main list
+           -- (its artist stays reachable behind the no-likely-match toggle, R7)
+           -- until a re-check (AUD-R029, spec 2026-10-13 R4).
            COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
-                            OR ib.reason_code IN ('{_USER_UNMATCHED}',
-                                                  '{_LIBRARY_FILE_REMOVED}')), FALSE)
+                            OR ib.reason_code = '{_LIBRARY_FILE_REMOVED}'), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
                AS likely
     FROM artist_base a
@@ -197,8 +221,8 @@ def _artist_bucket_from_identities(
 
     Only identities whose own ``match_status`` is still review-relevant
     (PENDING / NEEDS_REVIEW) contribute to the bucket — resolved children
-    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) represent work the curator has
-    already completed and must not inflate the headline. Within the
+    (AUTO_MATCHED, MANUAL_*, AUTO_REJECTED) are out of review — decided, or parked
+    until the next re-check — and must not inflate the headline. Within the
     review-relevant subset, the reduction surfaces the most actionable child:
     quick_review > needs_attention > blocked. If there are no review-relevant
     children, the artist is "blocked".
@@ -293,7 +317,9 @@ class MatchingQueue(BaseModel):
         default=0,
         description=(
             "Artists matching the search and bucket filters whose review "
-            "items have no guess at SONG_MIN_PRESENTATION_SCORE or above. Counted "
+            "items have no guess at SONG_MIN_PRESENTATION_SCORE or above, plus "
+            "matched artists whose only non-matched songs are rejected (spec "
+            "2026-10-13 R7, AUD-R029). Counted "
             "whether or not include_unlikely lets them into `items`, so the "
             "UI can say how many it is hiding."
         ),
@@ -875,8 +901,9 @@ async def resolve_identity(
                     exc_info=True,
                 )
     else:
-        # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song goes back to review
-        # with the file recorded, and the matcher skips it and its work from now on.
+        # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song is parked as
+        # manual_rejected with the file recorded, and the next matching run re-checks it
+        # without that file and its work (AUD-R029, spec 2026-10-13 R2, R6).
         try:
             await reject_song_suggestion(conn, identity_id, body.library_file_id)
         except IdentityNotFoundError as exc:
@@ -887,7 +914,7 @@ async def resolve_identity(
             ) from exc
         except SongNotRejectableError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
+        return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
     return ResolveResult(id=identity_id, match_status=new_status.value)
 
@@ -998,16 +1025,16 @@ async def unmatch_identity(
     conn: DbConn,
     _token: Token,
 ) -> ResolveResult:
-    """Revert a finalized identity match back to NEEDS_REVIEW.
+    """Take a matched song's match away and park it.
 
     Per-song unmatch — does not touch sibling identities or the parent
     artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
     A matched song's file(s) are recorded as rejected (AUD-R022, D5).
+    The song becomes manual_rejected until the next matching run (AUD-R029, spec 2026-10-13 R6).
 
     Raises:
         HTTPException: 404 if the identity does not exist.
-        HTTPException: 409 if the identity's current ``match_status`` is
-            not in :data:`backend.services.identity_resolution_service._UNMATCHABLE`.
+        HTTPException: 409 if the identity is not auto_matched or manual_matched.
     """
     try:
         await unmatch_song(conn, identity_id)
@@ -1015,7 +1042,7 @@ async def unmatch_identity(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SongNotRejectableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return ResolveResult(id=identity_id, match_status=MatchStatus.NEEDS_REVIEW.value)
+    return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1029,7 +1056,8 @@ async def run_matching(_token: Token) -> dict[str, bool]:
 
     The worker's ``rematch_undecided_task("all")`` rewinds undecided items to pending and hands
     every playlist with pending work to artist matching (AUD-R022 D1, spec 2026-10-05 §4.2).
-    Manual decisions and auto-matches are never touched (D2). Any request body is ignored.
+    Matches and rejected artists are never touched (D2); a song the curator rejected is
+    re-checked (AUD-R029, spec 2026-10-13 R1). Any request body is ignored.
 
     Raises:
         HTTPException: 503 if the task queue refuses the job.

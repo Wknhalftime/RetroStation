@@ -8,7 +8,6 @@ import {
   CircleCheck,
   CircleSlash,
   Clock,
-  X,
 } from "lucide-react";
 import { useResolveIdentity, useUnmatchIdentity } from "@/api/matcher";
 import { cn } from "@/lib/utils";
@@ -24,37 +23,22 @@ interface TitlePanelProps {
 // ---------------------------------------------------------------------------
 
 const REVIEW_STATUSES = new Set(["pending", "needs_review"]);
+const MATCHED_STATUSES = new Set(["auto_matched", "manual_matched"]);
 
-const RESOLVED_BUCKETS = {
-  auto_matched: 0,
-  manual_matched: 0,
-  rejected: 0,
-} as const;
-type ResolvedBuckets = { auto_matched: number; manual_matched: number; rejected: number };
-
-function partitionByReviewState(identities: QueueIdentity[]): {
-  review: QueueIdentity[];
-  resolved: QueueIdentity[];
-} {
-  const review: QueueIdentity[] = [];
-  const resolved: QueueIdentity[] = [];
-  for (const id of identities) {
-    if (REVIEW_STATUSES.has(id.match_status)) review.push(id);
-    else resolved.push(id);
-  }
-  return { review, resolved };
-}
+type ResolvedBuckets = { auto_matched: number; manual_matched: number };
 
 // A needs_review item whose best guess is below the 56% song floor is a row from
 // before the floor (the matcher now auto-rejects such songs, D6), or the song has
-// no score at all (orphan, missing match record, deferred). Items whose match was
-// taken away also land in "blocked" with no score, but they stay: curator-unmatched
-// ones are the curator's own work in progress, and ones released by deleting a
-// missing library file must return to review (spec C2). Mirrors `likely` in the
-// backend queue's _QUEUE_BUCKET_CTE.
-const KEPT_WITHOUT_SCORE = new Set(["USER_UNMATCHED", "LIBRARY_FILE_REMOVED"]);
+// no score at all (orphan, missing match record, deferred). Songs released by deleting
+// a missing library file have no score either but must return to review (spec C2).
+// Mirrors `likely` in the backend queue's _QUEUE_BUCKET_CTE.
+const KEPT_WITHOUT_SCORE = new Set(["LIBRARY_FILE_REMOVED"]);
 
+// Out of review: the matcher found nothing worth showing (auto_rejected), the curator
+// rejected the match and the song waits for the next run (manual_rejected, spec
+// 2026-10-13 R2), or a needs_review song has no usable guess.
 function isUnlikely(identity: QueueIdentity): boolean {
+  if (!REVIEW_STATUSES.has(identity.match_status)) return true;
   return (
     identity.match_status === "needs_review" &&
     identity.triage_bucket === "blocked" &&
@@ -62,17 +46,21 @@ function isUnlikely(identity: QueueIdentity): boolean {
   );
 }
 
-function partitionByLikelihood(identities: QueueIdentity[]): {
-  likely: QueueIdentity[];
+// Each song lands in exactly one section; Resolved holds matched songs only (R5).
+function partitionBySection(identities: QueueIdentity[]): {
+  review: QueueIdentity[];
   unlikely: QueueIdentity[];
+  resolved: QueueIdentity[];
 } {
-  const likely: QueueIdentity[] = [];
+  const review: QueueIdentity[] = [];
   const unlikely: QueueIdentity[] = [];
+  const resolved: QueueIdentity[] = [];
   for (const id of identities) {
-    if (isUnlikely(id)) unlikely.push(id);
-    else likely.push(id);
+    if (MATCHED_STATUSES.has(id.match_status)) resolved.push(id);
+    else if (isUnlikely(id)) unlikely.push(id);
+    else review.push(id);
   }
-  return { likely, unlikely };
+  return { review, unlikely, resolved };
 }
 
 const BUCKET_PRIORITY: Record<TriageBucket, number> = {
@@ -98,13 +86,10 @@ function sortReviewIdentities(items: QueueIdentity[]): QueueIdentity[] {
 }
 
 function summariseResolved(items: QueueIdentity[]): ResolvedBuckets {
-  const out: ResolvedBuckets = { ...RESOLVED_BUCKETS };
+  const out: ResolvedBuckets = { auto_matched: 0, manual_matched: 0 };
   for (const id of items) {
     if (id.match_status === "auto_matched") out.auto_matched += 1;
     else if (id.match_status === "manual_matched") out.manual_matched += 1;
-    else if (id.match_status === "auto_rejected" || id.match_status === "manual_rejected") {
-      out.rejected += 1;
-    }
   }
   return out;
 }
@@ -169,6 +154,15 @@ function reviewChipFor(identity: QueueIdentity): ReviewChip {
       label: "Queued for matching",
     };
   }
+  if (identity.match_status === "manual_rejected") {
+    return {
+      border: "border-l-gray-400",
+      chipBg: "bg-gray-100",
+      chipText: "text-gray-600",
+      Icon: CircleSlash,
+      label: "Rejected by you · waiting for re-match",
+    };
+  }
   switch (identity.triage_bucket) {
     case "quick_review":
       return {
@@ -226,9 +220,11 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
   // so the queue's broadened CTE (which now surfaces auto_matched parents
   // with review-needing children) doesn't strand the curator on the
   // "Resolve the artist first" placeholder. Excludes auto_rejected /
-  // manual_rejected: rejected parents have all non-protected children
-  // cascaded to AUTO_REJECTED by resolve_artist, so a rejected parent with
-  // pending/needs_review children is unreachable in steady state.
+  // manual_rejected: resolve_artist cascades a rejection to the children, but
+  // the song re-check rewinds undecided children (needs_review, auto_rejected
+  // and manual_rejected) to pending whatever their artist's status, so a
+  // rejected parent can show pending/needs_review children after a re-check.
+  // They stay behind "Resolve the artist first" until the artist is resolved.
   const artistResolved =
     artist !== null &&
     (artist.match_status === "auto_matched" || artist.match_status === "manual_matched");
@@ -251,12 +247,13 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
 
   const identities: QueueIdentity[] = artist.identities ?? [];
   const isPending = resolveIdentity.isPending || unmatchIdentity.isPending;
-  const { review: reviewIdentities, resolved: resolvedIdentities } =
-    partitionByReviewState(identities);
-  const { likely: likelyReview, unlikely: unlikelyReview } =
-    partitionByLikelihood(reviewIdentities);
-  const sortedReview = sortReviewIdentities(likelyReview);
-  const sortedUnlikely = sortReviewIdentities(unlikelyReview);
+  const {
+    review: reviewIdentities,
+    unlikely: unlikelyIdentities,
+    resolved: resolvedIdentities,
+  } = partitionBySection(identities);
+  const sortedReview = sortReviewIdentities(reviewIdentities);
+  const sortedUnlikely = sortReviewIdentities(unlikelyIdentities);
   const resolvedSummary = summariseResolved(resolvedIdentities);
 
   function handleApprove(identity: QueueIdentity) {
@@ -330,7 +327,6 @@ export function TitlePanel({ artist, onFileSearch }: TitlePanelProps) {
             isPending={isPending}
             onReject={handleReject}
             onUnmatch={handleUnmatch}
-            onFileSearch={onFileSearch}
           />
         )}
       </div>
@@ -414,6 +410,9 @@ interface ReviewCardProps {
   onFileSearch: (identityId: string) => void;
 }
 
+// The chip says these in words; printing the raw code would only repeat it.
+const CODES_SAID_BY_CHIP = new Set(["USER_UNMATCHED"]);
+
 function ReviewCard({ identity, isPending, onApprove, onReject, onFileSearch }: ReviewCardProps) {
   const chip = reviewChipFor(identity);
   const Icon = chip.Icon;
@@ -431,7 +430,12 @@ function ReviewCard({ identity, isPending, onApprove, onReject, onFileSearch }: 
   if (identity.confidence_score != null) {
     tierScoreSegments.push(`Score: ${identity.confidence_score.toFixed(0)}%`);
   }
-  const reasonText = identity.reason_detail || identity.reason_code;
+  const reasonText =
+    identity.reason_detail ||
+    (CODES_SAID_BY_CHIP.has(identity.reason_code ?? "") ? null : identity.reason_code);
+  // Reject applies to a song in review; an out-of-review song's old suggestion is not
+  // rejectable (the API answers 409).
+  const canReject = identity.proposed_match != null && REVIEW_STATUSES.has(identity.match_status);
 
   return (
     <div
@@ -499,7 +503,7 @@ function ReviewCard({ identity, isPending, onApprove, onReject, onFileSearch }: 
         >
           Find File
         </button>
-        {identity.proposed_match && (
+        {canReject && (
           <button
             onClick={() => onReject(identity)}
             disabled={isPending}
@@ -601,7 +605,6 @@ interface ResolvedSectionProps {
   isPending: boolean;
   onReject: (id: QueueIdentity) => void;
   onUnmatch: (id: QueueIdentity) => void;
-  onFileSearch: (identityId: string) => void;
 }
 
 function ResolvedSection({
@@ -612,13 +615,11 @@ function ResolvedSection({
   isPending,
   onReject,
   onUnmatch,
-  onFileSearch,
 }: ResolvedSectionProps) {
   // Build a muted breakdown shown in the header even when collapsed.
   const breakdownParts: string[] = [];
   if (summary.auto_matched) breakdownParts.push(`${summary.auto_matched} auto`);
   if (summary.manual_matched) breakdownParts.push(`${summary.manual_matched} manual`);
-  if (summary.rejected) breakdownParts.push(`${summary.rejected} rejected`);
   const breakdown = breakdownParts.join(" · ");
 
   const panelId = "resolved-section-panel";
@@ -666,7 +667,6 @@ function ResolvedSection({
               isPending={isPending}
               onReject={onReject}
               onUnmatch={onUnmatch}
-              onFileSearch={onFileSearch}
             />
           ))}
         </div>
@@ -680,71 +680,29 @@ interface ResolvedRowProps {
   isPending: boolean;
   onReject: (id: QueueIdentity) => void;
   onUnmatch: (id: QueueIdentity) => void;
-  onFileSearch: (identityId: string) => void;
 }
 
-function ResolvedRow({ identity, isPending, onReject, onUnmatch, onFileSearch }: ResolvedRowProps) {
-  const isMatched =
-    identity.match_status === "auto_matched" || identity.match_status === "manual_matched";
-  const isRejected =
-    identity.match_status === "auto_rejected" || identity.match_status === "manual_rejected";
-
-  let LeadingIcon: typeof Circle = Circle;
-  let leadingClass = "text-gray-400";
-  let label = identity.match_status;
-  if (identity.match_status === "auto_matched") {
-    LeadingIcon = Circle;
-    leadingClass = "text-emerald-500 fill-emerald-500";
-    label = "auto";
-  } else if (identity.match_status === "manual_matched") {
-    LeadingIcon = CheckCircle2;
-    leadingClass = "text-emerald-600";
-    label = "manual";
-  } else if (identity.match_status === "auto_rejected") {
-    LeadingIcon = CircleSlash;
-    leadingClass = "text-gray-400";
-    label = "auto-rejected";
-  } else if (identity.match_status === "manual_rejected") {
-    LeadingIcon = X;
-    leadingClass = "text-gray-400";
-    label = "rejected";
-  }
+function ResolvedRow({ identity, isPending, onReject, onUnmatch }: ResolvedRowProps) {
+  const isManual = identity.match_status === "manual_matched";
+  const LeadingIcon = isManual ? CheckCircle2 : Circle;
+  const leadingClass = isManual ? "text-emerald-600" : "text-emerald-500 fill-emerald-500";
 
   return (
     <div className="group flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 focus-within:bg-gray-50">
       <LeadingIcon className={cn("h-3.5 w-3.5 shrink-0", leadingClass)} aria-hidden="true" />
       <span className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
-        {label}
+        {isManual ? "manual" : "auto"}
       </span>
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-gray-700",
-          isRejected && "text-gray-400 line-through"
-        )}
-      >
-        {identity.original_title}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-gray-700">{identity.original_title}</span>
       <span className="ml-auto flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-        {isMatched && (
-          <button
-            onClick={() => onReject(identity)}
-            disabled={isPending}
-            className="rounded border border-red-200 px-2 py-0.5 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-            aria-label={`Reject ${identity.original_title}`}
-          >
-            Reject
-          </button>
-        )}
-        {isRejected && (
-          <button
-            onClick={() => onFileSearch(identity.id)}
-            disabled={isPending}
-            className="rounded bg-blue-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            aria-label={`Find file for ${identity.original_title}`}
-          >
-            Find File
-          </button>
-        )}
+        <button
+          onClick={() => onReject(identity)}
+          disabled={isPending}
+          className="rounded border border-red-200 px-2 py-0.5 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          aria-label={`Reject ${identity.original_title}`}
+        >
+          Reject
+        </button>
         <button
           onClick={() => onUnmatch(identity)}
           disabled={isPending}

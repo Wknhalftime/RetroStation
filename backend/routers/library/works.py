@@ -185,6 +185,20 @@ async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> 
     )
     file_rows = await files_cur.fetchall()
     if not file_rows:
+        # As master_selection_service._decide_master: with no present file to
+        # pick, a master on one of the work's own files stays (it may come
+        # back); one on a file of another work is removed.
+        await conn.execute(
+            """
+            DELETE FROM song_masters sm
+            WHERE sm.work_id = %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM library_files lf
+                  WHERE lf.id = sm.preferred_file_id AND lf.work_id = sm.work_id
+              )
+            """,
+            (work_id,),
+        )
         return
 
     best = max(file_rows, key=score_file_row)

@@ -2,7 +2,7 @@
 
 **Status: 2026-10-17.** Checked against master ac3e190 plus D111 (feat/silent-files)
 (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R028 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+(AUD-R015..R030 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -47,10 +47,24 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - import-linter carries 7 baseline ignores.
 - New code should not add to any of these.
 
+## Derived counts kept by triggers
+
+- `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
+  station, identity). Triggers on `play_events` (insert / delete / update / truncate) and on
+  `playlists` (delete, station change) keep it equal, so no service writes it and no task
+  reconciles it. The station missing-matches report reads it instead of scanning every play.
+- It is not a work list: no task reads it, so it is not in the status-column table below.
+- The check is `tests/integration/test_station_identity_plays_pg.py`, which compares it with
+  the count after every kind of write. This is the only trigger-maintained table; a second one
+  copies this one's shape (statement-level triggers with transition tables).
+
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
   a scope word, or nothing). Event graph 2026-10-09: 17 commands, 0 events, 0 queries, no cycles.
+  One exception (AUD-R030): a matching stage of a re-check's run also carries the run's id
+  (`artist_matching_task(playlist_id, run_id)` → `identity_matching_task(playlist_id, run_id)`),
+  so it can report to the run's progress row. The id is optional: an upload's matching has none.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
@@ -67,7 +81,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration 0039 deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports (S7); the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
-| `progress_tracking` | every task envelope | `/ws` poll (0.5 s), hash-backfill liveness |
+| the matching run's `progress_tracking` row (`matching`, `stages_left` / `stages_failed`, AUD-R030) | the re-check opens it; each matching stage refreshes it and finishes its stage; the last stage closes it | the matching stages, `/ws` |
+| `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark) |
 
 - **Flows:**
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
@@ -82,25 +97,34 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
     → (as above)
   - Re-run Matching (`POST /matching/run`, 202 `{"queued": true}`) →
     `rematch_undecided_task("all")` → `artist_matching_task` per playlist with pending work →
-    `identity_matching_task`
+    `identity_matching_task`. Every re-check with playlists to queue is one matching run: its
+    stages carry the run id and report to one `matching` progress row (AUD-R030)
   - streaming no-cue report → `stream_cue_request_task`
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.
 - **Periodic tasks reconcile** what a lost command leaves behind: hash-backfill resume and
-  cue-analysis resume (every 5 min each), cue prune. Matching has no periodic reconcile: work a
+  cue-analysis resume (every 5 min each), cue prune, progress prune (daily). Matching has no periodic reconcile: work a
   lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
   button), and so does a song a MusicBrainz outage deferred (MB_UNAVAILABLE), which every
   re-check rewinds (AUD-R028).
+- **Every re-check's rewind** takes undecided artists (`needs_review`, `auto_rejected`) and
+  undecided songs (those two plus `manual_rejected`): a song the curator rejected waits for
+  the next run, then is re-scored without its rejected files. A manually rejected artist is
+  never rewound (AUD-R029).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
-  a duplicated re-check repeats its rewind and fan-out, and decided items are never touched.
+  a duplicated re-check repeats its rewind and fan-out, and matches and rejected artists are
+  never touched.
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, the local-artist linking and the matching re-check, `task_failure_telemetry`,
-  the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016).
+  the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016). A matching
+  run's row spans many tasks (AUD-R030): `tasks/_matching_run` opens it from the re-check
+  (`run_fan_out`) and reports each stage to it (`matching_stage`); the matching services only
+  tick a `MatchingProgress` observer. Its writes are telemetry and never stop matching.
 
 ## What is enforced in CI (`.github/workflows/ci.yml`)
 

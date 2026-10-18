@@ -22,6 +22,7 @@ import sqlite3
 import subprocess
 import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,13 +48,17 @@ from tests.fakes.artist_linking import FakeArtistLinkingRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.matching_run import FakeMatchingRunRepository
+from tests.fakes.pending_match_work import FakePendingMatchWork
 from tests.fakes.system_logs import FakeSystemLogRepository
 from tests.fakes.task_progress import FakeTaskProgressRepository
 
 REPO = Path(__file__).resolve().parents[2]
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
-DECIDED = [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED]
+# Never rewound: matches, and an artist the curator rejected (below). A song the curator
+# rejected is re-checked on every run (spec 2026-10-13 R1).
+DECIDED = [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED]
 
 
 class _WaveFiles(FakeLibraryFileRepository):
@@ -81,6 +86,8 @@ class _Rig:
         self.files = _WaveFiles()
         self.artists = FakeBroadcastArtistRepository()
         self.songs = FakeBroadcastTrackIdentityRepository()
+        self.runs = FakeMatchingRunRepository()
+        self.pending = FakePendingMatchWork(0)
         self.queued: list[str] = []
         self.refuse: set[str] = set()
         self.order: list[str] = []
@@ -106,11 +113,16 @@ class _Rig:
             artist_linking=FakeArtistLinkingRepository(),  # D15: no artist linked, no name
         )
 
-    def enqueue(self, playlist_id: str) -> None:
+    def enqueue(self, playlist_id: str, run_id: str | None = None) -> None:
         self.order.append("enqueue")
         if playlist_id in self.refuse:
             raise sqlite3.OperationalError("database is locked")
         self.queued.append(playlist_id)
+
+    @contextmanager
+    def run_ports(self, _database_url: str) -> Iterator[SimpleNamespace]:
+        # The matching run's row (spec 2026-10-17): fakes, so no test reaches a database.
+        yield SimpleNamespace(runs=self.runs, pending=self.pending, clock=lambda: 0.0)
 
     # Seeding --------------------------------------------------------------------------------
 
@@ -219,6 +231,11 @@ def rig() -> Iterator[_Rig]:
             create=True,
         ),
         patch("backend.tasks.artist_matching_tasks.artist_matching_task", side_effect=r.enqueue),
+        patch("backend.tasks._matching_run.run_ports", side_effect=r.run_ports),
+        patch(
+            "backend.tasks._matching_run.connect_sync",
+            side_effect=AssertionError("a unit test reached a database"),
+        ),
     ):
         yield r
 
@@ -314,6 +331,18 @@ def test_decided_artists_and_songs_are_never_rewound(rig: _Rig, status: MatchSta
     assert rig.stored_song(song).match_status == status
     assert rig.stored_song(song).reason_code == ReasonCode.LOW_CONFIDENCE
     assert (result["artists_rewound"], result["songs_rewound"]) == (0, 0)
+
+
+def test_a_rejected_song_is_rewound_but_a_rejected_artist_is_not(rig: _Rig) -> None:
+    artist = rig.artist("abba", MatchStatus.MANUAL_REJECTED)
+    song = rig.song(artist, MatchStatus.MANUAL_REJECTED)
+
+    result = _run("all")
+
+    assert rig.stored_artist(artist).match_status == MatchStatus.MANUAL_REJECTED
+    assert rig.stored_song(song).match_status == MatchStatus.PENDING
+    assert rig.stored_song(song).reason_code is None
+    assert (result["artists_rewound"], result["songs_rewound"]) == (0, 1)
 
 
 def test_songs_follow_an_artist_in_the_wave_whatever_its_status(rig: _Rig) -> None:
