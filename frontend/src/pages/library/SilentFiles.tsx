@@ -12,7 +12,7 @@ const REASON_TEXT: Record<SilenceReason, (file: SilentFile) => string> = {
   silent: () => "Silent: no audio (skipped on air)",
   low_bitrate: (file) => `Low bitrate: ${file.bitrate_kbps ?? "?"} kb/s`,
   short_cued_span: (file) =>
-    `Audible ${formatDuration(file.cued_span_ms)} of ${formatDuration(file.duration_ms)}`,
+    `Audible ${file.cued_span_ms === 0 ? "0:00" : formatDuration(file.cued_span_ms)} of ${formatDuration(file.duration_ms)}`,
 };
 
 function Row({ file }: { file: SilentFile }) {

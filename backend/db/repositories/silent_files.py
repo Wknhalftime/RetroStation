@@ -7,9 +7,8 @@ through as a 500, which is acceptable for a page opened by hand.
 
 from __future__ import annotations
 
-from typing import Any
-
 import psycopg
+from psycopg.rows import DictRow
 
 from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.streaming import (
@@ -45,7 +44,7 @@ SELECT f.id, f.file_path, f.artist_name, f.track_title, f.release_title,
 """
 
 
-def _entry(r: dict[str, Any]) -> SilentFileEntry:
+def _entry(r: DictRow) -> SilentFileEntry:
     return SilentFileEntry(
         file_id=r["id"],
         path=r["file_path"],
@@ -63,7 +62,7 @@ def _entry(r: dict[str, Any]) -> SilentFileEntry:
 class PgSilentFileReportRepository(SilentFileReportRepository):
     """PostgreSQL implementation of :class:`SilentFileReportRepository`."""
 
-    def __init__(self, conn: psycopg.Connection[Any]) -> None:
+    def __init__(self, conn: psycopg.Connection[DictRow]) -> None:
         self._conn = conn
 
     def candidates(self) -> tuple[SilentFileEntry, ...]:
