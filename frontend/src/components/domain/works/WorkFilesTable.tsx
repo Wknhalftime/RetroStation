@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Crown } from "lucide-react";
 import { cn, formatDuration } from "@/lib/utils";
 import type { RecordingDetail } from "@/lib/schemas/works";
@@ -16,6 +17,11 @@ interface WorkFilesTableProps {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const CUES_LINK = cn(
+  "shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600",
+  "hover:border-indigo-300 hover:text-indigo-600"
+);
 
 function basename(filePath: string): string {
   return filePath.split(/[/\\]/).pop() ?? filePath;
@@ -121,6 +127,17 @@ export function WorkFilesTable({
                   >
                     Missing
                   </span>
+                )}
+
+                {/* The cue editor, for a file that is on disk */}
+                {!isMissing && (
+                  <Link
+                    to={`/library/files/${file.id}/cues`}
+                    className={CUES_LINK}
+                    title="Edit where the radio starts, fades and stops this file"
+                  >
+                    Cues
+                  </Link>
                 )}
 
                 {/* Metadata chips */}
