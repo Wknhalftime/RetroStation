@@ -12,7 +12,8 @@ rejected result line fails only its file); D77a and D89 (the run's progress row)
 The pipeline, one function per step:
 
 1. purge the other analyser versions, and commit;
-2. the priority set, read once and batched in memory; then the library, keyset by path;
+2. the priority set (station liners, then today's songs), read once and batched in memory;
+   then the library, keyset by path;
 3. per batch: drop what this run has seen, check the stat, analyse, check the stat again,
    record, commit;
 4. stop when both sources are exhausted, or after a batch once the time budget is spent;
@@ -59,6 +60,9 @@ from backend.services.streaming.cue_record import Autocued, CueRecord, record_an
 
 logger = structlog.get_logger()
 
+type LinerCueWork = Callable[[], list[CueCandidate]]
+"""LR4: the station liners that need analysis, keyed by liner id, each ``path`` absolute."""
+
 type Analyse = Callable[[Sequence[CueFile]], BatchAnalysis]
 """playout's ``analyse_batch`` with its environment and configuration bound (D67: each file
 goes with its duration)."""
@@ -85,6 +89,7 @@ class CueRunPorts:
     commit: Callable[[], None]
     analyse: Analyse
     progress: CueRunProgress = field(default_factory=SilentProgress)
+    liners: LinerCueWork | None = None  # LR4: station liners, first in the priority set
 
 
 @dataclass(frozen=True)
@@ -168,9 +173,12 @@ def _purge_other_versions(ports: CueRunPorts) -> None:
     ports.commit()
 
 
-def _priority_set(work: CueWorkRepository, today: date) -> list[CueCandidate]:
-    """D62: the files playing today and tomorrow at every station, in every logged year."""
-    return work.scheduled(tune_in_days(today, work.logged_years()))
+def _priority_set(ports: CueRunPorts, today: date) -> list[CueCandidate]:
+    """LR4: the station liners needing analysis, then (D62) the files playing today and
+    tomorrow at every station, in every logged year."""
+    work = ports.work
+    liners = [] if ports.liners is None else ports.liners()
+    return liners + work.scheduled(tune_in_days(today, work.logged_years()))
 
 
 def _unseen(batch: Sequence[CueCandidate], run: _Run) -> list[CueCandidate]:
@@ -330,7 +338,7 @@ def run_cue_analysis(ports: CueRunPorts, config: CueRunConfig) -> None:
     """
     started = config.steady()
     _purge_other_versions(ports)
-    run = _Run(_Backlog(ports.work, _priority_set(ports.work, config.today), config.batch_size))
+    run = _Run(_Backlog(ports.work, _priority_set(ports, config.today), config.batch_size))
     ended_normally = False
     try:
         paused = _run_batches(ports, config, run, started)

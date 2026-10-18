@@ -31,7 +31,8 @@ class StreamCueRepository(ABC):
     @abstractmethod
     def store_if_current(self, analysis: CueAnalysis, file_id: UUID) -> bool:
         """Store ``analysis`` as its audio's cues only while ``file_id`` still carries
-        ``analysis.audio_hash``; True if stored."""
+        ``analysis.audio_hash``; True if stored. ``file_id`` is a library file's id or, for
+        a station liner (LR4), the liner's."""
         ...
 
     @abstractmethod
@@ -43,9 +44,10 @@ class StreamCueRepository(ABC):
     def prune_orphans(self, now: datetime, grace: timedelta) -> None:
         """The daily two-strike prune (D56), in order:
 
-        1. clear the marks of audio a library file (any status) carries again;
+        1. clear the marks of audio a library file (any status) or a station liner (LR4)
+           carries again;
         2. delete rows marked at or before ``now - grace``;
-        3. mark every other row whose audio no library file carries, with ``now``,
+        3. mark every other row whose audio no library file or liner carries, with ``now``,
            keeping earlier marks.
 
         ``now`` must be timezone-aware; a naive value is read in the session's TimeZone.
