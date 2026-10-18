@@ -27,6 +27,12 @@ function basename(filePath: string): string {
   return filePath.split(/[/\\]/).pop() ?? filePath;
 }
 
+function crownLabel(isMaster: boolean, fromOtherWork: boolean): string {
+  if (isMaster) return "Current master file";
+  if (fromOtherWork) return "Move into this song and set as master file";
+  return "Set as master file";
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -65,6 +71,7 @@ export function WorkFilesTable({
           {recording.files.map((file, fileIdx) => {
             const isMaster = file.id === masterFileId;
             const isMissing = file.file_status !== "present";
+            const otherWork = file.other_work ?? null;
             return (
               <div
                 key={file.id}
@@ -82,7 +89,12 @@ export function WorkFilesTable({
                   <button
                     type="button"
                     onClick={() => onSetMaster(file.id)}
-                    aria-label={isMaster ? "Current master file" : "Set as master file"}
+                    aria-label={crownLabel(isMaster, otherWork !== null)}
+                    title={
+                      otherWork && !isMaster
+                        ? "Moves this file into this song, then makes it the master"
+                        : undefined
+                    }
                     className={cn(
                       "shrink-0 rounded p-0.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
                       isMaster
@@ -116,6 +128,15 @@ export function WorkFilesTable({
                       data-testid="file-album"
                     >
                       {file.release_title}
+                    </div>
+                  )}
+                  {otherWork && (
+                    <div
+                      className="truncate text-xs text-indigo-500"
+                      title="This file shares a recording with this song but sits on another"
+                      data-testid="file-other-work"
+                    >
+                      on {otherWork.artist_name} › {otherWork.title}
                     </div>
                   )}
                 </div>

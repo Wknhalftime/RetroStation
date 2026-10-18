@@ -814,6 +814,78 @@ class TestSetMaster:
         assert row is None
 
 
+def _seed_shared_recording(conn: psycopg.Connection) -> tuple[LibraryFile, LibraryFile]:
+    """Stone Sour › Bother, and a one-file Corey Taylor › Bother sharing its recording.
+
+    Returns (the Stone Sour promo file, the album file on the Corey Taylor work).
+    """
+    artists, works = PgArtistRepository(conn), PgWorkRepository(conn)
+    files = PgLibraryFileRepository(conn)
+    artists.upsert(_make_artist("a-ss", name="Stone Sour"))
+    artists.upsert(_make_artist("a-ct", name="Corey Taylor"))
+    works.upsert(_make_work("w-ss", "Bother", artist_id="a-ss"))
+    works.upsert(_make_work("w-ct", "Bother", artist_id="a-ct"))
+    PgRecordingRepository(conn).upsert(_make_recording("r-shared", "Bother"))
+    promo = files.upsert(_make_file("/m/promo.flac", recording_id="r-shared", work_id="w-ss"))
+    album = files.upsert(_make_file("/m/album.flac", recording_id="r-shared", work_id="w-ct"))
+    conn.commit()
+    return promo, album
+
+
+class TestFileShownFromAnotherWork:
+    """A work's page shows files by recording, so also files of another work sharing one."""
+
+    def test_detail_labels_the_file_with_the_work_it_is_on(self, client, db_conn) -> None:
+        promo, album = _seed_shared_recording(db_conn)
+
+        resp = client.get("/api/v1/library/works/w-ss")
+
+        assert resp.status_code == 200
+        files = {f["id"]: f for r in resp.json()["recordings"] for f in r["files"]}
+        assert files[str(promo.id)]["other_work"] is None
+        assert files[str(album.id)]["other_work"] == {
+            "id": "w-ct",
+            "title": "Bother",
+            "artist_name": "Corey Taylor",
+        }
+
+    def test_crowning_it_moves_it_onto_the_work_as_manual_master(self, client, db_conn) -> None:
+        _, album = _seed_shared_recording(db_conn)
+
+        resp = client.put(
+            "/api/v1/library/works/w-ss/master",
+            json={"preferred_file_id": str(album.id)},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["work_id"] == "w-ss"
+        assert data["preferred_file_id"] == str(album.id)
+        assert data["selection_method"] == "manual"
+        row = db_conn.execute(
+            "SELECT work_id, recording_id FROM library_files WHERE id = %s", (album.id,)
+        ).fetchone()
+        assert row == {"work_id": "w-ss", "recording_id": "r-shared"}
+        # The Corey Taylor work had nothing else on it.
+        assert db_conn.execute("SELECT 1 FROM works WHERE id = 'w-ct'").fetchone() is None
+
+    def test_after_the_move_the_page_shows_it_as_master_with_no_label(
+        self, client, db_conn
+    ) -> None:
+        _, album = _seed_shared_recording(db_conn)
+        client.put(
+            "/api/v1/library/works/w-ss/master",
+            json={"preferred_file_id": str(album.id)},
+        )
+
+        detail = client.get("/api/v1/library/works/w-ss").json()
+
+        assert detail["song_master"]["preferred_file_id"] == str(album.id)
+        assert detail["song_master"]["selection_method"] == "manual"
+        files = {f["id"]: f for r in detail["recordings"] for f in r["files"]}
+        assert files[str(album.id)]["other_work"] is None
+
+
 # ---------------------------------------------------------------------------
 # Tests — FormatOverrides
 # ---------------------------------------------------------------------------
