@@ -55,13 +55,15 @@ def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                 PgMusicBrainzCacheRepository(conn),
                 ttl_days=settings.mb_cache_ttl_days,
             ) as mb_client:
+                library_files = PgLibraryFileRepository(conn)
                 repos = IdentityMatchingRepos(
                     track_identity_repo=PgBroadcastTrackIdentityRepository(conn),
                     broadcast_artist_repo=PgBroadcastArtistRepository(conn),
                     match_repo=PgMatchRepository(conn),
-                    library_file_repo=PgLibraryFileRepository(conn),
+                    library_file_repo=library_files,
                     rules_repo=PgMappingRuleRepository(conn),
                     catalog_repo=PgArtistRepository(conn),
+                    recording_search_reach=library_files,
                 )
                 work_ids = match_identities_for_playlist(
                     playlist_id=UUID(playlist_id),

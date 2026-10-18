@@ -13,6 +13,7 @@ from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, Re
 from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, LibraryStorageError
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.recording_search_reach import RecordingSearchReachRepository
 
 # Shared by `upsert` and `upsert_write_only`; they differ only in whether
 # the row is read back afterwards.
@@ -141,7 +142,9 @@ def _audio_hash_of(value: str | None) -> AudioHash | None:
 
 
 @translate_lost_connection(LibraryStorageError)
-class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepository):
+class PgLibraryFileRepository(
+    LibraryFileRepository, LibraryFileEnrichmentRepository, RecordingSearchReachRepository
+):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
 
@@ -276,6 +279,21 @@ class PgLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentReposi
             (recording_mbid,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def has_file_beyond_artist_mbid(self, normalized_artist_name: str, artist_mbid: str) -> bool:
+        # The negation of get_by_artist_mbid (Step A), NULL-safe: an untagged file counts.
+        row = self._conn.execute(
+            """SELECT EXISTS (
+                   SELECT 1 FROM library_files
+                   WHERE normalized_artist_name = %s
+                     AND file_status = 'present'
+                     AND recording_mbid IS NOT NULL
+                     AND artist_mbid IS DISTINCT FROM %s
+                     AND album_artist_mbid IS DISTINCT FROM %s
+               ) AS reach""",
+            (normalized_artist_name, artist_mbid, artist_mbid),
+        ).fetchone()
+        return bool(row["reach"]) if row else False
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         rows = self._conn.execute(
