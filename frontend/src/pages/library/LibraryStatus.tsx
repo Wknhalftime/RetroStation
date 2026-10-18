@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Database, AlertTriangle, FileX, Users } from "lucide-react";
+import { Database, AlertTriangle, FileX, Users, VolumeX } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useLibraryStatus } from "@/api/library";
@@ -48,6 +48,13 @@ export function LibraryStatus() {
             >
               <Users className="h-4 w-4" />
               Browse Artists
+            </Link>
+            <Link
+              to="/library/silent"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <VolumeX className="h-4 w-4" />
+              Silent Files
             </Link>
           </>
         }

@@ -3,7 +3,9 @@
 Spec: Cue pre-computation ("autocue.internal, lufs_target -18, amplify_behavior "keep"");
 Data (start_next_ms "counted back from cue_out"; gain_db "gain to reach -18 LUFS"). House
 rule: validate on load and name the field, so every predictable failure is checked before a
-CuePoints is built. D54 rules ``start_next_ms`` = ``liq_cross_end_duration``.
+CuePoints is built. D54 rules ``start_next_ms`` = ``liq_cross_end_duration``. D111: audio
+measured at the meter's floor is silent; that is read from the gain alone, before the cue points
+are built (the silent stub's cue points fail ``CuePoints``; S4b).
 """
 
 from __future__ import annotations
@@ -29,12 +31,35 @@ AUTOCUE_KEYS = (
 _SECONDS_KEYS = tuple(key for key in AUTOCUE_KEYS if key != "liq_amplify")
 _GAIN_PATTERN = re.compile(r"^-?\d+(\.\d+)? dB$")
 
+METER_FLOOR_LUFS = -70.0
+"""FFmpeg ebur128's absolute gate: the integrated loudness it reports when no block is loud
+enough to count, i.e. silence (D111)."""
+
+AUTOCUE_LUFS_TARGET = -18.0
+"""``settings.autocue.internal.lufs_target`` in ``backend/playout/autocue.liq`` (spec: Cue
+pre-computation). The settings file is the one copy the engine reads; a test fails if this and
+it disagree."""
+
+SILENT_GAIN_DB = AUTOCUE_LUFS_TARGET - METER_FLOOR_LUFS
+"""``liq_amplify`` (lufs_target - lufs) for audio measured at the floor: +52.0 dB at the -18
+LUFS target. At or above it, the audio is silent (D111). Computed, never a bare 52."""
+
+SILENT_REASON = "no audio (silent file)"
+"""D111: the reason a silent verdict is logged with."""
+
 
 @dataclass(frozen=True)
 class Unusable:
     """Autocue output that cannot become cue points; ``reason`` names the field."""
 
     reason: str
+
+
+@dataclass(frozen=True)
+class Silent:
+    """Autocue measured no audio: the integrated loudness is at the meter's floor (D111)."""
+
+    reason: str = SILENT_REASON
 
 
 def _seconds_to_ms(key: str, value: str) -> int | Unusable:
@@ -58,8 +83,13 @@ def _gain_db(value: str) -> float | Unusable:
     return gain
 
 
-def autocue_points(metadata: Mapping[str, str]) -> CuePoints | Unusable:
-    """The cue points autocue's output encodes, or why they cannot be used."""
+def autocue_points(metadata: Mapping[str, str]) -> CuePoints | Silent | Unusable:
+    """The cue points autocue's output encodes, silence (D111), or why they cannot be used.
+
+    Silence is read from the gain after it is parsed and before the cue points are built:
+    autocue's stub for a silent file fails ``CuePoints`` (start-next equal to the span), which
+    would hide the verdict. ``SILENT_GAIN_DB`` is read at call time.
+    """
     if not metadata:
         return Unusable("autocue returned no metadata")
     for key in AUTOCUE_KEYS:
@@ -74,6 +104,13 @@ def autocue_points(metadata: Mapping[str, str]) -> CuePoints | Unusable:
     gain = _gain_db(metadata["liq_amplify"])
     if isinstance(gain, Unusable):
         return gain
+    if gain >= SILENT_GAIN_DB:
+        return Silent()
+    return _cue_points(milliseconds, gain)
+
+
+def _cue_points(milliseconds: Mapping[str, int], gain: float) -> CuePoints | Unusable:
+    """The parsed values as ``CuePoints``, or the invariant they break, named."""
     try:
         return CuePoints(
             cue_in_ms=milliseconds["liq_cue_in"],

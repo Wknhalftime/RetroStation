@@ -42,9 +42,12 @@ class PlayFileResolution:
 
     ``file_id`` is the station-format override or the song master of the work, or ``None``
     when the play has neither (D22). ``file_status`` is that file's status as the view reports
-    it; the consumer decides what is playable (D21).
+    it; the consumer decides what is playable (D21). ``audio_silent`` is whether the final
+    file's audio was measured silent (D111), as streaming stores it on the audio's cue
+    row; false with no row. The M3U export leaves a silent play out (S7).
     """
 
     play_event_id: UUID
     file_id: UUID | None
     file_status: FileStatus | None
+    audio_silent: bool = False

@@ -10,7 +10,8 @@ from backend.domain.streaming import CueAnalysis
 from backend.repositories.stream_cues import StreamCueRepository
 
 _COLUMNS = """(audio_hash, cue_in_ms, cue_out_ms, fade_in_ms, fade_out_ms,
-     start_next_ms, loudness_lufs, gain_db, analyser_version, analysis_failed, analysed_at)"""
+     start_next_ms, loudness_lufs, gain_db, analyser_version, analysis_failed, audio_silent,
+     analysed_at)"""
 
 # Every upsert clears the orphan mark (D66): audio analysed again is in the library.
 _ON_CONFLICT = """
@@ -24,20 +25,21 @@ ON CONFLICT (audio_hash) DO UPDATE SET
     gain_db          = EXCLUDED.gain_db,
     analyser_version = EXCLUDED.analyser_version,
     analysis_failed  = EXCLUDED.analysis_failed,
+    audio_silent     = EXCLUDED.audio_silent,
     analysed_at      = EXCLUDED.analysed_at,
     orphaned_at      = NULL
 """
 
 _UPSERT_SQL = f"""
 INSERT INTO stream_cues {_COLUMNS}
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
 {_ON_CONFLICT}"""
 
 # Stored only while the file still carries the hash read before analysing
 # (spec: Data, "For PR D and PR E").
 _STORE_IF_CURRENT_SQL = f"""
 INSERT INTO stream_cues {_COLUMNS}
-SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
 WHERE EXISTS (SELECT 1 FROM library_files WHERE id = %s AND audio_hash = %s)
 {_ON_CONFLICT}"""
 
@@ -71,6 +73,7 @@ def _values(analysis: CueAnalysis) -> tuple[object, ...]:
         cues.gain_db,
         analysis.analyser_version,
         analysis.analysis_failed,
+        analysis.audio_silent,
     )
 
 
