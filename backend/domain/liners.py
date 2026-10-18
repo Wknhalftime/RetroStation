@@ -171,8 +171,8 @@ def liner_points(
     """The points a liner plays with, or None when its audio is silent (plan note 6).
 
     An edit gives the positions and the stored row the gain; with no edit the stored row
-    gives both. Either way the fade-out is zero. With neither, the whole file plays at the
-    no-cues gain.
+    gives both. Either way there is no fade-in and no fade-out. With neither, the whole
+    file plays at the no-cues gain.
     """
     if stored is not None and stored.audio_silent:
         return None
@@ -181,4 +181,4 @@ def liner_points(
         return markers.to_points(gain_db)
     if stored is None:
         return CuePoints(0, duration_ms, 0, 0, 0, NO_CUES_GAIN_DB)
-    return replace(stored.cues, fade_out_ms=0)
+    return replace(stored.cues, fade_in_ms=0, fade_out_ms=0)
