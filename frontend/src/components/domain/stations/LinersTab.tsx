@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { AlertCircle, Pencil, Play, Square, Trash2, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -407,7 +408,13 @@ export function LinersTab({ stationId }: { stationId: string }) {
                     <Badge variant={cue.variant}>{cue.label}</Badge>
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1">
+                      <Link
+                        to={`/stations/${stationId}/liners/${liner.id}/cues`}
+                        className="mr-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                      >
+                        Edit cues
+                      </Link>
                       <button
                         type="button"
                         aria-label="Preview"

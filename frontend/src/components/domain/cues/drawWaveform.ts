@@ -23,6 +23,8 @@ export interface PaneScene {
   labels: boolean;
   /** Close-up windows drawn as boxes; only on a pane whose view is the whole file. */
   boxes?: { start: View; end: View };
+  /** The markers to draw (default all four); a hidden Fade-out also draws no fade line. */
+  markerKeys?: readonly MarkerKey[];
 }
 
 export interface LabelRect {
@@ -69,7 +71,7 @@ function drawPeaks(g: CanvasRenderingContext2D, w: number, h: number, s: PaneSce
 
 function drawFadeLine(g: CanvasRenderingContext2D, w: number, h: number, s: PaneScene): void {
   const { fadeAt, stop } = s.markers;
-  if (stop <= fadeAt) return;
+  if (stop <= fadeAt || !(s.markerKeys ?? MARKER_ORDER).includes("fadeAt")) return;
   g.strokeStyle = MARKER_COLOR.fadeAt;
   g.setLineDash([4, 3]);
   g.lineWidth = 1.5;
@@ -132,7 +134,7 @@ function drawMarkers(g: CanvasRenderingContext2D, w: number, h: number, s: PaneS
   const placed: LabelRect[] = [];
   let row = 0;
   g.font = "bold 10px sans-serif";
-  for (const key of MARKER_ORDER) {
+  for (const key of s.markerKeys ?? MARKER_ORDER) {
     const x = xAt(s.markers[key], w, s.view);
     if (x < -2 || x > w + 2) continue;
     g.fillStyle = MARKER_COLOR[key];

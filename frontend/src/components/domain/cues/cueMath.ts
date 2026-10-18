@@ -45,6 +45,21 @@ export function placeMarker(m: Markers, key: MarkerKey, ms: number, durationMs: 
   return { ...m, [key]: placed };
 }
 
+/**
+ * Place a marker where Fade-out is pinned to Stop (a liner has no fade): only EOM holds Stop
+ * down, and Fade-out follows wherever Stop lands. Start, EOM and Stop keep R1's other limits.
+ */
+export function placeMarkerFadeAtStop(
+  m: Markers,
+  key: MarkerKey,
+  ms: number,
+  durationMs: number
+): Markers {
+  // With Fade-out at EOM for the placement, it limits nothing R1 does not already limit.
+  const placed = placeMarker({ ...m, fadeAt: m.eom }, key, ms, durationMs);
+  return { ...placed, fadeAt: placed.stop };
+}
+
 export function nudge(m: Markers, key: MarkerKey, deltaMs: number, durationMs: number): Markers {
   return placeMarker(m, key, m[key] + deltaMs, durationMs);
 }
@@ -102,11 +117,17 @@ export function xAt(ms: number, widthPx: number, v: View): number {
   return ((ms - v.from) / (v.to - v.from)) * widthPx;
 }
 
-/** The marker nearest the pointer within HIT_PX, or null. */
-export function markerAt(xPx: number, widthPx: number, v: View, m: Markers): MarkerKey | null {
+/** The marker nearest the pointer within HIT_PX, or null; only `keys` can be hit. */
+export function markerAt(
+  xPx: number,
+  widthPx: number,
+  v: View,
+  m: Markers,
+  keys: readonly MarkerKey[] = MARKER_KEYS
+): MarkerKey | null {
   let best: MarkerKey | null = null;
   let bestDistance = Infinity;
-  for (const key of MARKER_KEYS) {
+  for (const key of keys) {
     const distance = Math.abs(xAt(m[key], widthPx, v) - xPx);
     if (distance <= HIT_PX && distance < bestDistance) {
       best = key;
