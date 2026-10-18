@@ -18,9 +18,9 @@ STORED = CuePoints(
     gain_db=-6.2,
 )
 TOO_SHORT = CuePoints(
-    cue_in_ms=0, cue_out_ms=9_000, fade_in_ms=3_000, fade_out_ms=4_000, start_next_ms=0, gain_db=0.0
+    cue_in_ms=0, cue_out_ms=6_000, fade_in_ms=3_000, fade_out_ms=4_000, start_next_ms=0, gain_db=0.0
 )
-"""A span of 9 s, under D9's minimum of 3 + 4 + 3 = 10 s."""
+"""A span of 6 s, under D9's minimum of 4 + 3 = 7 s (D112: the fade-in never counts)."""
 TIMING = StreamTiming()
 
 

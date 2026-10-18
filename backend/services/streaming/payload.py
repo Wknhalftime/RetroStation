@@ -2,7 +2,8 @@
 
 Liquidsoap always needs a valid ``liq_cue_out`` greater than ``liq_cue_in``: a no-cues song
 plays to its end with no overlap and no gain change (D23), and the sign-off clip (D26) is
-sent whole the same way, with zero fades and no title (PG14), marked ``final``.
+sent whole the same way, with zero fades and no title (PG14), marked ``final``. Every item
+starts at full level: ``liq_fade_in`` is always zero, whatever fade-in is stored (D112).
 """
 
 from __future__ import annotations
@@ -67,14 +68,12 @@ def item_payload(seq: int, item: ScheduleItem, offset_ms: int, timing: StreamTim
     if cues is None:
         cue_in_ms = offset_ms
         cue_out_ms = file.duration_ms or 0
-        fade_in_ms = timing.default_fade_in_ms
         fade_out_ms = timing.default_fade_out_ms
         start_next_ms = NO_CUES_START_NEXT_MS
         gain_db = NO_CUES_GAIN_DB
     else:
         cue_in_ms = cues.cue_in_ms + offset_ms
         cue_out_ms = cues.cue_out_ms
-        fade_in_ms = cues.fade_in_ms
         fade_out_ms = cues.fade_out_ms
         start_next_ms = cues.start_next_ms
         gain_db = cues.gain_db
@@ -88,7 +87,7 @@ def item_payload(seq: int, item: ScheduleItem, offset_ms: int, timing: StreamTim
         "item_seq": str(seq),
         "liq_cue_in": _seconds(cue_in_ms),
         "liq_cue_out": _seconds(cue_out_ms),
-        "liq_fade_in": _seconds(fade_in_ms),
+        "liq_fade_in": _seconds(0),
         "liq_fade_out": _seconds(fade_out_ms),
         "sn_rem": _seconds(start_next_ms),
         "liq_amplify": f"{gain_db:.1f} dB",

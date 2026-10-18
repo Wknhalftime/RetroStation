@@ -124,13 +124,14 @@ def test_nothing_is_stored_when_the_hash_changed_during_the_analysis(rig: CueRig
 
 
 def test_a_reported_file_the_analyser_stalls_on_gets_a_fallback_row(rig: CueRig) -> None:
-    """D61 with D52's fallback row; logged at info because a row was stored."""
+    """D61 with D52's fallback row (no fade-in, D112); logged at info because a row was
+    stored."""
     reported = rig.add("hangs.flac")
     rig.analyser.stall_on = {reported.path}
     logs = report(rig, reported.file_id)
     row = rig.store.analyses[reported.audio_hash]
     assert row.analysis_failed
-    assert row.cues == CuePoints(0, 200_000, 3_000, 4_000, 0, FALLBACK_GAIN_DB)
+    assert row.cues == CuePoints(0, 200_000, 0, 4_000, 0, FALLBACK_GAIN_DB)
     assert done(logs) == [("info", "failed")]
 
 
