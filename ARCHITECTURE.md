@@ -1,8 +1,8 @@
 # RetroStation architecture (one page)
 
 **Status: 2026-10-17.** Checked against master 260a04e plus D111 (feat/silent-files); the
-"Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data
-(comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
+"Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
+feat/cue-editor-api, the editor API (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
 (AUD-R015..R030 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -69,6 +69,14 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   domain's `edited_cues` decides.
 - The checks are `tests/integration/test_stream_cue_edits_pg.py::test_purge_and_prune_leave_edits`
   and the reader tests in `tests/integration/test_playable_schedule_edits.py`.
+- The editor API (`routers/library/cues.py` -> `services/streaming/cue_editor.py`) is the only
+  writer of `stream_cue_edits`. Save refuses what the radio would skip by asking the domain's
+  own `PlayableFile.is_playable` (D9): there is no second copy of the rule, so radio = preview.
+  Change D9 or the reader and the editor follows.
+- `/waveform` runs ffmpeg inside the API process, in a request thread, with no cache
+  (`playout/peaks.py`, 200 peaks/s). `/audio` serves a library file by its id, never by a path.
+- Its checks are `tests/services/streaming/test_cue_editor.py`,
+  `tests/routers/test_cue_editor_routes.py` and `tests/playout/test_peaks.py`.
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
