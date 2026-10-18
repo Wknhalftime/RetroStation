@@ -100,10 +100,12 @@ from backend.services.streaming.payload import (
     ItemPayload,
     final_payload,
     landing_payload,
+    liner_payload,
 )
 from backend.services.streaming.sessions import (
     Assigned,
     Committed,
+    LinerSlot,
     StreamSession,
     memoised_day_loader,
     schedule_finished,
@@ -403,17 +405,21 @@ def _following(load_day: DayLoader, after: ItemRef, timing: StreamTiming) -> Ass
 # ---- pure helpers ---------------------------------------------------------------------------
 
 
-def _payload(seq: int, assigned: Assigned | FinalClip, timing: StreamTiming) -> ItemPayload:
+def _payload(
+    seq: int, assigned: Assigned | FinalClip | LinerSlot, timing: StreamTiming
+) -> ItemPayload:
     """The item's annotations; an item's cues are dropped when its tail is too short for
     them (D80; a later item starts at offset 0, so only a landing can be affected)."""
     if isinstance(assigned, FinalClip):
         return final_payload(seq, assigned)
+    if isinstance(assigned, LinerSlot):
+        return liner_payload(seq, assigned)
     return landing_payload(seq, assigned.item, assigned.offset_ms, timing)
 
 
-def _flagged(assigned: Assigned | FinalClip) -> dict[str, str | None]:
+def _flagged(assigned: Assigned | FinalClip | LinerSlot) -> dict[str, str | None]:
     """The fields a failed item is flagged with (D32): its play, file and path."""
-    if isinstance(assigned, FinalClip):
+    if isinstance(assigned, FinalClip | LinerSlot):
         return {"event_id": None, "file_id": None, "path": str(assigned.path)}
     file = assigned.item.file
     return {
@@ -433,7 +439,7 @@ def _playing_span(committed: Committed | None, timing: StreamTiming) -> PlayingS
     if committed is None:
         return None
     playing = committed.assigned
-    if isinstance(playing, FinalClip):
+    if isinstance(playing, FinalClip | LinerSlot):
         return PlayingSpan(committed.started_at, playing.span_ms)
     return PlayingSpan(committed.started_at, _sent_span_ms(playing, timing))
 
@@ -824,6 +830,8 @@ class StreamService:
         previous = session.assigned[call.seq - 1]
         if isinstance(previous, FinalClip):  # the end marker already follows the clip
             raise EndOfScheduleError(f"session {call.session_id}: the final clip was the last")
+        if isinstance(previous, LinerSlot):  # the schedule goes on after the song it followed
+            previous = previous.after
         timing = self._config.timing
         try:
             following = await asyncio.to_thread(_following, session.load_day, previous.ref, timing)
@@ -1011,7 +1019,7 @@ class StreamService:
             "stream_item_failed", session_id=call.session_id, seq=call.seq, **_flagged(assigned)
         )
 
-    def _reported(self, call: ItemCall, session: StreamSession) -> Assigned | FinalClip:
+    def _reported(self, call: ItemCall, session: StreamSession) -> Assigned | FinalClip | LinerSlot:
         assigned = session.assigned.get(call.seq)
         if assigned is None:
             raise UnknownItemError(f"session {call.session_id}: item {call.seq} was not sent")

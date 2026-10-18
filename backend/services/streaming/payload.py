@@ -12,6 +12,7 @@ import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backend.domain.streaming import (
     NO_CUES_GAIN_DB,
@@ -21,6 +22,9 @@ from backend.domain.streaming import (
 )
 from backend.playout.liquidsoap_process import long_path
 
+if TYPE_CHECKING:
+    from backend.services.streaming.sessions import LinerSlot
+
 __all__ = [
     "NO_CUES_GAIN_DB",
     "NO_CUES_START_NEXT_MS",
@@ -29,6 +33,7 @@ __all__ = [
     "final_payload",
     "item_payload",
     "landing_payload",
+    "liner_payload",
 ]
 
 NO_CUES_START_NEXT_MS = 0
@@ -131,3 +136,21 @@ def final_payload(seq: int, clip: FinalClip) -> ItemPayload:
         "final": "true",
     }
     return ItemPayload(path=long_path(clip.path), annotations=annotations)
+
+
+def liner_payload(seq: int, slot: LinerSlot) -> ItemPayload:
+    """A station liner's annotations: its own cues at autocue's gain, zero fades and no title,
+    the next item starting at the liner's EOM (LR6); not marked ``final``."""
+    cues = slot.liner.cues
+    annotations = {
+        "item_seq": str(seq),
+        "liq_cue_in": _seconds(cues.cue_in_ms),
+        "liq_cue_out": _seconds(cues.cue_out_ms),
+        "liq_fade_in": _seconds(0),
+        "liq_fade_out": _seconds(0),
+        "sn_rem": _seconds(cues.start_next_ms),
+        "liq_amplify": f"{cues.gain_db:.1f} dB",
+        "title": "",
+        "artist": "",
+    }
+    return ItemPayload(path=long_path(slot.path), annotations=annotations)
