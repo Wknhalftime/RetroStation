@@ -14,6 +14,11 @@ from backend.db.progress_writer import Connect
 from backend.db.telemetry_connection import TelemetryConnection
 from backend.repositories.pending_match_work import PendingMatchWork
 
+COUNT_OPTIONS = "-c lock_timeout=2000 -c statement_timeout=10000"
+"""The count connection's startup options: a scan of two broadcast tables with no index of
+its own on ``match_status``, bounded as the cue coverage counts are (10 s, 2 s on a lock), so
+a cold disk does not lose a stage its start count."""
+
 _COUNT_SQL = """SELECT (SELECT count(*) FROM broadcast_artists WHERE match_status = 'pending')
                      + (SELECT count(*) FROM track_identities WHERE match_status = 'pending')
                     AS pending"""

@@ -133,5 +133,7 @@ def artist_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                 sys_log_repo=PgSystemLogRepository(log_conn),
                 on_failure=stage.refuse,
             )
-        if not stage.refused:
-            stage.hand_on()
+            # At once, inside the block: an error closing the log connection must not end
+            # a stage whose identity stage is already queued.
+            if not stage.refused:
+                stage.hand_on()

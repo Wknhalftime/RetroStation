@@ -1,10 +1,10 @@
 """The matching run's progress row in ``progress_tracking`` (spec 2026-10-17).
 
 Each write is one statement, with the counts worked out in SQL from the row's own
-``progress_data``, so two writes can never interleave a read and a write. Only a RUNNING row,
-or one the ``/ws`` reaper flipped to FAILED, is written; a write brings the latter back
-(``status = 'running'``, ``completed_at`` cleared, as ``touch_running`` does). A COMPLETED row
-and an unknown id match nothing.
+``progress_data``, read ``FOR UPDATE``, so two writes can never interleave a read and a
+write. Only a RUNNING row, or one the ``/ws`` reaper flipped to FAILED, is written; a write
+brings the latter back (``status = 'running'``, ``completed_at`` cleared, as
+``touch_running`` does). A COMPLETED row and an unknown id match nothing.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ _COUNTED_CTE = """WITH cur AS (
            (progress_data->>'stages_failed')::int AS stages_failed
       FROM progress_tracking
      WHERE task_id = %(run_id)s AND status IN ('running', 'failed')
+       FOR UPDATE
 ), c AS (
     SELECT task_id, stages_left, stages_failed,
            CASE WHEN %(pending)s::int IS NULL THEN total

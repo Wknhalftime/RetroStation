@@ -31,7 +31,7 @@ import psycopg
 
 from backend.db.progress_writer import writer_options
 from backend.db.repositories.matching_run import PgMatchingRunRepository
-from backend.db.repositories.pending_match_work import PgPendingMatchWork
+from backend.db.repositories.pending_match_work import COUNT_OPTIONS, PgPendingMatchWork
 from backend.db.sync_conn import connect_sync
 from backend.repositories.matching_run import MatchingRunRepository
 from backend.repositories.pending_match_work import PendingMatchWork
@@ -50,16 +50,24 @@ class RunPorts:
     """Monotonic seconds."""
 
 
+CONNECT_TIMEOUT_S = 2
+"""A telemetry connection never waits on a stalled server for long (libpq's default is
+forever, and the worker is single)."""
+
+
 @contextmanager
 def run_ports(database_url: str) -> Iterator[RunPorts]:
     """The run row and the pending count, each on its own autocommit connection with bounded
-    statements (``writer_options()``), opened when first used and closed at the end."""
+    statements (``writer_options()`` for the writes, ``COUNT_OPTIONS`` for the count), opened
+    when first used and closed at the end."""
 
-    def connect() -> psycopg.Connection[Any]:
-        return connect_sync(database_url, autocommit=True, options=writer_options())
+    def connect_with(options: str) -> Callable[[], psycopg.Connection[Any]]:
+        return lambda: connect_sync(
+            database_url, autocommit=True, connect_timeout=CONNECT_TIMEOUT_S, options=options
+        )
 
-    runs = PgMatchingRunRepository(connect)
-    pending = PgPendingMatchWork(connect)
+    runs = PgMatchingRunRepository(connect_with(writer_options()))
+    pending = PgPendingMatchWork(connect_with(COUNT_OPTIONS))
     try:
         yield RunPorts(runs=runs, pending=pending, clock=time.monotonic)
     finally:
@@ -177,10 +185,14 @@ class RunFanOut:
         self._accounted += 1
 
     def close_unqueued(self) -> None:
-        """Every stage never tried ends now, failed: the re-check stopped before queuing it."""
+        """Every stage never tried ends now, failed: the re-check stopped before queuing it.
+        The pending work is counted once for all of them."""
+        if self.run_id is None or self._accounted >= self._stages:
+            return
+        pending = self._ports.pending.count_pending()
         while self._accounted < self._stages:
             self._accounted += 1
-            self._finish_failed()
+            self._ports.runs.finish_stage(self.run_id, pending=pending, failed=True)
 
     def _finish_failed(self) -> None:
         if self.run_id is not None:
