@@ -5,7 +5,7 @@ Public API:
   read_tags(path) -> LibraryFile  (tags, stat, a FLAC's stored audio MD5;
                                     raises OSError on a file it cannot stat,
                                     MutagenError on an unreadable one)
-  probe_clip(path) -> ProbedClip  (a sign-off clip's format and length, from
+  probe_clip(path) -> ProbedClip  (a sign-off or liner clip's format and length, from
                                     its content; an MP3 with no length header
                                     is measured by its frames (mpeg_frames);
                                     raises UnsupportedClipError
@@ -402,7 +402,7 @@ def read_tags(path: Path) -> LibraryFile:
 
 
 # ---------------------------------------------------------------------------
-# Sign-off clip probe (D26; PG3, I2)
+# Sign-off and liner clip probe (D26; PG3, I2)
 # ---------------------------------------------------------------------------
 
 # The detected mutagen type decides the clip's format; a type not listed is unsupported.
@@ -415,12 +415,12 @@ _CLIP_FORMATS: tuple[tuple[type[MutagenFileType], ClipFormat], ...] = (
 _NOT_AUDIO = "the file is not audio that can be read"
 
 
-def _clip_format(audio: MutagenFileType) -> ClipFormat:
+def _clip_format(audio: MutagenFileType, role: str) -> ClipFormat:
     for kind, clip_format in _CLIP_FORMATS:
         if isinstance(audio, kind):
             return clip_format
     raise UnsupportedClipError(
-        f"the clip is {type(audio).__name__} audio; a sign-off must be FLAC, MP3 or WAV"
+        f"the clip is {type(audio).__name__} audio; {role} must be FLAC, MP3 or WAV"
     )
 
 
@@ -448,10 +448,11 @@ def _mp3_span_ms(path: Path, mutagen_span_ms: int) -> int:
     return mutagen_span_ms if measured is None else round(measured * 1000)
 
 
-def probe_clip(path: Path) -> ProbedClip:
-    """A staged sign-off clip's format and length, read from its content only (I2).
+def probe_clip(path: Path, *, role: str = "a sign-off") -> ProbedClip:
+    """A staged clip's format and length, read from its content only (I2).
 
-    The file's name never helps: the store stages clips as ``<uuid4>.partial``.
+    The file's name never helps: the store stages clips as ``<uuid4>.partial``. ``role`` names
+    what the clip is for in the unsupported-format message (the liners wire "a liner").
 
     Raises:
         UnsupportedClipError: the content is audio of a type other than FLAC, MP3 or WAV.
@@ -463,7 +464,7 @@ def probe_clip(path: Path) -> ProbedClip:
         raise UnreadableClipError(f"{_NOT_AUDIO} ({unreadable})") from unreadable
     if audio is None:
         raise UnreadableClipError(_NOT_AUDIO)
-    clip_format = _clip_format(audio)
+    clip_format = _clip_format(audio, role)
     span_ms = _clip_span_ms(audio.info)
     if clip_format is ClipFormat.MP3:
         span_ms = _mp3_span_ms(path, span_ms)

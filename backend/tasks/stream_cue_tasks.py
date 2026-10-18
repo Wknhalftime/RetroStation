@@ -36,7 +36,7 @@ from backend.db.progress_writer import (
     writer_options,
 )
 from backend.db.sync_conn import connect_sync
-from backend.domain.streaming import StreamTiming
+from backend.domain.streaming import CueCandidate, StreamTiming
 from backend.domain.system import StorageUnavailableError
 from backend.playout.cue_analysis import AnalyserConfig, analyse_batch, remove_listings
 from backend.playout.liquidsoap_process import session_base_env
@@ -45,6 +45,7 @@ from backend.services.repository_factory import RepositoryFactory
 from backend.services.streaming.cue_precompute import (
     CueRunConfig,
     CueRunPorts,
+    LinerCueWork,
     analyse_reported,
     run_cue_analysis,
 )
@@ -53,6 +54,7 @@ from backend.services.streaming.cue_progress import (
     CueProgressRows,
     end_leftover_cue_rows_with,
 )
+from backend.services.streaming.liners import liner_folder
 from backend.tasks.cue_huey_app import cue_huey
 
 logger = structlog.get_logger()
@@ -81,6 +83,22 @@ def _cue_cache_dir(stream_work_dir: Path) -> Path:
     return stream_work_dir / "cue-cache"
 
 
+def _liner_cue_work(repos: RepositoryFactory, work_dir: Path) -> LinerCueWork:
+    """LR4: the liners needing analysis, each path made absolute under the liners folder
+    (the store gives it relative to that folder). A relative ``STREAM_WORK_DIR`` (the default
+    ``var/stream``) is taken against this process's working folder, as the upload's is, so
+    both name the same files when the API and the consumer start from the repo root."""
+    root = liner_folder(work_dir).absolute()
+
+    def work() -> list[CueCandidate]:
+        return [
+            replace(candidate, path=str(root / candidate.path))
+            for candidate in repos.broadcast.liners.needing_analysis()
+        ]
+
+    return work
+
+
 def _run_ports(conn: psycopg.Connection[DictRow], exe: Path, work_dir: Path) -> CueRunPorts:
     """The repositories, the connection's commit and the analyser callable, for one run or
     one report: ``exe`` is the Liquidsoap the caller found set (D51), ``work_dir`` the stream
@@ -89,7 +107,13 @@ def _run_ports(conn: psycopg.Connection[DictRow], exe: Path, work_dir: Path) -> 
     repos = RepositoryFactory(conn)
     analyser = AnalyserConfig(exe=exe, cache_dir=_cue_cache_dir(work_dir))
     analyse = partial(analyse_batch, base_env=session_base_env(os.environ), config=analyser)
-    return CueRunPorts(repos.streaming.cue_work, repos.streaming.cues, conn.commit, analyse)
+    return CueRunPorts(
+        repos.streaming.cue_work,
+        repos.streaming.cues,
+        conn.commit,
+        analyse,
+        liners=_liner_cue_work(repos, work_dir),
+    )
 
 
 @dataclass(frozen=True)

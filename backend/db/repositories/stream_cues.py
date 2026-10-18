@@ -41,28 +41,32 @@ INSERT INTO stream_cues {_COLUMNS}
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
 {_ON_CONFLICT}"""
 
-# Stored only while the file still carries the hash read before analysing
-# (spec: Data, "For PR D and PR E").
+# Stored only while the file (or, LR4, the station liner) still carries the hash read before
+# analysing (spec: Data, "For PR D and PR E"). The id is a library file's or a liner's.
 _STORE_IF_CURRENT_SQL = f"""
 INSERT INTO stream_cues {_COLUMNS}
 SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
 WHERE EXISTS (SELECT 1 FROM library_files WHERE id = %s AND audio_hash = %s)
+   OR EXISTS (SELECT 1 FROM station_liners WHERE id = %s AND audio_hash = %s)
 {_ON_CONFLICT}"""
 
 _PURGE_SQL = "DELETE FROM stream_cues WHERE analyser_version <> %s"
 
 # D56, in order. "In the library" is any library file carrying the audio, whatever its status
-# (a missing file may come back or be remapped); idx_library_files_audio_hash serves it.
+# (a missing file may come back or be remapped), or any station liner (LR4);
+# idx_library_files_audio_hash serves the first, idx_station_liners_audio_hash the second.
 _CLEAR_RETURNED_SQL = """
 UPDATE stream_cues c SET orphaned_at = NULL
 WHERE c.orphaned_at IS NOT NULL
-  AND EXISTS (SELECT 1 FROM library_files f WHERE f.audio_hash = c.audio_hash)
+  AND (EXISTS (SELECT 1 FROM library_files f WHERE f.audio_hash = c.audio_hash)
+       OR EXISTS (SELECT 1 FROM station_liners l WHERE l.audio_hash = c.audio_hash))
 """
 _DELETE_EXPIRED_SQL = "DELETE FROM stream_cues WHERE orphaned_at <= %(now)s - %(grace)s"
 _MARK_ORPHANS_SQL = """
 UPDATE stream_cues c SET orphaned_at = %(now)s
 WHERE c.orphaned_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.audio_hash = c.audio_hash)
+  AND NOT EXISTS (SELECT 1 FROM station_liners l WHERE l.audio_hash = c.audio_hash)
 """
 
 
@@ -102,6 +106,18 @@ def _to_analysis(row: DictRow) -> CueAnalysis:
     )
 
 
+def row_analysis(row: DictRow) -> CueAnalysis | None:
+    """The analysis a ``stream_cues`` row describes, or None (logged) for an invalid row.
+
+    Public: the liner store reads its liners' rows with it, so a row maps one way.
+    """
+    try:
+        return _to_analysis(row)
+    except (InvalidStreamValueError, InvalidAudioHashError) as error:
+        logger.warning("stream_cue_row_invalid", audio_hash=row["audio_hash"], error=str(error))
+        return None
+
+
 class PgStreamCueRepository(StreamCueRepository):
     """PostgreSQL implementation of :class:`StreamCueRepository` (table ``stream_cues``)."""
 
@@ -110,13 +126,7 @@ class PgStreamCueRepository(StreamCueRepository):
 
     def get(self, audio_hash: AudioHash) -> CueAnalysis | None:
         row = self._conn.execute(_GET_SQL, (str(audio_hash),)).fetchone()
-        if row is None:
-            return None
-        try:
-            return _to_analysis(row)
-        except (InvalidStreamValueError, InvalidAudioHashError) as error:
-            logger.warning("stream_cue_row_invalid", audio_hash=str(audio_hash), error=str(error))
-            return None
+        return None if row is None else row_analysis(row)
 
     def upsert(self, analysis: CueAnalysis) -> None:
         """Store ``analysis`` as its audio's cues; no library file needs to exist (D20).
@@ -127,7 +137,8 @@ class PgStreamCueRepository(StreamCueRepository):
         self._conn.execute(_UPSERT_SQL, _values(analysis))
 
     def store_if_current(self, analysis: CueAnalysis, file_id: UUID) -> bool:
-        params = (*_values(analysis), file_id, str(analysis.audio_hash))
+        audio = str(analysis.audio_hash)
+        params = (*_values(analysis), file_id, audio, file_id, audio)
         return self._conn.execute(_STORE_IF_CURRENT_SQL, params).rowcount == 1
 
     def purge_other_versions(self, current_version: int) -> None:

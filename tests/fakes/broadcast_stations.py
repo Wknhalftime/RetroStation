@@ -1,12 +1,15 @@
+from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.broadcast import BroadcastStation, DuplicateCallLettersError
+from backend.domain.liners import LinerCadence
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 
 
 class FakeBroadcastStationRepository(BroadcastStationRepository):
     """In-memory stations. Call letters match in any case, and a station whose call letters
-    differ from another's only by case is refused, as the PostgreSQL adapter does (D72)."""
+    differ from another's only by case is refused, as the PostgreSQL adapter does (D72).
+    ``update`` keeps the stored liner cadence; only ``set_liner_cadence`` changes it (LR1)."""
 
     def __init__(self) -> None:
         self._data: dict[UUID, BroadcastStation] = {}
@@ -38,8 +41,16 @@ class FakeBroadcastStationRepository(BroadcastStationRepository):
 
     def update(self, station: BroadcastStation) -> BroadcastStation:
         self._refuse_twin(station)
+        current = self._data.get(station.id)
+        if current is not None:
+            station = replace(station, liner_cadence=current.liner_cadence)
         self._data[station.id] = station
         return station
+
+    def set_liner_cadence(self, station_id: UUID, cadence: LinerCadence | None) -> None:
+        current = self._data.get(station_id)
+        if current is not None:
+            self._data[station_id] = replace(current, liner_cadence=cadence)
 
     def delete(self, station_id: UUID) -> None:
         self._data.pop(station_id, None)

@@ -1,9 +1,11 @@
 # RetroStation architecture (one page)
 
-**Status: 2026-10-17.** Checked against master 260a04e plus D111 (feat/silent-files); the
+**Status: 2026-10-18.** Checked against master 260a04e plus D111 (feat/silent-files); the
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
-feat/cue-editor-api, the editor API (comment audit: `audit/comment-audit.md`). Rulings cited here are in `audit/rulings.jsonl`
-(AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of them in the same PR.
+feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
+feat/station-liners (comment audit: `audit/comment-audit.md`). Rulings cited here are in
+`audit/rulings.jsonl` (AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of
+them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -78,6 +80,29 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - Its checks are `tests/services/streaming/test_cue_editor.py`,
   `tests/routers/test_cue_editor_routes.py` and `tests/playout/test_peaks.py`.
 
+## Station liners: a per-station clip library, analysed like songs
+
+- `station_liners` (migration 0043) holds one row per liner: name, `file_name`, `format`,
+  `audio_hash`, `duration_ms`. `stations.songs_between_liners` is the cadence (NULL = off, LR1).
+  The same audio is one liner per station (unique `(station_id, audio_hash)`); deleting a
+  station cascades its rows. Nothing plays liners yet: the on-air side is a later PR (L2).
+- Files live at `stream_work_dir/liners/<station_id>/<liner_id>.<format>`
+  (`services/streaming/liners.py`); the service commits its own writes, then removes files.
+  An upload holds one sync DB connection for its whole duration, as the sign-off upload does.
+- A manual cue edit is three columns on the liner row (start, end of message, stop; the
+  fade-out sits at the stop). It never goes to `stream_cue_edits`, which is per song hash
+  (see Tune-in cues above), and an edit always beats autocue.
+- Autocue touches liners in three places:
+  - the run's priority set starts with the liners needing analysis, then today's songs
+    (`cue_precompute`, `LinerCueWork`);
+  - `store_if_current` accepts a liner id carrying the hash read before analysing, as it does
+    a library file id;
+  - the orphan prune treats a hash held by any liner as in use, so it never drops a liner's
+    `stream_cues` row.
+- The cue meter's processed count includes liners while its total counts library files only,
+  so it can pass the total within a run (capped; resets next run).
+- The checks are the liner PG integration tests (`tests/integration/*liner*`).
+
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
@@ -98,7 +123,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026) | local-artist linking (`link_local_artists_task`) |
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026) |
-| no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`) | cue upserts | cue analysis |
+| no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`), or for a station liner's hash (LR4) | cue upserts | cue analysis (liners first) |
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration `0039_stream_cues_audio_silent` deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports; the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
 | the matching run's `progress_tracking` row (`matching`, `stages_left` / `stages_failed`, AUD-R030) | the re-check opens it; each matching stage refreshes it and finishes its stage; the last stage closes it | the matching stages, `/ws` |

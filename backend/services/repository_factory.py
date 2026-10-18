@@ -28,6 +28,7 @@ from backend.db.repositories.playable_schedule import PgPlayableScheduleReposito
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.silent_files import PgSilentFileReportRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
+from backend.db.repositories.station_liners import PgStationLinerRepository
 from backend.db.repositories.stream_cue_edits import PgStreamCueEditRepository
 from backend.db.repositories.stream_cue_work import PgCueWorkRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
@@ -44,7 +45,7 @@ from backend.services.streaming.station_years import StationYearRepos
 
 @dataclass
 class BroadcastRepos:
-    """Broadcast-domain repositories."""
+    """Broadcast-domain repositories; ``liners`` is each station's liner library (LR3)."""
 
     stations: PgBroadcastStationRepository
     playlists: PgBroadcastPlaylistRepository
@@ -52,6 +53,7 @@ class BroadcastRepos:
     identities: PgBroadcastTrackIdentityRepository
     events: PgBroadcastPlayEventRepository
     days: PgBroadcastDayRepository
+    liners: PgStationLinerRepository
 
 
 @dataclass
@@ -126,6 +128,7 @@ class RepositoryFactory:
             identities=PgBroadcastTrackIdentityRepository(conn),
             events=PgBroadcastPlayEventRepository(conn),
             days=PgBroadcastDayRepository(conn),
+            liners=PgStationLinerRepository(conn),
         )
         self.library = LibraryRepos(
             files=PgLibraryFileRepository(conn),
