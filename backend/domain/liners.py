@@ -143,11 +143,21 @@ class LinerEntry:
 
 @dataclass(frozen=True)
 class PlayableLiner:
-    """A liner the radio can play: its stored file and the cue points to play it with."""
+    """A liner the radio can play: its stored file and the cue points to play it with.
+
+    The stream builds the liner's path from ``file_name``, so it must be a stored liner's
+    name (``LINER_FILE_NAME``) and can never leave the station's folder.
+    """
 
     liner_id: UUID
     file_name: str
     cues: CuePoints
+
+    def __post_init__(self) -> None:
+        if LINER_FILE_NAME.fullmatch(self.file_name) is None:
+            raise InvalidLinerValueError(
+                f"PlayableLiner.file_name must be a stored liner's name, got {self.file_name!r}"
+            )
 
 
 def liner_cue_state(markers: CueMarkers | None, stored: CueAnalysis | None) -> LinerCueState:

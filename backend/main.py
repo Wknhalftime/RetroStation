@@ -29,6 +29,7 @@ from backend.db.progress_writer import (
 )
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
+from backend.db.repositories.station_liners import PgPlayableLinerRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.db.sync_conn import connect_sync
@@ -51,6 +52,7 @@ from backend.routers import listen, radio, radio_pages, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
 from backend.services.streaming.cue_reports import CueReporter, NoCueReports
+from backend.services.streaming.liners import liner_folder
 from backend.services.streaming.resource_meter import (
     MeterPorts,
     MeterRuntime,
@@ -166,6 +168,7 @@ def _opened_repos(
                 stations=PgBroadcastStationRepository(conn),
                 settings=PgUserSettingRepository(conn),
                 schedule=PgPlayableScheduleRepository(conn),
+                liners=PgPlayableLinerRepository(conn),
             )
 
     return opened
@@ -210,12 +213,14 @@ def build_stream_ports(settings: Settings, start_engine: EngineStarter) -> Strea
 
 def stream_service_config(settings: Settings, logs: Path) -> StreamServiceConfig:
     """The stream service's config: engines call back on the API's own bind (D24) and log to
-    ``logs``; the user's sign-off clip is read from the folder its upload writes (D26, design
-    note 6). Production ships no default clip, so ``final_clip`` stays ``None``."""
+    ``logs``; the user's sign-off clip and the stations' liners are read from the folders
+    their uploads write (D26, design note 6; plan note 4). Production ships no default clip,
+    so ``final_clip`` stays ``None``."""
     return StreamServiceConfig(
         callback_base_url(settings.server_host, settings.server_port),
         logs,
         sign_off_dir=sign_off_folder(settings.stream_work_dir),
+        liners_dir=liner_folder(settings.stream_work_dir),
     )
 
 

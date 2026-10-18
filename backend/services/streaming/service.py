@@ -24,6 +24,7 @@ carries its own lock).
 from __future__ import annotations
 
 import asyncio
+import random
 import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractContextManager
@@ -35,6 +36,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
+from backend.domain.liners import Shuffle
 from backend.domain.streaming import (
     Bookmark,
     CuePoints,
@@ -61,6 +63,7 @@ from backend.playout.liquidsoap_process import (
 from backend.playout.relay import AsgiApp, RelayConfig, client_framing, relay_asgi
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 from backend.repositories.playable_schedule import PlayableScheduleRepository
+from backend.repositories.station_liners import PlayableLinerRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.streaming.bookmarks import (
     BookmarkKey,
@@ -136,6 +139,8 @@ class StreamRepos:
     stations: BroadcastStationRepository
     settings: UserSettingRepository
     schedule: PlayableScheduleRepository
+    liners: PlayableLinerRepository | None = None
+    """The station's playable liners (LR4); ``None`` reads none, as the D2 rigs do."""
 
 
 type ReposFactory = Callable[[], AbstractContextManager[StreamRepos]]
@@ -161,6 +166,8 @@ class StreamPorts:
     inject a gate."""
     cue_reports: NoCueReports = field(default_factory=IgnoredReports)
     """Where a song sent without cues is reported (D79); ``IgnoredReports`` in the D2 rigs."""
+    shuffle: Shuffle = random.shuffle
+    """Shuffles a session's liner ids in place (plan note 11); tests inject a fixed order."""
 
 
 _STEADY_EPOCH = datetime(2000, 1, 1)
@@ -187,6 +194,9 @@ class StreamServiceConfig:
     sign_off_dir: Path | None = None
     """The folder the user's sign-off clip is stored in (D26), read when a schedule ends
     (PG4); ``None`` never reads the user's clip, so only ``final_clip`` can play."""
+    liners_dir: Path | None = None
+    """The liners root (plan note 4): a liner plays from
+    ``<liners_dir>/<station_id>/<file_name>``; ``None`` plays no liners."""
     timing: StreamTiming = field(default_factory=StreamTiming)
     relay: RelayConfig = field(default_factory=RelayConfig)
     freeze_grace: timedelta = timedelta(seconds=30)  # D31
