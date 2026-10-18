@@ -13,12 +13,18 @@ from backend.domain.library import AudioHash
 from backend.domain.liners import (
     DuplicateLinerError,
     LinerEntry,
+    PlayableLiner,
     StationLiner,
     liner_cue_state,
     liner_markers,
+    liner_points,
 )
 from backend.domain.streaming import ClipFormat, CueAnalysis, CueCandidate, CueMarkers
-from backend.repositories.station_liners import LinerCueWorkRepository, StationLinerRepository
+from backend.repositories.station_liners import (
+    LinerCueWorkRepository,
+    PlayableLinerRepository,
+    StationLinerRepository,
+)
 
 #: The unique key a second copy of the same audio in one station violates (LR3); keyed by
 #: name, so an unrelated unique violation is never mistaken for a duplicate.
@@ -54,6 +60,18 @@ SELECT l.id, l.station_id, l.file_name, l.audio_hash, l.duration_ms
 FROM station_liners l
 WHERE NOT EXISTS (SELECT 1 FROM stream_cues c WHERE c.audio_hash = l.audio_hash)
 ORDER BY l.station_id, l.file_name
+"""
+
+# The stream's read (LR4): each liner with its audio's cue row, if any. ``c.*`` supplies the
+# row ``row_analysis`` reads (its ``audio_hash`` is NULL when there is none), so the liner's
+# own columns are listed by name and never shadow it. Upload order, then id.
+_PLAYABLE_SQL = """
+SELECT l.id AS liner_id, l.file_name, l.duration_ms, l.cue_start_ms, l.cue_eom_ms,
+       l.cue_stop_ms, c.*
+FROM station_liners l
+LEFT JOIN stream_cues c ON c.audio_hash = l.audio_hash
+WHERE l.station_id = %s
+ORDER BY l.uploaded_at, l.id
 """
 
 
@@ -173,3 +191,24 @@ class PgStationLinerRepository(StationLinerRepository, LinerCueWorkRepository):
             )
             for row in self._conn.execute(_NEEDING_ANALYSIS_SQL)
         ]
+
+
+def _to_playable(row: DictRow) -> PlayableLiner | None:
+    """The liner the joined row describes, or None when its audio is silent. An invalid cue
+    row (logged by ``row_analysis``) counts as none, as the liners tab reads it."""
+    stored = None if row["audio_hash"] is None else row_analysis(row)
+    points = liner_points(row["duration_ms"], _markers(row), stored)
+    return None if points is None else PlayableLiner(row["liner_id"], row["file_name"], points)
+
+
+class PgPlayableLinerRepository(PlayableLinerRepository):
+    """PostgreSQL implementation of :class:`PlayableLinerRepository`: one statement, the
+    station's liners LEFT JOIN ``stream_cues`` by audio hash."""
+
+    def __init__(self, conn: psycopg.Connection[DictRow]) -> None:
+        self._conn = conn
+
+    def playable(self, station_id: UUID) -> list[PlayableLiner]:
+        rows = self._conn.execute(_PLAYABLE_SQL, (station_id,))
+        found = (_to_playable(row) for row in rows)
+        return [liner for liner in found if liner is not None]

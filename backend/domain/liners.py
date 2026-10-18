@@ -8,6 +8,7 @@ Stop (plan notes 6 and 7).
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -142,11 +143,21 @@ class LinerEntry:
 
 @dataclass(frozen=True)
 class PlayableLiner:
-    """A liner the radio can play: its stored file and the cue points to play it with."""
+    """A liner the radio can play: its stored file and the cue points to play it with.
+
+    The stream builds the liner's path from ``file_name``, so it must be a stored liner's
+    name (``LINER_FILE_NAME``) and can never leave the station's folder.
+    """
 
     liner_id: UUID
     file_name: str
     cues: CuePoints
+
+    def __post_init__(self) -> None:
+        if LINER_FILE_NAME.fullmatch(self.file_name) is None:
+            raise InvalidLinerValueError(
+                f"PlayableLiner.file_name must be a stored liner's name, got {self.file_name!r}"
+            )
 
 
 def liner_cue_state(markers: CueMarkers | None, stored: CueAnalysis | None) -> LinerCueState:
@@ -182,3 +193,42 @@ def liner_points(
     if stored is None:
         return CuePoints(0, duration_ms, 0, 0, 0, NO_CUES_GAIN_DB)
     return replace(stored.cues, fade_in_ms=0, fade_out_ms=0)
+
+
+type Shuffle = Callable[[list[UUID]], None]
+"""Shuffles the list in place; ``random.shuffle`` in production."""
+
+
+@dataclass(frozen=True)
+class LinerRotation:
+    """A session's liner shuffle: the ids still to play, and the liner played last."""
+
+    order: tuple[UUID, ...] = ()
+    last: UUID | None = None
+
+
+def next_liner(
+    rotation: LinerRotation, available: Sequence[UUID], shuffle: Shuffle
+) -> tuple[UUID | None, LinerRotation]:
+    """The next liner to play and the rotation after it (plan note 11).
+
+    Ids no longer available are dropped from the order. With none left it reshuffles the
+    available ids; if that puts the last played first (and there is more than one), the
+    first and last entries swap. A liner added mid-order joins at the next reshuffle.
+    """
+    present = set(available)
+    order = [liner_id for liner_id in rotation.order if liner_id in present]
+    if not order and available:
+        order = list(available)
+        shuffle(order)
+        if len(order) > 1 and order[0] == rotation.last:
+            order[0], order[-1] = order[-1], order[0]
+    if not order:
+        return None, LinerRotation((), rotation.last)
+    picked, *rest = order
+    return picked, LinerRotation(tuple(rest), picked)
+
+
+def liner_due(songs_since_liner: int, cadence: LinerCadence | None) -> bool:
+    """A liner is due once ``cadence`` songs have played since the last; never without one."""
+    return cadence is not None and songs_since_liner >= cadence.songs

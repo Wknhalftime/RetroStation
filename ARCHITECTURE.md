@@ -3,7 +3,8 @@
 **Status: 2026-10-18.** Checked against master 260a04e plus D111 (feat/silent-files); the
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
-feat/station-liners (comment audit: `audit/comment-audit.md`). Rulings cited here are in
+feat/station-liners, and "Liners on air" with feat/liners-on-air (comment audit:
+`audit/comment-audit.md`). Rulings cited here are in
 `audit/rulings.jsonl` (AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -85,9 +86,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - `station_liners` (migration 0043) holds one row per liner: name, `file_name`, `format`,
   `audio_hash`, `duration_ms`. `stations.songs_between_liners` is the cadence (NULL = off, LR1).
   The same audio is one liner per station (unique `(station_id, audio_hash)`); deleting a
-  station cascades its rows. Nothing plays liners yet: the on-air side is a later PR (L2).
+  station cascades its rows. Liners on air are the next section.
 - Files live at `stream_work_dir/liners/<station_id>/<liner_id>.<format>`
   (`services/streaming/liners.py`); the service commits its own writes, then removes files.
+  After each add and delete it sweeps the station's folder: orphans older than an hour (one
+  stored-name read) and stale `.partial` files go; failures are logged, never raised.
   An upload holds one sync DB connection for its whole duration, as the sign-off upload does.
 - A manual cue edit is three columns on the liner row (start, end of message, stop; the
   fade-out sits at the stop). It never goes to `stream_cue_edits`, which is per song hash
@@ -102,6 +105,25 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The cue meter's processed count includes liners while its total counts library files only,
   so it can pass the total within a run (capped; resets next run).
 - The checks are the liner PG integration tests (`tests/integration/*liner*`).
+
+## Liners on air: a third kind of stream item, timeless
+
+- `StreamService.item` hands out three kinds of item: a song (`Assigned`), the sign-off
+  (`FinalClip`) and a liner (`LinerSlot`, plan note 8). The walk to the next song runs first,
+  so the end of the schedule signs off and no liner plays right before it; then, if the seq
+  before was a song and the cadence is due, the station's playable liners are read in a worker
+  thread. A failed read (`StreamReadError`, or a row the domain rejects) is a warning and the
+  song plays; an empty library plays the song quietly. A liner that fails to load is skipped
+  and still resets the count.
+- The count and the rotation belong to the listener session, from tune-in: the cadence is read
+  with the station at tune-in, the landing is song 1, and the shuffle (`LinerRotation`,
+  `next_liner` in `domain/liners.py`) moves on only on the event loop, once the slot is stored.
+  A reconnect starts both over.
+- Liners are timeless to placement (`sessions.song_heard`): during a liner, the reconnect live
+  position (D109) and the bookmark (`_left_at`) both take the song before it as played to its
+  end, so they land at the next song's top. Only the freeze watchdog follows the liner's own
+  span. A liner shows no title.
+- The checks are `tests/services/streaming/test_liner_playout.py` (rig `liner_rig.py`).
 
 ## Background work: an orchestrated command pipeline (not pub/sub)
 

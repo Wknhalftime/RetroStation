@@ -14,7 +14,10 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
+from uuid import UUID
 
+from backend.domain.liners import LinerCadence, LinerRotation, PlayableLiner
 from backend.domain.streaming import DayLoader, ItemRef, Landing, ScheduleItem
 from backend.playout.liquidsoap_process import RunningEngine
 from backend.services.streaming.bookmarks import BookmarkKey
@@ -23,9 +26,12 @@ from backend.services.streaming.payload import FinalClip
 __all__ = [
     "Assigned",
     "Committed",
+    "LinerSlot",
     "StreamSession",
     "memoised_day_loader",
     "schedule_finished",
+    "song_heard",
+    "songs_since_liner",
 ]
 
 
@@ -53,17 +59,36 @@ class Assigned:
 
 
 @dataclass(frozen=True)
+class LinerSlot:
+    """A liner handed out for a seq: which liner, where its file is stored, and the song it
+    follows. ``after`` is that song's assignment and ``after_span_ms`` the span it was sent
+    with, so the liner can be started at the song's EOM (LR6)."""
+
+    liner: PlayableLiner
+    path: Path
+    after: Assigned
+    after_span_ms: int
+
+    @property
+    def span_ms(self) -> int:
+        """How long the liner plays, from its cue-in to its cue-out."""
+        cues = self.liner.cues
+        return cues.cue_out_ms - cues.cue_in_ms
+
+
+@dataclass(frozen=True)
 class Committed:
     """The position a ``started`` report has confirmed, with when it started.
 
-    ``assigned`` is a regular item, or the sign-off clip (D26) once the schedule has
-    ended with one configured — a clip has no ``ItemRef``/``ScheduleItem`` to offer.
+    ``assigned`` is a regular item, a station liner, or the sign-off clip (D26) once the
+    schedule has ended with one configured — a liner or clip has no ``ItemRef``/
+    ``ScheduleItem`` to offer.
     ``started_at`` is an elapsed-clock reading (D47), comparable only with other readings of
     that clock, never with the wall clock or the domain's station times.
     """
 
     seq: int
-    assigned: Assigned | FinalClip
+    assigned: Assigned | FinalClip | LinerSlot
     started_at: datetime
 
 
@@ -88,6 +113,9 @@ class StreamSession:
     is ``(shows_at, text)``: the query compares ``shows_at`` to the clock rather than the
     record flipping itself, per CQRS.
 
+    ``station_id``, ``liner_cadence`` and ``liner_rotation`` are the station's liners on
+    this stream (LR7): which station, how often (``None`` is off), and the shuffle state.
+
     ``opened_at`` and ``now_playing[0]`` (``shows_at``) are elapsed-clock readings (D47), like
     ``Committed.started_at``: comparable only with each other, never with the wall clock or
     the domain's station times.
@@ -100,13 +128,16 @@ class StreamSession:
     landing: Landing | None = None
     clock_offset: timedelta | None = None
     placed: asyncio.Event = field(default_factory=asyncio.Event)
-    assigned: dict[int, Assigned | FinalClip] = field(default_factory=dict)
+    assigned: dict[int, Assigned | FinalClip | LinerSlot] = field(default_factory=dict)
     committed: Committed | None = None
     end_seq: int | None = None
     final_failed: bool = False
     engine: RunningEngine | None = None
     now_playing: tuple[datetime, str] | None = None
     stopped: bool = False
+    station_id: UUID | None = None
+    liner_cadence: LinerCadence | None = None
+    liner_rotation: LinerRotation = LinerRotation()
 
 
 def schedule_finished(session: StreamSession) -> bool:
@@ -117,3 +148,31 @@ def schedule_finished(session: StreamSession) -> bool:
         return False
     last_to_play = session.end_seq - (2 if session.final_failed else 1)
     return committed.seq >= last_to_play  # a clip reported started, then failed
+
+
+def song_heard(committed: Committed, elapsed_now: datetime) -> tuple[Assigned, timedelta] | None:
+    """The committed song and how much of it has played at ``elapsed_now`` (an elapsed-clock
+    reading), or ``None`` for the sign-off clip, which has no place in the log.
+
+    Liners are timeless (LR9, plan note 12): while one plays, the song it follows has played
+    its whole sent span, so the listener is at the top of the next song and no liner time is
+    counted."""
+    playing = committed.assigned
+    if isinstance(playing, LinerSlot):
+        return playing.after, timedelta(milliseconds=playing.after_span_ms)
+    if isinstance(playing, Assigned):
+        return playing, elapsed_now - committed.started_at
+    return None
+
+
+def songs_since_liner(session: StreamSession, before_seq: int) -> int:
+    """The songs handed out before ``before_seq`` since the session's last liner, or since
+    tune-in when it has had none (LR7): the landing is song 1, and a liner restarts the count."""
+    count = 0
+    for seq in range(before_seq):
+        handed_out = session.assigned.get(seq)
+        if isinstance(handed_out, LinerSlot):
+            count = 0
+        elif isinstance(handed_out, Assigned):
+            count += 1
+    return count

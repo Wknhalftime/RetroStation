@@ -7,18 +7,25 @@ from backend.domain.library import AudioHash
 from backend.domain.liners import (
     DuplicateLinerError,
     LinerEntry,
+    PlayableLiner,
     StationLiner,
     liner_cue_state,
+    liner_points,
 )
 from backend.domain.streaming import CueCandidate, CueMarkers
-from backend.repositories.station_liners import LinerCueWorkRepository, StationLinerRepository
+from backend.repositories.station_liners import (
+    LinerCueWorkRepository,
+    PlayableLinerRepository,
+    StationLinerRepository,
+)
 from tests.fakes.stream_cues import FakeStreamCueRepository
 
 
-class FakeStationLiners(StationLinerRepository, LinerCueWorkRepository):
+class FakeStationLiners(StationLinerRepository, LinerCueWorkRepository, PlayableLinerRepository):
     """In-memory liners (``liners``), keeping the PostgreSQL adapter's rules: the same audio
-    once per station, the list order, and cue state and needing-analysis read from the cue
-    fake's ``analyses`` (pass the fake the test analyses through; a fresh one by default)."""
+    once per station, the list order, and cue state, needing-analysis and playable points read
+    from the cue fake's ``analyses`` (pass the fake the test analyses through; a fresh one by
+    default). ``playable`` lists liners in the order they were stored."""
 
     def __init__(self, cues: FakeStreamCueRepository | None = None) -> None:
         self.liners: dict[UUID, StationLiner] = {}
@@ -78,3 +85,11 @@ class FakeStationLiners(StationLinerRepository, LinerCueWorkRepository):
             )
             for x in waiting
         ]
+
+    def playable(self, station_id: UUID) -> list[PlayableLiner]:
+        found = (
+            (x, liner_points(x.duration_ms, x.markers, self._cues.get(x.audio_hash)))
+            for x in self.liners.values()
+            if x.station_id == station_id
+        )
+        return [PlayableLiner(x.id, x.file_name, cues) for x, cues in found if cues is not None]

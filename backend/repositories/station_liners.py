@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.library import AudioHash
-from backend.domain.liners import LinerEntry, StationLiner
+from backend.domain.liners import LinerEntry, PlayableLiner, StationLiner
 from backend.domain.streaming import CueCandidate, CueMarkers
 
 
@@ -60,4 +60,15 @@ class LinerCueWorkRepository(ABC):
         """Every liner whose audio has no ``stream_cues`` row, keyed by the liner id, at
         ``"<station_id>/<file_name>"`` relative to the liners root, with no stored stat;
         in path order."""
+        ...
+
+
+class PlayableLinerRepository(ABC):
+    """What the stream reads about a station's liners (LR3, LR4)."""
+
+    @abstractmethod
+    def playable(self, station_id: UUID) -> list[PlayableLiner]:
+        """The station's liners the radio can play, each with its ``liner_points`` (its edit
+        and its audio's ``stream_cues`` row); a silent liner is left out. Empty for a station
+        with none, or no such station."""
         ...

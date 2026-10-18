@@ -20,7 +20,7 @@ from uuid import UUID
 from backend.domain.streaming import DayLoader, Landing, StreamTiming
 from backend.domain.tune_in import played_on
 from backend.services.streaming.bookmarks import BookmarkKey, still_logged_at
-from backend.services.streaming.sessions import Assigned, StreamSession, schedule_finished
+from backend.services.streaming.sessions import StreamSession, schedule_finished, song_heard
 
 __all__ = ["LivePosition", "live_landing", "live_position", "newest_live_position"]
 
@@ -32,11 +32,13 @@ class LivePosition:
     session_id: str
     """The open session it was read from."""
     started: Landing
-    """The committed item, at the offset it started playing from."""
+    """The committed item at the offset it started playing from; during a liner, the song
+    before the liner (the walk then spends its full sent span, LR9)."""
     event_id: UUID
     """The play the session found at ``started.ref`` when it read its day."""
     heard: timedelta
-    """Time since the committed item started, on the steady clock (D47)."""
+    """Time since the committed item started, on the steady clock (D47); during a liner, the
+    whole sent span of the song before it (LR9)."""
     clock_offset: timedelta
     """The session's station-clock offset, which a stream placed here carries on with."""
 
@@ -47,18 +49,20 @@ def live_position(
     """``session``'s position at ``elapsed_now`` (an elapsed-clock reading), or ``None`` when
     it has none to resume from: nothing has started yet, or its final item has started (it
     signed off, D26). Unlike the service's ``_left_at`` (a bookmark), the start offset and
-    the time since are kept apart, so ``played_on`` can drop a stale offset (D11)."""
+    the time since are kept apart, so ``played_on`` can drop a stale offset (D11). During a
+    liner it is the song before it, played to its end: the next song's top (LR9)."""
     committed = session.committed
     if committed is None or session.clock_offset is None or schedule_finished(session):
         return None
-    playing = committed.assigned
-    if not isinstance(playing, Assigned):  # the sign-off clip has no place in the log
+    heard = song_heard(committed, elapsed_now)
+    if heard is None:  # the sign-off clip has no place in the log
         return None
+    song, played = heard
     return LivePosition(
         session_id=session_id,
-        started=Landing(playing.ref, playing.offset_ms),
-        event_id=playing.item.event_id,
-        heard=elapsed_now - committed.started_at,
+        started=Landing(song.ref, song.offset_ms),
+        event_id=song.item.event_id,
+        heard=played,
         clock_offset=session.clock_offset,
     )
 
