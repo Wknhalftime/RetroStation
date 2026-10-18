@@ -442,11 +442,11 @@ describe("LinersTab", () => {
     }
     expect(screen.queryByText("No liners yet.")).toBeNull();
 
-    // L1 has no cue editor yet: "Edit cues" is not rendered (Task 16 adds it).
-    expect(screen.queryByText(/edit cues/i)).toBeNull();
-    expect(screen.queryByLabelText(/edit cues/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: /edit cues/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /edit cues/i })).toBeNull();
+    // L3 (LR11): each row links Edit cues to that liner's cue editor page.
+    for (const { id, name } of library.liners) {
+      const link = within(row(name)).getByRole("link", { name: "Edit cues" });
+      expect(link.getAttribute("href")).toBe(`/stations/${STATION}/liners/${id}/cues`);
+    }
 
     // The list is read from the station's liners route.
     expect(server.where("GET", LINERS_PATH).length).toBeGreaterThan(0);

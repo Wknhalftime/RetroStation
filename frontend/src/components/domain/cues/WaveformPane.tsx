@@ -12,6 +12,7 @@ import {
   type View,
 } from "./cueMath";
 import { drawWaveform, type LabelRect } from "./drawWaveform";
+import { MARKER_ORDER } from "./markerStyle";
 
 // One waveform view with draggable markers. Prop-driven: it is told the peaks, the view and the
 // markers, and reports what the pointer asks for (a marker moved, the view zoomed or panned, a
@@ -37,6 +38,8 @@ export interface WaveformPaneProps {
   onBox?(which: BoxKey, v: View): void;
   height?: number;
   label?: string;
+  /** The markers drawn and draggable here (default MARKER_ORDER); the others are left alone. */
+  markerKeys?: readonly MarkerKey[];
 }
 
 type Drag =
@@ -74,6 +77,7 @@ function centre(v: View): number {
 
 export function WaveformPane(props: WaveformPaneProps) {
   const { peaks, perSecond, view, markers, playheadMs, labels, boxes, height = 130 } = props;
+  const markerKeys = props.markerKeys ?? MARKER_ORDER;
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRects = useRef<LabelRect[]>([]);
@@ -116,8 +120,9 @@ export function WaveformPane(props: WaveformPaneProps) {
       playheadMs,
       labels,
       boxes,
+      markerKeys,
     });
-  }, [peaks, perSecond, view, markers, playheadMs, labels, boxes, width, height]);
+  }, [peaks, perSecond, view, markers, playheadMs, labels, boxes, markerKeys, width, height]);
 
   // The wheel needs a non-passive listener to stop the page scrolling; React's is passive.
   const zoomable = props.onView !== undefined;
@@ -156,7 +161,9 @@ export function WaveformPane(props: WaveformPaneProps) {
     if (!at || e.button !== 0) return;
     const { durationMs, onBox, onView } = props;
     const ms = msAt(at.x, at.width, view);
-    const key = labelAt(at.x, at.y, labelRects.current) ?? markerAt(at.x, at.width, view, markers);
+    const key =
+      labelAt(at.x, at.y, labelRects.current) ??
+      markerAt(at.x, at.width, view, markers, markerKeys);
     let next: Drag | null = null;
     if (key) {
       next = { kind: "marker", key };
@@ -200,7 +207,9 @@ export function WaveformPane(props: WaveformPaneProps) {
   }
 
   function cursorAt(x: number, y: number, w: number): string {
-    if (labelAt(x, y, labelRects.current) ?? markerAt(x, w, view, markers)) return "ew-resize";
+    if (labelAt(x, y, labelRects.current) ?? markerAt(x, w, view, markers, markerKeys)) {
+      return "ew-resize";
+    }
     if (boxes) {
       for (const which of BOX_ORDER) {
         const hit = boxHit(x, w, props.durationMs, boxes[which]);

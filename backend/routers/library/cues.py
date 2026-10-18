@@ -8,12 +8,10 @@ note 11); the repositories are synchronous, so every route is a plain ``def``.
 
 from __future__ import annotations
 
-import base64
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
 from starlette.responses import FileResponse
 
 from backend.dependencies import (
@@ -33,8 +31,14 @@ from backend.domain.streaming import (
     StreamTiming,
 )
 from backend.domain.system import StorageUnavailableError
+from backend.routers.cue_schemas import (
+    CueEditorOut,
+    MarkersModel,
+    WaveformOut,
+    editor_out,
+    waveform_out,
+)
 from backend.services.streaming.cue_editor import (
-    CueAnalysisState,
     CueEditorPorts,
     ReadPeaks,
     audio_path,
@@ -72,45 +76,6 @@ _UNKNOWN_MEDIA_TYPE = "application/octet-stream"
 # ---------------------------------------------------------------------------
 
 
-class MarkersModel(BaseModel):
-    """The four markers, whole milliseconds from the start of the file (strict, >= 0)."""
-
-    start_ms: int = Field(strict=True, ge=0)
-    eom_ms: int = Field(strict=True, ge=0)
-    fade_at_ms: int = Field(strict=True, ge=0)
-    stop_ms: int = Field(strict=True, ge=0)
-
-
-class CueEditorOut(BaseModel):
-    """Response body for GET /files/{file_id}/cues."""
-
-    file_id: UUID
-    title: str | None
-    artist: str | None
-    format: str
-    duration_ms: int
-    analysis: CueAnalysisState
-    automatic: MarkersModel
-    manual: MarkersModel | None
-
-
-class WaveformOut(BaseModel):
-    """Response body for GET /files/{file_id}/waveform: ``peaks`` is base64 of the bytes."""
-
-    duration_ms: int
-    per_second: int
-    peaks: str
-
-
-def _markers_out(markers: CueMarkers) -> MarkersModel:
-    return MarkersModel(
-        start_ms=markers.start_ms,
-        eom_ms=markers.eom_ms,
-        fade_at_ms=markers.fade_at_ms,
-        stop_ms=markers.stop_ms,
-    )
-
-
 def _body_invalid(reason: str) -> HTTPException:
     """A 422 in FastAPI's list shape, located at the request body."""
     return HTTPException(
@@ -143,16 +108,7 @@ def get_cues(file_id: UUID, _token: Token, ports: Ports, timing: Timing) -> CueE
         view = read_cue_editor(ports, file_id, timing)
     except (CueEditError, StorageUnavailableError) as failure:
         raise _http_error(failure) from failure
-    return CueEditorOut(
-        file_id=view.file_id,
-        title=view.title,
-        artist=view.artist,
-        format=view.format,
-        duration_ms=view.duration_ms,
-        analysis=view.analysis,
-        automatic=_markers_out(view.automatic),
-        manual=None if view.manual is None else _markers_out(view.manual),
-    )
+    return editor_out(view)
 
 
 @router.put("/files/{file_id}/cues", status_code=status.HTTP_204_NO_CONTENT)
@@ -188,11 +144,7 @@ def get_waveform(file_id: UUID, _token: Token, ports: Ports, read: PeakReader) -
         waveform = read_waveform(ports, file_id, read)
     except (CueEditError, StorageUnavailableError) as failure:
         raise _http_error(failure) from failure
-    return WaveformOut(
-        duration_ms=waveform.duration_ms,
-        per_second=waveform.per_second,
-        peaks=base64.b64encode(waveform.peaks).decode("ascii"),
-    )
+    return waveform_out(waveform)
 
 
 @router.get("/files/{file_id}/audio")

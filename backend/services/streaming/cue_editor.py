@@ -120,7 +120,8 @@ def _editable(ports: CueEditorPorts, file_id: UUID) -> _Editable:
     return _Editable(file, file.audio_hash, duration_ms, row)
 
 
-def _analysis_state(row: CueAnalysis | None) -> CueAnalysisState:
+def analysis_state(row: CueAnalysis | None) -> CueAnalysisState:
+    """What autocue has said about the audio: nothing yet, silent, failed or measured."""
     if row is None:
         return CueAnalysisState.WAITING
     if row.audio_silent:
@@ -143,13 +144,13 @@ def read_cue_editor(ports: CueEditorPorts, file_id: UUID, timing: StreamTiming) 
         artist=target.file.audio.artist_name,
         format=target.file.format,
         duration_ms=target.duration_ms,
-        analysis=_analysis_state(target.row),
+        analysis=analysis_state(target.row),
         automatic=_opening_markers(target, timing),
         manual=ports.edits.get(target.audio_hash),
     )
 
 
-def _clock(ms: int) -> str:
+def clock_text(ms: int) -> str:
     """``ms`` as m:ss.mmm, the way the editor shows a time."""
     minutes, rest = divmod(ms, 60_000)
     return f"{minutes}:{rest // 1000:02d}.{rest % 1000:03d}"
@@ -160,7 +161,7 @@ def _refusal_for(target: _Editable, markers: CueMarkers, timing: StreamTiming) -
     if target.row is not None and target.row.audio_silent:
         return SILENT_REFUSAL
     if markers.stop_ms > target.duration_ms:
-        end = _clock(target.duration_ms)
+        end = clock_text(target.duration_ms)
         return f"Stop can't be past the end of the song ({end})."
     stored = None if target.row is None else target.row.cues
     playable = PlayableFile(
