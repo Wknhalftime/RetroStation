@@ -62,12 +62,15 @@ class Assigned:
 class LinerSlot:
     """A liner handed out for a seq: which liner, where its file is stored, and the song it
     follows. ``after`` is that song's assignment and ``after_span_ms`` the span it was sent
-    with, so the liner can be started at the song's EOM (LR6)."""
+    with, so the liner can be started at the song's EOM (LR6). ``next_song`` is the song the
+    stream walked to after ``after``, at its top: where a reconnect or a bookmark during the
+    liner is placed (LR9). It is ``None`` only in slots built by hand for their payload."""
 
     liner: PlayableLiner
     path: Path
     after: Assigned
     after_span_ms: int
+    next_song: Assigned | None = None
 
     @property
     def span_ms(self) -> int:
@@ -154,11 +157,16 @@ def song_heard(committed: Committed, elapsed_now: datetime) -> tuple[Assigned, t
     """The committed song and how much of it has played at ``elapsed_now`` (an elapsed-clock
     reading), or ``None`` for the sign-off clip, which has no place in the log.
 
-    Liners are timeless (LR9, plan note 12): while one plays, the song it follows has played
-    its whole sent span, so the listener is at the top of the next song and no liner time is
-    counted."""
+    Liners are timeless (LR9, plan note 12): while one plays, the listener is at the top of
+    the song the stream walked to after the song before it, with nothing of it heard, so no
+    liner time is counted. That song is the walk's, not the song before plus its sent span
+    measured against the day as read at tune-in, which a D80 landing or a D85 re-read would
+    miss (#171 review M3). A slot without one is placed the old way: the song before, played
+    for its sent span."""
     playing = committed.assigned
     if isinstance(playing, LinerSlot):
+        if playing.next_song is not None:
+            return playing.next_song, timedelta(0)
         return playing.after, timedelta(milliseconds=playing.after_span_ms)
     if isinstance(playing, Assigned):
         return playing, elapsed_now - committed.started_at
