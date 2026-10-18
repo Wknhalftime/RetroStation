@@ -387,25 +387,27 @@ def test_backend_outage_plays_filler_then_resumes(
 def test_gain_is_applied_and_output_peak_is_limited(
     tmp_path: Path, liquidsoap_exe: Path, liq_cache: Path, job: object
 ) -> None:
-    def tone(frequency: int, gain_db: float) -> StubItem:
-        path = make_tone("ffmpeg", tmp_path / f"g{frequency}.flac", ToneSpec(frequency, 12))
-        return StubItem(path=long_path(path), span_s=12, title=f"{frequency} Hz", gain_db=gain_db)
+    def tone(frequency: int, gain_db: float, span: int = 12) -> StubItem:
+        path = make_tone("ffmpeg", tmp_path / f"g{frequency}.flac", ToneSpec(frequency, span))
+        return StubItem(path=long_path(path), span_s=span, title=f"{frequency} Hz", gain_db=gain_db)
 
     # Tones are -12 dBFS; with the -20/-10 dB item gains they reach the chain at -32.7 and
     # -20.7 LUFS (K-weighting lifts 1500 Hz by 2 dB). +18 dB drives it 6 dB over full scale.
-    items = [tone(500, -20.0), tone(1500, -10.0), tone(3000, 18.0)]
+    # The AGC (agc.liq) is windowed: it measures 3 s before it moves, then rises at up to
+    # 2 dB/s and slows to 0.5 dB/s near its goal, so the quiet item plays 24 s to settle.
+    items = [tone(500, -20.0, span=24), tone(1500, -10.0), tone(3000, 18.0)]
     setup = setup_for(liquidsoap_exe, liq_cache, tmp_path)
     session = start_stubbed_session(job, stub_session(items), setup)
     _, response = first_audio(session.port, session.started_at, FIRST_AUDIO_TIMEOUT_S)
     recording = tmp_path / "out.mp3"
-    record_for(response, 3 * 12 - 2 * START_NEXT_S + 2, recording)
+    record_for(response, 24 + 2 * 12 - 2 * START_NEXT_S + 2, recording)
     response.close()
     quiet, louder = band_loudness_lufs(recording, 500), band_loudness_lufs(recording, 1500)
-    # The AGC (target -16 LUFS, at most +10 dB) lifts the quiet item (measured -23.4 LUFS)
-    # and brings the louder one to its target (measured -15.0 LUFS)...
+    # The AGC (target -16 LUFS, at most +10 dB) lifts the quiet item (measured -24.4 LUFS)
+    # and brings the louder one to its target (measured -14.2 LUFS)...
     assert quiet >= -27.0, f"the AGC did not lift the quiet item: {quiet} LUFS"
     assert louder == pytest.approx(-16.0, abs=3.0)
-    # ...but the item gain still sets them apart (measured 8.4 LU).
+    # ...but the item gain still sets them apart (measured 10.2 LU).
     assert louder - quiet >= 5.0
     # Peaks are a sample-level limit, so dBFS, not LUFS.
     assert peak_db(recording) <= -0.5
