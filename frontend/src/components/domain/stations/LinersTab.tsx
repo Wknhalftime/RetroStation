@@ -409,12 +409,6 @@ export function LinersTab({ stationId }: { stationId: string }) {
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1">
-                      <Link
-                        to={`/stations/${stationId}/liners/${liner.id}/cues`}
-                        className="mr-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
-                      >
-                        Edit cues
-                      </Link>
                       <button
                         type="button"
                         aria-label="Preview"
@@ -424,6 +418,12 @@ export function LinersTab({ stationId }: { stationId: string }) {
                       >
                         {playing ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                       </button>
+                      <Link
+                        to={`/stations/${stationId}/liners/${liner.id}/cues`}
+                        className="px-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                      >
+                        Edit cues
+                      </Link>
                       <button
                         type="button"
                         aria-label="Rename"

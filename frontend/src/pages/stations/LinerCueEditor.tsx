@@ -81,9 +81,11 @@ export function LinerCueEditor() {
       <div>
         <button
           type="button"
-          // "default" is the first entry of this session: go to the station's page instead.
+          // "default" is the first entry of this session: open the station's Liners tab instead.
           onClick={() =>
-            location.key === "default" ? navigate(`/stations/${stationId}`) : navigate(-1)
+            location.key === "default"
+              ? navigate(`/stations/${stationId}?tab=liners`)
+              : navigate(-1)
           }
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
         >
