@@ -1,11 +1,12 @@
 """session.liq's AGC never re-applies an item's liq_amplify (real Liquidsoap 2.4.5, offline).
 
-On 2.4.5 the stdlib ``normalize`` ends with ``amplify({v()}, ...)``, whose ``override``
-defaults to ``liq_amplify``. A track boundary carrying it replaces the AGC gain with the
-item gain: the gain lands twice and the AGC stops riding (measured -28.5 LUFS instead of
--16 on Killing in the Name). In session.liq the decks' ``add()`` happens to hide those
-boundaries; this test feeds a deck straight into what session.liq does after that point,
-so the guard has to hold on its own.
+On 2.4.5 ``amplify``'s ``override`` defaults to ``liq_amplify``: in an AGC that ends in
+``amplify`` (the stdlib ``normalize`` did), a track boundary carrying it replaces the AGC
+gain with the item gain, so the gain lands twice and the AGC stops riding (measured -28.5
+LUFS instead of -16 on Killing in the Name). In session.liq the decks' ``add()`` happens to
+hide those boundaries; this test feeds a deck straight into what session.liq does after
+that point, so the guards (the metadata filter and agc.liq's ``override=null``) have to
+hold on their own.
 """
 
 from __future__ import annotations
@@ -25,10 +26,12 @@ ITEM_GAIN_DB = -10.0  # the incident's item: a -7 LUFS master at -10.5 dB
 MASTER_LUFS = -8.0  # measured: 500 Hz sine at the default 1/8 amplitude, raised 13.7 dB
 SPAN_S = 20
 
+AGC_SCRIPT = SESSION_SCRIPT.with_name("agc.liq")
+
 # From the line after the mix is built to the end of the AGC call: everything that sits
-# between the decks and normalize in session.liq.
+# between the decks and the AGC in session.liq.
 _AFTER_MIX = re.compile(r'^s = add\(id="main_and_bell".*\n', re.MULTILINE)
-_AGC_CALL = re.compile(r"^s = normalize\(.*?^\)\n", re.MULTILINE | re.DOTALL)
+_AGC_CALL = re.compile(r"^s = agc\(.*?\)\n", re.MULTILINE | re.DOTALL)
 
 
 def up_to_agc(script: str) -> str:
@@ -67,6 +70,7 @@ def render_script(agc: str) -> str:
     return "\n".join(
         [
             "settings.log.level := 2",
+            f'%include "{AGC_SCRIPT.as_posix()}"',
             'm = single("annotate:liq_amplify=\\"#{environment.get(\'ITEM_GAIN\')} dB\\":'
             "#{environment.get('MASTER')}\")",
             's = amplify(1., override="liq_amplify", m)',
@@ -105,7 +109,7 @@ def integrated_lufs(path: Path) -> float:
 
 
 def test_agc_does_not_reapply_a_decks_item_gain(tmp_path: Path, liquidsoap_exe: Path) -> None:
-    script = tmp_path / "agc.liq"
+    script = tmp_path / "spliced.liq"
     script.write_text(render_script(up_to_agc(SESSION_SCRIPT.read_text("utf-8"))), "utf-8")
     out = tmp_path / "out.wav"
     env = {
@@ -123,6 +127,6 @@ def test_agc_does_not_reapply_a_decks_item_gain(tmp_path: Path, liquidsoap_exe: 
     # The deck brings the master to -18 and the AGC rides it toward its -16 target (measured
     # -16.6). With the item gain applied a second time it comes out at -28 (measured -28.0).
     assert loudness == pytest.approx(-16.0, abs=1.5), (
-        f"{loudness} LUFS: normalize re-applied liq_amplify "
+        f"{loudness} LUFS: the AGC re-applied liq_amplify "
         f"(double gain would give {MASTER_LUFS + 2 * ITEM_GAIN_DB})"
     )

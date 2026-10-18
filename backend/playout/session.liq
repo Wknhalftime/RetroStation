@@ -460,11 +460,12 @@ main = fallback(id="main_or_filler", track_sensitive=false, [layers, filler])
 # The bell is silent and its metadata is dropped: it only has to be pulled every frame.
 s = add(id="main_and_bell", normalize=false, [main, source.drop.metadata(bell)])
 # The AGC must never see an item's gain: the decks have applied liq_amplify already. On
-# 2.4.5 normalize ends with amplify(), whose override defaults to "liq_amplify", so a track
-# boundary carrying it would replace the AGC gain with the item gain (applied twice, AGC
-# off: -28.5 LUFS instead of -16, measured feeding a deck straight in). add() hides deck
-# boundaries today; this holds without it (test_session_liq_agc.py). Not
-# settings.amplify.metadata := null: other operators rely on that default.
+# 2.4.5 amplify()'s override defaults to "liq_amplify", so in an AGC that ends in amplify a
+# track boundary carrying it would replace the AGC gain with the item gain (applied twice,
+# AGC off: -28.5 LUFS instead of -16, measured with normalize fed a deck straight in).
+# agc.liq passes override=null as well; add() hides deck boundaries today; this holds
+# without either (test_session_liq_agc.py). Not settings.amplify.metadata := null: other
+# operators rely on that default.
 def drop_item_gain(m) =
   list.filter(fun (kv) -> fst(kv) != "liq_amplify", m)
 end
