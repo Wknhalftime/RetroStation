@@ -34,12 +34,16 @@ class StationLinerRepository(ABC):
 
     @abstractmethod
     def rename(self, liner_id: UUID, name: str) -> None:
-        """Change the liner's name only; nothing when there is no such liner."""
+        """Change the liner's name only, stripped as ``StationLiner`` strips it. Raises
+        ``InvalidLinerValueError`` for a name a ``StationLiner`` refuses; nothing when there
+        is no such liner."""
         ...
 
     @abstractmethod
     def save_markers(self, liner_id: UUID, markers: CueMarkers | None) -> None:
-        """Store ``markers`` as the liner's edit, or clear it with None."""
+        """Store ``markers`` as the liner's edit, or clear it with None. Raises
+        ``InvalidLinerValueError`` for markers a ``StationLiner`` refuses (the fade not at
+        Stop, or Stop past the duration); nothing when there is no such liner."""
         ...
 
     @abstractmethod

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import UUID
 
 import psycopg
@@ -137,13 +138,24 @@ class PgStationLinerRepository(StationLinerRepository, LinerCueWorkRepository):
         return {a.audio_hash: a for a in found if a is not None}
 
     def rename(self, liner_id: UUID, name: str) -> None:
-        self._conn.execute(_RENAME_SQL, (name, liner_id))
+        liner = self.get(liner_id)
+        if liner is None:
+            return
+        # replace() re-runs StationLiner's rules: the name is stripped, or refused.
+        renamed = replace(liner, name=name)
+        self._conn.execute(_RENAME_SQL, (renamed.name, liner_id))
 
     def save_markers(self, liner_id: UUID, markers: CueMarkers | None) -> None:
-        if markers is None:
+        liner = self.get(liner_id)
+        if liner is None:
+            return
+        # replace() refuses a fade not at Stop and a Stop past the duration, so the
+        # table's CHECK is never what refuses an edit.
+        edit = replace(liner, markers=markers).markers
+        if edit is None:
             params: tuple[object, ...] = (None, None, None, liner_id)
         else:
-            params = (markers.start_ms, markers.eom_ms, markers.stop_ms, liner_id)
+            params = (edit.start_ms, edit.eom_ms, edit.stop_ms, liner_id)
         self._conn.execute(_MARKERS_SQL, params)
 
     def delete(self, liner_id: UUID) -> None:
