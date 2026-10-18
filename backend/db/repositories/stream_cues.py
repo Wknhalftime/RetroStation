@@ -102,6 +102,18 @@ def _to_analysis(row: DictRow) -> CueAnalysis:
     )
 
 
+def row_analysis(row: DictRow) -> CueAnalysis | None:
+    """The analysis a ``stream_cues`` row describes, or None (logged) for an invalid row.
+
+    Public: the liner store reads its liners' rows with it, so a row maps one way.
+    """
+    try:
+        return _to_analysis(row)
+    except (InvalidStreamValueError, InvalidAudioHashError) as error:
+        logger.warning("stream_cue_row_invalid", audio_hash=row["audio_hash"], error=str(error))
+        return None
+
+
 class PgStreamCueRepository(StreamCueRepository):
     """PostgreSQL implementation of :class:`StreamCueRepository` (table ``stream_cues``)."""
 
@@ -110,13 +122,7 @@ class PgStreamCueRepository(StreamCueRepository):
 
     def get(self, audio_hash: AudioHash) -> CueAnalysis | None:
         row = self._conn.execute(_GET_SQL, (str(audio_hash),)).fetchone()
-        if row is None:
-            return None
-        try:
-            return _to_analysis(row)
-        except (InvalidStreamValueError, InvalidAudioHashError) as error:
-            logger.warning("stream_cue_row_invalid", audio_hash=str(audio_hash), error=str(error))
-            return None
+        return None if row is None else row_analysis(row)
 
     def upsert(self, analysis: CueAnalysis) -> None:
         """Store ``analysis`` as its audio's cues; no library file needs to exist (D20).

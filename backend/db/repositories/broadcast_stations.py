@@ -11,6 +11,7 @@ from backend.domain.broadcast import (
     BroadcastStorageError,
     DuplicateCallLettersError,
 )
+from backend.domain.liners import LinerCadence
 from backend.repositories.broadcast_stations import BroadcastStationRepository
 
 #: Unique constraints a call-letters collision can violate: the original case-sensitive
@@ -35,19 +36,22 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
             city=row.get("city"),
             format_name=row.get("format_name"),
             created_at=row["created_at"],
+            liner_cadence=LinerCadence.from_setting(row.get("songs_between_liners")),
         )
 
     def create(self, station: BroadcastStation) -> BroadcastStation:
         try:
             self._conn.execute(
-                """INSERT INTO stations (id, call_letters, name, city, format_name)
-                   VALUES (%s, %s, %s, %s, %s)""",
+                """INSERT INTO stations
+                       (id, call_letters, name, city, format_name, songs_between_liners)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
                 (
                     station.id,
                     station.call_letters,
                     station.name,
                     station.city,
                     station.format_name,
+                    None if station.liner_cadence is None else station.liner_cadence.songs,
                 ),
             )
         except psycopg.errors.UniqueViolation as exc:
@@ -105,6 +109,12 @@ class PgBroadcastStationRepository(BroadcastStationRepository):
         if row is None:
             raise RuntimeError("Row not found after INSERT")
         return self._row_to_model(row)
+
+    def set_liner_cadence(self, station_id: UUID, cadence: LinerCadence | None) -> None:
+        self._conn.execute(
+            "UPDATE stations SET songs_between_liners = %s WHERE id = %s",
+            (None if cadence is None else cadence.songs, station_id),
+        )
 
     def delete(self, station_id: UUID) -> None:
         self._conn.execute("DELETE FROM stations WHERE id = %s", (station_id,))
