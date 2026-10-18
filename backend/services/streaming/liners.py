@@ -85,6 +85,11 @@ def _station_folder(root: Path, station_id: UUID) -> Path:
     return root / str(station_id)
 
 
+def liner_file(root: Path, liner: StationLiner) -> Path:
+    """Where the liner's stored file lives under the liners root ``root``."""
+    return _station_folder(root, liner.station_id) / liner.file_name
+
+
 @dataclass(frozen=True)
 class LinerPorts:
     """What the liner store is wired to at the composition root.
@@ -186,7 +191,7 @@ def rename_liner(ports: LinerPorts, station_id: UUID, liner_id: UUID, name: str)
         InvalidLinerValueError: the name is blank or longer than ``MAX_LINER_NAME``; nothing
             changes.
     """
-    _owned_liner(ports.liners, station_id, liner_id)
+    owned_liner(ports.liners, station_id, liner_id)
     ports.liners.rename(liner_id, name)
     ports.commit()
 
@@ -198,10 +203,10 @@ def delete_liner(ports: LinerPorts, station_id: UUID, liner_id: UUID) -> None:
     Raises:
         LinerNotFoundError: the station has no liner ``liner_id``.
     """
-    liner = _owned_liner(ports.liners, station_id, liner_id)
+    liner = owned_liner(ports.liners, station_id, liner_id)
     ports.liners.delete(liner_id)
     ports.commit()
-    _discard(_station_folder(ports.folder, station_id) / liner.file_name)
+    _discard(liner_file(ports.folder, liner))
     sweep_station_liners(ports, station_id)
 
 
@@ -241,8 +246,8 @@ def liner_audio(ports: LinerPorts, station_id: UUID, liner_id: UUID) -> LinerAud
     Raises:
         LinerNotFoundError: the station has no liner ``liner_id``, or its file is gone.
     """
-    liner = _owned_liner(ports.liners, station_id, liner_id)
-    path = _station_folder(ports.folder, station_id) / liner.file_name
+    liner = owned_liner(ports.liners, station_id, liner_id)
+    path = liner_file(ports.folder, liner)
     if not path.is_file():
         raise LinerNotFoundError(f"liner {liner_id} has no file at {path}")
     return LinerAudio(path=path, format=liner.format)
@@ -311,7 +316,7 @@ def _require_station(stations: BroadcastStationRepository, station_id: UUID) -> 
     return station
 
 
-def _owned_liner(liners: StationLinerRepository, station_id: UUID, liner_id: UUID) -> StationLiner:
+def owned_liner(liners: StationLinerRepository, station_id: UUID, liner_id: UUID) -> StationLiner:
     """The liner, reached only through its own station."""
     liner = liners.get(liner_id)
     if liner is None or liner.station_id != station_id:

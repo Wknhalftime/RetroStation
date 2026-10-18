@@ -4,8 +4,9 @@ serve the waveform the editor draws (station liners LR4, LR11; PR L3).
 A liner opens on what the radio plays for it (``liner_points``: autocue's row with no fades,
 or the whole file before analysis), with Fade-out pinned to Stop. An edit is stored on the
 liner's own row, never by audio hash, so the same audio in another station keeps its own.
-It reuses the song editor's ``CueEditorView``, ``CueAnalysisState`` and ``Waveform``.
-Commands return nothing; queries write nothing.
+It reuses the song editor's ``CueEditorView``, ``Waveform``, analysis state and clock text,
+and the liner store's ownership check and file path. Save refuses what ``liner_points`` would
+not play (a silent liner). Commands return nothing; queries write nothing.
 """
 
 from __future__ import annotations
@@ -26,11 +27,13 @@ from backend.playout.peaks import PeakReadError
 from backend.repositories.station_liners import StationLinerRepository
 from backend.repositories.stream_cues import StreamCueRepository
 from backend.services.streaming.cue_editor import (
-    CueAnalysisState,
     CueEditorView,
     ReadPeaks,
     Waveform,
+    analysis_state,
+    clock_text,
 )
+from backend.services.streaming.liners import liner_file, owned_liner
 
 SILENT_REFUSAL = "This liner was measured silent, so the radio skips it; its cues can't be edited."
 
@@ -46,21 +49,6 @@ class LinerCuePorts:
     commit: Callable[[], None]
 
 
-def _own_liner(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> StationLiner:
-    liner = ports.liners.get(liner_id)
-    if liner is None or liner.station_id != station_id:
-        raise LinerNotFoundError(f"Station {station_id} has no liner {liner_id}.")
-    return liner
-
-
-def _analysis_state(row: CueAnalysis | None) -> CueAnalysisState:
-    if row is None:
-        return CueAnalysisState.WAITING
-    if row.audio_silent:
-        return CueAnalysisState.SILENT
-    return CueAnalysisState.FAILED if row.analysis_failed else CueAnalysisState.MEASURED
-
-
 def _opening_markers(liner: StationLiner, row: CueAnalysis | None) -> CueMarkers:
     """What the radio plays for this liner without an edit, held within its length so the
     markers the editor opens on can always be saved; a silent liner opens on the whole file."""
@@ -74,14 +62,8 @@ def _opening_markers(liner: StationLiner, row: CueAnalysis | None) -> CueMarkers
     return liner_markers(start_ms, eom_ms, stop_ms)
 
 
-def _clock(ms: int) -> str:
-    """``ms`` as m:ss.mmm, the way the editor shows a time."""
-    minutes, rest = divmod(ms, 60_000)
-    return f"{minutes}:{rest // 1000:02d}.{rest % 1000:03d}"
-
-
 def read_liner_cues(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> CueEditorView:
-    liner = _own_liner(ports, station_id, liner_id)
+    liner = owned_liner(ports.liners, station_id, liner_id)
     row = ports.cues.get(liner.audio_hash)
     return CueEditorView(
         file_id=liner.id,
@@ -89,7 +71,7 @@ def read_liner_cues(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> C
         artist=None,
         format=liner.format.value,
         duration_ms=liner.duration_ms,
-        analysis=_analysis_state(row),
+        analysis=analysis_state(row),
         automatic=_opening_markers(liner, row),
         manual=liner.markers,
     )
@@ -98,19 +80,19 @@ def read_liner_cues(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> C
 def save_liner_cues(
     ports: LinerCuePorts, station_id: UUID, liner_id: UUID, start_ms: int, eom_ms: int, stop_ms: int
 ) -> None:
-    liner = _own_liner(ports, station_id, liner_id)
+    liner = owned_liner(ports.liners, station_id, liner_id)
     row = ports.cues.get(liner.audio_hash)
-    if row is not None and row.audio_silent:
+    if liner_points(liner.duration_ms, None, row) is None:
         raise CueEditRejectedError(SILENT_REFUSAL)
     if stop_ms > liner.duration_ms:
-        end = _clock(liner.duration_ms)
+        end = clock_text(liner.duration_ms)
         raise CueEditRejectedError(f"Stop can't be past the end of the liner ({end}).")
     ports.liners.save_markers(liner.id, liner_markers(start_ms, eom_ms, stop_ms))
     ports.commit()
 
 
 def reset_liner_cues(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> None:
-    liner = _own_liner(ports, station_id, liner_id)
+    liner = owned_liner(ports.liners, station_id, liner_id)
     ports.liners.save_markers(liner.id, None)
     ports.commit()
 
@@ -118,8 +100,8 @@ def reset_liner_cues(ports: LinerCuePorts, station_id: UUID, liner_id: UUID) -> 
 def read_liner_waveform(
     ports: LinerCuePorts, station_id: UUID, liner_id: UUID, read: ReadPeaks
 ) -> Waveform:
-    liner = _own_liner(ports, station_id, liner_id)
-    path = ports.folder / str(station_id) / liner.file_name
+    liner = owned_liner(ports.liners, station_id, liner_id)
+    path = liner_file(ports.folder, liner)
     if not path.is_file():
         raise LinerNotFoundError(f"The file of liner {liner_id} is no longer on disk.")
     try:
