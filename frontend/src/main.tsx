@@ -6,6 +6,7 @@ import App from "./App";
 import { StationList } from "@/pages/stations/StationList";
 import { StationDashboard } from "@/pages/stations/StationDashboard";
 import { PlaylistViewer } from "@/pages/stations/PlaylistViewer";
+import { LinerCueEditor } from "@/pages/stations/LinerCueEditor";
 import { MatcherBrowser } from "@/pages/matcher/MatcherBrowser";
 import { ScannerActions } from "@/pages/matcher/ScannerActions";
 import { LibraryStatus } from "@/pages/library/LibraryStatus";
@@ -39,6 +40,10 @@ const router = createBrowserRouter([
       {
         path: "stations/:station_id/playlists",
         element: <PlaylistViewer />,
+      },
+      {
+        path: "stations/:station_id/liners/:liner_id/cues",
+        element: <LinerCueEditor />,
       },
       { path: "library", element: <LibraryStatus /> },
       { path: "library/missing", element: <MissingFiles /> },

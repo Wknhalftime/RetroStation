@@ -15,9 +15,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from backend.dependencies import get_current_token, get_liner_ports
+from backend.dependencies import (
+    get_current_token,
+    get_liner_cue_ports,
+    get_liner_ports,
+    get_peak_reader,
+)
 from backend.domain.broadcast import UnknownStationError
 from backend.domain.liners import (
     MAX_LINER_BYTES,
@@ -32,6 +37,9 @@ from backend.domain.liners import (
 from backend.domain.streaming import (
     ClipFormat,
     ClipTooLargeError,
+    CueAudioUnreadableError,
+    CueEditRejectedError,
+    InvalidStreamValueError,
     UnreadableClipError,
     UnsupportedClipError,
 )
@@ -41,6 +49,15 @@ from backend.routers.clip_upload import (
     UploadLimits,
     declared_over,
     read_audio_upload,
+)
+from backend.routers.cue_schemas import CueEditorOut, WaveformOut, editor_out, waveform_out
+from backend.services.streaming.cue_editor import ReadPeaks
+from backend.services.streaming.liner_cues import (
+    LinerCuePorts,
+    read_liner_cues,
+    read_liner_waveform,
+    reset_liner_cues,
+    save_liner_cues,
 )
 from backend.services.streaming.liners import (
     LinerLibrary,
@@ -58,6 +75,8 @@ router = APIRouter()
 
 Token = Annotated[str, Depends(get_current_token)]
 Ports = Annotated[LinerPorts, Depends(get_liner_ports)]
+CuePorts = Annotated[LinerCuePorts, Depends(get_liner_cue_ports)]
+PeakReader = Annotated[ReadPeaks, Depends(get_peak_reader)]
 
 LINER_LIMITS = UploadLimits(
     max_file_bytes=MAX_LINER_BYTES,
@@ -111,6 +130,18 @@ class RenameIn(BaseModel):
     name: str = Field(strict=True)
 
 
+class LinerCuesIn(BaseModel):
+    """Request body for PUT /liners/{liner_id}/cues: the three markers, whole milliseconds
+    (strict, >= 0). There is no fade: a liner's Fade-out is its Stop (LR11), so a body carrying
+    ``fade_at_ms`` or any other extra field is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_ms: int = Field(strict=True, ge=0)
+    eom_ms: int = Field(strict=True, ge=0)
+    stop_ms: int = Field(strict=True, ge=0)
+
+
 class LinerAddedOut(BaseModel):
     """Response body for POST /liners: the liner's id, and whether it is new."""
 
@@ -153,6 +184,18 @@ def _invalid(field: str, refused: Exception) -> HTTPException:
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail=[{"loc": ["body", field], "msg": str(refused), "type": "value_error"}],
     )
+
+
+def _body_invalid(reason: Exception) -> HTTPException:
+    """A 422 in FastAPI's list shape, located at the whole request body."""
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=[{"loc": ["body"], "msg": str(reason), "type": "value_error"}],
+    )
+
+
+def _invalid_audio(unreadable: Exception) -> HTTPException:
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(unreadable))
 
 
 def _not_found(missing: Exception) -> HTTPException:
@@ -280,3 +323,67 @@ def get_liner_audio(station_id: UUID, liner_id: UUID, _token: Token, ports: Port
     except StorageUnavailableError as lost:
         raise _unavailable() from lost
     return FileResponse(audio.path, media_type=_MEDIA_TYPES[audio.format])
+
+
+@router.get("/{station_id}/liners/{liner_id}/cues", response_model=CueEditorOut)
+def get_liner_cues(
+    station_id: UUID, liner_id: UUID, _token: Token, ports: CuePorts
+) -> CueEditorOut:
+    """The liner's cues as the editor opens on them: what the radio plays, and any saved
+    edit (LR11)."""
+    try:
+        view = read_liner_cues(ports, station_id, liner_id)
+    except LinerNotFoundError as missing:
+        raise _not_found(missing) from missing
+    except StorageUnavailableError as lost:
+        raise _unavailable() from lost
+    return editor_out(view)
+
+
+@router.put("/{station_id}/liners/{liner_id}/cues", status_code=status.HTTP_204_NO_CONTENT)
+def put_liner_cues(
+    station_id: UUID, liner_id: UUID, body: LinerCuesIn, _token: Token, ports: CuePorts
+) -> Response:
+    """Save the liner's manual edit, unless the markers are out of order or the liner's
+    length or silence rules refuse them (LR4, LR11)."""
+    try:
+        save_liner_cues(ports, station_id, liner_id, body.start_ms, body.eom_ms, body.stop_ms)
+    except LinerNotFoundError as missing:
+        raise _not_found(missing) from missing
+    except (InvalidStreamValueError, CueEditRejectedError) as refused:
+        raise _body_invalid(refused) from refused
+    except LinerStorageError as failed:
+        raise _storage_failed(failed) from failed
+    except StorageUnavailableError as lost:
+        raise _unavailable() from lost
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{station_id}/liners/{liner_id}/cues", status_code=status.HTTP_204_NO_CONTENT)
+def delete_liner_cues(station_id: UUID, liner_id: UUID, _token: Token, ports: CuePorts) -> Response:
+    """Remove the liner's manual edit; a liner without one is left as it is (LR11)."""
+    try:
+        reset_liner_cues(ports, station_id, liner_id)
+    except LinerNotFoundError as missing:
+        raise _not_found(missing) from missing
+    except LinerStorageError as failed:
+        raise _storage_failed(failed) from failed
+    except StorageUnavailableError as lost:
+        raise _unavailable() from lost
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{station_id}/liners/{liner_id}/waveform", response_model=WaveformOut)
+def get_liner_waveform(
+    station_id: UUID, liner_id: UUID, _token: Token, ports: CuePorts, read: PeakReader
+) -> WaveformOut:
+    """The liner's peaks, for the editor to draw (LR11)."""
+    try:
+        waveform = read_liner_waveform(ports, station_id, liner_id, read)
+    except LinerNotFoundError as missing:
+        raise _not_found(missing) from missing
+    except CueAudioUnreadableError as unreadable:
+        raise _invalid_audio(unreadable) from unreadable
+    except StorageUnavailableError as lost:
+        raise _unavailable() from lost
+    return waveform_out(waveform)

@@ -22,6 +22,8 @@ export interface CueWaveformsProps {
   status: string | null;
   onMarker(key: MarkerKey, ms: number): void;
   onView(which: BoxKey, v: View): void;
+  /** The markers drawn and draggable on every view (default MARKER_ORDER). */
+  markerKeys?: readonly MarkerKey[];
 }
 
 function PaneLabel({ children }: { children: ReactNode }) {
@@ -46,6 +48,7 @@ const BUTTON = cn(
 
 export function CueWaveforms(props: CueWaveformsProps) {
   const { peaks, perSecond, durationMs, markers, views, preview, status, onMarker, onView } = props;
+  const { markerKeys } = props;
   const whole = useMemo(() => ({ from: 0, to: durationMs }), [durationMs]);
   const startRange = previewRange("start", markers, views.end);
   const endRange = previewRange("end", markers, views.end);
@@ -59,6 +62,7 @@ export function CueWaveforms(props: CueWaveformsProps) {
     markers,
     playheadMs: preview.playheadMs,
     onMarker,
+    markerKeys,
   };
 
   return (

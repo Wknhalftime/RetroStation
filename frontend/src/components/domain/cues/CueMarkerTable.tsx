@@ -1,7 +1,7 @@
 import { formatMs, type MarkerKey, type Markers } from "./cueMath";
 import { MARKER_COLOR, MARKER_LABEL, MARKER_ORDER } from "./markerStyle";
 
-// The four markers as numbers: each one's time, buttons that nudge it, and what autocue set it to.
+// The markers as numbers: each one's time, buttons that nudge it, and what autocue set it to.
 
 const NUDGES: readonly { label: string; deltaMs: number }[] = [
   { label: "-1", deltaMs: -1000 },
@@ -19,9 +19,12 @@ interface CueMarkerTableProps {
   markers: Markers;
   automatic: Markers;
   onNudge(key: MarkerKey, deltaMs: number): void;
+  /** The markers listed, in order (default MARKER_ORDER). */
+  markerKeys?: readonly MarkerKey[];
 }
 
-export function CueMarkerTable({ markers, automatic, onNudge }: CueMarkerTableProps) {
+export function CueMarkerTable(props: CueMarkerTableProps) {
+  const { markers, automatic, onNudge, markerKeys = MARKER_ORDER } = props;
   return (
     <table className="w-full text-sm">
       <thead>
@@ -33,7 +36,7 @@ export function CueMarkerTable({ markers, automatic, onNudge }: CueMarkerTablePr
         </tr>
       </thead>
       <tbody>
-        {MARKER_ORDER.map((key) => (
+        {markerKeys.map((key) => (
           <tr key={key} className="border-t border-gray-100">
             <td className="py-2 pr-4 whitespace-nowrap text-gray-900">
               <span aria-hidden="true" style={{ color: MARKER_COLOR[key] }}>

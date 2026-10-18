@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Pencil,
@@ -23,7 +23,13 @@ import { usePlaylists } from "@/api/playlists";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
 
-type DashboardTab = "overview" | "missing-matches" | "liners";
+const DASHBOARD_TABS = ["overview", "missing-matches", "liners"] as const;
+type DashboardTab = (typeof DASHBOARD_TABS)[number];
+
+/** The tab named by `?tab=`, or Overview when it names none. */
+function tabFrom(value: string | null): DashboardTab {
+  return DASHBOARD_TABS.find((tab) => tab === value) ?? "overview";
+}
 
 type UploadStatus =
   | { kind: "idle" }
@@ -35,7 +41,19 @@ export function StationDashboard() {
   const { station_id } = useParams<{ station_id: string }>();
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
-  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  // The tab lives in the URL (?tab=), so coming back from a page opened here (a liner's cues)
+  // lands on the tab it was opened from. Switching tabs replaces the entry rather than adding one.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = tabFrom(searchParams.get("tab"));
+  const setActiveTab = (tab: DashboardTab) =>
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("tab", tab);
+        return next;
+      },
+      { replace: true }
+    );
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
     kind: "idle",
   });
@@ -242,13 +260,25 @@ export function StationDashboard() {
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-200">
-        <button type="button" className={tabClass("overview")} onClick={() => setActiveTab("overview")}>
+        <button
+          type="button"
+          className={tabClass("overview")}
+          onClick={() => setActiveTab("overview")}
+        >
           Overview
         </button>
-        <button type="button" className={tabClass("missing-matches")} onClick={() => setActiveTab("missing-matches")}>
+        <button
+          type="button"
+          className={tabClass("missing-matches")}
+          onClick={() => setActiveTab("missing-matches")}
+        >
           Missing Matches
         </button>
-        <button type="button" className={tabClass("liners")} onClick={() => setActiveTab("liners")}>
+        <button
+          type="button"
+          className={tabClass("liners")}
+          onClick={() => setActiveTab("liners")}
+        >
           Liners
         </button>
       </div>
