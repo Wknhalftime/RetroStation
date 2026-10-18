@@ -61,6 +61,7 @@ _MEDIA_TYPE_OF = {
     "mp3": "audio/mpeg",
     "wav": "audio/wav",
     "m4a": "audio/mp4",
+    "aac": "audio/mp4",  # the scanner stores .m4a as "aac"
     "ogg": "audio/ogg",
 }
 _UNKNOWN_MEDIA_TYPE = "application/octet-stream"
@@ -124,7 +125,10 @@ def _http_error(failure: CueEditError | StorageUnavailableError) -> HTTPExceptio
         return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable")
     if isinstance(failure, CueEditRejectedError):
         return _body_invalid(str(failure))
-    return HTTPException(_STATUS_OF[type(failure)], str(failure))
+    for kind in type(failure).__mro__:
+        if kind in _STATUS_OF:
+            return HTTPException(_STATUS_OF[kind], str(failure))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(failure))
 
 
 # ---------------------------------------------------------------------------
@@ -198,5 +202,5 @@ def get_audio(file_id: UUID, _token: Token, ports: Ports) -> FileResponse:
         source = audio_path(ports, file_id)
     except (CueEditError, StorageUnavailableError) as failure:
         raise _http_error(failure) from failure
-    media_type = _MEDIA_TYPE_OF.get(source.format, _UNKNOWN_MEDIA_TYPE)
+    media_type = _MEDIA_TYPE_OF.get(source.format.lower(), _UNKNOWN_MEDIA_TYPE)
     return FileResponse(source.path, media_type=media_type)

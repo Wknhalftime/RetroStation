@@ -149,12 +149,19 @@ def read_cue_editor(ports: CueEditorPorts, file_id: UUID, timing: StreamTiming) 
     )
 
 
+def _clock(ms: int) -> str:
+    """``ms`` as m:ss.mmm, the way the editor shows a time."""
+    minutes, rest = divmod(ms, 60_000)
+    return f"{minutes}:{rest // 1000:02d}.{rest % 1000:03d}"
+
+
 def _refusal_for(target: _Editable, markers: CueMarkers, timing: StreamTiming) -> str | None:
     """Why the radio would not play these markers, or None when it would."""
     if target.row is not None and target.row.audio_silent:
         return SILENT_REFUSAL
     if markers.stop_ms > target.duration_ms:
-        return f"Stop can't be past the end of the song ({target.duration_ms} ms)."
+        end = _clock(target.duration_ms)
+        return f"Stop can't be past the end of the song ({end})."
     stored = None if target.row is None else target.row.cues
     playable = PlayableFile(
         target.file.id,

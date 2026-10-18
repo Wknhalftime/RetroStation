@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from backend.playout.liquidsoap_process import NO_WINDOW
+
 _FULL_SCALE = 32768
 _BYTE_MAX = 255
 
@@ -61,14 +63,16 @@ def _decode(path: str, settings: PeakSettings) -> bytes:
     try:
         done = subprocess.run(
             _decode_command(path, settings),
+            stdin=subprocess.DEVNULL,  # ffmpeg reads keys from an inherited console
             capture_output=True,
             timeout=settings.timeout_s,
             check=False,
+            creationflags=NO_WINDOW,
         )
-    except FileNotFoundError as exc:
-        raise PeakReadError(f"ffmpeg not found: {settings.ffmpeg}") from exc
     except subprocess.TimeoutExpired as exc:
         raise PeakReadError(f"ffmpeg timed out after {settings.timeout_s}s on {path}") from exc
+    except OSError as exc:  # not found, not executable, a directory
+        raise PeakReadError(f"ffmpeg could not start ({settings.ffmpeg}): {exc}") from exc
     if done.returncode != 0:
         reason = _last_line(done.stderr) or f"ffmpeg exited with {done.returncode}"
         raise PeakReadError(reason)
@@ -76,12 +80,15 @@ def _decode(path: str, settings: PeakSettings) -> bytes:
 
 
 def _bucket_peaks(pcm: bytes, bucket: int) -> bytes:
-    # Widen first: abs(-32768) overflows int16.
-    samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.int32)
+    samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2")
     padded = -len(samples) % bucket
     if padded:
-        samples = np.concatenate([samples, np.zeros(padded, dtype=np.int32)])
-    loudest = np.abs(samples).reshape(-1, bucket).max(axis=1)
+        samples = np.concatenate([samples, np.zeros(padded, dtype="<i2")])
+    # Reduce in int16, then widen only the per-bucket extremes: abs(-32768) overflows int16.
+    buckets = samples.reshape(-1, bucket)
+    top = buckets.max(axis=1).astype(np.int32)
+    bottom = buckets.min(axis=1).astype(np.int32)
+    loudest = np.maximum(top, -bottom)
     scaled = np.minimum(np.rint(_BYTE_MAX * loudest / _FULL_SCALE), _BYTE_MAX)
     return bytes(scaled.astype(np.uint8))
 
