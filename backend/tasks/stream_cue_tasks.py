@@ -85,8 +85,10 @@ def _cue_cache_dir(stream_work_dir: Path) -> Path:
 
 def _liner_cue_work(repos: RepositoryFactory, work_dir: Path) -> LinerCueWork:
     """LR4: the liners needing analysis, each path made absolute under the liners folder
-    (the store gives it relative to that folder)."""
-    root = liner_folder(work_dir)
+    (the store gives it relative to that folder). A relative ``STREAM_WORK_DIR`` (the default
+    ``var/stream``) is taken against this process's working folder, as the upload's is, so
+    both name the same files when the API and the consumer start from the repo root."""
+    root = liner_folder(work_dir).absolute()
 
     def work() -> list[CueCandidate]:
         return [

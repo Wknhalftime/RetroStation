@@ -237,10 +237,11 @@ def discard_station_liners(folder: Path, station_id: UUID) -> None:
     """Remove the station's liner folder under the liners root ``folder``, best effort: a
     failure is logged; a station with no folder is not an error (LR3)."""
     station_folder = _station_folder(folder, station_id)
-    if not station_folder.exists():
-        return
+    # The exists() check sits inside the try: a failed stat is logged like a failed delete,
+    # since the station's row is already committed when this runs.
     try:
-        shutil.rmtree(station_folder)
+        if station_folder.exists():
+            shutil.rmtree(station_folder)
     except OSError as failed:
         logger.warning(_CLEANUP_FAILED, path=str(station_folder), error=str(failed))
 

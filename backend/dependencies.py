@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator, Callable, Generator
 from datetime import UTC, datetime
+from functools import partial
 from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Annotated, Any
@@ -227,12 +228,12 @@ def _liner_commit(repos: RepositoryFactory) -> Callable[[], None]:
 def get_liner_ports(repos: SyncRepos) -> LinerPorts:
     """The station liners' ports (LR2, LR3): the request's liner and station repositories and
     commit, the liners root under ``STREAM_WORK_DIR`` (the folder the cue task reads) and the
-    real content probe."""
+    real content probe, whose unsupported-format message names a liner (not a sign-off)."""
     return LinerPorts(
         liners=repos.broadcast.liners,
         stations=repos.broadcast.stations,
         folder=liner_folder(get_settings().stream_work_dir),
-        probe=probe_clip,
+        probe=partial(probe_clip, role="a liner"),
         commit=_liner_commit(repos),
         clock=lambda: datetime.now(UTC),
     )

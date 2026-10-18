@@ -1,4 +1,4 @@
--- 0042_station_liners.sql
+-- 0043_station_liners.sql
 -- Station liners (station liners spec, LR1, LR3, LR4): each station's own audio clips, and
 -- how many songs the station plays between them.
 

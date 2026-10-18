@@ -54,7 +54,7 @@ _PURGE_SQL = "DELETE FROM stream_cues WHERE analyser_version <> %s"
 
 # D56, in order. "In the library" is any library file carrying the audio, whatever its status
 # (a missing file may come back or be remapped), or any station liner (LR4);
-# idx_library_files_audio_hash serves the first, the liners' unique key the second.
+# idx_library_files_audio_hash serves the first, idx_station_liners_audio_hash the second.
 _CLEAR_RETURNED_SQL = """
 UPDATE stream_cues c SET orphaned_at = NULL
 WHERE c.orphaned_at IS NOT NULL

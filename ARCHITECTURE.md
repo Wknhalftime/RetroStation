@@ -82,7 +82,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 ## Station liners: a per-station clip library, analysed like songs
 
-- `station_liners` (migration 0042) holds one row per liner: name, `file_name`, `format`,
+- `station_liners` (migration 0043) holds one row per liner: name, `file_name`, `format`,
   `audio_hash`, `duration_ms`. `stations.songs_between_liners` is the cadence (NULL = off, LR1).
   The same audio is one liner per station (unique `(station_id, audio_hash)`); deleting a
   station cascades its rows. Nothing plays liners yet: the on-air side is a later PR (L2).
