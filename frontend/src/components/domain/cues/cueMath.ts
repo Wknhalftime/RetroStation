@@ -2,15 +2,11 @@
 // preview ranges (R8), the fade gain (C1) and peak down-sampling. No fetch, no React, no DOM, and
 // no knowledge of what is being edited, so station liners can reuse it. All times are in ms.
 
+import type { ApiMarkers } from "@/lib/schemas/cues";
+
 export type MarkerKey = "start" | "eom" | "fadeAt" | "stop";
 export type Markers = { start: number; eom: number; fadeAt: number; stop: number };
 export type View = { from: number; to: number };
-export type ApiMarkers = {
-  start_ms: number;
-  eom_ms: number;
-  fade_at_ms: number;
-  stop_ms: number;
-};
 
 export const MIN_SPAN_MS = 200;
 export const START_VIEW_MS = 15_000;

@@ -1,17 +1,18 @@
 import { z } from "zod";
-import type { ApiMarkers } from "@/components/domain/cues/cueMath";
 
 // ---------------------------------------------------------------------------
 // Cue editor wire shapes (backend/routers/library/cues.py)
 // ---------------------------------------------------------------------------
 
-// `satisfies` pins this schema to cueMath's ApiMarkers, so the two cannot drift apart.
 export const MarkersSchema = z.object({
   start_ms: z.number(),
   eom_ms: z.number(),
   fade_at_ms: z.number(),
   stop_ms: z.number(),
-}) satisfies z.ZodType<ApiMarkers>;
+});
+
+// The four markers in API names; cueMath converts them to and from its own Markers.
+export type ApiMarkers = z.infer<typeof MarkersSchema>;
 
 export const CueAnalysisSchema = z.enum(["measured", "failed", "waiting", "silent"]);
 
