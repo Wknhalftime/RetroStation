@@ -8,6 +8,7 @@ from backend.routers import (
     matching,
     playlists,
     settings,
+    station_liners,
     stations,
     streaming_settings,
     system_logs,
@@ -16,6 +17,7 @@ from backend.routers import (
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(stations.router, prefix="/stations", tags=["stations"])
+router.include_router(station_liners.router, prefix="/stations", tags=["station-liners"])
 router.include_router(ingestion.router, prefix="/ingestion", tags=["ingestion"])
 router.include_router(library.router, prefix="/library", tags=["library"])
 router.include_router(playlists.router, prefix="/playlists", tags=["playlists"])

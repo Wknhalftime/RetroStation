@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator, Callable, Generator
+from datetime import UTC, datetime
 from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Annotated, Any
@@ -15,6 +16,7 @@ from backend.db.repositories.stream_cue_coverage import (
     BoundedCueCoverageRepository,
 )
 from backend.db.sync_conn import commit_or_unavailable
+from backend.domain.liners import LinerStorageError
 from backend.domain.streaming import ClipStorageError
 from backend.domain.system import StorageUnavailableError
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
@@ -23,6 +25,7 @@ from backend.services.audio_tags import probe_clip
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.streaming.liners import LinerPorts, liner_folder
 from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
@@ -203,6 +206,33 @@ def get_sign_off_ports(
         folder=folder,
         probe=probe_clip,
         commit=_sign_off_commit(repos),
+    )
+
+
+def _liner_commit(repos: RepositoryFactory) -> Callable[[], None]:
+    """The request's commit, with a lost database connection translated into the domain's
+    ``LinerStorageError`` at this adapter boundary (503 at the route)."""
+
+    def commit() -> None:
+        try:
+            repos.commit()
+        except psycopg.OperationalError as lost:
+            raise LinerStorageError(f"the liner could not be saved: {lost}") from lost
+
+    return commit
+
+
+def get_liner_ports(repos: SyncRepos) -> LinerPorts:
+    """The station liners' ports (LR2, LR3): the request's liner and station repositories and
+    commit, the liners root under ``STREAM_WORK_DIR`` (the folder the cue task reads) and the
+    real content probe."""
+    return LinerPorts(
+        liners=repos.broadcast.liners,
+        stations=repos.broadcast.stations,
+        folder=liner_folder(get_settings().stream_work_dir),
+        probe=probe_clip,
+        commit=_liner_commit(repos),
+        clock=lambda: datetime.now(UTC),
     )
 
 

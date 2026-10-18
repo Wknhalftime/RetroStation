@@ -24,6 +24,7 @@ from backend.services.m3u_generator_service import generate_m3u
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.stations import create_station as svc_create_station
 from backend.services.stations import update_station as svc_update_station
+from backend.services.streaming.liners import discard_station_liners, liner_folder
 
 router = APIRouter()
 
@@ -262,10 +263,14 @@ async def delete_station(station_id: UUID, conn: DbConn, _token: Token) -> None:
 
     Globally shared rows (broadcast_artists, track_identities,
     matches, artists, works, recordings) are not touched.
-    This is irreversible.
+    This is irreversible. Once the delete is committed, the station's liner folder under
+    ``STREAM_WORK_DIR`` goes too, best effort (LR3).
     """
     await _require_station(conn, station_id)
     await conn.execute("DELETE FROM stations WHERE id = %s", (station_id,))
+    await conn.commit()
+    liners = liner_folder(get_settings().stream_work_dir)
+    await asyncio.to_thread(discard_station_liners, liners, station_id)
 
 
 # ---------------------------------------------------------------------------
