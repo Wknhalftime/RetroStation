@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, apiFetchBytes } from "@/api/client";
+import { ApiError, apiFetch, apiFetchBytes } from "@/api/client";
 import {
   CueEditorSchema,
   WaveformSchema,
@@ -28,6 +28,8 @@ export function useCueEditor(fileId: string) {
       const data = await apiFetch(`${filePath(fileId)}/cues`);
       return CueEditorSchema.parse(data);
     },
+    // A 404 or 409 is the answer (not in the library, not fingerprinted): show it at once.
+    retry: (failures, error) => !(error instanceof ApiError && error.status < 500) && failures < 2,
   });
 }
 
@@ -44,8 +46,22 @@ export function useWaveform(fileId: string) {
 }
 
 // The song's file, for the browser to decode and play.
-export function fetchAudio(fileId: string): Promise<ArrayBuffer> {
-  return apiFetchBytes(`${filePath(fileId)}/audio`);
+export function fetchAudio(fileId: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return apiFetchBytes(`${filePath(fileId)}/audio`, signal);
+}
+
+export const cueAudioKey = (fileId: string) => ["cue-audio", fileId] as const;
+
+// The audio is tens of MB: fetched once per visit, cancelled if the page is left before it
+// arrives (the query's signal), and dropped from the cache as soon as nothing uses it.
+export function useCueAudio(fileId: string) {
+  return useQuery<ArrayBuffer>({
+    queryKey: cueAudioKey(fileId),
+    queryFn: ({ signal }) => fetchAudio(fileId, signal),
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import { SilentFiles } from "@/pages/library/SilentFiles";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
+import { CueEditor } from "@/pages/library/CueEditor";
 import { Settings } from "@/pages/settings/Settings";
 import { PathConfiguration } from "@/pages/settings/PathConfiguration";
 import { SystemLogs } from "@/pages/settings/SystemLogs";
@@ -48,6 +49,7 @@ const router = createBrowserRouter([
         path: "library/artists/:artist_id/works/:work_id",
         element: <AssociatedWorks />,
       },
+      { path: "library/files/:file_id/cues", element: <CueEditor /> },
       { path: "matcher", element: <MatcherBrowser /> },
       { path: "matcher/scanner", element: <ScannerActions /> },
       { path: "settings", element: <Settings /> },
