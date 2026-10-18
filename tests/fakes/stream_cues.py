@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -19,6 +21,9 @@ class FakeStreamCueRepository(StreamCueRepository):
         self.analyses: dict[AudioHash, CueAnalysis] = {}
         self.orphaned: dict[AudioHash, datetime] = {}
         self.file_hashes: dict[UUID, AudioHash | None] = {}
+
+    def get(self, audio_hash: AudioHash) -> CueAnalysis | None:
+        return self.analyses.get(audio_hash)
 
     def upsert(self, analysis: CueAnalysis) -> None:
         self.analyses[analysis.audio_hash] = analysis

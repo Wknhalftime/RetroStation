@@ -4,10 +4,16 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 import psycopg
+import structlog
 from psycopg.rows import DictRow
 
-from backend.domain.streaming import CueAnalysis
+from backend.domain.library import AudioHash, InvalidAudioHashError
+from backend.domain.streaming import CueAnalysis, CuePoints, InvalidStreamValueError
 from backend.repositories.stream_cues import StreamCueRepository
+
+logger = structlog.get_logger()
+
+_GET_SQL = "SELECT * FROM stream_cues WHERE audio_hash = %s"
 
 _COLUMNS = """(audio_hash, cue_in_ms, cue_out_ms, fade_in_ms, fade_out_ms,
      start_next_ms, loudness_lufs, gain_db, analyser_version, analysis_failed, analysed_at)"""
@@ -74,11 +80,39 @@ def _values(analysis: CueAnalysis) -> tuple[object, ...]:
     )
 
 
+def _to_analysis(row: DictRow) -> CueAnalysis:
+    """Builds the analysis a ``stream_cues`` row describes; raises on an invalid row."""
+    return CueAnalysis(
+        audio_hash=AudioHash.parse(row["audio_hash"]),
+        cues=CuePoints(
+            cue_in_ms=row["cue_in_ms"],
+            cue_out_ms=row["cue_out_ms"],
+            fade_in_ms=row["fade_in_ms"],
+            fade_out_ms=row["fade_out_ms"],
+            start_next_ms=row["start_next_ms"],
+            gain_db=row["gain_db"],
+        ),
+        loudness_lufs=row["loudness_lufs"],
+        analysis_failed=row["analysis_failed"],
+        analyser_version=row["analyser_version"],
+    )
+
+
 class PgStreamCueRepository(StreamCueRepository):
     """PostgreSQL implementation of :class:`StreamCueRepository` (table ``stream_cues``)."""
 
     def __init__(self, conn: psycopg.Connection[DictRow]) -> None:
         self._conn = conn
+
+    def get(self, audio_hash: AudioHash) -> CueAnalysis | None:
+        row = self._conn.execute(_GET_SQL, (str(audio_hash),)).fetchone()
+        if row is None:
+            return None
+        try:
+            return _to_analysis(row)
+        except (InvalidStreamValueError, InvalidAudioHashError) as error:
+            logger.warning("stream_cue_row_invalid", audio_hash=str(audio_hash), error=str(error))
+            return None
 
     def upsert(self, analysis: CueAnalysis) -> None:
         """Store ``analysis`` as its audio's cues; no library file needs to exist (D20).

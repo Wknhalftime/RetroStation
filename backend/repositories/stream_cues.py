@@ -1,12 +1,23 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from backend.domain.library import AudioHash
 from backend.domain.streaming import CueAnalysis
 
 
 class StreamCueRepository(ABC):
     """Stores one cue analysis per audio (``AudioHash``) for tune-in streaming (D20)."""
+
+    @abstractmethod
+    def get(self, audio_hash: AudioHash) -> CueAnalysis | None:
+        """The analysis stored for ``audio_hash``, or None when there is none.
+
+        A stored row that fails validation also reads as None (the adapter logs it).
+        """
+        ...
 
     @abstractmethod
     def upsert(self, analysis: CueAnalysis) -> None:
