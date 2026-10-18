@@ -16,13 +16,14 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { StationForm } from "@/components/domain/stations/StationForm";
 import { MissingMatchesReport } from "@/components/domain/stations/MissingMatchesReport";
+import { LinersTab } from "@/components/domain/stations/LinersTab";
 import { useStation, useUpdateStation } from "@/api/stations";
 import { useUploadPlaylist, useUploadPlaylists } from "@/api/ingestion";
 import { usePlaylists } from "@/api/playlists";
 import { formatDate } from "@/lib/utils";
 import type { StationUpdate } from "@/lib/schemas/stations";
 
-type DashboardTab = "overview" | "missing-matches";
+type DashboardTab = "overview" | "missing-matches" | "liners";
 
 type UploadStatus =
   | { kind: "idle" }
@@ -247,7 +248,13 @@ export function StationDashboard() {
         <button type="button" className={tabClass("missing-matches")} onClick={() => setActiveTab("missing-matches")}>
           Missing Matches
         </button>
+        <button type="button" className={tabClass("liners")} onClick={() => setActiveTab("liners")}>
+          Liners
+        </button>
       </div>
+
+      {/* Liners tab panel */}
+      {activeTab === "liners" && station_id && <LinersTab stationId={station_id} />}
 
       {/* Missing Matches tab panel */}
       {activeTab === "missing-matches" && station_id && (

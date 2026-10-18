@@ -143,3 +143,16 @@ export async function apiDownload(path: string, body?: unknown): Promise<Blob> {
   if (!res.ok) await throwForStatus(res);
   return res.blob();
 }
+
+// ---------------------------------------------------------------------------
+// apiGetBlob — GET that returns a Blob (audio for preview)
+// ---------------------------------------------------------------------------
+
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "X-Airwave-Token": TOKEN },
+  });
+
+  if (!res.ok) await throwForStatus(res);
+  return res.blob();
+}
