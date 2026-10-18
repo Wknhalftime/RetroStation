@@ -18,13 +18,15 @@ from pathlib import Path
 
 import pytest
 
+from backend.config import get_settings
 from backend.playout.peaks import PeakReadError, Peaks, PeakSettings, read_peaks
 
-FFMPEG = shutil.which("ffmpeg")
+# FFmpeg as the app finds it: the configured path first, then PATH.
+FFMPEG = shutil.which(get_settings().ffmpeg_path) or shutil.which("ffmpeg")
 
 pytestmark = [
     pytest.mark.slow,
-    pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not on PATH"),
+    pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not found (settings.ffmpeg_path, PATH)"),
 ]
 
 # The sine source plays at 1/8 of full scale; +12 dB makes it 0.498, i.e. about -6 dBFS.
@@ -68,7 +70,7 @@ def test_silence_then_tone_is_visible(tmp_path: Path) -> None:
     path = tmp_path / "silence-then-tone.wav"
     ffmpeg(
         "-filter_complex",
-        "anullsrc=r=8000:cl=mono:d=1[quiet];"
+        "anullsrc=r=8000:cl=mono:d=1,atrim=end_sample=8000[quiet];"
         + LOUD_SINE.format(frequency=440, seconds=1)
         + "[tone];[quiet][tone]concat=n=2:v=0:a=1[out]",
         "-map",
@@ -95,6 +97,17 @@ def test_a_peak_is_a_fraction_of_full_scale_in_255ths(tmp_path: Path) -> None:
     data = read_peaks(str(tone(tmp_path / "scale.wav", 1.0, frequency=1000)), settings()).data
     assert set(data[10:190]) <= {126, 127, 128}
     assert 127 in data
+
+
+def test_full_scale_reads_255_whatever_the_sign(tmp_path: Path) -> None:
+    """R7, Task 5: a sample at -32768 (clipped audio, which int16 abs() cannot negate) is full
+    scale, 255, and so is +1.0 (32767): the largest magnitude must not overflow or wrap."""
+    low = tmp_path / "low.wav"
+    ffmpeg("-f", "lavfi", "-i", "aevalsrc=-1:s=8000:d=1", "-c:a", "pcm_s16le", str(low))
+    high = tmp_path / "high.wav"
+    ffmpeg("-f", "lavfi", "-i", "aevalsrc=1:s=8000:d=1", "-c:a", "pcm_s16le", str(high))
+    assert read_peaks(str(low), settings()).data == bytes([255]) * 200
+    assert read_peaks(str(high), settings()).data == bytes([255]) * 200
 
 
 def test_per_second_sets_the_bucket_size(tmp_path: Path) -> None:

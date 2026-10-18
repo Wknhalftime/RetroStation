@@ -10,19 +10,18 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from types import SimpleNamespace
-from typing import cast
+from typing import cast, get_type_hints
 
 import pytest
-from fastapi.dependencies.utils import get_dependant
 
 import backend.dependencies as dependencies
 import backend.playout.peaks as peaks_module
 from backend.config import get_settings
 from backend.dependencies import (
+    SyncRepos,
     get_cue_editor_ports,
     get_peak_reader,
     get_stream_timing,
-    get_sync_repos,
 )
 from backend.domain.streaming import StreamTiming
 from backend.playout.peaks import Peaks, PeakSettings
@@ -108,11 +107,11 @@ def test_the_ports_are_built_from_the_request_repositories() -> None:
     assert ports.edits is edits
 
 
-def test_the_ports_come_from_the_request_scoped_connection() -> None:
-    """R7, plan note 12: the provider depends on ``SyncRepos`` (``get_sync_repos``, one
-    connection per request, committed before the response), not on a connection of its own."""
-    dependant = get_dependant(path="/files/{file_id}/cues", call=get_cue_editor_ports)
-    assert [sub.call for sub in dependant.dependencies] == [get_sync_repos]
+def test_the_ports_take_the_request_scoped_repositories() -> None:
+    """R7, plan note 12: the provider is declared ``get_cue_editor_ports(repos: SyncRepos)``,
+    one connection per request, committed before the response."""
+    hints = get_type_hints(get_cue_editor_ports, include_extras=True)
+    assert hints["repos"] == SyncRepos
 
 
 def test_the_stream_timing_is_the_radios_default() -> None:

@@ -70,6 +70,7 @@ WHOLE_FILE = CueMarkers(start_ms=0, eom_ms=252_893, fade_at_ms=248_893, stop_ms=
 EDIT = CueMarkers(start_ms=9_000, eom_ms=241_100, fade_at_ms=244_000, stop_ms=247_100)
 NOT_FINGERPRINTED = "This file hasn't been fingerprinted yet, so its cues can't be edited."
 NO_LENGTH = "This file has no known length."
+SILENT_REFUSAL = "This song was measured silent, so the radio skips it; its cues can't be edited."
 
 
 @dataclass
@@ -92,6 +93,13 @@ class Rig:
     def measure(self, points: CuePoints = HERETIC, *, failed: bool = False) -> None:
         self.cues.upsert(
             CueAnalysis(HASH, points, None if failed else -14.0, failed, CUE_ANALYSER_VERSION)
+        )
+
+    def measure_silent(self, duration_ms: int = DURATION_MS) -> None:
+        """A D111 row: the analysis found no audio; fallback values, failed and silent."""
+        fallback = CuePoints(0, duration_ms, 0, 4_000, 0, -8.0)
+        self.cues.upsert(
+            CueAnalysis(HASH, fallback, None, True, CUE_ANALYSER_VERSION, audio_silent=True)
         )
 
 
@@ -167,6 +175,35 @@ def test_view_of_unmeasured_song_opens_on_d23(rig: Rig) -> None:
     assert view.manual is None
 
 
+def test_view_of_silent_song_says_silent(rig: Rig) -> None:
+    """R3, C2, D111: a row measured silent opens on its whole-file fallback markers, flagged
+    SILENT (not 'failed': silence is not a failure), so the flat waveform can be shown."""
+    rig.measure_silent()
+    view = read_cue_editor(rig.ports, FILE_ID, TIMING)
+    assert view.analysis == CueAnalysisState.SILENT
+    assert view.automatic == CueMarkers(0, 252_893, 248_893, 252_893)
+    assert view.manual is None
+
+
+def test_view_duration_is_the_longer_of_the_tag_and_autocues_stop(rig: Rig) -> None:
+    """R3, R6, C2: when the tagged length (250_000) is shorter than the measured Stop
+    (252_893), the editor's length is the Stop, so the opening markers are always savable."""
+    rig.add_file(audio=AudioMetadata(track_title="Retagged", duration_ms=250_000))
+    rig.measure(CuePoints(0, 252_893, 0, 6_000, 6_000, -11.63))
+    view = read_cue_editor(rig.ports, FILE_ID, TIMING)
+    assert view.duration_ms == 252_893
+    assert view.automatic == CueMarkers(0, 246_893, 246_893, 252_893)
+
+    save_cue_edit(rig.ports, FILE_ID, view.automatic, TIMING)
+    assert rig.edits.edits == {HASH: view.automatic}
+
+
+def test_view_duration_is_the_tag_when_autocue_stops_earlier(rig: Rig) -> None:
+    """R3: the usual case (Stop before the end of the file) keeps the tagged length."""
+    rig.measure()
+    assert read_cue_editor(rig.ports, FILE_ID, TIMING).duration_ms == 252_893
+
+
 def test_view_shows_a_saved_edit_as_manual(rig: Rig) -> None:
     """R3, R4: a stored edit is the manual markers; the automatic ones stay autocue's."""
     rig.measure()
@@ -203,7 +240,12 @@ def test_viewing_writes_nothing(rig: Rig) -> None:
 
 def test_the_analysis_states_are_the_words_the_api_sends() -> None:
     """Interfaces: CueAnalysisState values are lowercase strings (they go out as JSON)."""
-    assert [state.value for state in CueAnalysisState] == ["measured", "failed", "waiting"]
+    assert [state.value for state in CueAnalysisState] == [
+        "measured",
+        "failed",
+        "waiting",
+        "silent",
+    ]
     assert CueAnalysisState.MEASURED == "measured"
 
 
@@ -339,6 +381,15 @@ def test_a_refused_edit_leaves_autocue_alone(rig: Rig) -> None:
     assert rig.cues.analyses[HASH].cues == HERETIC
 
 
+def test_save_refused_for_silent_audio(rig: Rig) -> None:
+    """C4, anti-goal 2, D111: the radio gives silent audio no file, edit or not, so an edit
+    would be one the radio never plays: refused, with this sentence, and nothing stored."""
+    rig.measure_silent()
+    error = refusal(lambda: save_cue_edit(rig.ports, FILE_ID, EDIT, TIMING))
+    assert str(error) == SILENT_REFUSAL
+    assert rig.edits.edits == {}
+
+
 # --- Reset (R4) ---------------------------------------------------------------------------
 
 
@@ -354,6 +405,14 @@ def test_reset_deletes_the_edit(rig: Rig) -> None:
 
 def test_reset_without_edit_is_fine(rig: Rig) -> None:
     """R4: resetting a song that has no edit is not an error."""
+    reset_cue_edit(rig.ports, FILE_ID)
+    assert rig.edits.edits == {}
+
+
+def test_reset_still_works_on_silent_audio(rig: Rig) -> None:
+    """R4, D111: an edit left from before the audio was measured silent can still be removed."""
+    rig.edits.save(HASH, EDIT)
+    rig.measure_silent()
     reset_cue_edit(rig.ports, FILE_ID)
     assert rig.edits.edits == {}
 
@@ -477,6 +536,23 @@ def test_a_directory_in_place_of_the_file_is_not_found(rig: Rig) -> None:
     rig.path.mkdir()
     with pytest.raises(CueEditFileNotFoundError):
         audio_path(rig.ports, FILE_ID)
+
+
+def test_waveform_and_audio_work_for_a_present_file_without_a_hash(rig: Rig) -> None:
+    """R7 (ruling): only view, save and reset need a hash; the audio and its waveform are
+    served for any present file."""
+    on_disk(rig)
+    rig.add_file(audio_hash=None)
+    waveform = read_waveform(rig.ports, FILE_ID, lambda path: Peaks(200, b"\x05"))
+    assert waveform.peaks == b"\x05"
+    assert audio_path(rig.ports, FILE_ID) == AudioSource(str(rig.path), "flac")
+
+
+def test_audio_works_for_a_present_file_with_no_hash_and_no_length(rig: Rig) -> None:
+    """R7 (ruling): not even the length is needed to serve the audio."""
+    on_disk(rig)
+    rig.add_file(audio_hash=None, audio=AudioMetadata(duration_ms=None))
+    assert audio_path(rig.ports, FILE_ID) == AudioSource(str(rig.path), "flac")
 
 
 def test_audio_path_of_present_file(rig: Rig) -> None:

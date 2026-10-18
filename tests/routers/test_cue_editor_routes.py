@@ -69,6 +69,7 @@ HERETIC = CuePoints(
 )
 EDIT = {"start_ms": 9_000, "eom_ms": 241_100, "fade_at_ms": 244_000, "stop_ms": 247_100}
 EDIT_MARKERS = CueMarkers(start_ms=9_000, eom_ms=241_100, fade_at_ms=244_000, stop_ms=247_100)
+SILENT_REFUSAL = "This song was measured silent, so the radio skips it; its cues can't be edited."
 NOT_FINGERPRINTED = "This file hasn't been fingerprinted yet, so its cues can't be edited."
 AUDIO_BYTES = bytes(range(256)) * 8
 
@@ -123,6 +124,12 @@ class Rig:
 
     def measure(self) -> None:
         self.cues.upsert(CueAnalysis(HASH, HERETIC, -14.0, False, CUE_ANALYSER_VERSION))
+
+    def measure_silent(self) -> None:
+        fallback = CuePoints(0, 252_893, 0, 4_000, 0, -8.0)
+        self.cues.upsert(
+            CueAnalysis(HASH, fallback, None, True, CUE_ANALYSER_VERSION, audio_silent=True)
+        )
 
     def put_on_disk(self, content: bytes = AUDIO_BYTES) -> None:
         self.path.write_bytes(content)
@@ -232,12 +239,14 @@ async def test_get_view_shape(rig: Rig) -> None:
     }
 
 
-@pytest.mark.parametrize("state", ["measured", "failed", "waiting"])
+@pytest.mark.parametrize("state", ["measured", "failed", "waiting", "silent"])
 async def test_get_view_says_how_the_song_was_analysed(rig: Rig, state: str) -> None:
-    """R7, R3, C5: ``analysis`` is measured, failed or waiting; the last two open on the whole
-    file."""
+    """R7, R3, C5, D111: ``analysis`` is measured, failed, waiting or silent; the last three
+    open on the whole file."""
     if state == "measured":
         rig.measure()
+    elif state == "silent":
+        rig.measure_silent()
     elif state == "failed":
         fallback = CuePoints(0, 252_893, 0, 4_000, 0, -8.0)
         rig.cues.upsert(CueAnalysis(HASH, fallback, None, True, CUE_ANALYSER_VERSION))
@@ -330,6 +339,24 @@ async def test_put_non_int_is_422(rig: Rig, change: Body) -> None:
     negative is 422 (FastAPI's list shape), and nothing is stored."""
     response = await call(app_for(rig.ports), "PUT", cues_path(), {**EDIT, **change})
     assert_list_shape(response)
+    assert rig.edits.edits == {}
+
+
+async def test_put_on_silent_audio_is_422_with_reason(rig: Rig) -> None:
+    """C4, D111, R7: the radio never plays silent audio, so the edit is refused (422, list
+    shape, ``loc == ["body"]``) with the reason, and nothing is stored."""
+    rig.measure_silent()
+    detail = assert_list_shape(await call(app_for(rig.ports), "PUT", cues_path(), EDIT))
+    assert detail[0]["loc"] == ["body"]
+    assert detail[0]["msg"] == SILENT_REFUSAL
+    assert rig.edits.edits == {}
+
+
+async def test_delete_still_works_on_silent_audio(rig: Rig) -> None:
+    """R4, D111: a stale edit on audio since measured silent can still be reset."""
+    rig.edits.save(HASH, EDIT_MARKERS)
+    rig.measure_silent()
+    assert (await call(app_for(rig.ports), "DELETE", cues_path())).status_code == 204
     assert rig.edits.edits == {}
 
 
@@ -456,6 +483,16 @@ async def test_audio_route_serves_bytes_with_media_type(
     response = await call(app_for(rig.ports), "GET", f"{LIBRARY}/files/{FILE_ID}/audio")
     assert response.status_code == 200
     assert response.headers["content-type"] == media_type
+    assert response.content == AUDIO_BYTES
+
+
+async def test_audio_route_serves_a_present_file_without_a_hash(rig: Rig) -> None:
+    """R7 (ruling): the audio of a present but unfingerprinted file is served (200, its bytes);
+    only view, save and reset need the hash."""
+    rig.put_on_disk()
+    rig.add_file(audio_hash=None)
+    response = await call(app_for(rig.ports), "GET", f"{LIBRARY}/files/{FILE_ID}/audio")
+    assert response.status_code == 200
     assert response.content == AUDIO_BYTES
 
 
