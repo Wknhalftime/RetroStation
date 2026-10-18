@@ -3,8 +3,8 @@
 **Status: 2026-10-18.** Checked against master 260a04e plus D111 (feat/silent-files); the
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
-feat/station-liners, and "Liners on air" with feat/liners-on-air (comment audit:
-`audit/comment-audit.md`). Rulings cited here are in
+feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
+feat/liner-cues (comment audit: `audit/comment-audit.md`). Rulings cited here are in
 `audit/rulings.jsonl` (AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -73,11 +73,14 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The checks are `tests/integration/test_stream_cue_edits_pg.py::test_purge_and_prune_leave_edits`
   and the reader tests in `tests/integration/test_playable_schedule_edits.py`.
 - The editor API (`routers/library/cues.py` -> `services/streaming/cue_editor.py`) is the only
-  writer of `stream_cue_edits`. Save refuses what the radio would skip by asking the domain's
-  own `PlayableFile.is_playable` (D9): there is no second copy of the rule, so radio = preview.
-  Change D9 or the reader and the editor follows.
+  writer of `stream_cue_edits`. For a song, Save refuses what the radio would skip by asking
+  the domain's own `PlayableFile.is_playable` (D9): there is no second copy of the song rule,
+  so radio = preview. Change D9 or the reader and the editor follows. Liners are edited
+  elsewhere (Station liners below).
 - `/waveform` runs ffmpeg inside the API process, in a request thread, with no cache
-  (`playout/peaks.py`, 200 peaks/s). `/audio` serves a library file by its id, never by a path.
+  (`playout/peaks.py`, 200 peaks/s), for a library file and for a liner alike. `/audio` serves
+  a library file by its id, and a liner's `/audio` serves the liner by its id; never by a path.
+  The response models both editors share are in `routers/cue_schemas.py`.
 - Its checks are `tests/services/streaming/test_cue_editor.py`,
   `tests/routers/test_cue_editor_routes.py` and `tests/playout/test_peaks.py`.
 
@@ -95,6 +98,15 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - A manual cue edit is three columns on the liner row (start, end of message, stop; the
   fade-out sits at the stop). It never goes to `stream_cue_edits`, which is per song hash
   (see Tune-in cues above), and an edit always beats autocue.
+- Liner cue edits live on that liner row and are edited only through
+  `/stations/{id}/liners/{id}/cues` (`routers/station_liners.py` ->
+  `services/streaming/liner_cues.py`; GET, PUT, DELETE, plus `/waveform`), never in
+  `stream_cue_edits`: `LinerCuePorts` has no port to it, and every route reaches the liner
+  through its own station (`owned_liner`), so another station's liner is a 404. Save refuses
+  what `liner_points` would not play (a silent liner) and a Stop past the end; the radio reads
+  the same row through `liner_points`. Its checks are
+  `tests/services/streaming/test_liner_cue_editor.py` and
+  `tests/routers/test_liner_cue_routes.py`.
 - Autocue touches liners in three places:
   - the run's priority set starts with the liners needing analysis, then today's songs
     (`cue_precompute`, `LinerCueWork`);
