@@ -15,10 +15,13 @@
 #   Without references the bass bands, which carry most of the energy, compressed hardest
 #   and tilted the sound 1.5-3 dB brighter.
 # - band 5's compressor is Off in the preset: band 5 follows band 4 at 100% (4>5 coupling,
-#   sidechaincompress keyed on band 4). Its delta release and max delta GR only act on its
-#   own compressor, so they do not apply. The 3>4 coupling (30%) is left out: band 4's own
-#   gain reduction (median 4.4 dB) is nearly always above 30% of band 3's (1.5 dB), and the
-#   coupling takes the larger of the two (p. 3-64).
+#   sidechaincompress keyed like band 4). Its delta release and max delta GR only act on its
+#   own compressor, so they do not apply.
+# - 3>4 coupling (`couple34`, preset 30%): band 4 takes the larger of its own gain reduction
+#   and 30% of band 3's (the "OR" rule, p. 3-64). Band 4's sidechain carries four channels,
+#   band 4 itself and a copy of band 3 that compand maps to the level giving 30% of band 3's
+#   gain reduction; linked by maximum, the compressor follows whichever needs more. Over six
+#   songs the coupling decides band 4's gain 17% of the time (median +0.8 dB, up to 5.6).
 # - bass clipper on band 1 at `bass_clip` dB under the limiter ceiling (preset -4), a tanh
 #   soft clip (ffmpeg's nearest to clip shape 7.6).
 # - peak control: the former 1 ms, 20:1 compressor at -1.5 dBFS, then a 5 ms lookahead
@@ -42,13 +45,21 @@ def multiband(
   ~makeup=0.,
   ~bass_clip=-4.,
   ~ceiling=-2.,
+  ~couple34=0.3,
   s
 ) =
   # drive 13 with these references puts band 3 at about 5 dB of gain reduction.
   calibration = 15.
-  def threshold(t, r) =
-    lin_of_dB(r + t - drive + calibration)
+  def threshold_db(t, r) =
+    r + t - drive + calibration
   end
+
+  def threshold(t, r) =
+    lin_of_dB(threshold_db(t, r))
+  end
+
+  t3_db = threshold_db(t3, ref3)
+  t4_db = threshold_db(t4, ref4)
   raw =
     ffmpeg.raw.encode.audio(
       %ffmpeg(%audio.raw(sample_format = "flt", sample_rate = 44100, channels = 2)), s
@@ -62,7 +73,20 @@ def multiband(
         detection=0, link=1, x
       )
     end
+    let (band3, _) = ffmpeg.filter.asplit(graph, outputs=2, list.nth(bands, 2))
     let (band4, _) = ffmpeg.filter.asplit(graph, outputs=2, list.nth(bands, 3))
+    # Band 3 at its threshold maps to band 4's threshold; above it, couple34 dB per dB.
+    coupled =
+      ffmpeg.filter.compand(
+        graph, attacks="#{a3 / 1000.}", decays="#{release / 1000.}", volume=-90.,
+        points="-90/-150|#{t3_db}/#{t4_db}|0/#{t4_db + couple34 * (0. - t3_db)}",
+        list.nth(band3, 1)
+      )
+    key =
+      ffmpeg.filter.join(
+        graph, inputs=2, channel_layout="quad", [list.nth(band4, 1), coupled], []
+      )
+    let (keys, _) = ffmpeg.filter.asplit(graph, outputs=2, key)
     c1 = squeeze(t1, ref1, a1, list.nth(bands, 0))
     # The clip sits on band 1's output after makeup, so its threshold takes makeup off.
     c1 =
@@ -70,13 +94,16 @@ def multiband(
         graph, type=0, threshold=lin_of_dB(ceiling + bass_clip - makeup), c1
       )
     c2 = squeeze(t2, ref2, a2, list.nth(bands, 1))
-    c3 = squeeze(t3, ref3, a3, list.nth(bands, 2))
-    c4 = squeeze(t4, ref4, a4, list.nth(band4, 0))
-    c5 =
+    c3 = squeeze(t3, ref3, a3, list.nth(band3, 0))
+    # Bands 4 and 5 both follow the four-channel key, so band 5 keeps band 4's full gain.
+    def follow(x, k) =
       ffmpeg.filter.sidechaincompress(
         graph, threshold=threshold(t4, ref4), ratio=20., attack=a4, release=release, knee=1.,
-        detection=0, link=1, list.nth(bands, 4), list.nth(band4, 1)
+        detection=0, link=1, x, k
       )
+    end
+    c4 = follow(list.nth(band4, 0), list.nth(keys, 0))
+    c5 = follow(list.nth(bands, 4), list.nth(keys, 1))
     mixed = ffmpeg.filter.amix(graph, inputs=5, normalize=false, [c1, c2, c3, c4, c5], [])
     mixed = ffmpeg.filter.volume(graph, volume="#{makeup}dB", mixed)
     mixed =
