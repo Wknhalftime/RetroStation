@@ -25,6 +25,9 @@
 #   gain can still come down but only creeps up, at window_rate: songs arrive already at
 #   -18 LUFS, so a quiet intro is the mix, not a level error, and lifting it at full rate
 #   sent the band's entrance 5-8 dB hot (Teen Spirit, Stairway, In the Air Tonight).
+#   12 s covers most rock intros (Teen Spirit's is about 8 s) and still lets a whole song
+#   that arrives quiet be lifted in time (the frozen gain test's 24 s item missed by 0.1 dB
+#   at 15 s).
 # Rates are in dB/s.
 def agc(
   ~target=-16.,
@@ -40,7 +43,7 @@ def agc(
   ~window_s=3.,
   ~attack_window_s=0.4,
   ~entrance=3.,
-  ~intro_hold=15.,
+  ~intro_hold=12.,
   ~crossover=200.,
   ~bass_couple=3.,
   ~bass_tilt=-3.6,
@@ -53,6 +56,10 @@ def agc(
   s = lufs(window={window_s}, fast)
   g = ref(idle)
   bass_offset = ref(0.)
+  # Linear gains, worked out once per frame in update(): amplify evaluates its getter on
+  # every sample, so the getters only read these (dB maths per sample cost CPU for nothing).
+  master_lin = ref(lin_of_dB(idle))
+  bass_extra_lin = ref(lin_of_dB(idle + bass_shelf) - lin_of_dB(idle))
   dt = frame.duration()
   # Frames left in the intro hold: gain may come down but only creeps up (window_rate).
   held = ref(int_of_float(intro_hold / dt))
@@ -144,6 +151,8 @@ def agc(
     end
     if bass_split then update_bass(gated) end
     if held() > 0 then held := held() - 1 end
+    master_lin := lin_of_dB(g())
+    bass_extra_lin := lin_of_dB(g() + bass_offset() + bass_shelf) - master_lin()
   end
 
   s.on_frame(synchronous=true, update)
@@ -157,11 +166,8 @@ def agc(
       # filter instead of two): out = master gain x full + (bass gain - master gain) x low.
       # Mixed as tracks, not with add(): add() drops track marks (measured), and the song
       # boundaries must reach the outputs. Metadata and marks come from the full band.
-      def bass_extra() =
-        lin_of_dB(g() + bass_offset() + bass_shelf) - lin_of_dB(g())
-      end
-      full = source.tracks(amplify(override=null, {lin_of_dB(g())}, full_rms))
-      lo = source.tracks(amplify(override=null, bass_extra, low_rms))
+      full = source.tracks(amplify(override=null, {master_lin()}, full_rms))
+      lo = source.tracks(amplify(override=null, {bass_extra_lin()}, low_rms))
       source(
         {
           audio=track.audio.add(normalize=false, [full.audio, lo.audio]),
@@ -170,7 +176,7 @@ def agc(
         }
       )
     else
-      amplify(override=null, {lin_of_dB(g())}, s)
+      amplify(override=null, {master_lin()}, s)
     end
   result.{gain={g()}, bass_offset={bass_offset()}, hold=hold}
 end

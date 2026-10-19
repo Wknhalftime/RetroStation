@@ -485,17 +485,18 @@ s = metadata.map(id="no_item_gain", update=false, drop_item_gain, s)
 # Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
 # compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
 # with a lookahead outputs nothing but silence in most runs.
-# AGC (agc.liq): windowed, gated and two-band like the Optimod's, set from Lance's Rock-Light
-# preset (release 3 dB/s, window 3 dB at 0.5 dB/s, bass band at 200 Hz coupled within 3 dB).
-# Songs arrive at -18 LUFS (liq_amplify), so the idle gain is +2 dB; the gate at -33 sits
-# 15 dB below program (Rock-Light's -40 is on Orban's own scale: -40 here sent entrances
-# hotter). For 15 s after a song starts the gain only creeps up, so a quiet intro is not
-# lifted into the band's entrance (Smells Like Teen Spirit: +5.0 -> +3.0 dB over usual).
-s = agc(target=-16., idle=2., threshold=-33., bass_shelf=2., s)
+# AGC (agc.liq): windowed and gated like the Optimod's, set from Lance's Rock-Light preset
+# (release 3 dB/s, window 3 dB at 0.5 dB/s). Songs arrive at -18 LUFS (liq_amplify), so the
+# idle gain is +2 dB; the gate at -33 sits 15 dB below program (Rock-Light's -40 is on
+# Orban's own scale: -40 here sent entrances hotter). For 12 s after a song starts the gain
+# only creeps up, so a quiet intro is not lifted into the band's entrance (Smells Like Teen
+# Spirit: +5.0 -> +3.0 dB over usual). One band (crossover=0.): the bass band's per-frame
+# work widened the end-of-schedule race (8 resets in 224 under load against 0), and the
+# multiband's bands 1-2 control bass dynamics anyway.
+s = agc(target=-16., idle=2., threshold=-33., crossover=0., s)
 song_started := s.hold
-# EQ, Rock-Light: the bass shelf (+2 dB below 200 Hz) is in the AGC's bass band
-# (bass_shelf, above); low +1 dB at 266 Hz, 2 oct = Q 0.67; mid +2 dB at 5209 Hz, 3.8 oct =
-# Q 0.29. Liquidsoap's own lowshelf has no gain.
+# EQ, Rock-Light: the bass shelf (+2 dB below 200 Hz) is in the multiband's graph; low +1 dB
+# at 266 Hz, 2 oct = Q 0.67; mid +2 dB at 5209 Hz, 3.8 oct = Q 0.29.
 s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
 s = filter.iir.eq.peak(frequency=5209., gain=2., q=0.29, s)
 # Five-band compression and peak control (multiband.liq), from Lance's Optimod Rock-Light
