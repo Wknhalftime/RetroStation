@@ -443,6 +443,9 @@ sfx.on_position(
 )
 layers = add(id="layers", normalize=false, [music, sfx_out])
 
+# Ends the stream at the end of the schedule; set once the output exists (below).
+close_stream = ref(fun () -> shutdown())
+
 # ---- starvation and end of schedule: the looping filler's track boundaries drive retries ----
 filler = single(id="filler", filler_file)
 filler.on_track(
@@ -452,7 +455,8 @@ filler.on_track(
       ended() and list.is_empty(prefetched()) and not null.defined(awaiting())
     then
       note("SCHEDULE_DONE", "")
-      thread.run(fun () -> shutdown())
+      end_stream = close_stream()
+      end_stream()
     else
       retry_fetch()
     end
@@ -497,6 +501,33 @@ o =
     mount="stream",
     s
   )
+
+# The end of the schedule closes the listeners' connections before the process exits: a
+# socket still open when it exits is reset (Windows), so the listener gets a connection
+# reset instead of the end of the stream. Neither shutdown() nor o.stop() alone is enough on
+# Liquidsoap 2.4.5. shutdown() tears down only one of the source groups when the ffmpeg
+# limiter's graph is in the chain, sometimes not the harbor's. And the harbor's stop wakes
+# each listener's writer with one broadcast, which a writer that has just found its buffer
+# empty, and is not yet waiting, misses: it then waits forever and never closes its socket
+# (harbor_output.ml, client_task and stop). Restarting the harbor and connecting to it once
+# makes it broadcast again as it sends to that connection, which wakes such a writer: it
+# sees it is done and closes. Measured on the end-of-schedule test under load (32 copies,
+# 16 at a time): shutdown() reset 1 to 3 in 32; stopping first, 2 in 32; this, 1 in 192.
+def wake_writers() =
+  try
+    ignore(http.get(timeout=1., "http://127.0.0.1:#{port}/stream"))
+  catch _ do
+    ()
+  end
+end
+close_stream :=
+  fun () ->
+    begin
+      o.stop()
+      o.start()
+      thread.run(wake_writers)
+      thread.run(delay=1.5, shutdown)
+    end
 
 # Boot when the output starts: the listener connects within about 1 s of launch, and the
 # harbor burst then carries the intro to it. A process nobody connects to is shut down
