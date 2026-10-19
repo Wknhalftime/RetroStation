@@ -12,10 +12,15 @@
 #   loud entrance is `entrance` dB too loud. With only the 3 s detector a band coming in
 #   after a quiet intro stayed about 3 LU hot for 5 s (Smells Like Teen Spirit). A 0.5 s
 #   lookahead on top of this barely changed it (measured), so there is none.
-# - bass band (crossover > 0; 0 = one band): first-order low/high split, which sums flat when both bands
-#   have the same gain. The bass band's gain follows the master gain plus an offset, within
-#   bass_couple dB, that steers the bass-to-full-band balance toward bass_tilt (the
-#   Optimod's AGC bass threshold and coupling).
+# - bass band (crossover > 0; 0 = one band): first-order low band, the high band being the
+#   rest, so the two sum flat when both have the same gain. The bass band's gain follows the
+#   master gain plus an offset, within bass_couple dB, that steers the bass-to-full-band
+#   balance toward bass_tilt (the Optimod's AGC bass threshold and coupling).
+# - bass shelf (bass_shelf dB, with the bass band): a fixed boost on the low band, which is
+#   a low shelf below the crossover (+2 dB: measured +1.9/+1.1/+0.5/+0.1 dB at 50/200/400/
+#   1000 Hz). It lives here because this band already exists: a separate shelf stage that
+#   mixed its own low band made the end-of-schedule shutdown reset the listener's
+#   connection (3 runs in 8; 0 in 8 without it).
 # - intro hold (intro_hold > 0): call .hold() when a song starts. For intro_hold seconds the
 #   gain can still come down but only creeps up, at window_rate: songs arrive already at
 #   -18 LUFS, so a quiet intro is the mix, not a level error, and lifting it at full rate
@@ -41,6 +46,7 @@ def agc(
   ~bass_tilt=-3.6,
   ~bass_attack_rate=3.,
   ~bass_release_rate=6.4,
+  ~bass_shelf=0.,
   s
 ) =
   fast = lufs(window={attack_window_s}, s)
@@ -86,7 +92,6 @@ def agc(
   full_rms = rms.smooth(duration=window_s, s)
   split_at = if bass_split then crossover else 200. end
   low = filter.iir.butterworth.low(frequency=split_at, order=1, full_rms)
-  high = filter.iir.butterworth.high(frequency=split_at, order=1, full_rms)
   low_rms = rms.smooth(duration=window_s, low)
 
   def update_bass(gated) =
@@ -148,12 +153,21 @@ def agc(
     if
       bass_split
     then
-      add(
-        normalize=false,
-        [
-          amplify(override=null, {lin_of_dB(g())}, high),
-          amplify(override=null, {lin_of_dB(g() + bass_offset())}, low_rms)
-        ]
+      # The high band is the full band minus the low one (sums flat by construction, one
+      # filter instead of two): out = master gain x full + (bass gain - master gain) x low.
+      # Mixed as tracks, not with add(): add() drops track marks (measured), and the song
+      # boundaries must reach the outputs. Metadata and marks come from the full band.
+      def bass_extra() =
+        lin_of_dB(g() + bass_offset() + bass_shelf) - lin_of_dB(g())
+      end
+      full = source.tracks(amplify(override=null, {lin_of_dB(g())}, full_rms))
+      lo = source.tracks(amplify(override=null, bass_extra, low_rms))
+      source(
+        {
+          audio=track.audio.add(normalize=false, [full.audio, lo.audio]),
+          metadata=full.metadata,
+          track_marks=full.track_marks
+        }
       )
     else
       amplify(override=null, {lin_of_dB(g())}, s)
