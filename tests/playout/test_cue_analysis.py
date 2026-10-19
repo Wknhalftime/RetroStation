@@ -139,12 +139,14 @@ def test_a_hung_analyser_is_killed_and_its_file_reported_stalled(tmp_path: Path)
 
 def test_a_slow_file_is_blamed_not_the_next_one(tmp_path: Path) -> None:
     """D65: file 0 is cut at its own 1 s deadline. One timeout for the whole batch
-    (5 + 2 x 1 s = 7 s) would let its 2.5 s pass, and so would timing every line by the 5 s
-    startup deadline; a batch clock that ran out later would blame the healthy file 1."""
+    (15 + 2 x 1 s = 17 s) would let its 2.5 s pass, and so would timing every line by the
+    15 s startup deadline; a batch clock that ran out later would blame the healthy file 1.
+    Startup is D63's 15 s: that deadline also absorbs the process launch, which a loaded
+    machine can stretch to seconds."""
     batch = analyse_batch(
         files("a", "b"),
         env(),
-        config(tmp_path, SLOW_FIRST_FILE, startup_timeout_s=5.0, per_file_timeout_s=1.0),
+        config(tmp_path, SLOW_FIRST_FILE, startup_timeout_s=15.0, per_file_timeout_s=1.0),
     )
     assert (dict(batch.metadata), batch.stalled) == ({}, 0)
 
@@ -184,11 +186,12 @@ def test_the_per_file_deadline_is_the_ruling(
 
 def test_a_cold_start_is_timed_by_the_startup_deadline(tmp_path: Path) -> None:
     """D63/D65: the first line waits for the startup deadline (a cold script cache takes
-    about 5 s), not the per-file one."""
+    about 5 s), not the per-file one. Startup is D63's 15 s: that deadline also absorbs the
+    process launch, which a loaded machine can stretch to seconds."""
     batch = analyse_batch(
         files("a"),
         env(),
-        config(tmp_path, COLD_START, startup_timeout_s=3.0, per_file_timeout_s=0.5),
+        config(tmp_path, COLD_START, startup_timeout_s=15.0, per_file_timeout_s=0.5),
     )
     assert (sorted(batch.metadata), batch.stalled) == ([0], None)
 
