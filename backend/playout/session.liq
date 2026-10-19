@@ -20,6 +20,7 @@ settings.log.file := false
 settings.log.level := 3
 settings.harbor.bind_addrs := ["127.0.0.1"]
 %include "agc.liq"
+%include "multiband.liq"
 
 session_id = environment.get("SESSION_ID")
 port = int_of_string(environment.get("HARBOR_PORT"))
@@ -448,6 +449,9 @@ sfx.on_position(
 )
 layers = add(id="layers", normalize=false, [music, sfx_out])
 
+# Ends the stream at the end of the schedule; set once the output exists (below).
+close_stream = ref(fun () -> shutdown())
+
 # ---- starvation and end of schedule: the looping filler's track boundaries drive retries ----
 filler = single(id="filler", filler_file)
 filler.on_track(
@@ -457,7 +461,8 @@ filler.on_track(
       ended() and list.is_empty(prefetched()) and not null.defined(awaiting())
     then
       note("SCHEDULE_DONE", "")
-      thread.run(fun () -> shutdown())
+      end_stream = close_stream()
+      end_stream()
     else
       retry_fetch()
     end
@@ -493,30 +498,11 @@ song_started := s.hold
 # Q 0.29. Liquidsoap's own lowshelf has no gain.
 s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
 s = filter.iir.eq.peak(frequency=5209., gain=2., q=0.29, s)
-# Gentle compression; the long release keeps it from pumping on the beat
-s = compress(threshold=-14., ratio=2., attack=30., release=800., s)
-# Peak control, in place of the Optimod's clipper. This compressor has no lookahead, so the
-# first millisecond of each hit gets through it (+0.3 dBFS on Killing in the Name).
-s = compress(threshold=-1.5, ratio=20., attack=1., release=80., s)
-# Ceiling: ffmpeg's lookahead limiter (5 ms) at -2 dBFS. The MP3 encode adds up to 1.5 dB on
-# dense material, so -2 keeps what listeners decode near -1 dBFS (measured 2026-10-18).
-def lookahead_limit(s) =
-  raw =
-    ffmpeg.raw.encode.audio(
-      %ffmpeg(%audio.raw(sample_format = "flt", sample_rate = 44100, channels = 2)), s
-    )
-  def mkfilter(graph) =
-    a = ffmpeg.filter.audio.input(graph, source.tracks(raw).audio)
-    a =
-      ffmpeg.filter.alimiter(
-        graph, limit=lin_of_dB(-2.), attack=5., release=50., level=false, a
-      )
-    source({audio=ffmpeg.filter.audio.output(graph, a)})
-  end
-  ffmpeg.raw.decode.audio(ffmpeg.filter.create(mkfilter))
-end
-# A filter graph's output is fallible; mksafe plays silence if it ever stops.
-s = mksafe(lookahead_limit(s))
+# Five-band compression and peak control (multiband.liq), from Lance's Optimod Rock-Light
+# preset, in one ffmpeg filter graph: it evens out tone song to song and holds peaks under
+# -2 dBFS (the MP3 encode adds up to 1.5 dB on dense material). A filter graph's output is
+# fallible; mksafe plays silence if it ever stops.
+s = mksafe(multiband(s))
 
 o =
   output.harbor(
@@ -525,6 +511,33 @@ o =
     mount="stream",
     s
   )
+
+# The end of the schedule closes the listeners' connections before the process exits: a
+# socket still open when it exits is reset (Windows), so the listener gets a connection
+# reset instead of the end of the stream. Neither shutdown() nor o.stop() alone is enough on
+# Liquidsoap 2.4.5. shutdown() tears down only one of the source groups when the ffmpeg
+# limiter's graph is in the chain, sometimes not the harbor's. And the harbor's stop wakes
+# each listener's writer with one broadcast, which a writer that has just found its buffer
+# empty, and is not yet waiting, misses: it then waits forever and never closes its socket
+# (harbor_output.ml, client_task and stop). Restarting the harbor and connecting to it once
+# makes it broadcast again as it sends to that connection, which wakes such a writer: it
+# sees it is done and closes. Measured on the end-of-schedule test under load (32 copies,
+# 16 at a time): shutdown() reset 1 to 3 in 32; stopping first, 2 in 32; this, 1 in 192.
+def wake_writers() =
+  try
+    ignore(http.get(timeout=1., "http://127.0.0.1:#{port}/stream"))
+  catch _ do
+    ()
+  end
+end
+close_stream :=
+  fun () ->
+    begin
+      o.stop()
+      o.start()
+      thread.run(wake_writers)
+      thread.run(delay=1.5, shutdown)
+    end
 
 # Boot when the output starts: the listener connects within about 1 s of launch, and the
 # harbor burst then carries the intro to it. A process nobody connects to is shut down
