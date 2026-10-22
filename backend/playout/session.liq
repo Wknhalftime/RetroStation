@@ -495,10 +495,8 @@ s = metadata.map(id="no_item_gain", update=false, drop_item_gain, s)
 # multiband's bands 1-2 control bass dynamics anyway.
 s = agc(target=-16., idle=2., threshold=-33., crossover=0., s)
 song_started := s.hold
-# EQ, Rock-Light: the bass shelf (+2 dB below 200 Hz) is in the multiband's graph; low +1 dB
-# at 266 Hz, 2 oct = Q 0.67; mid +2 dB at 5209 Hz, 3.8 oct = Q 0.29.
-s = filter.iir.eq.peak(frequency=266., gain=1., q=0.67, s)
-s = filter.iir.eq.peak(frequency=5209., gain=2., q=0.29, s)
+# No EQ (Lance, 2026-10-22): the Rock-Light bass shelf and the 266 Hz / 5209 Hz bells
+# coloured every song on top of their own mastering.
 # Five-band compression and peak control (multiband.liq), from Lance's Optimod Rock-Light
 # preset, in one ffmpeg filter graph: it evens out tone song to song and holds peaks under
 # -2 dBFS (the MP3 encode adds up to 1.5 dB on dense material). A filter graph's output is
