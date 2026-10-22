@@ -24,7 +24,6 @@
 #   songs the coupling decides band 4's gain 17% of the time (median +0.8 dB, up to 5.6).
 # - bass clipper on band 1 at `bass_clip` dB under the limiter ceiling (preset -4), a tanh
 #   soft clip (ffmpeg's nearest to clip shape 7.6).
-# - bass shelf (`bass_shelf`, Rock-Light EQ +2 dB below 200 Hz) ahead of the crossover.
 # - peak control: the former 1 ms, 20:1 compressor at -1.5 dBFS, then a 5 ms lookahead
 #   limiter at `ceiling` (-2 dBFS: the 128k MP3 encode adds up to 1.5 dB on dense material).
 # Not modelled: the multiband gate (ffmpeg compressors cannot freeze), per-band limiters.
@@ -47,7 +46,6 @@ def multiband(
   ~bass_clip=-4.,
   ~ceiling=-2.,
   ~couple34=0.3,
-  ~bass_shelf=2.,
   s
 ) =
   # drive 13 with these references puts band 3 at about 5 dB of gain reduction.
@@ -68,12 +66,6 @@ def multiband(
     )
   def mkfilter(graph) =
     dry = ffmpeg.filter.audio.input(graph, source.tracks(raw).audio)
-    # Rock-Light's EQ bass shelf: +2 dB below 200 Hz at 12 dB/oct (the 8685's slope setting),
-    # here so it costs no extra graph; Liquidsoap's own lowshelf has no gain.
-    dry =
-      ffmpeg.filter.lowshelf(
-        graph, frequency=200., gain=bass_shelf, width_type=2, width=0.707, dry
-      )
     let (bands, _) = ffmpeg.filter.acrossover(graph, split="100 520 1800 6000", dry)
     def squeeze(t, r, a, x) =
       ffmpeg.filter.acompressor(
