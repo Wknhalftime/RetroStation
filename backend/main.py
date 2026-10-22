@@ -39,8 +39,8 @@ from backend.playout.assets import ensure_stream_assets
 from backend.playout.liquidsoap_process import (
     SESSION_SCRIPT,
     EngineConfig,
+    EngineStartError,
     RunningEngine,
-    ScriptCacheError,
     SessionEndpoint,
     prune_session_logs,
     session_base_env,
@@ -48,6 +48,7 @@ from backend.playout.liquidsoap_process import (
     warm_script_cache,
 )
 from backend.playout.process_meter import PsutilMeter
+from backend.playout.script_cache import ScriptCache, warm_first
 from backend.routers import listen, radio, radio_pages, stream_internal
 from backend.routers.v1 import router as v1_router
 from backend.services.streaming.bookmarks import BookmarkStore
@@ -131,11 +132,16 @@ def _make_work_folders(work: Path) -> bool:
     return True
 
 
+def _log_script_cache_failure(error: BaseException) -> None:
+    logger.error("stream_script_cache_failed", output=str(error))
+
+
 async def _prepared_engine(
     ffmpeg: str, exe: Path, work: Path, base_env: dict[str, str]
-) -> EngineConfig | None:
-    """The engine, its filler and intro made and its script cache warm; None (logged) if
-    either cannot be prepared (spec: Engine "the app must warm it at startup"; D34)."""
+) -> tuple[EngineConfig, ScriptCache] | None:
+    """The engine, its filler and intro made, and its script cache, warm; None (logged) if
+    either cannot be prepared (spec: Engine "the app must warm it at startup"; D34). The
+    cache is warmed again before a session starts if the script changed since (D113)."""
     try:
         assets = ensure_stream_assets(ffmpeg, work / "assets")
     except (subprocess.SubprocessError, OSError) as error:
@@ -148,12 +154,15 @@ async def _prepared_engine(
         filler=assets.filler,
         intro_sfx=assets.static_intro,
     )
+    cache = ScriptCache(
+        partial(warm_script_cache, base_env, engine), engine.script, _log_script_cache_failure
+    )
     try:
-        await asyncio.to_thread(warm_script_cache, base_env, engine)
-    except (ScriptCacheError, subprocess.TimeoutExpired, OSError) as error:
+        await cache.ensure_warm()
+    except EngineStartError as error:
         _engine_unavailable("Liquidsoap's script cache could not be built", str(error))
         return None
-    return engine
+    return engine, cache
 
 
 def _opened_repos(
@@ -264,9 +273,12 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
         return None
     _prune_logs(work / "logs")
     base_env = session_base_env(os.environ)
-    engine = await _prepared_engine(settings.ffmpeg_path, settings.liquidsoap_path, work, base_env)
-    if engine is None:
+    prepared = await _prepared_engine(
+        settings.ffmpeg_path, settings.liquidsoap_path, work, base_env
+    )
+    if prepared is None:
         return None
+    engine, cache = prepared
     # Lazy: windows_job raises ImportError off Windows, and this line is reached only on win32.
     from backend.playout.windows_job import KillOnCloseJob
 
@@ -275,7 +287,9 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
     except OSError as error:
         _engine_unavailable("the job that ends engines with the app was refused", str(error))
         return None
-    start_engine = partial(start_ready_engine, job.assign, base_env, engine=engine)
+    start_engine = warm_first(
+        cache, partial(start_ready_engine, job.assign, base_env, engine=engine)
+    )
     ports = build_stream_ports(settings, start_engine)
     service = _stream_service(ports, settings, work / "logs")
     return StreamingRuntime(service, job.close, _start_watchdog(service), ports.cue_reports)
