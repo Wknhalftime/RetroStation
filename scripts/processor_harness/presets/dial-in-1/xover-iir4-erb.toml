@@ -1,0 +1,9 @@
+# Dial-in step 1 (crossover): every band at unity, summed. IIR acrossover, 4th order, five bands of equal ERB-number width.
+id = "xover-iir4-erb"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_iir.liq"
+description = "IIR acrossover, 4th order, five bands of equal ERB-number width."
+[params]
+split = "370 1213 3250 8190"
+order = 1

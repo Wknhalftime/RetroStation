@@ -9,6 +9,7 @@ import pytest
 from processor_harness import measure, signals
 from processor_harness.measure import Rendered
 from processor_harness.metrics import loudness
+from scipy import signal as sp
 
 FS = 44100
 
@@ -36,9 +37,35 @@ def test_impulse_reports_band_sum_and_latency() -> None:
 
     row = measure.measure("impulse", untouched(stim))
 
-    assert row == pytest.approx(
-        {"band_sum_min_db": 0.0, "band_sum_max_db": 0.0, "latency_ms": 0.0}, abs=0.01
+    assert {k: row[k] for k in ("band_sum_min_db", "band_sum_max_db", "latency_ms")} == (
+        pytest.approx({"band_sum_min_db": 0.0, "band_sum_max_db": 0.0, "latency_ms": 0.0}, abs=0.01)
     )
+
+
+def test_impulse_reports_the_third_octave_response() -> None:
+    # A solo band (one crossover band rendered alone) shows its shape here: a 1 kHz
+    # fourth-order low-pass is flat at 125 Hz and far down at 4 kHz.
+    stim = signals.impulse(FS, level_dbfs=-30.0, seconds=2.0, at_s=0.5)
+    sos = sp.butter(4, 1000.0, fs=FS, output="sos")
+    rendered = untouched(stim)
+    low_passed = Rendered(
+        inp=stim.samples,
+        out=sp.sosfilt(sos, stim.samples, axis=0),
+        fs=FS,
+        segments=stim.segments,
+        gauges={},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+    )
+
+    flat = measure.measure("impulse", rendered)
+    row = measure.measure("impulse", low_passed)
+
+    assert flat["response_25hz_db"] == pytest.approx(0.0, abs=0.01)
+    assert flat["response_16000hz_db"] == pytest.approx(0.0, abs=0.01)
+    assert row["response_125hz_db"] == pytest.approx(0.0, abs=0.1)
+    assert row["response_4000hz_db"] < -40.0
 
 
 def test_sweep_reports_response_deviation() -> None:

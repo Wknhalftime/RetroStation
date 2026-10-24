@@ -1,0 +1,9 @@
+# Dial-in step 1 (crossover): every band at unity, summed. Linear phase, 50 ms FIR, the brief's 100/400/1600/6400 Hz edges.
+id = "xover-lin50-brief"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Linear phase, 50 ms FIR, the brief's 100/400/1600/6400 Hz edges."
+[params]
+split = "100 400 1600 6400"
+delay = 0.05

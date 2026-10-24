@@ -1,0 +1,10 @@
+# Dial-in step 1 (crossover): Band 2 (100-520 Hz) alone, linear phase: its shape.
+id = "xover-lin20-a-solo2"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Band 2 (100-520 Hz) alone, linear phase: its shape."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+solo = 2

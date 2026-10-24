@@ -47,11 +47,16 @@ def read_gauges(csv: Path) -> dict[str, Trace]:
 
 def _impulse(r: Rendered) -> dict[str, float]:
     low, high = response.band_sum_range(r.inp, r.out, r.fs)
-    return {
+    row = {
         "band_sum_min_db": low,
         "band_sum_max_db": high,
         "latency_ms": 1000 * response.latency(r.inp, r.out, r.fs),
     }
+    # The shape of the response (the band's shape, for a preset that renders one band solo).
+    _, levels = response.third_octave_response(r.inp, r.out, r.fs)
+    for label, level in zip(response.THIRD_OCTAVE_LABELS, levels, strict=True):
+        row[f"response_{label}hz_db"] = float(level)
+    return row
 
 
 def _sweep(r: Rendered) -> dict[str, float]:

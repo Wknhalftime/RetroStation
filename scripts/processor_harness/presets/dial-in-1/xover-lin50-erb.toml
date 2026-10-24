@@ -1,0 +1,9 @@
+# Dial-in step 1 (crossover): every band at unity, summed. Linear phase, 50 ms FIR, five bands of equal ERB-number width.
+id = "xover-lin50-erb"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Linear phase, 50 ms FIR, five bands of equal ERB-number width."
+[params]
+split = "370 1213 3250 8190"
+delay = 0.05
