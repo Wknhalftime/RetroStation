@@ -111,3 +111,32 @@ def test_programme_offsets_and_native_levels_reach_the_chain_as_set(tmp_path: Pa
     assert loudness.integrated(audio_io.read_wav(native.path)[0], FS) == pytest.approx(
         mastered, abs=0.05
     )
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not on PATH")
+def test_isolating_the_first_hit_silences_only_what_comes_before_it(tmp_path: Path) -> None:
+    # A recording's first hit sits on room sound; pre-ringing can only be measured once
+    # everything before the hit's attack is digital silence.
+    room = signals.noise_with_pauses(FS, burst_s=2.0, pause_s=0.1, bursts=1, level_dbfs=-50.0)
+    hit = signals.kick(FS, level_dbfs=-6.0, seconds=2.1, at_s=0.5)
+    audio_io.write_wav(tmp_path / "drums.wav", room.samples + hit.samples, FS)
+    corpus = load_corpus(
+        corpus_file(
+            tmp_path,
+            '[[programme]]\nid = "drums"\npath = "drums.wav"\ncategory = "transient"\n'
+            "start_s = 0.0\nduration_s = 2.0\nnative = true\nisolate_first_hit = true\n",
+        )
+    )
+
+    assert FFMPEG is not None
+    (drums,) = prepare_inputs(corpus, tmp_path / "inputs", ffmpeg=Path(FFMPEG))
+
+    x, _ = audio_io.read_wav(drums.path)
+    start = round(0.5 * FS)
+    assert not np.any(x[: start - round(0.002 * FS)])
+    np.testing.assert_allclose(
+        x[start + 100 : start + FS],
+        (room.samples + hit.samples)[start + 100 : start + FS],
+        atol=1e-6,
+    )

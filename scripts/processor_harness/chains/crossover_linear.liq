@@ -6,29 +6,39 @@
 # the graph; afir would need each impulse response fed in as a second audio stream.
 # Params:
 # - split: crossover frequencies, space-separated (default: today's 100 520 1800 6000)
-# - delay: FIR half-length and latency, s (default 0.05); a longer one gives steeper band
-#   edges (a Hann window's transition is about 2 / delay Hz wide)
+# - delay: FIR half-length and latency, s. Default 0.02, locked in dial-in step 1 (2026-10-24):
+#   pre-ringing reaches at most one delay ahead of a hit, and backward masking covers about
+#   20 ms. With one band at -10 dB, 20 ms keeps every hit's pre-ring inside 20 ms; 50 ms put
+#   -33 to -40 dB re peak more than 20 ms ahead on bands 1-2 (kick, real drum intros).
+#   A longer delay gives steeper band edges (a Hann window's transition is about 2 / delay Hz
+#   wide). Superseded default: 0.05 (before the pre-ringing test).
 # - wfunc: firequalizer's window index (default 1, Hann)
 # - solo: 0 sums every band; n renders band n alone, so the impulse shows its shape
+# - gains: static gain per band in dB, space-separated (default all 0), standing in for the
+#   unequal gains compression applies (pre-ringing tests); built into each band's FIR
 def chain(s) =
   split = param_string("split", "100 520 1800 6000")
-  delay = param_float("delay", 0.05)
+  delay = param_float("delay", 0.02)
   wfunc = param_int("wfunc", 1)
   solo = param_int("solo", 0)
   edges = list.map(float_of_string, string.split(separator=" ", split))
   n = list.length(edges) + 1
+  gains = string.split(separator=" ", param_string("gains", ""))
+  def band_db(i) =
+    if list.length(gains) == n then list.nth(gains, i) else "0" end
+  end
   # Band i passes [edge i-1, edge i): half-open, so no frequency lands in two bands.
   def band_gain(i) =
     if
       i == 0
     then
-      "if(lt(f,#{list.nth(edges, 0)}),0,-INF)"
+      "if(lt(f,#{list.nth(edges, 0)}),#{band_db(i)},-INF)"
     elsif
       i == n - 1
     then
-      "if(gte(f,#{list.nth(edges, i - 1)}),0,-INF)"
+      "if(gte(f,#{list.nth(edges, i - 1)}),#{band_db(i)},-INF)"
     else
-      "if(gte(f,#{list.nth(edges, i - 1)})*lt(f,#{list.nth(edges, i)}),0,-INF)"
+      "if(gte(f,#{list.nth(edges, i - 1)})*lt(f,#{list.nth(edges, i)}),#{band_db(i)},-INF)"
     end
   end
   raw =

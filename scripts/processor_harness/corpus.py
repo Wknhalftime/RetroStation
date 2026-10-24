@@ -19,6 +19,7 @@ to cut from it.
     duration_s = 60.0
     offset_db = -10.0         # optional: this many dB from programme_lufs (AGC level tests)
     native = true             # optional, instead: keep the level it was mastered at
+    isolate_first_hit = true  # optional: silence everything before the first hit's attack
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ GENERATORS: dict[str, Callable[..., Stimulus]] = {
     "smpte_imd": signals.smpte_twin_tone,
     "ccif_imd": signals.ccif_twin_tone,
     "noise_with_pauses": signals.noise_with_pauses,
+    "kick": signals.kick,
+    "snare": signals.snare,
 }
 CATEGORIES = ("music", "speech", "voice", "transient")
 # Songs reach the chain at -18 LUFS: the decks apply each item's gain (liq_amplify) first.
@@ -70,6 +73,7 @@ class ProgrammeEntry:
     duration_s: float
     offset_db: float = 0.0
     native: bool = False
+    isolate_first_hit: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,7 @@ def _programme(path: Path, entry: dict[str, object]) -> ProgrammeEntry:
         float(str(entry.get("duration_s", 0.0))),
         float(str(entry.get("offset_db", 0.0))),
         native,
+        entry.get("isolate_first_hit", False) is True,
     )
 
 

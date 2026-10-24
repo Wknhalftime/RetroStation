@@ -31,6 +31,9 @@ _MAX = {
     "thd_pct",
     "imd_smpte_pct",
     "imd_ccif_pct",
+    "pre_ring_energy_db",
+    "pre_ring_reach_ms",
+    "pre_ring_beyond_20ms_db",
 }
 _MIN = {"band_sum_min_db"}
 

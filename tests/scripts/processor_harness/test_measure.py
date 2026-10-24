@@ -18,11 +18,12 @@ def untouched(
     stim: signals.Stimulus,
     gauges: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
     decoded: np.ndarray | None = None,
+    out: np.ndarray | None = None,
 ) -> Rendered:
-    """A render whose output is its input."""
+    """A render whose output is its input (or ``out``, when given)."""
     return Rendered(
         inp=stim.samples,
-        out=stim.samples,
+        out=stim.samples if out is None else out,
         fs=FS,
         segments=stim.segments,
         gauges=gauges or {},
@@ -184,3 +185,51 @@ def test_gauges_csv_reads_into_one_trace_per_name(tmp_path: Path) -> None:
     np.testing.assert_array_equal(gauges["a"][0], [0.0, 0.02])
     np.testing.assert_array_equal(gauges["a"][1], [1.0, 2.0])
     assert gauges["b"][1][0] == float("-inf")
+
+
+PRE_RING = ("pre_ring_energy_db", "pre_ring_reach_ms", "pre_ring_beyond_20ms_db")
+
+
+def test_hits_and_the_click_report_pre_ringing() -> None:
+    kick = measure.measure("kick", untouched(signals.kick(FS, -6.0, 1.5, 0.5)))
+    snare = measure.measure("snare", untouched(signals.snare(FS, -6.0, 1.5, 0.5)))
+    click = measure.measure("impulse", untouched(signals.impulse(FS, -30.0, 2.0, 0.5)))
+
+    for row in (kick, snare, click):
+        assert row["pre_ring_reach_ms"] == 0.0
+        assert row["pre_ring_beyond_20ms_db"] == float("-inf")
+    assert set(kick) == set(PRE_RING)
+
+
+def test_only_transient_programme_reports_pre_ringing() -> None:
+    stim = signals.noise_with_pauses(FS, burst_s=4.0, pause_s=0.5, bursts=1, level_dbfs=-18.0)
+
+    def row(category: str) -> dict[str, float]:
+        rendered = Rendered(
+            inp=stim.samples,
+            out=stim.samples,
+            fs=FS,
+            segments=stim.segments,
+            gauges={},
+            decoded=None,
+            ceiling_dbtp=-1.0,
+            latency_s=0.0,
+            category=category,
+        )
+        return measure.measure("programme", rendered)
+
+    assert set(PRE_RING) <= set(row("transient"))
+    assert not set(PRE_RING) & set(row("music"))
+
+
+def test_the_click_lines_up_its_pre_ringing_by_its_own_latency() -> None:
+    # The impulse is where the chain's latency is measured, so its own pre-ring must use
+    # that latency, not the one handed in (0 before any impulse has been measured).
+    stim = signals.impulse(FS, level_dbfs=-30.0, seconds=2.0, at_s=0.5)
+    out = stim.samples + 0.01 * np.roll(stim.samples, -round(0.030 * FS), axis=0)
+    out = np.roll(out, round(0.050 * FS), axis=0)  # a 50 ms linear-phase chain
+
+    row = measure.measure("impulse", untouched(stim, out=out))
+
+    assert row["latency_ms"] == pytest.approx(50.0, abs=0.05)
+    assert row["pre_ring_reach_ms"] == pytest.approx(30.0, abs=1.0)

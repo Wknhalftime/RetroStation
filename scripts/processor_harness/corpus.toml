@@ -68,6 +68,21 @@ kind = "ccif_imd"
 level_dbfs = -6.0
 seconds = 5.0
 
+# Pre-ringing (linear-phase crossover bands at unequal gains): drum hits from digital silence.
+[[signal]]
+id = "kick"
+kind = "kick"
+level_dbfs = -6.0
+seconds = 1.5
+at_s = 0.5
+
+[[signal]]
+id = "snare"
+kind = "snare"
+level_dbfs = -6.0
+seconds = 1.5
+at_s = 0.5
+
 # Programme excerpts (music across formats, transient-heavy material, speech with pauses, male
 # voice) are Lance's pick, an open decision in the brief. Add them as:
 # [[programme]]

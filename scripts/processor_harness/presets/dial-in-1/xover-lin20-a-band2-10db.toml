@@ -1,0 +1,10 @@
+# Dial-in step 1 (crossover), pre-ringing: band 2 at -10 dB, the rest at 0 dB, no compressors.
+id = "xover-lin20-a-band2-10db"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Pre-ringing test: lin20, today's edges, band 2 at -10 dB."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+gains = "0 -10 0 0 0"
