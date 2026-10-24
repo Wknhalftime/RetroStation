@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from processor_harness import measure, signals
 from processor_harness.measure import Rendered
+from processor_harness.metrics import loudness
 
 FS = 44100
 
@@ -114,6 +115,32 @@ def test_programme_reports_loudness_peaks_and_the_codec_round_trip() -> None:
     ):
         assert key in row, key
     assert row["codec_true_peak_dbtp"] - row["true_peak_dbtp"] == pytest.approx(1.58, abs=0.02)
+
+
+def test_programme_reports_what_moved_against_the_input() -> None:
+    # Output 3 dB louder than its input, with one sample pushed to -2 dBFS: peaks and
+    # loudness are reported both as levels and as changes from the input, so it is clear
+    # which of the two moved.
+    stim = signals.noise_with_pauses(FS, burst_s=10.0, pause_s=0.5, bursts=1, level_dbfs=-24.0)
+    out = stim.samples * 10 ** (3 / 20)
+    out[FS, :] = 10 ** (-2 / 20)
+    rendered = Rendered(
+        inp=stim.samples,
+        out=out,
+        fs=FS,
+        segments=stim.segments,
+        gauges={},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+    )
+
+    row = measure.measure("programme", rendered)
+
+    assert row["sample_peak_dbfs"] == pytest.approx(-2.0, abs=1e-6)
+    assert row["loudness_change_lu"] == pytest.approx(3.0, abs=0.05)
+    input_peak = loudness.true_peak(stim.samples, FS)
+    assert row["true_peak_rise_db"] == pytest.approx(row["true_peak_dbtp"] - input_peak, abs=1e-9)
 
 
 def test_unknown_kinds_are_refused() -> None:

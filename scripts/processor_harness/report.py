@@ -21,6 +21,8 @@ _IDENTITY_COLUMNS = ("preset", "version", "backend", "renderer", "standalone_ffm
 _SUM = {"sample_overs", "true_overs", "codec_true_overs"}
 _MAX = {
     "true_peak_dbtp",
+    "true_peak_rise_db",
+    "sample_peak_dbfs",
     "codec_true_peak_dbtp",
     "band_sum_max_db",
     "latency_ms",

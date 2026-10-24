@@ -106,10 +106,15 @@ def _percentile(values: NDArray[np.float64], q: float) -> float:
 
 def _programme(r: Rendered) -> dict[str, float]:
     psr = dynamics.psr(r.out, r.fs)
+    lufs = loudness.integrated(r.out, r.fs)
+    peak = loudness.true_peak(r.out, r.fs)
     row = {
-        "lufs_i": loudness.integrated(r.out, r.fs),
+        "lufs_i": lufs,
+        "loudness_change_lu": lufs - loudness.integrated(r.inp, r.fs),
         "lra_lu": loudness.loudness_range(r.out, r.fs),
-        "true_peak_dbtp": loudness.true_peak(r.out, r.fs),
+        "true_peak_dbtp": peak,
+        "true_peak_rise_db": peak - loudness.true_peak(r.inp, r.fs),
+        "sample_peak_dbfs": loudness.to_db(float(np.max(np.abs(r.out)))),
         "plr_lu": dynamics.plr(r.out, r.fs),
         "psr_p10_lu": _percentile(psr, 10),
         "psr_p50_lu": _percentile(psr, 50),

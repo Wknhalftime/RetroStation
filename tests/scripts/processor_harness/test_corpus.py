@@ -76,3 +76,33 @@ def test_invalid_manifests_name_the_file_and_the_field(
 
     with pytest.raises(CorpusError, match=rf"c\.toml.*{field}"):
         load_corpus(path)
+
+
+def test_programme_can_keep_its_mastered_level_or_take_an_offset(tmp_path: Path) -> None:
+    (tmp_path / "song.flac").write_bytes(b"")
+    corpus = load_corpus(
+        write(
+            tmp_path / "c.toml",
+            "sample_rate = 44100\n"
+            '[[programme]]\nid = "hot"\npath = "song.flac"\ncategory = "music"\n'
+            "start_s = 0.0\nduration_s = 60.0\noffset_db = 10.0\n"
+            '[[programme]]\nid = "mastered"\npath = "song.flac"\ncategory = "music"\n'
+            "start_s = 0.0\nduration_s = 60.0\nnative = true\n",
+        )
+    )
+
+    hot, mastered = corpus.programme
+    assert (hot.offset_db, hot.native) == (10.0, False)
+    assert (mastered.offset_db, mastered.native) == (0.0, True)
+
+
+def test_a_native_level_entry_cannot_also_take_an_offset(tmp_path: Path) -> None:
+    (tmp_path / "song.flac").write_bytes(b"")
+    path = write(
+        tmp_path / "c.toml",
+        'sample_rate = 44100\n[[programme]]\nid = "s"\npath = "song.flac"\ncategory = "music"\n'
+        "start_s = 0.0\nduration_s = 1.0\nnative = true\noffset_db = -10.0\n",
+    )
+
+    with pytest.raises(CorpusError, match=r"c\.toml.*offset_db"):
+        load_corpus(path)

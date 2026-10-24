@@ -82,3 +82,32 @@ def test_programme_without_ffmpeg_is_refused(tmp_path: Path) -> None:
 
 def test_corpus_programme_level_defaults_to_the_item_gain_target(tmp_path: Path) -> None:
     assert load_corpus(corpus_file(tmp_path, "")).programme_lufs == -18.0
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not on PATH")
+def test_programme_offsets_and_native_levels_reach_the_chain_as_set(tmp_path: Path) -> None:
+    # The AGC step needs level variation: one copy 10 dB under the item-gain level, one left
+    # at the level it was mastered at.
+    noise = signals.noise_with_pauses(FS, burst_s=12.0, pause_s=0.1, bursts=1, level_dbfs=-25.0)
+    audio_io.write_wav(tmp_path / "song.wav", noise.samples, FS)
+    mastered = loudness.integrated(noise.samples, FS)
+    corpus = load_corpus(
+        corpus_file(
+            tmp_path,
+            '[[programme]]\nid = "quiet"\npath = "song.wav"\ncategory = "music"\n'
+            "start_s = 0.0\nduration_s = 12.0\noffset_db = -10.0\n"
+            '[[programme]]\nid = "mastered"\npath = "song.wav"\ncategory = "music"\n'
+            "start_s = 0.0\nduration_s = 12.0\nnative = true\n",
+        )
+    )
+
+    assert FFMPEG is not None
+    quiet, native = prepare_inputs(corpus, tmp_path / "inputs", ffmpeg=Path(FFMPEG))
+
+    assert loudness.integrated(audio_io.read_wav(quiet.path)[0], FS) == pytest.approx(
+        -28.0, abs=0.05
+    )
+    assert loudness.integrated(audio_io.read_wav(native.path)[0], FS) == pytest.approx(
+        mastered, abs=0.05
+    )

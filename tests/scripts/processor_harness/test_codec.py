@@ -19,19 +19,41 @@ pytestmark = [
 ]
 
 
-def test_round_trip_keeps_a_quiet_tone_at_its_level(tmp_path: Path) -> None:
+def aligned_tone_level(reference: np.ndarray, decoded: np.ndarray, freq: float) -> float:
+    """The decoded tone's amplitude (dB) in its steady middle, after lining it up with the
+    reference by cross-correlation (LAME adds encoder delay and padding)."""
+    n = len(reference) + len(decoded)
+    corr = np.fft.irfft(np.fft.rfft(decoded, n) * np.conj(np.fft.rfft(reference, n)), n)
+    lag = int(np.argmax(corr[:FS]))
+    steady = decoded[lag + FS : lag + 2 * FS]
+    t = np.arange(len(steady)) / FS
+    basis = np.column_stack([np.sin(2 * np.pi * freq * t), np.cos(2 * np.pi * freq * t)])
+    coef, *_ = np.linalg.lstsq(basis, steady, rcond=None)
+    return float(20 * np.log10(np.hypot(*coef)))
+
+
+def round_trip_level(tmp_path: Path, bitrate: str) -> float:
     assert FFMPEG is not None
+    tone = signals.tone(FS, 1000.0, -12.0, 3.0).samples
     wav = tmp_path / "in.wav"
-    audio_io.write_wav(wav, signals.tone(FS, 1000.0, -12.0, 3.0).samples, FS)
+    audio_io.write_wav(wav, tone, FS)
 
-    mp3 = codec.encode_mp3(Path(FFMPEG), wav, tmp_path / "in.mp3")
-    decoded = codec.decode(Path(FFMPEG), mp3, tmp_path / "decoded.wav")
+    mp3 = codec.encode_mp3(Path(FFMPEG), wav, tmp_path / "in.mp3", bitrate=bitrate)
+    decoded, fs = audio_io.read_wav(codec.decode(Path(FFMPEG), mp3, tmp_path / "decoded.wav"))
 
-    x, fs = audio_io.read_wav(decoded)
-    assert fs == FS and x.shape[1] == 2
-    # Measured 2026-10-24 (FFmpeg 8.0.1's libmp3lame, 128k): a 1 kHz tone comes back 0.45 dB
-    # low at -20, -12 and -6 dBFS alike.
-    assert 20 * np.log10(np.max(np.abs(x))) == pytest.approx(-12.0, abs=0.6)
+    assert fs == FS and decoded.shape[1] == 2
+    return aligned_tone_level(tone[:, 0], decoded[:, 0], 1000.0)
+
+
+def test_round_trip_at_the_streams_128k_carries_lames_preset_scale(tmp_path: Path) -> None:
+    expected = -12.0 + 20 * np.log10(codec.LAME_SCALE_AT_128K)  # -12.45 dB
+
+    assert round_trip_level(tmp_path, "128k") == pytest.approx(expected, abs=0.05)
+
+
+def test_round_trip_at_256k_keeps_the_level(tmp_path: Path) -> None:
+    # LAME's preset scale is 1.0 from 256 kb/s, so the tone comes back where it went in.
+    assert round_trip_level(tmp_path, "256k") == pytest.approx(-12.0, abs=0.3)
 
 
 def test_round_trip_overshoots_a_hard_limited_signal(tmp_path: Path) -> None:

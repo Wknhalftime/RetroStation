@@ -17,6 +17,8 @@ to cut from it.
     category = "music"        # music | speech | voice | transient
     start_s = 0.0
     duration_s = 60.0
+    offset_db = -10.0         # optional: this many dB from programme_lufs (AGC level tests)
+    native = true             # optional, instead: keep the level it was mastered at
 """
 
 from __future__ import annotations
@@ -66,6 +68,8 @@ class ProgrammeEntry:
     category: str
     start_s: float
     duration_s: float
+    offset_db: float = 0.0
+    native: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,12 +105,19 @@ def _programme(path: Path, entry: dict[str, object]) -> ProgrammeEntry:
             f"{path}: programme {entry_id!r}: category {category!r} is not one of "
             + ", ".join(CATEGORIES)
         )
+    native = entry.get("native", False) is True
+    if native and "offset_db" in entry:
+        raise CorpusError(
+            f"{path}: programme {entry_id!r}: native and offset_db exclude each other"
+        )
     return ProgrammeEntry(
         entry_id,
         file,
         category,
         float(str(entry.get("start_s", 0.0))),
         float(str(entry.get("duration_s", 0.0))),
+        float(str(entry.get("offset_db", 0.0))),
+        native,
     )
 
 

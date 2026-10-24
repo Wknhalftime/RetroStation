@@ -2,7 +2,8 @@
 
 Stimuli are generated; programme excerpts are cut and resampled by FFmpeg, then set to the
 corpus's programme_lufs, the level songs reach the chain at in the stream (the decks apply each
-item's gain first), so the AGC sees what it sees live.
+item's gain first), so the AGC sees what it sees live. An entry can move off that level by
+offset_db, or keep its mastered level (native), to give the AGC level variation to work on.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ class PreparedInput:
     segments: tuple[Segment, ...]
 
 
-def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, out: Path) -> None:
+def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, out: Path) -> float:
+    """Cut, resample and level one excerpt; its integrated loudness as written (LUFS)."""
     run = subprocess.run(
         [
             str(ffmpeg), "-hide_banner", "-nostats", "-y",
@@ -42,8 +44,12 @@ def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, o
     if run.returncode != 0:
         raise RuntimeError(f"ffmpeg could not cut {entry.path}:\n{run.stderr[-4000:]}")
     x, _ = read_wav(out)
-    gain_db = target_lufs - loudness.integrated(x, fs)
-    write_wav(out, x * 10 ** (gain_db / 20), fs)
+    level = loudness.integrated(x, fs)
+    if entry.native:
+        return level
+    target = target_lufs + entry.offset_db
+    write_wav(out, x * 10 ** ((target - level) / 20), fs)
+    return target
 
 
 def prepare_inputs(
@@ -63,8 +69,8 @@ def prepare_inputs(
     for item in corpus.programme:
         assert ffmpeg is not None
         path = directory / f"{item.id}.wav"
-        _excerpt(ffmpeg, item, fs, corpus.programme_lufs, path)
-        span = (Segment(0.0, item.duration_s, corpus.programme_lufs),)
+        level = _excerpt(ffmpeg, item, fs, corpus.programme_lufs, path)
+        span = (Segment(0.0, item.duration_s, level),)
         prepared.append(PreparedInput(item.id, PROGRAMME, item.category, path, span))
     return tuple(prepared)
 
