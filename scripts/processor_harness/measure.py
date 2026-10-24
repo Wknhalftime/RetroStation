@@ -14,6 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from processor_harness.metrics import distortion, dynamics, fits, loudness, response, transients
+from processor_harness.metrics.acompressor import Settings
 from processor_harness.signals import SILENT, Segment
 
 Audio = NDArray[np.float64]
@@ -33,6 +34,7 @@ class Rendered:
     ceiling_dbtp: float
     latency_s: float
     category: str = ""  # programme category; "" for stimuli
+    model: Settings | None = None  # the chain's acompressor settings, when the preset says
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -79,7 +81,10 @@ def _sweep(r: Rendered) -> dict[str, float]:
 
 
 def _stepped_tone(r: Rendered) -> dict[str, float]:
-    fit = fits.fit_static_curve(fits.static_levels(r.segments, r.out, r.fs))
+    if r.model is not None:
+        fit = fits.fit_acompressor_static(r.segments, r.inp, r.out, r.fs, r.model, r.latency_s)
+    else:
+        fit = fits.fit_static_curve(fits.static_levels(r.segments, r.out, r.fs))
     return {
         "static_threshold_db": fit.threshold_db,
         "static_ratio": fit.ratio,
@@ -90,6 +95,15 @@ def _stepped_tone(r: Rendered) -> dict[str, float]:
 
 
 def _tone_bursts(r: Rendered) -> dict[str, float]:
+    if r.model is not None:
+        times = fits.fit_acompressor_times(r.segments, r.inp, r.out, r.fs, r.model, r.latency_s)
+        return {
+            "attack_ms": times.attack_ms,
+            "release_ms": times.release_ms,
+            "attack_tau_ms": times.attack_ms / 4,
+            "release_tau_ms": times.release_ms / 4,
+            "times_fit_error_db": times.rms_error_db,
+        }
     tc = fits.time_constants(r.segments, r.inp, r.out, r.fs, r.latency_s)
     return {"attack_tau_ms": 1000 * tc.attack_s, "release_tau_ms": 1000 * tc.release_s}
 

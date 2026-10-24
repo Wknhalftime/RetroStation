@@ -233,3 +233,33 @@ def test_the_click_lines_up_its_pre_ringing_by_its_own_latency() -> None:
 
     assert row["latency_ms"] == pytest.approx(50.0, abs=0.05)
     assert row["pre_ring_reach_ms"] == pytest.approx(30.0, abs=1.0)
+
+
+def test_a_declared_acompressor_switches_the_fits_to_its_model() -> None:
+    from processor_harness.metrics import acompressor
+    from processor_harness.metrics.acompressor import Settings
+
+    s = Settings.from_db(-24.0, 4.0, 9.03, 6.0, 20.0, 250.0)
+    steps = signals.stepped_tone(FS, 1000.0, -40.0, 0.0, hold_s=1.0)
+    bursts = signals.tone_bursts(FS, 1000.0, -30.0, 10.0, hold_s=1.0, cycles=2)
+
+    def compressed(stim: signals.Stimulus) -> Rendered:
+        return Rendered(
+            inp=stim.samples,
+            out=acompressor.process(stim.samples, FS, s),
+            fs=FS,
+            segments=stim.segments,
+            gauges={},
+            decoded=None,
+            ceiling_dbtp=-1.0,
+            latency_s=0.0,
+            model=s,
+        )
+
+    static = measure.measure("stepped_tone", compressed(steps))
+    times = measure.measure("tone_bursts", compressed(bursts))
+
+    assert static["static_ratio"] == pytest.approx(4.0, rel=0.02)
+    assert times["attack_ms"] == pytest.approx(20.0, rel=0.05)
+    assert times["attack_tau_ms"] == pytest.approx(5.0, rel=0.05)
+    assert times["release_tau_ms"] == pytest.approx(62.5, rel=0.05)

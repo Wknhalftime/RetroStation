@@ -1,5 +1,8 @@
 """Fits that check the chain against the brief's math: the static gain curve (item 2), attack
 and release time constants (items 1 and 3), and AGC gating (item 4: no gain rise in silence).
+FFmpeg's acompressor (item 3a) gets its own fits, which run the sample-for-sample model in
+acompressor.py: its detector rides a rectified tone somewhere between the tone's mean and peak,
+so no closed-form curve describes it.
 
 Tone levels are peak dBFS: a sine's RMS level + 3.01 dB.
 """
@@ -7,12 +10,13 @@ Tone levels are peak dBFS: a sine's RMS level + 3.01 dB.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 
+from processor_harness.metrics import acompressor
 from processor_harness.signals import Segment
 
 Audio = NDArray[np.float64]
@@ -160,3 +164,122 @@ def pause_rise(
         if inside.size:
             rise = max(rise, float(np.max(inside) - inside[0]))
     return rise
+
+
+@dataclass(frozen=True)
+class AttackRelease:
+    """acompressor's attack and release as set values (ms); each detector time constant is a
+    quarter of its set value (item 3a)."""
+
+    attack_ms: float
+    release_ms: float
+    rms_error_db: float
+
+
+# acompressor's option ranges: threshold 1/1024 .. 1, ratio 1 .. 20, knee 1 .. 8, makeup 1 .. 64.
+_ACOMP_LOW = [20 * math.log10(1 / 1024), 1.0, 0.0, 0.0]
+_ACOMP_HIGH = [0.0, 20.0, 20 * math.log10(8.0), 20 * math.log10(64.0)]
+
+
+def _aligned(out: Audio, length: int, latency_s: float, fs: int) -> Audio:
+    shift = round(latency_s * fs)
+    y = np.zeros((length, out.shape[1]))
+    tail = out[shift : shift + length]
+    y[: len(tail)] = tail
+    return y
+
+
+def _settled(segments: tuple[Segment, ...], fs: int) -> list[slice]:
+    return [
+        slice(
+            round((seg.start_s + _SETTLED_FRACTION * (seg.stop_s - seg.start_s)) * fs),
+            round((seg.stop_s - _EDGE_S) * fs),
+        )
+        for seg in segments
+    ]
+
+
+def fit_acompressor_static(
+    segments: tuple[Segment, ...],
+    inp: Audio,
+    out: Audio,
+    fs: int,
+    settings: acompressor.Settings,
+    latency_s: float,
+) -> StaticFit:
+    """Threshold, ratio, knee (width, dB) and makeup that make the 3a model reproduce each
+    settled step of the stepped tone. The detector settings (attack, release, detection, link)
+    are taken as set; they do not depend on the four fitted values."""
+    windows = _settled(segments, fs)
+    measured = np.array([_level_db(_aligned(out, len(inp), latency_s, fs)[w, 0]) for w in windows])
+    level = acompressor.detector(
+        inp, fs, settings.attack_ms, settings.release_ms, settings.rms, settings.link_max
+    )
+    index = np.concatenate([np.arange(w.start, w.stop) for w in windows])
+    starts = np.cumsum([0] + [w.stop - w.start for w in windows[:-1]])
+    lengths = np.array([w.stop - w.start for w in windows])
+    tone, detected = inp[index, 0], level[index]
+
+    def candidate(v: NDArray[np.float64]) -> acompressor.Settings:
+        return replace(
+            settings,
+            threshold=10 ** (v[0] / 20),
+            ratio=float(v[1]),
+            knee=10 ** (v[2] / 20),
+            makeup=10 ** (v[3] / 20),
+        )
+
+    def predicted(v: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = candidate(v)
+        y = tone * acompressor.gain(detected, s) * s.makeup
+        power = np.add.reduceat(y * y, starts) / lengths
+        return np.asarray(10 * np.log10(power) + _SINE_PEAK_OVER_RMS_DB, dtype=np.float64)
+
+    def residual(v: NDArray[np.float64]) -> NDArray[np.float64]:
+        return np.asarray(predicted(v) - measured, dtype=np.float64)
+
+    best = None
+    for start in np.arange(max(measured.min(), _ACOMP_LOW[0]), 0.0, 5.0):
+        fit = least_squares(residual, [start, 2.0, 6.0, 1.0], bounds=(_ACOMP_LOW, _ACOMP_HIGH))
+        if best is None or fit.cost < best.cost:
+            best = fit
+    assert best is not None
+    t, r, k, m = (float(v) for v in best.x)
+    error = float(np.sqrt(np.mean(residual(best.x) ** 2)))
+    if np.max(np.abs(acompressor.gain(detected, candidate(best.x)) - 1.0)) < 1e-3:
+        # Nothing reaches the knee: no threshold in range, and any ratio fits equally well.
+        return StaticFit(math.nan, 1.0, math.nan, m, error)
+    return StaticFit(t, r, k, m, error)
+
+
+def fit_acompressor_times(
+    segments: tuple[Segment, ...],
+    inp: Audio,
+    out: Audio,
+    fs: int,
+    settings: acompressor.Settings,
+    latency_s: float,
+) -> AttackRelease:
+    """Attack and release (set values) that make the 3a model reproduce the measured gain
+    trace over the tone bursts (2 ms windows every 0.5 ms), the static settings taken as set.
+    The model runs on the whole input for every candidate, so its detector state is exact."""
+    del segments  # the whole trace is fitted; the steps need no special treatment
+    reference = _envelope_db(inp[:, 0], fs)
+    measured = _envelope_db(_aligned(out, len(inp), latency_s, fs)[:, 0], fs) - reference
+    usable = np.isfinite(measured) & np.isfinite(reference)
+    if np.ptp(measured[usable]) < _MIN_STEP_DB:
+        # The bursts hardly move the gain: on real renders the fit would chase noise.
+        return AttackRelease(math.nan, math.nan, math.nan)
+
+    def residual(v: NDArray[np.float64]) -> NDArray[np.float64]:
+        s = replace(settings, attack_ms=math.exp(v[0]), release_ms=math.exp(v[1]))
+        modelled = _envelope_db(acompressor.process(inp, fs, s)[:, 0], fs) - reference
+        return np.asarray((modelled - measured)[usable], dtype=np.float64)
+
+    fit = least_squares(
+        residual,
+        [math.log(settings.attack_ms), math.log(settings.release_ms)],
+        bounds=([math.log(0.01)] * 2, [math.log(2000.0), math.log(9000.0)]),
+    )
+    error = float(np.sqrt(np.mean(residual(fit.x) ** 2)))
+    return AttackRelease(math.exp(fit.x[0]), math.exp(fit.x[1]), error)
