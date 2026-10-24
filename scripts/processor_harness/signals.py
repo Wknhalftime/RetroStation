@@ -114,6 +114,16 @@ def twin_tone(
     return Stimulus(_stereo(mono), fs, (Segment(0.0, seconds, level_dbfs),))
 
 
+def smpte_twin_tone(fs: int, level_dbfs: float, seconds: float) -> Stimulus:
+    """SMPTE IMD stimulus: 60 Hz + 7 kHz at 4:1."""
+    return twin_tone(fs, f1=60.0, f2=7000.0, ratio=4.0, level_dbfs=level_dbfs, seconds=seconds)
+
+
+def ccif_twin_tone(fs: int, level_dbfs: float, seconds: float) -> Stimulus:
+    """CCIF IMD stimulus: 19 kHz + 20 kHz at 1:1."""
+    return twin_tone(fs, f1=19000.0, f2=20000.0, ratio=1.0, level_dbfs=level_dbfs, seconds=seconds)
+
+
 def _pink(n: int, rng: np.random.Generator) -> NDArray[np.float64]:
     spectrum = np.fft.rfft(rng.standard_normal(n))
     f = np.fft.rfftfreq(n)
