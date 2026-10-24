@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -131,7 +132,9 @@ def prepare_clip(
     cuts: dict[str, np.ndarray] = {}
     fs = 0
     for preset, mp3 in mp3s.items():
-        decoded, fs = read_wav(decode(ffmpeg, mp3, directory / f"{clip_id}_{preset}.decoded.wav"))
+        whole = decode(ffmpeg, mp3, directory / f"{clip_id}_{preset}.decoded.wav")
+        decoded, fs = read_wav(whole)
+        whole.unlink()  # a whole song as float: only needed long enough to cut the clip
         start = round(start_s * fs)
         cuts[preset] = decoded[start : start + round(duration_s * fs)]
     levels = {p: loudness.integrated(x, fs) for p, x in cuts.items()}
@@ -171,6 +174,15 @@ def make_session(
     return Session(mode, presets, tuple(clips), tuple(made), seed)
 
 
+def _portable(path: Path, directory: Path) -> str:
+    """A clip path relative to the session folder, so the folder can move as a whole; absolute
+    when the clip is on another drive (no relative path exists then)."""
+    target, base = path.resolve(), directory.resolve()
+    if target.drive != base.drive:
+        return str(target)
+    return os.path.relpath(target, base)
+
+
 def save_session(session: Session, directory: Path) -> Session:
     """Write the session (with its key) as ``<mode>-session.json`` under ``directory``."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -178,7 +190,10 @@ def save_session(session: Session, directory: Path) -> Session:
         "mode": session.mode.value,
         "presets": list(session.presets),
         "seed": session.seed,
-        "clips": {c.id: {p: str(path) for p, path in c.paths.items()} for c in session.clips},
+        "clips": {
+            c.id: {p: _portable(path, directory) for p, path in c.paths.items()}
+            for c in session.clips
+        },
         "trials": [
             {"number": t.number, "clip": t.clip, "labels": dict(t.labels)} for t in session.trials
         ],
@@ -192,7 +207,7 @@ def load_session(path: Path) -> Session:
     """A session written by save_session."""
     data = json.loads(path.read_text(encoding="utf-8"))
     clips = tuple(
-        Clip(clip_id, {p: Path(v) for p, v in paths.items()})
+        Clip(clip_id, {p: (path.parent / v).resolve() for p, v in paths.items()})
         for clip_id, paths in data["clips"].items()
     )
     trials = tuple(Trial(t["number"], t["clip"], t["labels"]) for t in data["trials"])

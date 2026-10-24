@@ -150,3 +150,22 @@ def test_clips_are_cut_from_the_mp3s_and_level_matched(tmp_path: Path) -> None:
         assert np.max(np.abs(x)) < 10 ** (-0.5 / 20)
         levels.append(loudness.integrated(x, fs))
     assert levels[0] == pytest.approx(levels[1], abs=0.1)
+    # Whole-song decodes are only scaffolding (about 100 MB a song): none are left behind.
+    assert not list((tmp_path / "clips").glob("*.decoded.wav"))
+
+
+def test_a_saved_session_still_finds_its_clips_after_the_folder_moves(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    (first / "clips").mkdir(parents=True)
+    paths = {}
+    for preset in ("liq", "norm"):
+        paths[preset] = first / "clips" / f"song_{preset}.wav"
+        paths[preset].write_bytes(b"")
+    session = listening.make_session([Clip("song", paths)], ("liq", "norm"), Mode.ABX, 2, seed=1)
+    listening.save_session(session, first)
+    moved = first.rename(tmp_path / "moved")
+
+    loaded = listening.load_session(moved / "abx-session.json")
+
+    assert loaded.clip_path("song", "liq") == (moved / "clips" / "song_liq.wav").resolve()
+    assert loaded.clip_path("song", "liq").is_file()
