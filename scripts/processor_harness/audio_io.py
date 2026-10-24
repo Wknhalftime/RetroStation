@@ -19,6 +19,12 @@ def write_wav(path: Path, x: Audio, fs: int) -> None:
     wavfile.write(path, fs, np.asarray(x, dtype=np.float32))
 
 
+def write_pcm16(path: Path, x: Audio, fs: int) -> None:
+    """Write a 16-bit PCM WAV (what Windows' own player plays), clipped to full scale."""
+    pcm = np.clip(np.round(np.asarray(x) * 32767.0), -32768, 32767).astype(np.int16)
+    wavfile.write(path, fs, pcm)
+
+
 def read_wav(path: Path) -> tuple[Audio, int]:
     """Read a float or 16/32-bit integer WAV as (samples, channels) float64 and its rate."""
     if not path.is_file():

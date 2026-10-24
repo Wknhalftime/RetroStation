@@ -1,0 +1,10 @@
+# Listening test 1 (AGC choice, open): agc.liq at R8's -14 LUFS, then the shared safety limiter.
+id = "agc-liq"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/agc_liq.liq"
+description = "agc.liq (windowed, gated, intro hold), -14 LUFS target, +-10 dB, gate -33."
+[params]
+target = -14.0
+idle = 4.0
+threshold = -33.0

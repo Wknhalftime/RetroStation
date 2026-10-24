@@ -1,0 +1,9 @@
+# Listening test 1 (AGC choice, open): normalize at R8's -14 LUFS, then the shared safety limiter.
+id = "agc-normalize"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/agc_normalize.liq"
+description = "normalize(lufs=true), -14 LUFS target, +-10 dB, gate -33, defaults otherwise."
+[params]
+target = -14.0
+threshold = -33.0
