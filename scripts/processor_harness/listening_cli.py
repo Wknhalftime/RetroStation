@@ -10,10 +10,11 @@
 
 The clips file names the run's programme inputs and where each clip starts:
 
-    duration_s = 15.0          # 10 to 20 s
+    duration_s = 15.0          # default clip length, 10 s to 2 minutes
     [[clip]]
     input = "teen-spirit"      # a programme id from the run's corpus
     start_s = 0.0              # within the rendered excerpt
+    duration_s = 69.0          # optional: this clip's own length
     note = "quiet intro into the band"
     id = "teen-intro"          # optional; defaults to <input>-<start>s, unique per test
 """
@@ -34,7 +35,7 @@ from processor_harness.listening import Mode, Result
 from processor_harness.presets import PresetError, load_preset
 
 MIN_CLIP_S = 10.0
-MAX_CLIP_S = 20.0
+MAX_CLIP_S = 120.0  # long enough for whole passages (Lance, 2026-10-24)
 
 
 class ClipSpecError(ValueError):
@@ -46,15 +47,21 @@ class ClipSpec:
     id: str
     input: str
     start_s: float
+    duration_s: float
     note: str
 
 
-def load_clip_specs(path: Path) -> tuple[float, list[ClipSpec]]:
-    """Clip length and the clips to cut; errors name the file."""
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    duration = data.get("duration_s")
-    if not isinstance(duration, int | float) or not MIN_CLIP_S <= duration <= MAX_CLIP_S:
+def _length(path: Path, value: object) -> float:
+    if not isinstance(value, int | float) or not MIN_CLIP_S <= value <= MAX_CLIP_S:
         raise ClipSpecError(f"{path}: duration_s must be {MIN_CLIP_S:g} to {MAX_CLIP_S:g} s")
+    return float(value)
+
+
+def load_clip_specs(path: Path) -> list[ClipSpec]:
+    """The clips to cut, each with its length (its own duration_s, else the file's);
+    errors name the file."""
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    default = data.get("duration_s")
     entries = data.get("clip", [])
     if not entries:
         raise ClipSpecError(f"{path}: no [[clip]] entries")
@@ -63,16 +70,18 @@ def load_clip_specs(path: Path) -> tuple[float, list[ClipSpec]]:
         if "input" not in entry or "start_s" not in entry:
             raise ClipSpecError(f"{path}: every [[clip]] needs input and start_s")
         start = float(entry["start_s"])
+        length = _length(path, entry.get("duration_s", default))
         clip_id = str(entry.get("id", f"{entry['input']}-{start:g}s"))
-        specs.append(ClipSpec(clip_id, str(entry["input"]), start, str(entry.get("note", ""))))
+        note = str(entry.get("note", ""))
+        specs.append(ClipSpec(clip_id, str(entry["input"]), start, length, note))
     ids = [spec.id for spec in specs]
     if len(ids) != len(set(ids)):
         raise ClipSpecError(f"{path}: clip ids must be unique, got {ids}")
-    return float(duration), specs
+    return specs
 
 
 def _prepare(args: argparse.Namespace) -> None:
-    duration, specs = load_clip_specs(args.clips)
+    specs = load_clip_specs(args.clips)
     presets = [load_preset(args.a), load_preset(args.b)]
     folder = args.run / "listening" / args.name
     clips = []
@@ -85,14 +94,17 @@ def _prepare(args: argparse.Namespace) -> None:
             mp3s[preset.id] = mp3
         clips.append(
             listening.prepare_clip(
-                spec.id, mp3s, spec.start_s, duration, folder / "clips", args.ffmpeg
+                spec.id, mp3s, spec.start_s, spec.duration_s, folder / "clips", args.ffmpeg
             )
         )
     pair = (presets[0].id, presets[1].id)
     for mode in Mode:
         session = listening.make_session(clips, pair, mode, trials=args.trials)
         listening.save_session(session, folder)
-    notes = {s.id: {"input": s.input, "start_s": s.start_s, "note": s.note} for s in specs}
+    notes = {
+        s.id: {"input": s.input, "start_s": s.start_s, "duration_s": s.duration_s, "note": s.note}
+        for s in specs
+    }
     (folder / "clips.json").write_text(json.dumps(notes, indent=2) + "\n", encoding="utf-8")
     print(f"prepared {len(clips)} clips; run: run_listening_test.py run {folder} --mode abx")
 
@@ -109,7 +121,10 @@ def _report_line(result: Result) -> str:
             f"p = {result.p_value:.4f} (one-sided) |"
         )
     wins = ", ".join(f"{p} {n}" for p, n in result.wins.items())
-    return f"| Preference | {wins} | p = {result.p_value:.4f} (two-sided) |"
+    return (
+        f"| Preference | {wins}, no preference {result.no_preference} | "
+        f"p = {result.p_value:.4f} (two-sided, over the decided trials) |"
+    )
 
 
 def _score(args: argparse.Namespace) -> None:
@@ -132,6 +147,7 @@ def _score(args: argparse.Namespace) -> None:
                     "trials": result.trials,
                     "correct": result.correct,
                     "wins": dict(result.wins),
+                    "no_preference": result.no_preference,
                     "p_value": result.p_value,
                     "per_clip": dict(result.per_clip),
                 },

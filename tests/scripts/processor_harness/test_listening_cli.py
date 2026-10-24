@@ -21,17 +21,36 @@ def test_clip_specs_carry_their_input_start_and_note(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    duration, (spec,) = load_clip_specs(path)
+    (spec,) = load_clip_specs(path)
 
-    assert duration == 15.0
-    assert (spec.input, spec.start_s, spec.note) == ("teen-spirit", 0.0, "intro")
+    assert (spec.input, spec.start_s, spec.duration_s, spec.note) == (
+        "teen-spirit",
+        0.0,
+        15.0,
+        "intro",
+    )
+
+
+def test_a_clip_can_set_its_own_length_up_to_two_minutes(tmp_path: Path) -> None:
+    # Lance, 2026-10-24: longer clips, to hear whole passages (Somebody to Love 0:00-1:09).
+    path = tmp_path / "clips.toml"
+    path.write_text(
+        'duration_s = 15.0\n[[clip]]\ninput = "queen"\nstart_s = 0.0\nduration_s = 69.0\n'
+        '[[clip]]\ninput = "b"\nstart_s = 0.0\n',
+        encoding="utf-8",
+    )
+
+    queen, other = load_clip_specs(path)
+
+    assert (queen.duration_s, other.duration_s) == (69.0, 15.0)
 
 
 @pytest.mark.parametrize(
     "body",
     [
         '[[clip]]\ninput = "a"\nstart_s = 0.0\n',
-        'duration_s = 25.0\n[[clip]]\ninput = "a"\nstart_s = 0.0\n',
+        'duration_s = 125.0\n[[clip]]\ninput = "a"\nstart_s = 0.0\n',
+        'duration_s = 15.0\n[[clip]]\ninput = "a"\nstart_s = 0.0\nduration_s = 5.0\n',
         "duration_s = 15.0\n",
     ],
 )
@@ -97,7 +116,7 @@ def test_two_clips_from_one_input_get_distinct_ids(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    _, specs = load_clip_specs(path)
+    specs = load_clip_specs(path)
 
     assert [s.id for s in specs] == ["air-171s", "air-314s", "intro"]
 

@@ -169,3 +169,31 @@ def test_a_saved_session_still_finds_its_clips_after_the_folder_moves(tmp_path: 
 
     assert loaded.clip_path("song", "liq") == (moved / "clips" / "song_liq.wav").resolve()
     assert loaded.clip_path("song", "liq").is_file()
+
+
+def test_no_preference_is_recorded_and_left_out_of_the_binomial(tmp_path: Path) -> None:
+    # Lance, 2026-10-24: on the song endings there was "nothing really to tell".
+    session = listening.save_session(
+        listening.make_session(clips(2), ("liq", "norm"), Mode.PREFERENCE, trials=3, seed=2),
+        tmp_path,
+    )
+    listening.run_session(session, FakePlayer(), answers("0", "1", "2"))
+
+    picks = listening.read_picks(session)
+    result = listening.score(session, picks)
+
+    assert [p["choice"] for p in picks] == ["none", "A", "B"]
+    assert result.no_preference == 1
+    assert sum(result.wins.values()) == 2
+    decided = 2 * listening.binomial_p(max(result.wins.values()), 2)
+    assert result.p_value == pytest.approx(min(1.0, decided))
+
+
+def test_abx_stays_a_forced_choice(tmp_path: Path) -> None:
+    session = listening.save_session(
+        listening.make_session(clips(2), ("liq", "norm"), Mode.ABX, trials=1, seed=2), tmp_path
+    )
+
+    listening.run_session(session, FakePlayer(), answers("0", "1"))
+
+    assert [p["choice"] for p in listening.read_picks(session)] == ["A"]

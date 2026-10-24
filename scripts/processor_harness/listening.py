@@ -10,7 +10,9 @@ measurements.
 - Every pick is appended to the session's picks file as it is made, so a stopped session
   resumes where it left off.
 - Scores use math item 13: p = sum over k >= c of C(n, k) 0.5^n. ABX is one-sided (correct
-  identifications); preference is two-sided (neither preset is favoured in advance).
+  identifications) and a forced choice. Preference is two-sided (neither preset is
+  favoured in advance) and allows "no preference" (0): those trials are counted but left
+  out of the binomial, which runs over the decided trials only.
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ class Result:
     wins: Mapping[str, int]  # preference: picks per preset (empty for ABX)
     p_value: float
     per_clip: Mapping[str, str]  # clip -> "correct/total" (ABX) or "wins a/b" (preference)
+    no_preference: int = 0  # preference: trials answered "no preference"
 
 
 class Player(Protocol):
@@ -228,14 +231,16 @@ def _prompt(session: Session, trial: Trial) -> str:
     if session.mode is Mode.ABX:
         keys = "a / b / x play, s stop; 1 = X is A, 2 = X is B; q quit"
     else:
-        keys = "a / b play, s stop; 1 = prefer A, 2 = prefer B; q quit"
+        keys = "a / b play, s stop; 1 = prefer A, 2 = prefer B, 0 = no preference; q quit"
     return f"[{session.mode.value} {trial.number}/{total}] {keys} > "
 
 
 def run_session(session: Session, player: Player, ask: Callable[[str], str] = input) -> None:
     """Ask for a pick on every unanswered trial, recording each one as it is made."""
     done = {p["trial"] for p in read_picks(session)}
-    playable = ("a", "b", "x") if session.mode is Mode.ABX else ("a", "b")
+    abx = session.mode is Mode.ABX
+    playable = ("a", "b", "x") if abx else ("a", "b")
+    answers = {"1": "A", "2": "B"} if abx else {"1": "A", "2": "B", "0": "none"}
     for trial in session.trials:
         if trial.number in done:
             continue
@@ -246,12 +251,12 @@ def run_session(session: Session, player: Player, ask: Callable[[str], str] = in
                 player.play(session.clip_path(trial.clip, trial.labels[command.upper()]))
             elif command == "s":
                 player.stop()
-            elif command in ("1", "2"):
+            elif command in answers:
                 player.stop()
                 pick = {
                     "trial": trial.number,
                     "clip": trial.clip,
-                    "choice": "A" if command == "1" else "B",
+                    "choice": answers[command],
                     "time": datetime.now(UTC).isoformat(timespec="seconds"),
                 }
                 with session.picks_path.open("a", encoding="utf-8") as f:
@@ -278,15 +283,21 @@ def score(session: Session, picks: Sequence[Mapping[str, object]]) -> Result:
             session.mode, len(picks), correct, {}, binomial_p(correct, len(picks)), summary
         )
     wins = dict.fromkeys(session.presets, 0)
+    undecided = 0
     for pick in picks:
         t = trials[int(str(pick["trial"]))]
+        if pick["choice"] == "none":
+            undecided += 1
+            per_clip.setdefault(t.clip, []).append("none")
+            continue
         preset = t.labels[str(pick["choice"])]
         wins[preset] += 1
         per_clip.setdefault(t.clip, []).append(preset)
     leader = max(wins.values())
+    decided = sum(wins.values())
     summary = {
-        c: " / ".join(f"{p} {chosen.count(p)}" for p in session.presets)
+        c: " / ".join(f"{p} {chosen.count(p)}" for p in (*session.presets, "none"))
         for c, chosen in per_clip.items()
     }
-    p_value = min(1.0, 2 * binomial_p(leader, len(picks)))
-    return Result(session.mode, len(picks), leader, wins, p_value, summary)
+    p_value = min(1.0, 2 * binomial_p(leader, decided)) if decided else 1.0
+    return Result(session.mode, len(picks), leader, wins, p_value, summary, undecided)
