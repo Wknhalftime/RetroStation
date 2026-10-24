@@ -4,6 +4,7 @@ programme entries point at a file (relative paths resolve next to the manifest) 
 to cut from it.
 
     sample_rate = 44100
+    programme_lufs = -18.0     # optional: the item-gain level songs reach the chain at
     [[signal]]
     id = "impulse"
     kind = "impulse"
@@ -40,6 +41,8 @@ GENERATORS: dict[str, Callable[..., Stimulus]] = {
     "noise_with_pauses": signals.noise_with_pauses,
 }
 CATEGORIES = ("music", "speech", "voice", "transient")
+# Songs reach the chain at -18 LUFS: the decks apply each item's gain (liq_amplify) first.
+DEFAULT_PROGRAMME_LUFS = -18.0
 
 
 class CorpusError(ValueError):
@@ -68,6 +71,7 @@ class ProgrammeEntry:
 @dataclass(frozen=True)
 class Corpus:
     sample_rate: int
+    programme_lufs: float
     signals: tuple[SignalEntry, ...]
     programme: tuple[ProgrammeEntry, ...]
     source: Path
@@ -116,4 +120,5 @@ def load_corpus(path: Path) -> Corpus:
     ids = [e.id for e in found] + [e.id for e in programme]
     if len(ids) != len(set(ids)):
         raise CorpusError(f"{path}: every id must be unique, got {ids}")
-    return Corpus(int(data["sample_rate"]), found, programme, path)
+    level = float(data.get("programme_lufs", DEFAULT_PROGRAMME_LUFS))
+    return Corpus(int(data["sample_rate"]), level, found, programme, path)

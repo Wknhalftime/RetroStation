@@ -6,6 +6,7 @@ Tone levels are peak dBFS: a sine's RMS level + 3.01 dB.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,6 +23,7 @@ _EDGE_S = 0.02  # and stop short of its end, so a few ms of latency never reach 
 _ENVELOPE_S = 0.002  # gain-trace window: two periods of the 1 kHz burst tone
 _HOP_S = 0.0005
 _MIN_STEP_DB = 0.5  # a smaller gain change is not a time constant to fit
+_NO_BEND_DB = 0.01  # a fitted curve this close to 1:1 everywhere has no threshold in range
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,10 @@ def fit_static_curve(points: list[tuple[float, float]]) -> StaticFit:
     assert best is not None
     t, r, w, m = (float(v) for v in best.x)
     error = float(np.sqrt(np.mean(residual(best.x) ** 2)))
+    if np.max(np.abs(_soft_knee(x, t, r, w, m) - (x + m))) < _NO_BEND_DB:
+        # The curve never bends inside the measured range: no threshold to report, and any
+        # ratio fits equally well, so the chain reads as 1:1.
+        return StaticFit(math.nan, 1.0, math.nan, m, error)
     return StaticFit(t, r, w, m, error)
 
 
@@ -134,7 +140,13 @@ def time_constants(
         finite = np.isfinite(trace)
         tau = _fit_tau(t[finite], trace[finite])
         (attacks if seg.level_dbfs > before.level_dbfs else releases).append(tau)
-    return TimeConstants(float(np.nanmedian(attacks)), float(np.nanmedian(releases)))
+    return TimeConstants(_median(attacks), _median(releases))
+
+
+def _median(values: list[float]) -> float:
+    """Median of the fitted values; nan when no step moved the gain (an idle chain)."""
+    fitted = [v for v in values if not math.isnan(v)]
+    return float(np.median(fitted)) if fitted else math.nan
 
 
 def pause_rise(

@@ -1,0 +1,8 @@
+# Today's live chain (agc.liq + multiband.liq as session.liq calls them), measured once so the
+# new chain's numbers have an anchor. Not a listening reference. Overs are counted against P5's
+# -1 dBTP starting point, the new chain's target, not this chain's own -2 dBFS sample ceiling.
+id = "live-2026-10-22"
+version = 1
+backend = "liquidsoap"
+chain = "../chains/live_2026_10_22.liq"
+description = "Rock-Light AGC (one band, 12 s intro hold) + five-band ffmpeg multiband, no EQ."

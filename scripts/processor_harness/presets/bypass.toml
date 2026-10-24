@@ -1,0 +1,7 @@
+# The "no compression" reference: programme at the -18 LUFS item-gain level, untouched, through
+# the Liquidsoap back end and the stream's MP3 encoder.
+id = "bypass"
+version = 1
+backend = "liquidsoap"
+chain = "../chains/bypass.liq"
+description = "No processing; the reference for every listening comparison."
