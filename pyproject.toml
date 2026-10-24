@@ -58,6 +58,8 @@ dev = [
     "cosmic-ray>=8.7",
     # psutil ships no py.typed; the stubs type backend/playout/process_meter.py (M5)
     "types-psutil",
+    "scipy>=1.14",
+    "scipy-stubs>=1.18.1.1",
 ]
 
 [tool.pytest.ini_options]
