@@ -1,0 +1,11 @@
+# Band step: band 1 of edges A (100 / 520 / 1800 / 6000 Hz) alone through the 20 ms linear
+# crossover, for its shape: the reference D's band separation is compared against.
+id = "be-a-solo1"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Band 1 of edges A alone: its shape (reference for D)."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+solo = 1

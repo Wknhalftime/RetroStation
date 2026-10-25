@@ -1,0 +1,12 @@
+# Band step: band 2 of edges D (60 / 520 / 1800 / 6000 Hz) alone through the 20 ms linear
+# crossover, for its shape: D's lowest edge is under 100 Hz, so band separation is measured
+# again (Lance, 2026-10-24).
+id = "be-d-solo2"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Band 2 of edges D alone: its shape (separation under 100 Hz)."
+[params]
+split = "60 520 1800 6000"
+delay = 0.02
+solo = 2

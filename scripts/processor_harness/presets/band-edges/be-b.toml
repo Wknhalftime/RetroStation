@@ -1,0 +1,20 @@
+# Band step, edge sweep (Lance, 2026-10-25): B, 100 Hz then ERB-spaced to 12 kHz (100 / 583 / 1776 / 4723 Hz), with the gentle starting curve.
+# Ratio 2.5:1, 9 dB soft knee, RMS detection, stereo average; thresholds set so each band
+# averages 3 dB of gain reduction on the T3 renders (scripts/run_band_calibration.py); today's
+# attacks (band 1 34 ms, at least 30 ms) and 1 s release for every variant.
+id = "be-b"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "B, 100 Hz then ERB-spaced to 12 kHz (100 / 583 / 1776 / 4723 Hz): gentle curve, 3 dB mean gain reduction per band."
+[params]
+split = "100 583 1776 4723"
+delay = 0.02
+threshold_db = "-28.6 -25.6 -29.4 -30.7 -35.3"
+ratio = "2.5 2.5 2.5 2.5 2.5"
+knee_db = "9.03 9.03 9.03 9.03 9.03"
+makeup_db = "0 0 0 0 0"
+attack_ms = "34 33 33 25 25"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 1
+link = 0

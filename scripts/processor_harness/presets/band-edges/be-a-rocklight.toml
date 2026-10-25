@@ -1,0 +1,22 @@
+# Band step, edge sweep (Lance, 2026-10-25): the live setting for the record, Lance's Rock-Light
+# multiband (backend/playout/multiband.liq) on edges A: 20:1, hard knee, peak detection, stereo
+# maximum, today's attacks, 1 s release. Thresholds are live's (ref + t - drive + 15) moved
+# 2 dB down, since live's AGC hands the multiband -16 LUFS and R10's -18. Not modelled here:
+# band 5 following band 4's key (it gets band 4's settings on its own detector), the 3>4
+# coupling, the bass clipper and the final peak stages (the band step has no clipper; P4).
+id = "be-a-rocklight"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "A, live Rock-Light curve (20:1, hard knee, peak), thresholds 2 dB down for R10."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+threshold_db = "-26.35 -18.6 -23.0 -21.6 -21.6"
+ratio = "20 20 20 20 20"
+knee_db = "0 0 0 0 0"
+makeup_db = "0 0 0 0 0"
+attack_ms = "34 33 33 25 25"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 0
+link = 1
