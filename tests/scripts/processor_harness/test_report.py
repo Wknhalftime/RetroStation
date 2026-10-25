@@ -73,9 +73,9 @@ def test_band_levels_also_report_their_spread_between_songs() -> None:
         renderer="Liquidsoap 2.4.5",
         standalone_ffmpeg="ffmpeg version 8.0.1",
         metrics={
-            "song-a": {"band.1.out_db": -30.0, "band.1.in_db": -28.0},
-            "song-b": {"band.1.out_db": -27.5, "band.1.in_db": -24.0},
-            "song-c": {"band.1.out_db": -29.0, "band.1.in_db": -26.0},
+            "song-a": {"band.1.out_db": -30.0, "band.1.in_db": -28.0, "octave.63hz.out_db": -31.0},
+            "song-b": {"band.1.out_db": -27.5, "band.1.in_db": -24.0, "octave.63hz.out_db": -33.0},
+            "song-c": {"band.1.out_db": -29.0, "band.1.in_db": -26.0, "octave.63hz.out_db": -30.0},
         },
     )
 
@@ -84,3 +84,4 @@ def test_band_levels_also_report_their_spread_between_songs() -> None:
     assert row["band.1.out_db"] == pytest.approx(-29.0)  # median
     assert row["band.1.out_spread_db"] == pytest.approx(2.5)
     assert row["band.1.in_spread_db"] == pytest.approx(4.0)
+    assert row["octave.63hz.out_spread_db"] == pytest.approx(3.0)

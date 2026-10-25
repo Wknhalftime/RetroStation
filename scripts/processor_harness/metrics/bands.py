@@ -14,6 +14,8 @@ loudness-range cost as the tiebreak, and wants each band's output level consiste
 - Balance drift: how far the bands' gain reductions move apart and together during the song,
   with the moment's overall gain and each band's average taken out (dB RMS). Balance change:
   how far the song's average balance moved (the spread of the bands' average reductions).
+- Octave levels (31.5 Hz to 16 kHz) put every edge set on one grid, so each song's balance
+  can be compared between songs whatever the bands are.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.signal import oaconvolve
+from scipy.signal import oaconvolve, welch
 
 from processor_harness.metrics import acompressor
 from processor_harness.metrics.acompressor import Settings
@@ -35,6 +37,8 @@ DELAY_S = 0.02  # the crossover's FIR half-length, locked in dial-in step 1
 BLOCK_S = 0.4
 SILENT_DBFS = -60.0  # a block this quiet is not programme
 BAND_FLOOR_DBFS = -70.0  # a band this quiet in a block has nothing to compress
+OCTAVE_CENTRES = 1000.0 * 2.0 ** np.arange(-5, 5)
+OCTAVE_LABELS = ("31.5", "63", "125", "250", "500", "1000", "2000", "4000", "8000", "16000")
 
 
 def kernels(edges: Sequence[float], fs: int, delay_s: float = DELAY_S) -> NDArray[np.float64]:
@@ -71,6 +75,16 @@ def band_powers(
     return np.array(
         [_block_mean(np.mean(_band(x, k) ** 2, axis=1), block) for k in kernels(edges, fs, delay_s)]
     )
+
+
+def octave_levels(x: Audio, fs: int) -> NDArray[np.float64]:
+    """Mean power in each octave band (dB), both channels together, over the whole input."""
+    freqs, psd = welch(x, fs, nperseg=16384, axis=0)
+    power = np.mean(psd, axis=1) * (freqs[1] - freqs[0])
+    levels = [
+        power[(freqs >= c / np.sqrt(2)) & (freqs < c * np.sqrt(2))].sum() for c in OCTAVE_CENTRES
+    ]
+    return _db(np.array(levels))
 
 
 def _db(power: NDArray[np.float64]) -> NDArray[np.float64]:

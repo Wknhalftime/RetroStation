@@ -157,3 +157,14 @@ def test_the_python_split_matches_the_chains_crossover(tmp_path: Path) -> None:
         # firequalizer designs its FIRs a little differently: its bottom bands read up to
         # 0.11 dB lower (measured 2026-10-25: -0.11, -0.09, -0.03, 0.00, 0.00 dB).
         assert theirs == pytest.approx(here, abs=0.15), f"band {band + 1}"
+
+
+def test_octave_levels_put_a_tone_in_its_octave() -> None:
+    # A grid shared by every edge set, so between-song balance compares fairly across them.
+    x = signals.tone(FS, 1000.0, -20.0, 4.0).samples
+
+    levels = bands.octave_levels(x, FS)
+
+    i = bands.OCTAVE_LABELS.index("1000")
+    assert levels[i] == pytest.approx(-23.01, abs=0.1)
+    assert np.all(np.delete(levels, i) < levels[i] - 30)

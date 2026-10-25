@@ -203,6 +203,11 @@ def _bands(r: Rendered) -> dict[str, float]:
     for k, values in enumerate(zip(c.in_db, c.out_db, c.gr_mean_db, c.gr_p95_db, strict=True)):
         for name, value in zip(("in_db", "out_db", "gr_mean_db", "gr_p95_db"), values, strict=True):
             row[f"band.{k + 1}.{name}"] = value
+    # The same octaves for every edge set, so balance compares between songs fairly.
+    octave_in, octave_out = bands.octave_levels(r.inp, r.fs), bands.octave_levels(r.out, r.fs)
+    for i, label in enumerate(bands.OCTAVE_LABELS):
+        row[f"octave.{label}hz.in_db"] = float(octave_in[i])
+        row[f"octave.{label}hz.out_db"] = float(octave_out[i])
     return row
 
 

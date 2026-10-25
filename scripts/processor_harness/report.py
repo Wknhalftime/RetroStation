@@ -5,8 +5,9 @@ a value tuned through one FFmpeg can differ inside the other.
 
 Summary rules: worst case for peaks, overs counts, deviations and latency (overs summed); the
 median otherwise, with ``lufs_i_spread`` (highest minus lowest) beside the loudness, and the
-same spread beside each band's input and output level (``band.N.out_spread_db``): a music
-stream wants each band consistent from song to song.
+same spread beside each band's and each octave's input and output level
+(``band.N.out_spread_db``, ``octave.Fhz.out_spread_db``): a music stream wants each band
+consistent from song to song.
 """
 
 from __future__ import annotations
@@ -82,7 +83,8 @@ def summary_row(result: PresetResult) -> dict[str, str | int | float]:
         row[name] = _rule(name)(finite) if finite else math.nan
         if name == "lufs_i" and finite:
             row["lufs_i_spread"] = max(finite) - min(finite)
-        if name.startswith("band.") and name.endswith((".in_db", ".out_db")) and finite:
+        banded = name.startswith(("band.", "octave."))
+        if banded and name.endswith((".in_db", ".out_db")) and finite:
             row[name.removesuffix("_db") + "_spread_db"] = max(finite) - min(finite)
     return row
 
