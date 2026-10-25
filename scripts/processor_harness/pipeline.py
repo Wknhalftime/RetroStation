@@ -15,6 +15,7 @@ from pathlib import Path
 from processor_harness.audio_io import Audio, read_wav
 from processor_harness.codec import decode, encode_mp3
 from processor_harness.measure import PROGRAMME, SEQUENCE, Rendered, measure, read_gauges
+from processor_harness.metrics.acompressor import Settings
 from processor_harness.prepare import PreparedInput
 from processor_harness.presets import Backend, ParamValue, Preset
 from processor_harness.render import (
@@ -46,6 +47,19 @@ def render_params(preset: Preset, item: PreparedInput) -> dict[str, ParamValue]:
     if item.kind == SEQUENCE:
         params["boundaries"] = " ".join(str(seg.start_s) for seg in item.segments)
     return params
+
+
+def model_for(preset: Preset, item: PreparedInput) -> Settings | None:
+    """The compressor settings an input's fits run: the aimed-at band's, for a stimulus aimed
+    at one band of a multiband preset, otherwise the preset's [model]."""
+    if item.band is None or not preset.band_models:
+        return preset.model
+    if item.band > len(preset.band_models):
+        raise ValueError(
+            f"{item.id} is aimed at band {item.band}, but {preset.source} has "
+            f"{len(preset.band_models)} bands"
+        )
+    return preset.band_models[item.band - 1]
 
 
 def _render(
@@ -114,7 +128,7 @@ def measure_renders(
             ceiling_dbtp=preset.ceiling_dbtp,
             latency_s=latency_s,
             category=item.category,
-            model=preset.model,
+            model=model_for(preset, item),
             gauge_limits=preset.gauge_limits,
             level_check=preset.level_check,
             band_edges=preset.band_edges,

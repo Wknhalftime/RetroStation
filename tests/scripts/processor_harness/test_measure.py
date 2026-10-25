@@ -396,6 +396,7 @@ def test_programme_through_a_band_preset_reports_each_band() -> None:
     assert row["balance_change_db"] > 1.0
     assert row["balance_drift_db"] < 0.1
     assert "band.5.gr_p95_db" in row
+    assert row["band.3.gr_p50_db"] == pytest.approx(3.0, abs=0.05)
     assert row["octave.1000hz.out_db"] < row["octave.1000hz.in_db"]
     assert row["octave_drift_db"] < 0.1 and row["octave_change_db"] > 0.5
 

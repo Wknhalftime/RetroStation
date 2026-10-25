@@ -11,6 +11,8 @@ to cut from it.
     level_dbfs = -30.0
     seconds = 2.0
     at_s = 0.5
+    band = 3                  # optional: the band of a multiband preset it is aimed
+                              # at, whose compressor settings its fits then use
     [[programme]]
     id = "teen-spirit"
     path = "D:/Music/..."
@@ -62,6 +64,7 @@ class SignalEntry:
     id: str
     kind: str
     params: Mapping[str, float | int]
+    band: int | None = None  # 1-based band of a multiband preset
 
     def build(self, fs: int) -> Stimulus:
         return GENERATORS[self.kind](fs, **self.params)
@@ -99,13 +102,16 @@ def _signal(path: Path, entry: dict[str, object]) -> SignalEntry:
     entry_id, kind = str(entry.get("id", "")), str(entry.get("kind", ""))
     if kind not in GENERATORS:
         raise CorpusError(f"{path}: signal {entry_id!r}: unknown kind {kind!r}")
-    params = {k: v for k, v in entry.items() if k not in ("id", "kind")}
+    band = entry.get("band")
+    if band is not None and (not isinstance(band, int) or isinstance(band, bool) or band < 1):
+        raise CorpusError(f"{path}: signal {entry_id!r}: band must be a whole number from 1")
+    params = {k: v for k, v in entry.items() if k not in ("id", "kind", "band")}
     try:
         inspect.signature(GENERATORS[kind]).bind(0, **params)
     except TypeError as error:
         raise CorpusError(f"{path}: signal {entry_id!r}: {error}") from None
     numbers = {k: v for k, v in params.items() if isinstance(v, int | float)}
-    return SignalEntry(entry_id, kind, numbers)
+    return SignalEntry(entry_id, kind, numbers, band)
 
 
 def _programme(path: Path, entry: dict[str, object]) -> ProgrammeEntry:
