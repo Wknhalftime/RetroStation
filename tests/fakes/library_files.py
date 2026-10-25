@@ -5,7 +5,12 @@ from pathlib import Path
 from uuid import UUID
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
-from backend.domain.library import AUDIO_HASHABLE_FORMATS, AudioHash, LibraryFile
+from backend.domain.library import (
+    AUDIO_HASHABLE_FORMATS,
+    AudioHash,
+    LibraryFile,
+    LibraryFileRejectedError,
+)
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 
@@ -20,6 +25,17 @@ def _stat_unchanged(existing: LibraryFile, incoming: LibraryFile) -> bool:
     )
 
 
+def _holds_nul(value: object) -> bool:
+    """Mirrors PostgreSQL, which stores no NUL byte in a text or jsonb value."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_holds_nul(k) or _holds_nul(v) for k, v in value.items())
+    if isinstance(value, list | tuple):
+        return any(_holds_nul(v) for v in value)
+    return False
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -30,6 +46,14 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         self._clock = clock
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
+        # Like Pg's, a row holding a NUL is refused, and nothing of it is stored.
+        if _holds_nul(dataclasses.astuple(file)):
+            raise LibraryFileRejectedError(
+                "the database refused the row: text fields cannot contain NUL (0x00) bytes"
+            )
+        return self._store(file)
+
+    def _store(self, file: LibraryFile) -> LibraryFile:
         existing = self.get_by_path(file.file_path)
         if existing is None:
             self._data[file.id] = file
@@ -58,7 +82,10 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
         return stored
 
     def upsert_write_only(self, file: LibraryFile) -> None:
-        self.upsert(file)
+        # Never refused here: Pg's write-only upsert leaves a refused row to its caller
+        # as psycopg's own error (the full scan rolls back and quarantines), which a
+        # fake cannot raise.
+        self._store(file)
 
     def get_by_id(self, file_id: UUID) -> LibraryFile | None:
         return self._data.get(file_id)
