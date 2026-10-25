@@ -8,6 +8,7 @@ render's CPU time before the real-time factor is worked out.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,11 @@ def model_for(preset: Preset, item: PreparedInput) -> Settings | None:
             f"{len(preset.band_models)} bands"
         )
     return preset.band_models[item.band - 1]
+
+
+def band_makeup_db(preset: Preset) -> tuple[float, ...]:
+    """Each band's makeup (dB), for a multiband preset; empty otherwise."""
+    return tuple(20 * math.log10(m.makeup) for m in preset.band_models)
 
 
 def _render(
@@ -132,6 +138,7 @@ def measure_renders(
             gauge_limits=preset.gauge_limits,
             level_check=preset.level_check,
             band_edges=preset.band_edges,
+            band_makeup_db=band_makeup_db(preset),
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

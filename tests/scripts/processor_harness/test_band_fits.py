@@ -68,3 +68,10 @@ def test_a_band_past_the_presets_bands_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="steps-band9"):
         pipeline.model_for(preset, aimed)
+
+
+def test_a_band_presets_makeup_reaches_the_measurement(tmp_path: Path) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+    preset = load_preset(write(tmp_path / "p.toml", BANDS.replace('"0 0 0"', '"1.5 0 2"')))
+
+    assert pipeline.band_makeup_db(preset) == pytest.approx((1.5, 0.0, 2.0))
