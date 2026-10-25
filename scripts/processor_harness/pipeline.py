@@ -85,6 +85,7 @@ def measure_renders(
             latency_s=latency_s,
             category=item.category,
             model=preset.model,
+            gauge_limits=preset.gauge_limits,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

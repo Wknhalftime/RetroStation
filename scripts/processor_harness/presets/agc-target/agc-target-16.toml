@@ -10,3 +10,5 @@ idle = 2.0
 threshold = -33.0
 gain_min = -10.0
 gain_max = 10.0
+[gauge_limits]
+agc_gain = [-10.0, 10.0]

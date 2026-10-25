@@ -137,3 +137,26 @@ def test_bad_model_tables_name_the_file_and_the_field(
 
     with pytest.raises(PresetError, match=r"bad\.toml.*model"):
         load_preset(path)
+
+
+def test_presets_declare_the_limits_of_their_gauges(tmp_path: Path) -> None:
+    preset = load_preset(
+        write(
+            tmp_path / "p.toml",
+            'id = "x"\nversion = 1\nbackend = "ffmpeg"\ngraph = "g"\n'
+            "[gauge_limits]\nagc_gain = [-10.0, 10.0]\n",
+        )
+    )
+
+    assert dict(preset.gauge_limits) == {"agc_gain": (-10.0, 10.0)}
+
+
+def test_gauge_limits_need_a_low_and_a_high(tmp_path: Path) -> None:
+    path = write(
+        tmp_path / "bad.toml",
+        'id = "x"\nversion = 1\nbackend = "ffmpeg"\ngraph = "g"\n'
+        "[gauge_limits]\nagc_gain = [10.0]\n",
+    )
+
+    with pytest.raises(PresetError, match=r"bad\.toml.*gauge_limits"):
+        load_preset(path)

@@ -14,6 +14,8 @@ so the active value is never ambiguous.
     description = "..."
     [params]
     target = -16.0
+    [gauge_limits]             # optional: a logged gauge's range, for its pinned time
+    agc_gain = [-10.0, 10.0]
     [model]                    # optional: what the chain's compressor is set to (item 3a);
     kind = "acompressor"       # the stepped-tone and burst fits then run that model
     threshold_db = -24.0
@@ -30,7 +32,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -72,6 +74,7 @@ class Preset:
     superseded: tuple[Superseded, ...]
     source: Path
     model: Settings | None = None
+    gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
 
 
 def _param_value(path: Path, name: str, value: object) -> ParamValue:
@@ -137,6 +140,20 @@ def _model(path: Path, table: object) -> Settings | None:
     return Settings.from_db(rms=_DETECTION[str(detection)], link_max=_LINK[str(link)], **numbers)
 
 
+def _gauge_limits(path: Path, table: object) -> dict[str, tuple[float, float]]:
+    """[gauge_limits]: each gauge name to its [low, high] range."""
+    if table is None:
+        return {}
+    limits = {}
+    if not isinstance(table, dict):
+        raise PresetError(f"{path}: [gauge_limits] must be a table of [low, high] pairs")
+    for name, pair in table.items():
+        if not (isinstance(pair, list) and len(pair) == 2):
+            raise PresetError(f"{path}: [gauge_limits] {name} must be [low, high]")
+        limits[str(name)] = (float(pair[0]), float(pair[1]))
+    return limits
+
+
 def load_preset(path: Path) -> Preset:
     """Read and validate a preset file; errors name the file and the field."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -160,4 +177,5 @@ def load_preset(path: Path) -> Preset:
         superseded=tuple(_superseded(path, e) for e in data.get("superseded", [])),
         source=path,
         model=_model(path, data.get("model")),
+        gauge_limits=_gauge_limits(path, data.get("gauge_limits")),
     )
