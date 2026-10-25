@@ -224,7 +224,11 @@ def render_liquidsoap(
 def ffmpeg_version(ffmpeg: Path) -> str:
     """First line of ``ffmpeg -version`` plus its libavfilter version."""
     out = subprocess.run(
-        [str(ffmpeg), "-hide_banner", "-version"], capture_output=True, text=True, check=True
+        [str(ffmpeg), "-hide_banner", "-version"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout
     first = out.splitlines()[0]
     build = " ".join(first.split()[:3])
@@ -237,7 +241,11 @@ def liquidsoap_version(liquidsoap: Path) -> str:
     """``liquidsoap --version`` plus the FFmpeg libraries linked into the binary, read from
     the version strings libavcodec and libavformat embed (Liquidsoap reports neither)."""
     out = subprocess.run(
-        [str(liquidsoap), "--version"], capture_output=True, text=True, check=True
+        [str(liquidsoap), "--version"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout
     data = liquidsoap.read_bytes()
     found = []

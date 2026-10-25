@@ -71,3 +71,13 @@ def test_round_trip_overshoots_a_hard_limited_signal(tmp_path: Path) -> None:
 
     x, _ = audio_io.read_wav(decoded)
     assert loudness.true_peak(x, FS) > -1.0
+
+
+def test_ffmpeg_errors_keep_non_ascii_file_names(tmp_path: Path) -> None:
+    # FFmpeg's messages are UTF-8: read with Windows' codepage, a name like blink‐182's (U+2010)
+    # crashed the reader thread and the error text was lost.
+    assert FFMPEG is not None
+    missing = tmp_path / "blink‐182 - Stay Together.mp3"
+
+    with pytest.raises(RuntimeError, match="blink‐182"):
+        codec.decode(Path(FFMPEG), missing, tmp_path / "out.wav")

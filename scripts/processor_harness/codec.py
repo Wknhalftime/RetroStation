@@ -26,7 +26,10 @@ LAME_SCALE_AT_128K = 0.95
 
 def _ffmpeg(ffmpeg: Path, *args: str) -> None:
     run = subprocess.run(
-        [str(ffmpeg), "-hide_banner", "-nostats", "-y", *args], capture_output=True, text=True
+        [str(ffmpeg), "-hide_banner", "-nostats", "-y", *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if run.returncode != 0:
         raise RuntimeError(f"ffmpeg {' '.join(args)} failed:\n{run.stderr[-4000:]}")

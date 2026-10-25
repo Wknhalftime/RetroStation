@@ -45,7 +45,7 @@ def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, o
             "-ac", "2", "-ar", str(fs), "-c:a", "pcm_f32le", str(out),
         ],
         capture_output=True,
-        text=True,
+        encoding="utf-8", errors="replace",
     )  # fmt: skip
     if run.returncode != 0:
         raise RuntimeError(f"ffmpeg could not cut {entry.path}:\n{run.stderr[-4000:]}")
