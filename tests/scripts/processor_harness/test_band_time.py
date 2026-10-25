@@ -104,3 +104,16 @@ def test_programme_through_a_band_preset_reports_band_1_bass_thd() -> None:
 
     assert row["band.1.bass_thd_added_p50_pct"] > 0.05
     assert row["band.1.bass_thd_windows"] >= 5
+
+
+def test_real_songs_give_held_bass_notes_in_half_second_windows() -> None:
+    # Notes change every quarter to half second in real songs: 1 s windows held within 1 dB
+    # found 0-7 per song (Lance's corpus, 2026-10-25), half-second ones within 1.5 dB dozens.
+    s = Settings.from_db(-26.0, 2.5, 9.03, 0.0, 30.0, 1000.0)
+    t = np.arange(round(6.0 * FS)) / FS
+    notes = np.where((t // 0.8) % 2 == 0, 45.0, 60.0)  # two notes, 0.8 s each
+    decay_db = -17.0 - 3.0 * (t % 0.8) / 0.8  # each note re-attacks, then fades 3 dB
+    mono = 10 ** (decay_db / 20) * np.sin(2 * np.pi * np.cumsum(notes) / FS)
+    x = np.stack([mono, mono], axis=1)
+
+    assert bands.bass_thd_added(x, FS, EDGES, s).windows >= 5

@@ -348,11 +348,13 @@ class BassThd:
     windows: int  # held, pitched windows found
 
 
-_NOTE_WINDOW_S = 1.0
-_NOTE_HOP_S = 0.5
-_NOTE_STEADY_DB = 1.0  # every 100 ms of the window within this of its median level
+# Notes change every quarter to half second in real songs: 1 s windows held within 1 dB found
+# 0-7 per song in Lance's corpus, half-second windows within 1.5 dB found 46-316 in most.
+_NOTE_WINDOW_S = 0.5
+_NOTE_HOP_S = 0.25
+_NOTE_STEADY_DB = 1.5  # every 100 ms of the window within this of its median level
 _NOTE_FLOOR_DBFS = -50.0
-_NOTE_PITCHED = 0.3  # the fundamental's share of the window's power
+_NOTE_PITCHED = 0.25  # the fundamental's share of the window's power
 _NOTE_LOWEST_HZ, _NOTE_HIGHEST_HZ = 25.0, 100.0
 
 
@@ -374,7 +376,7 @@ def bass_thd_added(
 ) -> BassThd:
     """The THD a band's compressor adds on held bass notes in real programme: the band split
     as the chain splits it, run through the 3a model (which matched the rendered 50 Hz tone's
-    THD within 0.002 points), and compared at each held, pitched 1 s window's fundamental.
+    THD within 0.002 points), and compared at each held, pitched half-second window's fundamental.
     The rendered output cannot show this: the compressor's products land in the next band."""
     part = _band(x, kernels(edges, fs)[band])
     level = acompressor.detector(part, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
