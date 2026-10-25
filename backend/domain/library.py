@@ -28,6 +28,11 @@ class LibraryStorageError(LibraryError, StorageUnavailableError):
     """A library repository lost its database connection mid-operation."""
 
 
+class LibraryFileRejectedError(LibraryError):
+    """The database refused a library file's row: a value it cannot store (a NUL byte in a
+    text field) or a constraint the row breaks. Nothing of the row was written."""
+
+
 # Formats an audio fingerprint is defined for (spec B1). Other formats get none.
 AUDIO_HASHABLE_FORMATS: frozenset[str] = frozenset({"flac", "mp3"})
 

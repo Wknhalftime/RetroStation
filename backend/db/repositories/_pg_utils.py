@@ -6,12 +6,14 @@ never needs to import from ``backend.services``.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import wraps
 from typing import Any, Protocol
 
 import psycopg
+from psycopg import pq
 
 from backend.domain.system import StorageUnavailableError
 
@@ -54,6 +56,26 @@ def _translating(
             raise error(f"the database connection was lost: {lost}") from lost
 
     return wrapper
+
+
+@contextlib.contextmanager
+def refused_row_as(conn: psycopg.Connection[Any], error: type[Exception]) -> Iterator[None]:
+    """Re-raise a row the database refuses inside the block as ``error``, undoing only the block.
+
+    psycopg refuses some values before sending them (a NUL in a text field); the server
+    refuses others (``\\u0000`` in jsonb, a broken constraint), and that aborts the
+    transaction. Inside a transaction the block is a savepoint, so the caller's earlier writes
+    stand. Outside one there is nothing earlier to keep, and a transaction the block left
+    aborted is rolled back.
+    """
+    in_transaction = conn.info.transaction_status != pq.TransactionStatus.IDLE
+    try:
+        with conn.transaction() if in_transaction else contextlib.nullcontext():
+            yield
+    except (psycopg.DataError, psycopg.IntegrityError) as refused:
+        if conn.info.transaction_status == pq.TransactionStatus.INERROR:
+            conn.rollback()
+        raise error(f"the database refused the row: {refused}") from refused
 
 
 def parse_embedding(raw: Any) -> list[float] | None:

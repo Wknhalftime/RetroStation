@@ -248,3 +248,90 @@ def test_a_new_and_a_changed_file_in_one_folder_are_both_written(tmp_path: Path)
         result = _scan(new, repo)
 
     assert (result.files_written, result.quarantined) == (2, 0)
+
+
+def _with_nul_tag(path: Path) -> LibraryFile:
+    """A multi-artist MP3's ID3v2.4 TXXX frame read whole: its MBIDs joined with NUL."""
+    lf = _fresh(path)
+    lf.audio.artist_mbid = "mbid-1\x00mbid-2"
+    return lf
+
+
+def test_a_new_file_the_database_refuses_is_quarantined_and_the_folder_scan_goes_on(
+    tmp_path: Path,
+) -> None:
+    """2026-10-25: one refused row failed every watcher poll, and no later folder was scanned."""
+    before = _track(tmp_path, "1-before.flac")
+    refused = _track(tmp_path, "2-refused.flac")
+    after = _track(tmp_path, "3-after.flac")
+    repo = FakeLibraryFileRepository()
+    q_repo = FakeLibraryQuarantineRepository()
+
+    def read(path: Path) -> LibraryFile:
+        return _with_nul_tag(path) if path == refused else _fresh(path)
+
+    with patch(_READ, side_effect=read):
+        result = scan_folder_incrementally(
+            folder_path=refused.parent,
+            file_repo=repo,
+            quarantine_repo=q_repo,
+        )
+
+    assert repo.get_by_path(str(before)) is not None
+    assert repo.get_by_path(str(after)) is not None
+    assert repo.get_by_path(str(refused)) is None
+    assert (result.files_written, result.quarantined) == (2, 1)
+    assert result.failing_paths == {str(refused)}
+    assert q_repo.get_by_path(str(refused)) is not None
+
+
+def test_a_changed_file_the_database_refuses_keeps_its_stored_row(tmp_path: Path) -> None:
+    path = _track(tmp_path)
+    size, mtime_ns = _on_disk(path)
+    repo = FakeLibraryFileRepository()
+    stored = repo.upsert(_row(path, stat=(size + 1, mtime_ns)))
+    q_repo = FakeLibraryQuarantineRepository()
+
+    with patch(_READ, return_value=_with_nul_tag(path)):
+        result = scan_folder_incrementally(
+            folder_path=path.parent,
+            file_repo=repo,
+            quarantine_repo=q_repo,
+        )
+
+    got = repo.get_by_path(str(path))
+    assert got is not None and (got.file_size, got.enrichment_status) == (
+        size + 1,
+        EnrichmentStatus.ENRICHED,
+    )
+    assert (got.id, result.files_written) == (stored.id, 0)
+    assert result.failing_paths == {str(path)}
+    assert q_repo.get_by_path(str(path)) is not None
+
+
+def test_a_reappeared_row_the_database_refuses_to_restore_is_quarantined(
+    tmp_path: Path,
+) -> None:
+    path = _track(tmp_path)
+    repo = FakeLibraryFileRepository()
+    repo.upsert(_row(path, stat=_on_disk(path)))
+    repo.mark_missing(str(path))
+    held = repo.get_by_path(str(path))
+    assert held is not None
+    # The fake hands out its stored rows: this one now holds a value the
+    # database refuses, so writing it back PRESENT is refused.
+    held.audio.artist_mbid = "mbid-1\x00mbid-2"
+    q_repo = FakeLibraryQuarantineRepository()
+
+    with patch(_READ, side_effect=_NO_READ):
+        result = scan_folder_incrementally(
+            folder_path=path.parent,
+            file_repo=repo,
+            quarantine_repo=q_repo,
+        )
+
+    # Not the row's status: the scan sets the held row PRESENT before
+    # writing it. Pg's refused row stays MISSING
+    # (tests/integration/test_pg_library_files_refused_row.py).
+    assert result.failing_paths == {str(path)}
+    assert q_repo.get_by_path(str(path)) is not None
