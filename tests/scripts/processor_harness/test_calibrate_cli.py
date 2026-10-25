@@ -72,3 +72,23 @@ def test_a_preset_without_band_compressors_is_refused(
 
     assert code == 2
     assert "plain.toml" in capsys.readouterr().err
+
+
+def test_bands_sharing_a_detector_get_one_threshold(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "chain.liq").write_text("def chain(s) = s end\n", encoding="utf-8")
+    preset_path = tmp_path / "shared.toml"
+    preset_path.write_text(
+        PRESET.replace('id = "gentle"', 'id = "shared"').replace('"34 33 25"', '"34 25 25"')
+        + 'shared = "2 3"\n',
+        encoding="utf-8",
+    )
+    song = tmp_path / "song.wav"
+    audio_io.write_wav(song, signals.noise_with_pauses(FS, 6.0, 0.5, 1, -16.0).samples, FS)
+
+    assert calibrate_cli.main([str(preset_path), "--inputs", str(song)]) == 0
+
+    printed = capsys.readouterr().out
+    values = [float(v) for v in printed.split('threshold_db = "')[1].split('"')[0].split()]
+    assert values[1] == values[2]

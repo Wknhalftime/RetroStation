@@ -220,16 +220,21 @@ def calibration_traces(
     edges: Sequence[float],
     settings: Sequence[Settings],
     block_s: float = BLOCK_S,
+    shared: Sequence[int] = (),
 ) -> list[BandTrace]:
     """Every band of one input, split as the chain splits it and run through the 3a detector
     with that band's attack, release, detection and link (the threshold does not change the
-    detector, so one pass serves every threshold tried)."""
+    detector, so one pass serves every threshold tried). Bands listed in ``shared`` (0-based)
+    take their detector from the sum of those bands, as the chain's shared sidechain does."""
     block = round(block_s * fs)
     sounding = _sounding(x, fs, block_s)
+    rows = kernels(edges, fs)
+    key = _band(x, rows[list(shared)].sum(axis=0)) if shared else None
     traces = []
-    for kernel, s in zip(kernels(edges, fs), settings, strict=True):
+    for index, (kernel, s) in enumerate(zip(rows, settings, strict=True)):
         band = _band(x, kernel)
-        level = acompressor.detector(band, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
+        source = key if key is not None and index in shared else band
+        level = acompressor.detector(source, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
         power = np.mean(band**2, axis=1)
         blocks = len(power) // block
         counted = sounding[:blocks] & (_db(_block_mean(power, block)) >= BAND_FLOOR_DBFS)

@@ -200,3 +200,24 @@ def test_band_lists_need_one_value_per_band(tmp_path: Path) -> None:
 
     with pytest.raises(PresetError, match=r"p\.toml.*ratio"):
         load_preset(path)
+
+
+def test_a_band_preset_can_name_bands_that_share_one_detector(tmp_path: Path) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+
+    shared = load_preset(write(tmp_path / "p.toml", BANDS + 'shared = "2 3"\n'))
+    alone = load_preset(write(tmp_path / "q.toml", BANDS))
+
+    assert shared.band_shared == (2, 3)
+    assert alone.band_shared == ()
+
+
+@pytest.mark.parametrize("value", ['"2"', '"3 2"', '"2 4"'])
+def test_shared_bands_must_be_two_or_more_existing_bands_in_order(
+    tmp_path: Path, value: str
+) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+    path = write(tmp_path / "p.toml", BANDS + f"shared = {value}\n")
+
+    with pytest.raises(PresetError, match=r"p\.toml.*shared"):
+        load_preset(path)

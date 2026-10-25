@@ -40,7 +40,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         traces = []
         for path in args.inputs:
             x, fs = read_wav(path)
-            traces.append(bands.calibration_traces(x, fs, preset.band_edges, preset.band_models))
+            shared = [b - 1 for b in preset.band_shared]
+            traces.append(
+                bands.calibration_traces(
+                    x, fs, preset.band_edges, preset.band_models, shared=shared
+                )
+            )
         found = bands.thresholds_for_gain_reduction(traces, preset.band_models, args.target_gr)
         tuned = [
             replace(m, threshold=10 ** (t / 20))
