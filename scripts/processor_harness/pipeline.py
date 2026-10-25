@@ -117,6 +117,7 @@ def measure_renders(
             model=preset.model,
             gauge_limits=preset.gauge_limits,
             level_check=preset.level_check,
+            band_edges=preset.band_edges,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

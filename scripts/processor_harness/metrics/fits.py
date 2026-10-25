@@ -210,7 +210,10 @@ def fit_acompressor_static(
     """Threshold, ratio, knee (width, dB) and makeup that make the 3a model reproduce each
     settled step of the stepped tone. The detector settings (attack, release, detection, link)
     are taken as set; they do not depend on the four fitted values."""
-    windows = _settled(segments, fs)
+    # A render is as long as its input, so with latency its end never arrives: leave out any
+    # step the lined-up output does not fully cover (its zero padding would read as quiet).
+    covered = len(out) - round(latency_s * fs)
+    windows = [w for w in _settled(segments, fs) if w.stop <= covered]
     measured = np.array([_level_db(_aligned(out, len(inp), latency_s, fs)[w, 0]) for w in windows])
     level = acompressor.detector(
         inp, fs, settings.attack_ms, settings.release_ms, settings.rms, settings.link_max

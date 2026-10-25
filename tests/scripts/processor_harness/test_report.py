@@ -62,3 +62,25 @@ def test_reports_write_json_summary_and_comparison(tmp_path: Path) -> None:
     assert (lufs_a["bypass"], lufs_a["new"]) == ("-14.0", "-16.0")
 
     assert "| preset |" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+
+
+def test_band_levels_also_report_their_spread_between_songs() -> None:
+    # A music stream wants each band's level consistent from song to song (Lance, 2026-10-25).
+    r = PresetResult(
+        preset_id="bands",
+        version=1,
+        backend="liquidsoap",
+        renderer="Liquidsoap 2.4.5",
+        standalone_ffmpeg="ffmpeg version 8.0.1",
+        metrics={
+            "song-a": {"band.1.out_db": -30.0, "band.1.in_db": -28.0},
+            "song-b": {"band.1.out_db": -27.5, "band.1.in_db": -24.0},
+            "song-c": {"band.1.out_db": -29.0, "band.1.in_db": -26.0},
+        },
+    )
+
+    row = summary_row(r)
+
+    assert row["band.1.out_db"] == pytest.approx(-29.0)  # median
+    assert row["band.1.out_spread_db"] == pytest.approx(2.5)
+    assert row["band.1.in_spread_db"] == pytest.approx(4.0)

@@ -163,3 +163,17 @@ def test_acompressor_time_fit_lines_up_a_delayed_output() -> None:
 
     assert times.attack_ms == pytest.approx(20.0, rel=0.05)
     assert times.release_ms == pytest.approx(250.0, rel=0.05)
+
+
+def test_acompressor_static_fit_leaves_out_steps_the_render_never_reached() -> None:
+    # A chain with latency renders as long as its input, so its last 20 ms (here 60 ms, as
+    # Liquidsoap cut the multiband's render) never arrive: that step must not count as quiet.
+    stim = signals.stepped_tone(FS, 1000.0, -40.0, 0.0, hold_s=0.6)
+    s = Settings.from_db(-24.0, 3.0, 9.03, 0.0, 20.0, 250.0)
+    model = acompressor.process(stim.samples, FS, s)
+    late = np.concatenate([np.zeros((882, 2)), model])[: len(model) - round(0.06 * FS)]
+
+    fit = fits.fit_acompressor_static(stim.segments, stim.samples, late, FS, s, 0.02)
+
+    assert fit.threshold_db == pytest.approx(-24.0, abs=0.05)
+    assert fit.ratio == pytest.approx(3.0, rel=0.01)

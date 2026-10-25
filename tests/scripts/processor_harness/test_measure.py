@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from processor_harness import measure, signals
 from processor_harness.measure import Rendered
-from processor_harness.metrics import loudness
+from processor_harness.metrics import bands, loudness
 from scipy import signal as sp
 
 FS = 44100
@@ -378,3 +378,29 @@ def test_gauge_rows_broken_by_an_interleaved_log_line_are_skipped(tmp_path: Path
 
     np.testing.assert_array_equal(times, [0.0, 0.04])
     np.testing.assert_array_equal(values, [1.0, 2.0])
+
+
+def test_programme_through_a_band_preset_reports_each_band() -> None:
+    # Band 3 of 5 turned down 3 dB: its gain reduction, its levels, and the balance measures.
+    edges = (100.0, 520.0, 1800.0, 6000.0)
+    stim = signals.noise_with_pauses(FS, 8.0, 0.0, 1, -20.0)
+    part = sp.oaconvolve(stim.samples, bands.kernels(edges, FS)[2][:, np.newaxis], "same", axes=0)
+    out = stim.samples - part * (1 - 10 ** (-3 / 20))
+    rendered = Rendered(**{**untouched(stim).__dict__, "out": out, "band_edges": edges})
+
+    row = measure.measure(measure.PROGRAMME, rendered)
+
+    assert row["band.3.gr_mean_db"] == pytest.approx(3.0, abs=0.05)
+    assert row["band.3.out_db"] == pytest.approx(row["band.3.in_db"] - 3.0, abs=0.05)
+    assert abs(row["band.1.gr_mean_db"]) < 0.05
+    assert row["balance_change_db"] > 1.0
+    assert row["balance_drift_db"] < 0.1
+    assert "band.5.gr_p95_db" in row
+
+
+def test_programme_without_band_edges_has_no_band_rows() -> None:
+    stim = signals.noise_with_pauses(FS, 4.0, 0.0, 1, -20.0)
+
+    row = measure.measure(measure.PROGRAMME, untouched(stim))
+
+    assert not [k for k in row if k.startswith(("band.", "balance_"))]

@@ -26,6 +26,11 @@ so the active value is never ambiguous.
     release_ms = 250.0
     detection = "rms"          # or "peak"
     link = "average"           # or "maximum"
+
+A multiband preset's ``split`` param (crossover frequencies, space-separated) gives its band
+edges; with ``threshold_db``, ``ratio``, ``knee_db``, ``makeup_db``, ``attack_ms`` and
+``release_ms`` as one value per band (space-separated) and ``detection`` (0 peak, 1 rms) and
+``link`` (0 average, 1 maximum), it also gives each band's compressor settings.
 """
 
 from __future__ import annotations
@@ -76,6 +81,8 @@ class Preset:
     model: Settings | None = None
     gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
     level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
+    band_edges: tuple[float, ...] = ()
+    band_models: tuple[Settings, ...] = ()  # one per band, from the per-band params
 
 
 def _param_value(path: Path, name: str, value: object) -> ParamValue:
@@ -141,6 +148,40 @@ def _model(path: Path, table: object) -> Settings | None:
     return Settings.from_db(rms=_DETECTION[str(detection)], link_max=_LINK[str(link)], **numbers)
 
 
+def _numbers(path: Path, params: Mapping[str, ParamValue], name: str) -> list[float]:
+    """A space-separated list param as numbers."""
+    try:
+        return [float(v) for v in str(params[name]).split()]
+    except ValueError:
+        raise PresetError(f"{path}: param {name!r} must be numbers separated by spaces") from None
+
+
+def _band_edges(path: Path, params: Mapping[str, ParamValue]) -> tuple[float, ...]:
+    return tuple(_numbers(path, params, "split")) if "split" in params else ()
+
+
+def _band_models(
+    path: Path, params: Mapping[str, ParamValue], edges: tuple[float, ...]
+) -> tuple[Settings, ...]:
+    """One acompressor setting per band, when the preset sets the bands' compressors."""
+    if not edges or "threshold_db" not in params:
+        return ()
+    count = len(edges) + 1
+    lists = {}
+    for name in _MODEL_NUMBERS:
+        if name not in params:
+            raise PresetError(f"{path}: param {name!r} is missing (one value per band)")
+        lists[name] = _numbers(path, params, name)
+        if len(lists[name]) != count:
+            raise PresetError(f"{path}: param {name!r} needs {count} values, one per band")
+    rms = int(params.get("detection", 1)) == 1
+    link_max = int(params.get("link", 0)) == 1
+    return tuple(
+        Settings.from_db(**{n: v[i] for n, v in lists.items()}, rms=rms, link_max=link_max)
+        for i in range(count)
+    )
+
+
 def _gauge_limits(path: Path, table: object) -> dict[str, tuple[float, float]]:
     """[gauge_limits]: each gauge name to its [low, high] range."""
     if table is None:
@@ -177,14 +218,15 @@ def load_preset(path: Path) -> Preset:
     if not isinstance(version, int) or version < 1:
         raise PresetError(f"{path}: version must be a whole number from 1")
     backend = _backend(path, data)
-    params = data.get("params", {})
+    params = {name: _param_value(path, name, v) for name, v in data.get("params", {}).items()}
+    edges = _band_edges(path, params)
     return Preset(
         id=preset_id,
         version=version,
         backend=backend,
         chain=_chain(path, data) if backend is Backend.LIQUIDSOAP else None,
         graph=str(_required(path, data, "graph")) if backend is Backend.FFMPEG else None,
-        params={name: _param_value(path, name, v) for name, v in params.items()},
+        params=params,
         ceiling_dbtp=float(data.get("ceiling_dbtp", DEFAULT_CEILING_DBTP)),
         description=str(data.get("description", "")),
         superseded=tuple(_superseded(path, e) for e in data.get("superseded", [])),
@@ -192,4 +234,6 @@ def load_preset(path: Path) -> Preset:
         model=_model(path, data.get("model")),
         gauge_limits=_gauge_limits(path, data.get("gauge_limits")),
         level_check=_level_check(path, data.get("level_check")),
+        band_edges=edges,
+        band_models=_band_models(path, params, edges),
     )
