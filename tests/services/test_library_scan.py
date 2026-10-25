@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import mutagen
 import pytest
 from mutagen._util import MutagenError
+from mutagen.id3 import ID3, TPE1, TXXX, Encoding  # type: ignore[attr-defined]
 
 from backend.domain.library import LibraryFile, LibraryQuarantine
 from backend.services.audio_tags import (
@@ -30,7 +31,7 @@ from backend.services.audio_tags import (
     read_tags,
 )
 from backend.services.library_scan_service import scan_directory
-from tests.fixtures.audio_builders import tag_flac, write_flac
+from tests.fixtures.audio_builders import tag_flac, write_flac, write_mp3
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -489,6 +490,34 @@ def test_extract_first_tag_value_uses_the_first_of_several_list_elements() -> No
     """AUD-009 gate 2: every existing fixture's list tags have one element, so a
     survived mutant swapping index 0 for 1 went uncaught."""
     assert _extract_first_tag_value({"key": ["first", "second"]}, "key") == "first"
+
+
+def test_extract_first_tag_value_uses_the_first_value_of_a_multi_value_id3_frame() -> None:
+    """An ID3 frame is not a list, and str() joins its values with NUL bytes."""
+    frame = TPE1(encoding=Encoding.UTF8, text=["Bad Omens", "Bob Vylan"])
+
+    assert _extract_first_tag_value({"TPE1": frame}, "TPE1") == "Bad Omens"
+
+
+def test_a_multi_artist_mp3_keeps_its_primary_artist_mbid(tmp_path: Path) -> None:
+    """Picard writes one MusicBrainz Artist Id per credited artist into a single ID3v2.4
+    TXXX frame. Read whole, the ids came back NUL-joined, which PostgreSQL text refuses,
+    and the watcher scan failed on every poll (2026-10-25)."""
+    path = write_mp3(tmp_path / "duet.mp3")
+    tags = ID3()
+    tags.add(
+        TXXX(
+            encoding=Encoding.UTF8,
+            desc="MusicBrainz Artist Id",
+            text=[
+                "eecada09-acfc-472d-ae55-e9e5a43f12d8",
+                "d1bc5be1-f552-4e2e-95ae-da8d6a4d3c17",
+            ],
+        )
+    )
+    tags.save(str(path), v2_version=4)
+
+    assert read_tags(path).audio.artist_mbid == "eecada09-acfc-472d-ae55-e9e5a43f12d8"
 
 
 def test_disk_stat_is_frozen() -> None:
