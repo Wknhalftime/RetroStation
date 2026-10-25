@@ -1,0 +1,12 @@
+# AGC output-target step: agc.liq alone at -20 LUFS; idle = target - (-18 LUFS item-gain level).
+id = "agc-target-20"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/agc_only.liq"
+description = "agc.liq alone, target -20 LUFS, idle -2.0 dB, +-10 dB, gate -33."
+[params]
+target = -20.0
+idle = -2.0
+threshold = -33.0
+gain_min = -10.0
+gain_max = 10.0

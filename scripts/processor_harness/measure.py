@@ -138,6 +138,21 @@ def _percentile(values: NDArray[np.float64], q: float) -> float:
     return float(np.percentile(values, q)) if values.size else math.nan
 
 
+def _gauge_spread(r: Rendered) -> dict[str, float]:
+    """Where each logged gauge spent the render: extremes and 5th / 50th / 95th percentile
+    (for the AGC, how close its gain runs to its range limits)."""
+    row = {}
+    for name, (_, values) in r.gauges.items():
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            continue
+        row[f"gauge.{name}.min"] = float(np.min(finite))
+        row[f"gauge.{name}.max"] = float(np.max(finite))
+        for q in (5, 50, 95):
+            row[f"gauge.{name}.p{q:02d}"] = float(np.percentile(finite, q))
+    return row
+
+
 def _programme(r: Rendered) -> dict[str, float]:
     psr = dynamics.psr(r.out, r.fs)
     lufs = loudness.integrated(r.out, r.fs)
@@ -159,6 +174,7 @@ def _programme(r: Rendered) -> dict[str, float]:
     }
     if r.category == "transient":
         row |= _pre_ring(r)
+    row |= _gauge_spread(r)
     if r.decoded is not None:
         row["codec_true_peak_dbtp"] = loudness.true_peak(r.decoded, r.fs)
         row["codec_true_overs"] = float(dynamics.true_overs(r.decoded, r.fs, r.ceiling_dbtp))
