@@ -43,6 +43,7 @@ GENERATORS: dict[str, Callable[..., Stimulus]] = {
     "log_sweep": signals.log_sweep,
     "stepped_tone": signals.stepped_tone,
     "tone_bursts": signals.tone_bursts,
+    "level_drop": signals.level_drop,
     "tone": signals.tone,
     "smpte_imd": signals.smpte_twin_tone,
     "ccif_imd": signals.ccif_twin_tone,

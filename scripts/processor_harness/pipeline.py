@@ -168,6 +168,7 @@ def measure_renders(
             level_check=preset.level_check,
             band_edges=preset.band_edges,
             band_makeup_db=band_makeup_db(preset),
+            band_models=preset.band_models,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

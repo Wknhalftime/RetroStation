@@ -102,6 +102,26 @@ def tone_bursts(
     return _tone_at_levels(fs, freq, _held_levels(levels, hold_s))
 
 
+def level_drop(
+    fs: int,
+    freq: float,
+    loud_dbfs: float,
+    quiet_dbfs: float,
+    lead_s: float,
+    loud_s: float,
+    quiet_s: float,
+) -> Stimulus:
+    """Tone quiet (idle), then loud, then quiet again: how long a band takes to let go after
+    a loud passage (the band-1 release pick). The quiet parts keep the gain observable."""
+    loud_end = lead_s + loud_s
+    segments = (
+        Segment(0.0, lead_s, quiet_dbfs, "idle"),
+        Segment(lead_s, loud_end, loud_dbfs, "loud"),
+        Segment(loud_end, loud_end + quiet_s, quiet_dbfs, "after"),
+    )
+    return _tone_at_levels(fs, freq, segments)
+
+
 def twin_tone(
     fs: int, f1: float, f2: float, ratio: float, level_dbfs: float, seconds: float
 ) -> Stimulus:

@@ -28,7 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import oaconvolve, welch
 
-from processor_harness.metrics import acompressor
+from processor_harness.metrics import acompressor, distortion
 from processor_harness.metrics.acompressor import Settings
 
 Audio = NDArray[np.float64]
@@ -339,3 +339,61 @@ def makeups_for_balance(
                 changes.append(10 * math.log10(p_in / p_out))
         found.append(float(np.mean(changes)) if changes else 0.0)
     return found
+
+
+@dataclass(frozen=True)
+class BassThd:
+    p50_pct: float  # THD the compressor adds on a held bass note, percentage points
+    p95_pct: float
+    windows: int  # held, pitched windows found
+
+
+_NOTE_WINDOW_S = 1.0
+_NOTE_HOP_S = 0.5
+_NOTE_STEADY_DB = 1.0  # every 100 ms of the window within this of its median level
+_NOTE_FLOOR_DBFS = -50.0
+_NOTE_PITCHED = 0.3  # the fundamental's share of the window's power
+_NOTE_LOWEST_HZ, _NOTE_HIGHEST_HZ = 25.0, 100.0
+
+
+def _fundamental(x: NDArray[np.float64], fs: int) -> tuple[float, float]:
+    """The strongest frequency in the bass range (parabolic peak) and its share of the power."""
+    window = np.blackman(len(x))
+    power = np.abs(np.fft.rfft(x * window)) ** 2
+    freqs = np.fft.rfftfreq(len(x), 1 / fs)
+    span = np.flatnonzero((freqs >= _NOTE_LOWEST_HZ) & (freqs <= _NOTE_HIGHEST_HZ))
+    k = int(span[np.argmax(power[span])])
+    a, b, c = np.log(power[k - 1 : k + 2] + 1e-30)
+    offset = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c != 0 else 0.0
+    share = float(power[k - 3 : k + 4].sum() / power.sum())
+    return float((k + offset) * fs / len(x)), share
+
+
+def bass_thd_added(
+    x: Audio, fs: int, edges: Sequence[float], s: Settings, band: int = 0
+) -> BassThd:
+    """The THD a band's compressor adds on held bass notes in real programme: the band split
+    as the chain splits it, run through the 3a model (which matched the rendered 50 Hz tone's
+    THD within 0.002 points), and compared at each held, pitched 1 s window's fundamental.
+    The rendered output cannot show this: the compressor's products land in the next band."""
+    part = _band(x, kernels(edges, fs)[band])
+    level = acompressor.detector(part, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
+    squeezed = part * acompressor.gain(level, replace(s, makeup=1.0))[:, np.newaxis]
+    size, hop, sub = round(_NOTE_WINDOW_S * fs), round(_NOTE_HOP_S * fs), round(0.1 * fs)
+    added = []
+    for start in range(0, len(part) - size + 1, hop):
+        held = part[start : start + size]
+        steps = _db(_block_mean(np.mean(held**2, axis=1), sub))
+        if (
+            np.median(steps) < _NOTE_FLOOR_DBFS
+            or np.max(np.abs(steps - np.median(steps))) > _NOTE_STEADY_DB
+        ):
+            continue
+        f0, share = _fundamental(held[:, 0], fs)
+        if share < _NOTE_PITCHED:
+            continue
+        out = squeezed[start : start + size]
+        added.append(100 * (distortion.thd(out, fs, f0) - distortion.thd(held, fs, f0)))
+    if not added:
+        return BassThd(math.nan, math.nan, 0)
+    return BassThd(float(np.median(added)), float(np.percentile(added, 95)), len(added))
