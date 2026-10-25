@@ -136,7 +136,10 @@ def _tone_frequency(r: Rendered) -> float:
 
 
 def _tone(r: Rendered) -> dict[str, float]:
-    return {"thd_pct": 100 * distortion.thd(r.out, r.fs, _tone_frequency(r))}
+    freq = _tone_frequency(r)
+    out = 100 * distortion.thd(r.out, r.fs, freq)
+    # What the chain added: band 1's attack is chosen by it (Lance, 2026-10-25).
+    return {"thd_pct": out, "thd_change_pct": out - 100 * distortion.thd(r.inp, r.fs, freq)}
 
 
 def _smpte(r: Rendered) -> dict[str, float]:
@@ -213,6 +216,7 @@ def _bands(r: Rendered) -> dict[str, float]:
         "gr_mean_db": c.gr_mean_db,
         "gr_p50_db": c.gr_p50_db,  # a band averaging 2 dB with a p95 of 10 is pumping
         "gr_p95_db": c.gr_p95_db,
+        "gr_swing_1s_p95_db": c.gr_swing_1s_p95_db,
     }
     # The level change includes the band's makeup; its compressor's reduction does not.
     makeup = r.band_makeup_db or (0.0,) * len(c.in_db)
@@ -246,6 +250,7 @@ def _programme(r: Rendered) -> dict[str, float]:
         "psr_p10_lu": _percentile(psr, 10),
         "psr_p50_lu": _percentile(psr, 50),
         "psr_p90_lu": _percentile(psr, 90),
+        "psr_p50_change_lu": _percentile(psr, 50) - _percentile(dynamics.psr(r.inp, r.fs), 50),
         "crest_db": dynamics.crest_factor(r.out),
         "sample_overs": float(dynamics.sample_overs(r.out, r.ceiling_dbtp)),
         "true_overs": float(dynamics.true_overs(r.out, r.fs, r.ceiling_dbtp)),

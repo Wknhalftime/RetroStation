@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from processor_harness.corpus import CorpusError, load_corpus
-from processor_harness.pipeline import Tools, measure_renders, render_inputs
+from processor_harness.pipeline import Tools, check_aimed_tones, measure_renders, render_inputs
 from processor_harness.prepare import prepare_inputs, silence
 from processor_harness.presets import Backend, Preset, PresetError, load_preset
 from processor_harness.render import RenderError, ffmpeg_version, liquidsoap_version
@@ -53,6 +53,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         corpus = load_corpus(args.corpus)
         presets = [load_preset(p) for p in args.presets]
+        for preset in presets:
+            check_aimed_tones(preset, corpus.signals, corpus.sample_rate)
         tools = _tools(args, presets)
         inputs = prepare_inputs(corpus, args.out / "inputs", tools.ffmpeg)
         startup = silence(args.out / "inputs", corpus.sample_rate)

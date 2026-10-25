@@ -225,3 +225,18 @@ def test_bands_sharing_a_detector_are_calibrated_on_their_sum() -> None:
     c = bands.compare(x, out, FS, EDGES, latency_s=0.0)
     assert c.gr_mean_db[2] == pytest.approx(2.0, abs=0.3)
     assert c.gr_mean_db[3] == pytest.approx(2.0, abs=0.3)
+
+
+def test_a_bands_gain_swing_is_the_p95_of_how_far_it_moves_in_a_second() -> None:
+    # The AGC step's pumping measure, per band: band 4 cut 6 dB every other 2 s swings about
+    # 6 dB within a second at its edges; a steady cut does not swing.
+    x = pink(12.0)
+    t = np.arange(len(x)) / FS
+    pumping = np.where((t // 2) % 2 == 0, 0.0, -6.0)
+
+    steady = bands.compare(x, scaled_band(x, 3, -6.0), FS, EDGES, latency_s=0.0)
+    moving = bands.compare(x, scaled_band(x, 3, pumping), FS, EDGES, latency_s=0.0)
+
+    assert steady.gr_swing_1s_p95_db[3] < 0.2
+    assert moving.gr_swing_1s_p95_db[3] == pytest.approx(6.0, abs=0.5)
+    assert moving.gr_swing_1s_p95_db[1] < 0.2

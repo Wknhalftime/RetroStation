@@ -37,6 +37,8 @@ DELAY_S = 0.02  # the crossover's FIR half-length, locked in dial-in step 1
 BLOCK_S = 0.4
 SILENT_DBFS = -60.0  # a block this quiet is not programme
 BAND_FLOOR_DBFS = -70.0  # a band this quiet in a block has nothing to compress
+SWING_BLOCK_S = 0.1  # each band's gain trace for its one-second swing (the AGC step's measure)
+SWING_LAG_S = 1.0
 OCTAVE_CENTRES = 1000.0 * 2.0 ** np.arange(-5, 5)
 OCTAVE_LABELS = ("31.5", "63", "125", "250", "500", "1000", "2000", "4000", "8000", "16000")
 
@@ -77,6 +79,14 @@ def band_powers(
     )
 
 
+def response_db(edges: Sequence[float], fs: int, freq: float) -> NDArray[np.float64]:
+    """Each band's gain (dB) at one frequency: the split's magnitude response there."""
+    rows = kernels(edges, fs)
+    t = np.arange(rows.shape[1]) - rows.shape[1] // 2
+    gains = np.abs(rows @ np.exp(-2j * np.pi * freq * t / fs))
+    return _db(gains**2)
+
+
 def octave_levels(x: Audio, fs: int) -> NDArray[np.float64]:
     """Mean power in each octave band (dB), both channels together, over the whole input."""
     freqs, psd = welch(x, fs, nperseg=16384, axis=0)
@@ -103,6 +113,7 @@ class BandComparison:
     gr_mean_db: tuple[float, ...]
     gr_p50_db: tuple[float, ...]
     gr_p95_db: tuple[float, ...]
+    gr_swing_1s_p95_db: tuple[float, ...]  # how far each band's gain moves in a second
     drift_db: float
     change_db: float
 
@@ -129,8 +140,11 @@ def compare(
     delay_s: float = DELAY_S,
 ) -> BandComparison:
     """The input and the output (lined up by the chain's latency) compared band by band."""
-    p_in = band_powers(inp, fs, edges, block_s, delay_s)
-    p_out = band_powers(_aligned(out, len(inp), latency_s, fs), fs, edges, block_s, delay_s)
+    # One split per signal, in 100 ms blocks: the swing reads them, the rest reads them in fours.
+    f_in = band_powers(inp, fs, edges, SWING_BLOCK_S, delay_s)
+    f_out = band_powers(_aligned(out, len(inp), latency_s, fs), fs, edges, SWING_BLOCK_S, delay_s)
+    group = round(block_s / SWING_BLOCK_S)
+    p_in, p_out = _regroup(f_in, group), _regroup(f_out, group)
     sounding = _sounding(inp, fs, block_s)[: p_in.shape[1]]
     gr = _db(p_in) - _db(p_out)
     active = sounding & (_db(p_in) >= BAND_FLOOR_DBFS)
@@ -145,9 +159,33 @@ def compare(
         gr_mean_db=gr_mean,
         gr_p50_db=gr_p50,
         gr_p95_db=gr_p95,
+        gr_swing_1s_p95_db=_swing(f_in, f_out, _sounding(inp, fs, SWING_BLOCK_S)),
         drift_db=balance.drift_db,
         change_db=balance.change_db,
     )
+
+
+def _regroup(power: NDArray[np.float64], group: int) -> NDArray[np.float64]:
+    """Block powers averaged in runs of ``group`` blocks (rows: bands)."""
+    count = power.shape[1] // group
+    runs = power[:, : count * group].reshape(power.shape[0], count, group)
+    return np.asarray(runs.mean(axis=2), dtype=np.float64)
+
+
+def _swing(
+    p_in: NDArray[np.float64], p_out: NDArray[np.float64], sounding: NDArray[np.bool_]
+) -> tuple[float, ...]:
+    """Per band, the 95th percentile of how far its gain reduction moves in one second,
+    over pairs of blocks where the band is sounding at both ends."""
+    lag = round(SWING_LAG_S / SWING_BLOCK_S)
+    gr = _db(p_in) - _db(p_out)
+    active = sounding[: gr.shape[1]] & (_db(p_in) >= BAND_FLOOR_DBFS)
+    swings = []
+    for g, a in zip(gr, active, strict=True):
+        both = a[lag:] & a[:-lag]
+        moved = np.abs(g[lag:] - g[:-lag])[both]
+        swings.append(float(np.percentile(moved, 95)) if moved.size else math.nan)
+    return tuple(swings)
 
 
 @dataclass(frozen=True)

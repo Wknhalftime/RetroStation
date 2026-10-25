@@ -426,3 +426,27 @@ def test_band_gain_reduction_leaves_out_the_bands_makeup() -> None:
     assert row["band.3.gr_mean_db"] == pytest.approx(3.0, abs=0.05)
     assert row["band.3.gr_p50_db"] == pytest.approx(3.0, abs=0.05)
     assert row["band.3.out_db"] == pytest.approx(row["band.3.in_db"] - 1.0, abs=0.05)
+
+
+def test_programme_reports_each_bands_swing_and_the_psr_change() -> None:
+    edges = (100.0, 520.0, 1800.0, 6000.0)
+    stim = signals.noise_with_pauses(FS, 8.0, 0.0, 1, -20.0)
+    rendered = Rendered(**{**untouched(stim).__dict__, "band_edges": edges})
+
+    row = measure.measure(measure.PROGRAMME, rendered)
+
+    assert row["band.2.gr_swing_1s_p95_db"] < 0.2
+    assert row["psr_p50_change_lu"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_tone_reports_how_much_distortion_the_chain_added() -> None:
+    # Lance, 2026-10-25: band 1's attack is chosen by the THD it adds on a 50 Hz tone.
+    stim = signals.tone(FS, 50.0, -17.0, 6.0)
+    clipped = np.clip(stim.samples, -0.1, 0.1)
+
+    plain = measure.measure("tone", untouched(stim))
+    added = measure.measure("tone", untouched(stim, out=clipped))
+
+    assert plain["thd_change_pct"] == pytest.approx(0.0, abs=1e-6)
+    assert added["thd_change_pct"] == pytest.approx(added["thd_pct"] - plain["thd_pct"])
+    assert added["thd_change_pct"] > 1.0
