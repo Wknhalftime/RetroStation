@@ -6,6 +6,7 @@ programme the decoded codec round trip.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,8 @@ Audio = NDArray[np.float64]
 Trace = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 PROGRAMME = "programme"
+# A float as Liquidsoap prints one (or nan / inf).
+_NUMBER = re.compile(r"^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$|^-?inf$|^nan$")
 SEQUENCE = "sequence"
 PINNED_WITHIN_DB = 1.0  # a gauge this close to a declared limit counts as pinned
 
@@ -45,7 +48,11 @@ def read_gauges(csv: Path) -> dict[str, Trace]:
     """The gauges CSV a Liquidsoap render writes, as (times, values) per gauge name."""
     rows: dict[str, tuple[list[float], list[float]]] = {}
     for line in csv.read_text(encoding="utf-8").splitlines()[1:]:
-        t, name, value = line.split(",")
+        fields = line.split(",")
+        # Liquidsoap's log shares stdout with the gauge lines and can split one: skip pieces.
+        if len(fields) != 3 or not (_NUMBER.match(fields[0]) and _NUMBER.match(fields[2])):
+            continue
+        t, name, value = fields
         times, values = rows.setdefault(name, ([], []))
         times.append(float(t))
         values.append(float(value))

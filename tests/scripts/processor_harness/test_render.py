@@ -123,3 +123,53 @@ def test_liquidsoap_version_includes_its_linked_ffmpeg_libraries() -> None:
 
     assert version.startswith("Liquidsoap 2.4.5")
     assert "libavcodec" in version and "libavformat" in version
+
+
+def test_reuse_finds_nothing_when_a_render_is_missing(tmp_path: Path) -> None:
+    assert render.reuse_run(tmp_path / "out.wav", liquidsoap=True) is None
+
+
+def test_reuse_rebuilds_a_liquidsoap_render_and_its_gauges(tmp_path: Path) -> None:
+    # A finished render's files are enough to measure it again: the WAV, the MP3, the log (the
+    # gauges are re-extracted, so a fixed parser applies to old runs) and the CPU sidecar.
+    out = sine_file(tmp_path / "out.wav", seconds=1.0)
+    out.with_suffix(".mp3").write_bytes(b"mp3")
+    out.with_suffix(".log").write_text(
+        "HARNESS_GAUGE\t0.0\tagc_gain\t1.5\n"
+        "HARNESS_GAUGE\t0.02\tagc_gain\t0.02026/10/24 22:34:45 [video.converter:3] Using\n"
+        "HARNESS_GAUGE\t0.04\tagc_gain\t2.5\n",
+        encoding="utf-8",
+    )
+    out.with_suffix(".run.json").write_text('{"cpu_seconds": 0.25}', encoding="utf-8")
+
+    run = render.reuse_run(out, liquidsoap=True)
+
+    assert run is not None
+    assert run.cpu_seconds == 0.25
+    assert run.audio_seconds == pytest.approx(1.0)
+    assert run.mp3 == out.with_suffix(".mp3")
+    assert run.gauges is not None
+    rows = run.gauges.read_text(encoding="utf-8").splitlines()
+    assert rows == ["time_s,name,value", "0.0,agc_gain,1.5", "0.04,agc_gain,2.5"]
+
+
+def test_reuse_without_a_cpu_sidecar_reports_no_cpu_time(tmp_path: Path) -> None:
+    out = sine_file(tmp_path / "out.wav", seconds=1.0)
+
+    run = render.reuse_run(out, liquidsoap=False)
+
+    assert run is not None and np.isnan(run.cpu_seconds)
+    assert run.mp3 is None and run.gauges is None
+
+
+@pytest.mark.slow
+@needs_ffmpeg
+def test_a_render_saves_its_cpu_time_for_reuse(tmp_path: Path) -> None:
+    assert FFMPEG is not None
+    run = render.render_ffmpeg(
+        Path(FFMPEG), "[0:a]anull[out]", sine_file(tmp_path / "in.wav"), tmp_path / "o.wav"
+    )
+
+    again = render.reuse_run(run.output, liquidsoap=False)
+
+    assert again is not None and again.cpu_seconds == pytest.approx(run.cpu_seconds)

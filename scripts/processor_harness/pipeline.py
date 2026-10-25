@@ -17,7 +17,13 @@ from processor_harness.codec import decode, encode_mp3
 from processor_harness.measure import PROGRAMME, SEQUENCE, Rendered, measure, read_gauges
 from processor_harness.prepare import PreparedInput
 from processor_harness.presets import Backend, ParamValue, Preset
-from processor_harness.render import RenderRun, fill_graph, render_ffmpeg, render_liquidsoap
+from processor_harness.render import (
+    RenderRun,
+    fill_graph,
+    render_ffmpeg,
+    render_liquidsoap,
+    reuse_run,
+)
 
 
 @dataclass(frozen=True)
@@ -67,14 +73,19 @@ def render_inputs(
     tools: Tools,
     directory: Path,
     startup_source: Path,
+    reuse: bool = False,
 ) -> PresetRenders:
-    """Render the startup probe, then every input, into ``directory``."""
+    """Render the startup probe, then every input, into ``directory``. With ``reuse``, a
+    render already in ``directory`` is measured as it is instead of being made again."""
     directory.mkdir(parents=True, exist_ok=True)
-    startup = _render(preset, tools, startup_source, directory / "_startup.wav")
-    runs = {
-        i.id: _render(preset, tools, i.path, directory / f"{i.id}.wav", render_params(preset, i))
-        for i in inputs
-    }
+    liquidsoap = preset.backend is Backend.LIQUIDSOAP
+
+    def made(source: Path, output: Path, params: Mapping[str, ParamValue]) -> RenderRun:
+        found = reuse_run(output, liquidsoap) if reuse else None
+        return found or _render(preset, tools, source, output, params)
+
+    startup = made(startup_source, directory / "_startup.wav", preset.params)
+    runs = {i.id: made(i.path, directory / f"{i.id}.wav", render_params(preset, i)) for i in inputs}
     return PresetRenders(runs, startup.cpu_seconds)
 
 

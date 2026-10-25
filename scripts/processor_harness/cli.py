@@ -31,6 +31,11 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--liquidsoap", type=Path, default=os.environ.get("LIQUIDSOAP_PATH"))
     parser.add_argument("--ffmpeg", type=Path, default=shutil.which("ffmpeg"))
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    parser.add_argument(
+        "--reuse-renders",
+        action="store_true",
+        help="measure renders already in --out instead of making them again",
+    )
     return parser.parse_args(argv)
 
 
@@ -58,7 +63,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         results = []
         for preset in presets:
             directory = args.out / f"{preset.id}-v{preset.version}"
-            renders = render_inputs(preset, inputs, tools, directory, startup)
+            renders = render_inputs(
+                preset, inputs, tools, directory, startup, reuse=args.reuse_renders
+            )
             metrics = measure_renders(preset, inputs, renders, tools.ffmpeg)
             results.append(
                 PresetResult(
@@ -70,7 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     metrics,
                 )
             )
-        write_reports(results, args.out)
+            # Reports after every preset, so a later failure cannot take earlier results.
+            write_reports(results, args.out)
     except (CorpusError, PresetError, RenderError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
