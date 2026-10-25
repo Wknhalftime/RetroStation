@@ -35,6 +35,7 @@ import mutagen.mp3
 import mutagen.wave
 from mutagen._file import FileType as MutagenFileType
 from mutagen._util import MutagenError
+from mutagen.id3 import TextFrame  # type: ignore[attr-defined]
 
 from backend.domain.enums import EnrichmentStatus, ReleaseStatus, ReleaseType
 from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
@@ -88,8 +89,10 @@ def _extract_first_tag_value(tags: object, key: str) -> str | None:
         return None
     try:
         val = tags[key]  # type: ignore[index]
-        raw = val[0] if isinstance(val, list) else val
-        # mutagen ID3 frame objects stringify to their text content
+        # A Vorbis tag is a list. An ID3 text frame indexes like one, and must be
+        # indexed: str() of a multi-value frame joins its values with NUL bytes,
+        # which PostgreSQL text refuses.
+        raw = val[0] if isinstance(val, list | TextFrame) else val
         return str(raw).strip() or None
     except (KeyError, IndexError, TypeError):
         return None
