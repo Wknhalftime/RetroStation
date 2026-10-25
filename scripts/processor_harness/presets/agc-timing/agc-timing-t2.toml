@@ -13,3 +13,6 @@ window_s = 10.0
 attack_rate = 2.0
 [gauge_limits]
 agc_gain = [-10.0, 10.0]
+[level_check]
+gauge = "agc_gain"
+target_lufs = -18.0

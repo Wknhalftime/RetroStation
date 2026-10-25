@@ -21,6 +21,7 @@ Audio = NDArray[np.float64]
 Trace = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 PROGRAMME = "programme"
+SEQUENCE = "sequence"
 PINNED_WITHIN_DB = 1.0  # a gauge this close to a declared limit counts as pinned
 
 
@@ -37,6 +38,7 @@ class Rendered:
     category: str = ""  # programme category; "" for stimuli
     model: Settings | None = None  # the chain's acompressor settings, when the preset says
     gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
+    level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -207,6 +209,45 @@ def _programme(r: Rendered) -> dict[str, float]:
     return row
 
 
+def _recovery(r: Rendered) -> dict[str, float]:
+    """Per playlist song: seconds from its start until the checked gauge comes within 1 dB of
+    the correction that song needs (target minus its level, inside the gauge's limits); nan,
+    and counted as missed, if it never does before the song ends."""
+    if r.level_check is None or r.level_check[0] not in r.gauges:
+        return {}
+    name, target = r.level_check
+    times, gain = r.gauges[name]
+    low, high = r.gauge_limits.get(name, (-math.inf, math.inf))
+    row: dict[str, float] = {}
+    reached, missed = [], 0
+    for i, seg in enumerate(r.segments, start=1):
+        need = min(high, max(low, target - seg.level_dbfs))
+        inside = (times >= seg.start_s) & (times < seg.stop_s)
+        close = np.abs(gain[inside] - need) <= PINNED_WITHIN_DB
+        if close.any():
+            seconds = float(times[inside][np.argmax(close)] - seg.start_s)
+            reached.append(seconds)
+        else:
+            seconds, missed = math.nan, missed + 1
+        row[f"recovery_s.{i:02d}-{seg.label}"] = seconds
+    row["recovery_s_max"] = max(reached) if reached else math.nan
+    row["recovery_s_median"] = float(np.median(reached)) if reached else math.nan
+    row["recovery_missed"] = float(missed)
+    return row
+
+
+def _sequence(r: Rendered) -> dict[str, float]:
+    """A playlist: each song's output loudness and their spread (the AGC's song-to-song job),
+    and how fast the gain reaches each song's correction."""
+    row: dict[str, float] = {}
+    for i, seg in enumerate(r.segments, start=1):
+        part = r.out[round(seg.start_s * r.fs) : round(seg.stop_s * r.fs)]
+        row[f"item_lufs.{i:02d}-{seg.label}"] = loudness.integrated(part, r.fs)
+    levels = [v for k, v in row.items() if math.isfinite(v)]
+    row["item_lufs_spread"] = max(levels) - min(levels) if levels else math.nan
+    return row | _recovery(r)
+
+
 MEASURES: dict[str, Callable[[Rendered], dict[str, float]]] = {
     "impulse": _impulse,
     "log_sweep": _sweep,
@@ -219,6 +260,7 @@ MEASURES: dict[str, Callable[[Rendered], dict[str, float]]] = {
     "kick": lambda r: _pre_ring(r),
     "snare": lambda r: _pre_ring(r),
     PROGRAMME: _programme,
+    SEQUENCE: _sequence,
 }
 
 

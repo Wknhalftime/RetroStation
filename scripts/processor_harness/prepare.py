@@ -19,7 +19,7 @@ import numpy as np
 
 from processor_harness.audio_io import Audio, read_wav, write_wav
 from processor_harness.corpus import Corpus, ProgrammeEntry
-from processor_harness.measure import PROGRAMME
+from processor_harness.measure import PROGRAMME, SEQUENCE
 from processor_harness.metrics import loudness
 from processor_harness.signals import Segment
 
@@ -91,7 +91,24 @@ def prepare_inputs(
         level = _excerpt(ffmpeg, item, fs, corpus.programme_lufs, path)
         span = (Segment(0.0, item.duration_s, level),)
         prepared.append(PreparedInput(item.id, PROGRAMME, item.category, path, span))
+    songs = {p.id: p for p in prepared if p.kind == PROGRAMME}
+    for sequence in corpus.sequences:
+        prepared.append(_join(sequence.id, [songs[i] for i in sequence.items], directory, fs))
     return tuple(prepared)
+
+
+def _join(sequence_id: str, songs: list[PreparedInput], directory: Path, fs: int) -> PreparedInput:
+    """The songs end to end in one file, each segment labelled with its song and level."""
+    parts, segments, t = [], [], 0.0
+    for song in songs:
+        x, _ = read_wav(song.path)
+        parts.append(x)
+        stop = t + len(x) / fs
+        segments.append(Segment(t, stop, song.segments[0].level_dbfs, song.id))
+        t = stop
+    path = directory / f"{sequence_id}.wav"
+    write_wav(path, np.concatenate(parts), fs)
+    return PreparedInput(sequence_id, SEQUENCE, "", path, tuple(segments))
 
 
 def silence(directory: Path, fs: int, seconds: float = 1.0) -> Path:

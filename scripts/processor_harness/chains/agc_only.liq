@@ -3,7 +3,9 @@
 # target (LUFS), idle (dB; the gain held through gated passages, session.liq's rule being target
 # minus the -18 LUFS item-gain level), threshold (gate, LUFS), gain_min / gain_max (dB), and the
 # timing: window (dB) and window_rate, attack_rate, release_rate, idle_rate (dB/s), window_s and
-# attack_window_s (detector windows, s), entrance (dB), intro_hold (s).
+# attack_window_s (detector windows, s), entrance (dB), intro_hold (s). For a playlist render the
+# harness also passes boundaries (song start times, s): at each one the chain re-arms the intro
+# hold, as session.liq does when a song starts.
 %include "../../../backend/playout/agc.liq"
 
 def chain(s) =
@@ -19,5 +21,19 @@ def chain(s) =
       crossover=0., s
     )
   gauge("agc_gain", s.gain)
+  starts = string.split(separator=" ", param_string("boundaries", ""))
+  pending = ref(list.map(float_of_string, list.filter(fun (x) -> x != "", starts)))
+  frames = ref(0)
+  def rearm() =
+    t = float(frames()) * frame.duration()
+    if
+      pending() != [] and t >= list.hd(pending())
+    then
+      s.hold()
+      pending := list.tl(pending())
+    end
+    frames := frames() + 1
+  end
+  s.on_frame(synchronous=true, rearm)
   s
 end

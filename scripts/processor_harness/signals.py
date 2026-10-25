@@ -23,6 +23,7 @@ class Segment:
     start_s: float
     stop_s: float
     level_dbfs: float
+    label: str = ""  # a sequence item's programme id
 
 
 @dataclass(frozen=True, eq=False)
