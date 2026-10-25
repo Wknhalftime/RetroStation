@@ -140,14 +140,32 @@ def _percentile(values: NDArray[np.float64], q: float) -> float:
     return float(np.percentile(values, q)) if values.size else math.nan
 
 
+def _gauge_movement(
+    name: str, times: NDArray[np.float64], values: NDArray[np.float64]
+) -> dict[str, float]:
+    """How much a gauge moves (for the AGC: pumping versus correcting a level error): total
+    travel per minute, and the 95th percentile of how far it moves in any one second."""
+    if values.size < 2:
+        return {}
+    step = float(np.median(np.diff(times)))
+    minutes = (times[-1] - times[0] + step) / 60
+    lag = max(1, round(1.0 / step))
+    swing = np.abs(values[lag:] - values[:-lag]) if values.size > lag else np.zeros(1)
+    return {
+        f"gauge.{name}.travel_db_per_min": float(np.sum(np.abs(np.diff(values))) / minutes),
+        f"gauge.{name}.swing_1s_p95_db": float(np.percentile(swing, 95)),
+    }
+
+
 def _gauge_spread(r: Rendered) -> dict[str, float]:
     """Where each logged gauge spent the render: extremes and 5th / 50th / 95th percentile
     (for the AGC, how close its gain runs to its range limits)."""
-    row = {}
-    for name, (_, values) in r.gauges.items():
+    row: dict[str, float] = {}
+    for name, (times, values) in r.gauges.items():
         finite = values[np.isfinite(values)]
         if finite.size == 0:
             continue
+        row |= _gauge_movement(name, times[np.isfinite(values)], finite)
         row[f"gauge.{name}.min"] = float(np.min(finite))
         row[f"gauge.{name}.max"] = float(np.max(finite))
         for q in (5, 50, 95):

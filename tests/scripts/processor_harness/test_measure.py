@@ -336,3 +336,28 @@ def test_programme_reports_its_loudness_range_change() -> None:
     row = measure.measure("programme", rendered)
 
     assert row["lra_change_lu"] == pytest.approx(-5.0, abs=0.7)
+
+
+def test_gain_travel_and_one_second_swing_show_how_much_a_gauge_moves() -> None:
+    # The AGC timing step: a level-correcting AGC barely moves within a song; one that follows
+    # the music (pumping) travels far and swings within seconds.
+    stim = signals.noise_with_pauses(FS, burst_s=60.0, pause_s=0.1, bursts=1, level_dbfs=-18.0)
+    times = np.arange(0.0, 60.0, 0.02)  # one minute of frames
+    gain = 3.0 * np.sin(2 * np.pi * 0.5 * times)  # +-3 dB at 0.5 Hz: pumping
+    rendered = Rendered(
+        inp=stim.samples,
+        out=stim.samples,
+        fs=FS,
+        segments=stim.segments,
+        gauges={"agc_gain": (times, gain)},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+    )
+
+    row = measure.measure("programme", rendered)
+
+    # 30 cycles of 4 x 3 dB each = 360 dB of travel in the minute.
+    assert row["gauge.agc_gain.travel_db_per_min"] == pytest.approx(360.0, rel=0.01)
+    # Over any 1 s (half a period) the gain swings by up to 6 dB.
+    assert row["gauge.agc_gain.swing_1s_p95_db"] == pytest.approx(5.9, abs=0.2)

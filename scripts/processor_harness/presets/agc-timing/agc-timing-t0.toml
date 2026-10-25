@@ -1,0 +1,11 @@
+# AGC timing step: agc.liq alone at R10's -18 LUFS. Today's timing: release 3 dB/s, 3 dB window at 0.5 dB/s, 3 s detector, attack 6 dB/s.
+id = "agc-timing-t0"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/agc_only.liq"
+description = "Today's timing: release 3 dB/s, 3 dB window at 0.5 dB/s, 3 s detector, attack 6 dB/s."
+[params]
+target = -18.0
+idle = 0.0
+[gauge_limits]
+agc_gain = [-10.0, 10.0]
