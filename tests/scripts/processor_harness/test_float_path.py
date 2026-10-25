@@ -57,3 +57,25 @@ def test_every_filter_link_runs_in_float(probe_run: render.RenderRun) -> None:
     assert "samplefmt:s32p" in log  # the MP3 encoder's input buffer, outside the graph
     inserted = [line for line in log.splitlines() if "auto-inserting" in line.lower()]
     assert not [line for line in inserted if re.search(r"s16|s32|u8", line)]
+
+
+def test_pink_noise_over_full_scale_comes_out_sample_exact(tmp_path: Path) -> None:
+    # Lance, 2026-10-24: every band carries audio over 0 dBFS, and the probe is linear (band
+    # compressors at ratio 1, no limiter), so the output must be the input times the total gain,
+    # delayed by the 20 ms crossover. Any clip, in any band, shows up as a deviation.
+    assert LIQUIDSOAP is not None
+    noise = signals.noise_with_pauses(FS, burst_s=3.0, pause_s=0.1, bursts=1, level_dbfs=-6.0)
+    audio_io.write_wav(tmp_path / "hot.wav", noise.samples, FS)
+    x, _ = audio_io.read_wav(tmp_path / "hot.wav")
+    assert 20 * np.log10(np.max(np.abs(x))) > 3.0  # well over full scale
+
+    run = render.render_liquidsoap(
+        Path(LIQUIDSOAP), PROBE, {}, tmp_path / "hot.wav", tmp_path / "out.wav", tmp_path / "c"
+    )
+
+    y, _ = audio_io.read_wav(run.output)
+    gain = 2.0 * 10 ** (6 / 20)  # band makeup 2, then volume 6 dB
+    delay = round(0.020 * FS)
+    n = min(len(x), len(y) - delay)
+    deviation = np.abs(y[delay : delay + n] - gain * x[:n])
+    assert np.max(deviation) < 1e-4
