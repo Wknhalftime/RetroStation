@@ -168,3 +168,18 @@ def test_octave_levels_put_a_tone_in_its_octave() -> None:
     i = bands.OCTAVE_LABELS.index("1000")
     assert levels[i] == pytest.approx(-23.01, abs=0.1)
     assert np.all(np.delete(levels, i) < levels[i] - 30)
+
+
+def test_octave_drift_sees_a_band_moving_whatever_the_edges() -> None:
+    # Balance drift on the shared octaves (63 Hz - 8 kHz), so edge sets compare fairly: a
+    # steady cut does not drift, a band cut every other 2 s does.
+    x = pink(8.0)
+    t = np.arange(len(x)) / FS
+    pumping = np.where((t // 2) % 2 == 0, 0.0, -6.0)
+
+    steady = bands.octave_drift(x, scaled_band(x, 3, -6.0), FS, latency_s=0.0)
+    moving = bands.octave_drift(x, scaled_band(x, 3, pumping), FS, latency_s=0.0)
+
+    assert steady.drift_db < 0.1
+    assert steady.change_db > 1.0
+    assert moving.drift_db > 1.0

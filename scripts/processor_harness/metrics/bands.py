@@ -136,22 +136,64 @@ def compare(
     pairs = list(zip(gr, active, strict=True))
     gr_mean = tuple(float(np.mean(g[a])) if a.any() else math.nan for g, a in pairs)
     gr_p95 = tuple(float(np.percentile(g[a], 95)) if a.any() else math.nan for g, a in pairs)
-    everywhere = active.all(axis=0)
-    drift = change = math.nan
-    if everywhere.sum() >= 2:
-        g = gr[:, everywhere]
-        moment = g - g.mean(axis=0)  # the moment's overall gain taken out
-        averages = moment.mean(axis=1, keepdims=True)
-        drift = float(np.sqrt(np.mean((moment - averages) ** 2)))
-        change = float(np.sqrt(np.mean(averages**2)))
+    balance = _balance(gr[:, active.all(axis=0)])
     return BandComparison(
         in_db=tuple(_mean_db(p[sounding]) for p in p_in),
         out_db=tuple(_mean_db(p[sounding]) for p in p_out),
         gr_mean_db=gr_mean,
         gr_p95_db=gr_p95,
-        drift_db=drift,
-        change_db=change,
+        drift_db=balance.drift_db,
+        change_db=balance.change_db,
     )
+
+
+@dataclass(frozen=True)
+class Balance:
+    drift_db: float  # how far the bands moved apart and together during the song
+    change_db: float  # how far the song's average balance moved
+
+
+def _balance(gr: NDArray[np.float64]) -> Balance:
+    """Balance drift and change from gain reductions (rows: bands, columns: blocks where every
+    band is sounding)."""
+    if gr.shape[1] < 2:
+        return Balance(math.nan, math.nan)
+    moment = gr - gr.mean(axis=0)  # the moment's overall gain taken out
+    averages = moment.mean(axis=1, keepdims=True)
+    return Balance(
+        drift_db=float(np.sqrt(np.mean((moment - averages) ** 2))),
+        change_db=float(np.sqrt(np.mean(averages**2))),
+    )
+
+
+_DRIFT_OCTAVES = slice(1, 9)  # 63 Hz to 8 kHz: 31.5 Hz and 16 kHz are empty in many songs
+
+
+def _octave_block_powers(x: Audio, fs: int, block_s: float) -> NDArray[np.float64]:
+    """Mean power per block in each octave band (rows), from a Hann-windowed FFT of each block,
+    scaled so a band's sum is its share of the block's mean power."""
+    block = round(block_s * fs)
+    count = len(x) // block
+    window = np.hanning(block)
+    blocks = x[: count * block].reshape(count, block, x.shape[1]) * window[:, None]
+    scale = 2 / (block * np.sum(window**2))
+    spectrum = np.mean(np.abs(np.fft.rfft(blocks, axis=1)) ** 2, axis=2) * scale
+    freqs = np.fft.rfftfreq(block, 1 / fs)
+    edges = [(c / np.sqrt(2), c * np.sqrt(2)) for c in OCTAVE_CENTRES[_DRIFT_OCTAVES]]
+    return np.array([spectrum[:, (freqs >= lo) & (freqs < hi)].sum(axis=1) for lo, hi in edges])
+
+
+def octave_drift(
+    inp: Audio, out: Audio, fs: int, latency_s: float, block_s: float = BLOCK_S
+) -> Balance:
+    """Balance drift and change measured on the octaves from 63 Hz to 8 kHz instead of the
+    chain's own bands, so edge sets compare fairly: on its own bands, a set that merges two
+    bands can no longer show them moving against each other."""
+    p_in = _octave_block_powers(inp, fs, block_s)
+    p_out = _octave_block_powers(_aligned(out, len(inp), latency_s, fs), fs, block_s)
+    sounding = _sounding(inp, fs, block_s)[: p_in.shape[1]]
+    active = sounding & np.all(_db(p_in) >= BAND_FLOOR_DBFS, axis=0)
+    return _balance((_db(p_in) - _db(p_out))[:, active])
 
 
 @dataclass(frozen=True)

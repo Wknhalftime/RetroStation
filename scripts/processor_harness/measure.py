@@ -199,7 +199,13 @@ def _bands(r: Rendered) -> dict[str, float]:
     """Each band's input and output level, its gain reduction (mean and 95th percentile),
     and how the balance between bands moved (metrics.bands)."""
     c = bands.compare(r.inp, r.out, r.fs, r.band_edges, r.latency_s)
-    row = {"balance_drift_db": c.drift_db, "balance_change_db": c.change_db}
+    grid = bands.octave_drift(r.inp, r.out, r.fs, r.latency_s)
+    row = {
+        "balance_drift_db": c.drift_db,
+        "balance_change_db": c.change_db,
+        "octave_drift_db": grid.drift_db,
+        "octave_change_db": grid.change_db,
+    }
     for k, values in enumerate(zip(c.in_db, c.out_db, c.gr_mean_db, c.gr_p95_db, strict=True)):
         for name, value in zip(("in_db", "out_db", "gr_mean_db", "gr_p95_db"), values, strict=True):
             row[f"band.{k + 1}.{name}"] = value
