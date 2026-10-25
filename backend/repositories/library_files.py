@@ -8,7 +8,13 @@ from backend.domain.library import AudioHash, LibraryFile
 
 class LibraryFileRepository(ABC):
     @abstractmethod
-    def upsert(self, file: LibraryFile) -> LibraryFile: ...
+    def upsert(self, file: LibraryFile) -> LibraryFile:
+        """Insert or update the row at ``file.file_path`` and return it as stored.
+
+        Raises ``LibraryFileRejectedError`` when the database refuses the row: nothing of it
+        is written, and the caller's earlier writes in the transaction stand.
+        """
+        ...
 
     @abstractmethod
     def upsert_write_only(self, file: LibraryFile) -> None: ...

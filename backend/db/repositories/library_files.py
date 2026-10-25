@@ -7,10 +7,16 @@ from uuid import UUID
 
 import psycopg
 
-from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._pg_utils import refused_row_as, translate_lost_connection
 from backend.db.repositories.path_prefix import dir_like_prefix
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
-from backend.domain.library import AudioHash, AudioMetadata, LibraryFile, LibraryStorageError
+from backend.domain.library import (
+    AudioHash,
+    AudioMetadata,
+    LibraryFile,
+    LibraryFileRejectedError,
+    LibraryStorageError,
+)
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recording_search_reach import RecordingSearchReachRepository
@@ -194,7 +200,8 @@ class PgLibraryFileRepository(
         )
 
     def upsert(self, file: LibraryFile) -> LibraryFile:
-        self._conn.execute(_UPSERT_SQL, _upsert_params(file))
+        with refused_row_as(self._conn, LibraryFileRejectedError):
+            self._conn.execute(_UPSERT_SQL, _upsert_params(file))
         row = self._conn.execute(
             "SELECT * FROM library_files WHERE file_path = %s",
             (file.file_path,),

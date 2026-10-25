@@ -25,7 +25,7 @@ import structlog
 from mutagen._util import MutagenError
 
 from backend.domain.enums import FileStatus
-from backend.domain.library import LibraryFile, LibraryQuarantine
+from backend.domain.library import LibraryFile, LibraryFileRejectedError, LibraryQuarantine
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.library_quarantine import LibraryQuarantineRepository
 from backend.services.audio_tags import SUPPORTED_EXTENSIONS, DiskStat, disk_stat, read_tags
@@ -171,6 +171,27 @@ def _read_tags_safe(
         return None
 
 
+def _upsert_safe(
+    lf: LibraryFile,
+    file_repo: LibraryFileRepository,
+    quarantine_repo: LibraryQuarantineRepository,
+    result: FolderScanResult,
+) -> bool:
+    """Write *lf*'s row; when the database refuses it, quarantine the file and return False.
+
+    The refused row rolls back alone, so the folder's other writes stand
+    and the visit goes on: one bad row must not fail every watcher poll.
+    """
+    try:
+        file_repo.upsert(lf)
+    except LibraryFileRejectedError as exc:
+        logger.warning("scan_smart_row_refused", path=lf.file_path, error=str(exc))
+        quarantine_once(quarantine_repo, lf.file_path, str(exc))
+        result.record_failure(lf.file_path)
+        return False
+    return True
+
+
 def _mark_missing_files(
     existing_by_path: dict[str, LibraryFile],
     file_repo: LibraryFileRepository,
@@ -190,8 +211,7 @@ def _reread_and_upsert(
     result: FolderScanResult,
 ) -> None:
     lf = _read_tags_safe(path, str(path), quarantine_repo, result)
-    if lf is not None:
-        file_repo.upsert(lf)
+    if lf is not None and _upsert_safe(lf, file_repo, quarantine_repo, result):
         result.files_written += 1
 
 
@@ -368,8 +388,10 @@ def _index_new_file(
     moved_from = adopt_moved_row(lf, file_repo)
     if moved_from is not None:
         result.files_relocated += 1
-    file_repo.upsert(lf)
-    result.files_written += 1
+    # A refused row leaves the relocation standing: the row follows its
+    # file, keeping its links and its old tags.
+    if _upsert_safe(lf, file_repo, quarantine_repo, result):
+        result.files_written += 1
     return moved_from
 
 
@@ -412,7 +434,7 @@ def _restore_reappeared_file(existing: LibraryFile, path: Path, ctx: FolderScanC
         return
     if unchanged:
         existing.file_status = FileStatus.PRESENT
-        ctx.file_repo.upsert(existing)
+        _upsert_safe(existing, ctx.file_repo, ctx.quarantine_repo, ctx.result)
     else:
         _reread_and_upsert(path, ctx.file_repo, ctx.quarantine_repo, ctx.result)
     ctx.result.files_reappeared += 1
@@ -491,7 +513,8 @@ def scan_folder_incrementally(
       4. Re-appeared file (MISSING in DB)             -> restore PRESENT; re-read into the
                                                          same row if size or mtime differ
       5. Missing file (in DB, not on disk)            -> mark MISSING
-      6. Parse failure (Mutagen error)                -> quarantine (once per path)
+      6. Parse failure (Mutagen error), or a row      -> quarantine (once per path);
+         the database refuses                            the visit goes on
 
     Afterwards, quarantine entries for this folder's files that did not fail
     this visit are dropped: the file now reads, or is gone.
