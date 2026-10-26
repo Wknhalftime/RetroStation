@@ -450,3 +450,11 @@ def test_a_tone_reports_how_much_distortion_the_chain_added() -> None:
     assert plain["thd_change_pct"] == pytest.approx(0.0, abs=1e-6)
     assert added["thd_change_pct"] == pytest.approx(added["thd_pct"] - plain["thd_pct"])
     assert added["thd_change_pct"] > 1.0
+
+
+def test_impulse_reports_the_low_frequency_response_and_group_delay() -> None:
+    row = measure.measure("impulse", untouched(signals.impulse(FS, -6.0, 2.0, 0.5)))
+
+    assert row["lf_response_40hz_db"] == pytest.approx(0.0, abs=1e-6)
+    assert row["lf_response_20hz_db"] == pytest.approx(0.0, abs=1e-6)
+    assert row["lf_group_delay_40hz_ms"] == pytest.approx(0.0, abs=1e-3)

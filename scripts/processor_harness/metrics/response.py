@@ -73,3 +73,26 @@ def sweep_deviation(inp: Audio, out: Audio, fs: int) -> float:
     centres, levels = third_octave_response(inp, out, fs)
     reference = levels[np.argmin(np.abs(centres - REFERENCE_HZ))]
     return float(np.max(np.abs(levels - reference)))
+
+
+def _transfer(
+    inp: Audio, out: Audio, fs: int
+) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+    freqs, x, y = _spectra(inp, out, fs)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return freqs, np.asarray(y / x, dtype=np.complex128)
+
+
+def response_at_db(inp: Audio, out: Audio, fs: int, freq: float) -> float:
+    """The chain's gain (dB) at one frequency, from the impulse (high-pass corner checks)."""
+    freqs, h = _transfer(inp, out, fs)
+    return float(20 * np.log10(np.interp(freq, freqs, np.abs(h))))
+
+
+def group_delay_ms(inp: Audio, out: Audio, fs: int, freq: float) -> float:
+    """The group delay at one frequency beyond the group delay at 1 kHz (ms): what an IIR
+    stage adds at the low end, the chain's plain latency taken out."""
+    freqs, h = _transfer(inp, out, fs)
+    phase = np.unwrap(np.angle(h))
+    delay = -np.gradient(phase, 2 * np.pi * freqs)
+    return float(1000 * (np.interp(freq, freqs, delay) - np.interp(REFERENCE_HZ, freqs, delay)))
