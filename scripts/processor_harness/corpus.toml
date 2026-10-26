@@ -1,0 +1,78 @@
+# The harness corpus: the brief's test-signal table at the stream's rate. Tone levels are peak
+# dBFS, noise levels RMS dBFS.
+sample_rate = 44100
+programme_lufs = -18.0  # songs reach the chain at the item-gain level
+
+# Band-sum flatness and latency (low enough that no compressor acts).
+[[signal]]
+id = "impulse"
+kind = "impulse"
+level_dbfs = -30.0
+seconds = 3.0
+at_s = 0.5
+
+# Frequency response with the dynamics idle.
+[[signal]]
+id = "sweep"
+kind = "log_sweep"
+f1 = 20.0
+f2 = 20000.0
+level_dbfs = -30.0
+seconds = 20.0
+
+# Static gain curve (math item 2). One per band once the crossover edges are set (dial-in 1).
+[[signal]]
+id = "steps-1k"
+kind = "stepped_tone"
+freq = 1000.0
+start_dbfs = -40.0
+stop_dbfs = 0.0
+hold_s = 3.0
+
+# Attack and release time constants (items 1 and 3): +10 dB and -10 dB steps.
+[[signal]]
+id = "bursts-1k"
+kind = "tone_bursts"
+freq = 1000.0
+base_dbfs = -30.0
+step_db = 10.0
+hold_s = 2.0
+cycles = 3
+
+# AGC gating (item 4): the gain must not rise over a 10 s pause.
+[[signal]]
+id = "pauses"
+kind = "noise_with_pauses"
+burst_s = 5.0
+pause_s = 10.0
+bursts = 3
+level_dbfs = -20.0
+
+# Distortion from the dynamics stages.
+[[signal]]
+id = "thd-1k"
+kind = "tone"
+freq = 1000.0
+level_dbfs = -6.0
+seconds = 5.0
+
+[[signal]]
+id = "imd-smpte"
+kind = "smpte_imd"
+level_dbfs = -6.0
+seconds = 5.0
+
+[[signal]]
+id = "imd-ccif"
+kind = "ccif_imd"
+level_dbfs = -6.0
+seconds = 5.0
+
+# Programme excerpts (music across formats, transient-heavy material, speech with pauses, male
+# voice) are Lance's pick, an open decision in the brief. Add them as:
+# [[programme]]
+# id = "teen-spirit"
+# path = "D:/Music/Nirvana/Nevermind/01 Smells Like Teen Spirit.flac"
+# category = "music"      # music | speech | voice | transient
+# start_s = 0.0
+# duration_s = 60.0
