@@ -15,7 +15,9 @@ from pathlib import Path
 
 from processor_harness.audio_io import Audio, read_wav
 from processor_harness.codec import decode, encode_mp3
+from processor_harness.corpus import CorpusError, SignalEntry
 from processor_harness.measure import PROGRAMME, SEQUENCE, Rendered, measure, read_gauges
+from processor_harness.metrics import bands
 from processor_harness.metrics.acompressor import Settings
 from processor_harness.prepare import PreparedInput
 from processor_harness.presets import Backend, ParamValue, Preset
@@ -61,6 +63,33 @@ def model_for(preset: Preset, item: PreparedInput) -> Settings | None:
             f"{len(preset.band_models)} bands"
         )
     return preset.band_models[item.band - 1]
+
+
+# Where a check tone may sit (Lance, 2026-10-25): band 1's fit read its ratio 3% high at
+# 50 Hz, where the crossover's window still ripples (+0.06 dB) and band 2 takes a share.
+FLAT_WITHIN_DB = 0.03  # the aimed-at band's gain at the tone
+OTHERS_BELOW_DB = -50.0  # every other band's gain at the tone
+
+
+def check_aimed_tones(preset: Preset, signals: Sequence[SignalEntry], fs: int) -> None:
+    """Refuse a tone aimed at a band of this preset unless that band passes it flat and the
+    others pass almost none of it: the fits feed the band's compressor the whole tone."""
+    if not preset.band_edges:
+        return
+    for s in signals:
+        freq = s.params.get("freq")
+        if s.band is None or freq is None or s.band > len(preset.band_edges) + 1:
+            continue
+        gains = bands.response_db(preset.band_edges, fs, float(freq))
+        own = float(gains[s.band - 1])
+        others = max((float(g) for i, g in enumerate(gains) if i != s.band - 1), default=-999.0)
+        if abs(own) > FLAT_WITHIN_DB or others > OTHERS_BELOW_DB:
+            raise CorpusError(
+                f"signal {s.id!r} at {freq} Hz is aimed at band {s.band} of {preset.source}, "
+                f"which passes it at {own:+.3f} dB with another band at {others:.1f} dB; a "
+                f"check tone needs its band within {FLAT_WITHIN_DB} dB and the others under "
+                f"{OTHERS_BELOW_DB:.0f} dB (band 1: 40 Hz)"
+            )
 
 
 def band_makeup_db(preset: Preset) -> tuple[float, ...]:
@@ -139,6 +168,7 @@ def measure_renders(
             level_check=preset.level_check,
             band_edges=preset.band_edges,
             band_makeup_db=band_makeup_db(preset),
+            band_models=preset.band_models,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

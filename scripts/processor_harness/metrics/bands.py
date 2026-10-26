@@ -28,7 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import oaconvolve, welch
 
-from processor_harness.metrics import acompressor
+from processor_harness.metrics import acompressor, distortion
 from processor_harness.metrics.acompressor import Settings
 
 Audio = NDArray[np.float64]
@@ -37,6 +37,8 @@ DELAY_S = 0.02  # the crossover's FIR half-length, locked in dial-in step 1
 BLOCK_S = 0.4
 SILENT_DBFS = -60.0  # a block this quiet is not programme
 BAND_FLOOR_DBFS = -70.0  # a band this quiet in a block has nothing to compress
+SWING_BLOCK_S = 0.1  # each band's gain trace for its one-second swing (the AGC step's measure)
+SWING_LAG_S = 1.0
 OCTAVE_CENTRES = 1000.0 * 2.0 ** np.arange(-5, 5)
 OCTAVE_LABELS = ("31.5", "63", "125", "250", "500", "1000", "2000", "4000", "8000", "16000")
 
@@ -77,6 +79,14 @@ def band_powers(
     )
 
 
+def response_db(edges: Sequence[float], fs: int, freq: float) -> NDArray[np.float64]:
+    """Each band's gain (dB) at one frequency: the split's magnitude response there."""
+    rows = kernels(edges, fs)
+    t = np.arange(rows.shape[1]) - rows.shape[1] // 2
+    gains = np.abs(rows @ np.exp(-2j * np.pi * freq * t / fs))
+    return _db(gains**2)
+
+
 def octave_levels(x: Audio, fs: int) -> NDArray[np.float64]:
     """Mean power in each octave band (dB), both channels together, over the whole input."""
     freqs, psd = welch(x, fs, nperseg=16384, axis=0)
@@ -103,6 +113,7 @@ class BandComparison:
     gr_mean_db: tuple[float, ...]
     gr_p50_db: tuple[float, ...]
     gr_p95_db: tuple[float, ...]
+    gr_swing_1s_p95_db: tuple[float, ...]  # how far each band's gain moves in a second
     drift_db: float
     change_db: float
 
@@ -129,8 +140,11 @@ def compare(
     delay_s: float = DELAY_S,
 ) -> BandComparison:
     """The input and the output (lined up by the chain's latency) compared band by band."""
-    p_in = band_powers(inp, fs, edges, block_s, delay_s)
-    p_out = band_powers(_aligned(out, len(inp), latency_s, fs), fs, edges, block_s, delay_s)
+    # One split per signal, in 100 ms blocks: the swing reads them, the rest reads them in fours.
+    f_in = band_powers(inp, fs, edges, SWING_BLOCK_S, delay_s)
+    f_out = band_powers(_aligned(out, len(inp), latency_s, fs), fs, edges, SWING_BLOCK_S, delay_s)
+    group = round(block_s / SWING_BLOCK_S)
+    p_in, p_out = _regroup(f_in, group), _regroup(f_out, group)
     sounding = _sounding(inp, fs, block_s)[: p_in.shape[1]]
     gr = _db(p_in) - _db(p_out)
     active = sounding & (_db(p_in) >= BAND_FLOOR_DBFS)
@@ -145,9 +159,33 @@ def compare(
         gr_mean_db=gr_mean,
         gr_p50_db=gr_p50,
         gr_p95_db=gr_p95,
+        gr_swing_1s_p95_db=_swing(f_in, f_out, _sounding(inp, fs, SWING_BLOCK_S)),
         drift_db=balance.drift_db,
         change_db=balance.change_db,
     )
+
+
+def _regroup(power: NDArray[np.float64], group: int) -> NDArray[np.float64]:
+    """Block powers averaged in runs of ``group`` blocks (rows: bands)."""
+    count = power.shape[1] // group
+    runs = power[:, : count * group].reshape(power.shape[0], count, group)
+    return np.asarray(runs.mean(axis=2), dtype=np.float64)
+
+
+def _swing(
+    p_in: NDArray[np.float64], p_out: NDArray[np.float64], sounding: NDArray[np.bool_]
+) -> tuple[float, ...]:
+    """Per band, the 95th percentile of how far its gain reduction moves in one second,
+    over pairs of blocks where the band is sounding at both ends."""
+    lag = round(SWING_LAG_S / SWING_BLOCK_S)
+    gr = _db(p_in) - _db(p_out)
+    active = sounding[: gr.shape[1]] & (_db(p_in) >= BAND_FLOOR_DBFS)
+    swings = []
+    for g, a in zip(gr, active, strict=True):
+        both = a[lag:] & a[:-lag]
+        moved = np.abs(g[lag:] - g[:-lag])[both]
+        swings.append(float(np.percentile(moved, 95)) if moved.size else math.nan)
+    return tuple(swings)
 
 
 @dataclass(frozen=True)
@@ -301,3 +339,63 @@ def makeups_for_balance(
                 changes.append(10 * math.log10(p_in / p_out))
         found.append(float(np.mean(changes)) if changes else 0.0)
     return found
+
+
+@dataclass(frozen=True)
+class BassThd:
+    p50_pct: float  # THD the compressor adds on a held bass note, percentage points
+    p95_pct: float
+    windows: int  # held, pitched windows found
+
+
+# Notes change every quarter to half second in real songs: 1 s windows held within 1 dB found
+# 0-7 per song in Lance's corpus, half-second windows within 1.5 dB found 46-316 in most.
+_NOTE_WINDOW_S = 0.5
+_NOTE_HOP_S = 0.25
+_NOTE_STEADY_DB = 1.5  # every 100 ms of the window within this of its median level
+_NOTE_FLOOR_DBFS = -50.0
+_NOTE_PITCHED = 0.25  # the fundamental's share of the window's power
+_NOTE_LOWEST_HZ, _NOTE_HIGHEST_HZ = 25.0, 100.0
+
+
+def _fundamental(x: NDArray[np.float64], fs: int) -> tuple[float, float]:
+    """The strongest frequency in the bass range (parabolic peak) and its share of the power."""
+    window = np.blackman(len(x))
+    power = np.abs(np.fft.rfft(x * window)) ** 2
+    freqs = np.fft.rfftfreq(len(x), 1 / fs)
+    span = np.flatnonzero((freqs >= _NOTE_LOWEST_HZ) & (freqs <= _NOTE_HIGHEST_HZ))
+    k = int(span[np.argmax(power[span])])
+    a, b, c = np.log(power[k - 1 : k + 2] + 1e-30)
+    offset = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c != 0 else 0.0
+    share = float(power[k - 3 : k + 4].sum() / power.sum())
+    return float((k + offset) * fs / len(x)), share
+
+
+def bass_thd_added(
+    x: Audio, fs: int, edges: Sequence[float], s: Settings, band: int = 0
+) -> BassThd:
+    """The THD a band's compressor adds on held bass notes in real programme: the band split
+    as the chain splits it, run through the 3a model (which matched the rendered 50 Hz tone's
+    THD within 0.002 points), and compared at each held, pitched half-second window's fundamental.
+    The rendered output cannot show this: the compressor's products land in the next band."""
+    part = _band(x, kernels(edges, fs)[band])
+    level = acompressor.detector(part, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
+    squeezed = part * acompressor.gain(level, replace(s, makeup=1.0))[:, np.newaxis]
+    size, hop, sub = round(_NOTE_WINDOW_S * fs), round(_NOTE_HOP_S * fs), round(0.1 * fs)
+    added = []
+    for start in range(0, len(part) - size + 1, hop):
+        held = part[start : start + size]
+        steps = _db(_block_mean(np.mean(held**2, axis=1), sub))
+        if (
+            np.median(steps) < _NOTE_FLOOR_DBFS
+            or np.max(np.abs(steps - np.median(steps))) > _NOTE_STEADY_DB
+        ):
+            continue
+        f0, share = _fundamental(held[:, 0], fs)
+        if share < _NOTE_PITCHED:
+            continue
+        out = squeezed[start : start + size]
+        added.append(100 * (distortion.thd(out, fs, f0) - distortion.thd(held, fs, f0)))
+    if not added:
+        return BassThd(math.nan, math.nan, 0)
+    return BassThd(float(np.median(added)), float(np.percentile(added, 95)), len(added))

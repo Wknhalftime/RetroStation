@@ -52,6 +52,7 @@ class Rendered:
     level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
     band_edges: tuple[float, ...] = ()  # the chain's crossover, for per-band measures
     band_makeup_db: tuple[float, ...] = ()  # each band's makeup, left out of its reduction
+    band_models: tuple[Settings, ...] = ()  # each band's compressor (3a), for model measures
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -135,8 +136,40 @@ def _tone_frequency(r: Rendered) -> float:
     return float(np.fft.rfftfreq(len(r.inp), 1 / r.fs)[np.argmax(spectrum)])
 
 
+_RECOVERY_WINDOW_S = 0.01
+
+
+def _level_drop(r: Rendered) -> dict[str, float]:
+    """Seconds after the loud part until the gain on the quiet tone is back within 1 dB of
+    its idle gain (measured on the quiet lead-in, so makeup and the band's response cancel);
+    nan if it never is."""
+    idle, loud, after = r.segments
+    lag = round(r.latency_s * r.fs)
+    out = r.out[lag : lag + len(r.inp), 0]
+    inp = r.inp[: len(out), 0]
+    step = round(_RECOVERY_WINDOW_S * r.fs)
+
+    def gain_db(start_s: float, stop_s: float) -> NDArray[np.float64]:
+        a, z = round(start_s * r.fs), min(round(stop_s * r.fs), len(out))
+        count = (z - a) // step
+        o = out[a : a + count * step].reshape(count, step)
+        i = inp[a : a + count * step].reshape(count, step)
+        return np.asarray(10 * np.log10(np.mean(o**2, axis=1) / np.mean(i**2, axis=1)))
+
+    reference = float(
+        np.median(gain_db(idle.start_s + 0.5 * (idle.stop_s - idle.start_s), idle.stop_s))
+    )
+    trace = gain_db(after.start_s, after.stop_s)
+    back = np.abs(trace - reference) <= 1.0
+    seconds = float(np.argmax(back) * _RECOVERY_WINDOW_S) if back.any() else math.nan
+    return {"recovery_to_1db_s": seconds}
+
+
 def _tone(r: Rendered) -> dict[str, float]:
-    return {"thd_pct": 100 * distortion.thd(r.out, r.fs, _tone_frequency(r))}
+    freq = _tone_frequency(r)
+    out = 100 * distortion.thd(r.out, r.fs, freq)
+    # What the chain added: band 1's attack is chosen by it (Lance, 2026-10-25).
+    return {"thd_pct": out, "thd_change_pct": out - 100 * distortion.thd(r.inp, r.fs, freq)}
 
 
 def _smpte(r: Rendered) -> dict[str, float]:
@@ -213,6 +246,7 @@ def _bands(r: Rendered) -> dict[str, float]:
         "gr_mean_db": c.gr_mean_db,
         "gr_p50_db": c.gr_p50_db,  # a band averaging 2 dB with a p95 of 10 is pumping
         "gr_p95_db": c.gr_p95_db,
+        "gr_swing_1s_p95_db": c.gr_swing_1s_p95_db,
     }
     # The level change includes the band's makeup; its compressor's reduction does not.
     makeup = r.band_makeup_db or (0.0,) * len(c.in_db)
@@ -221,6 +255,12 @@ def _bands(r: Rendered) -> dict[str, float]:
     for name, values in per_band.items():
         for k, value in enumerate(values, start=1):
             row[f"band.{k}.{name}"] = value
+    if r.band_models:
+        # Band 1 only: release ripple sits at twice a bass note (Lance, 2026-10-25).
+        bass = bands.bass_thd_added(r.inp, r.fs, r.band_edges, r.band_models[0])
+        row["band.1.bass_thd_added_p50_pct"] = bass.p50_pct
+        row["band.1.bass_thd_added_p95_pct"] = bass.p95_pct
+        row["band.1.bass_thd_windows"] = float(bass.windows)
     # The same octaves for every edge set, so balance compares between songs fairly.
     octave_in, octave_out = bands.octave_levels(r.inp, r.fs), bands.octave_levels(r.out, r.fs)
     for i, label in enumerate(bands.OCTAVE_LABELS):
@@ -246,6 +286,7 @@ def _programme(r: Rendered) -> dict[str, float]:
         "psr_p10_lu": _percentile(psr, 10),
         "psr_p50_lu": _percentile(psr, 50),
         "psr_p90_lu": _percentile(psr, 90),
+        "psr_p50_change_lu": _percentile(psr, 50) - _percentile(dynamics.psr(r.inp, r.fs), 50),
         "crest_db": dynamics.crest_factor(r.out),
         "sample_overs": float(dynamics.sample_overs(r.out, r.ceiling_dbtp)),
         "true_overs": float(dynamics.true_overs(r.out, r.fs, r.ceiling_dbtp)),
@@ -306,6 +347,7 @@ MEASURES: dict[str, Callable[[Rendered], dict[str, float]]] = {
     "stepped_tone": _stepped_tone,
     "tone_bursts": _tone_bursts,
     "tone": _tone,
+    "level_drop": _level_drop,
     "smpte_imd": _smpte,
     "ccif_imd": _ccif,
     "noise_with_pauses": _pauses,

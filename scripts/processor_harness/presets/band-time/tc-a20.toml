@@ -1,0 +1,21 @@
+# Band step, time constants (Lance, 2026-10-25): the R13 curve (2.5:1, 9 dB soft knee, RMS,
+# stereo average) on R12's edges with bands 2-5 attack 20 ms (band 1 as R13, 34 ms). Thresholds recalibrated to 2 dB mean gain reduction
+# per band and makeup for long-term balance (scripts/run_band_calibration.py on the T3
+# renders), since the time constants change what a threshold gives. Set values are about 4x
+# the detector's time constant (math item 3a).
+id = "tc-a20"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "R13 curve, bands 2-5 attack 20 ms (band 1 as R13, 34 ms)."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+threshold_db = "-26.0 -22.9 -25.9 -27.6 -34.1"
+ratio = "2.5 2.5 2.5 2.5 2.5"
+knee_db = "9.03 9.03 9.03 9.03 9.03"
+makeup_db = "2.9 2.6 3.2 3.1 3.3"
+attack_ms = "34 20 20 20 20"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 1
+link = 0
