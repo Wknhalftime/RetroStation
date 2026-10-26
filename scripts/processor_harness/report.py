@@ -18,7 +18,7 @@ from pathlib import Path
 from statistics import median
 
 _IDENTITY_COLUMNS = ("preset", "version", "backend", "renderer", "standalone_ffmpeg")
-_SUM = {"sample_overs", "true_overs", "codec_true_overs"}
+_SUM = {"sample_overs", "true_overs", "codec_true_overs", "recovery_missed"}
 _MAX = {
     "true_peak_dbtp",
     "true_peak_rise_db",
@@ -34,6 +34,8 @@ _MAX = {
     "pre_ring_energy_db",
     "pre_ring_reach_ms",
     "pre_ring_beyond_20ms_db",
+    "recovery_s_max",
+    "item_lufs_spread",
 }
 _MIN = {"band_sum_min_db"}
 

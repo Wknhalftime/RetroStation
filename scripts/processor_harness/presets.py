@@ -75,6 +75,7 @@ class Preset:
     source: Path
     model: Settings | None = None
     gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
+    level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
 
 
 def _param_value(path: Path, name: str, value: object) -> ParamValue:
@@ -154,6 +155,18 @@ def _gauge_limits(path: Path, table: object) -> dict[str, tuple[float, float]]:
     return limits
 
 
+def _level_check(path: Path, table: object) -> tuple[str, float] | None:
+    """[level_check]: the gauge holding the chain's gain (dB) and the LUFS it aims at."""
+    if table is None:
+        return None
+    if not isinstance(table, dict) or not isinstance(table.get("gauge"), str):
+        raise PresetError(f"{path}: [level_check] needs gauge (a name) and target_lufs")
+    target = table.get("target_lufs")
+    if not isinstance(target, int | float) or isinstance(target, bool):
+        raise PresetError(f"{path}: [level_check] target_lufs must be a number")
+    return str(table["gauge"]), float(target)
+
+
 def load_preset(path: Path) -> Preset:
     """Read and validate a preset file; errors name the file and the field."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -178,4 +191,5 @@ def load_preset(path: Path) -> Preset:
         source=path,
         model=_model(path, data.get("model")),
         gauge_limits=_gauge_limits(path, data.get("gauge_limits")),
+        level_check=_level_check(path, data.get("level_check")),
     )

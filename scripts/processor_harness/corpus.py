@@ -20,6 +20,9 @@ to cut from it.
     offset_db = -10.0         # optional: this many dB from programme_lufs (AGC level tests)
     native = true             # optional, instead: keep the level it was mastered at
     isolate_first_hit = true  # optional: silence everything before the first hit's attack
+    [[sequence]]                # a playlist: programme entries joined in play order, so a
+    id = "playlist"             # chain's state carries across song boundaries
+    items = ["rollin-native", "stairway", "lithium-6db"]
 """
 
 from __future__ import annotations
@@ -77,12 +80,19 @@ class ProgrammeEntry:
 
 
 @dataclass(frozen=True)
+class SequenceEntry:
+    id: str
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Corpus:
     sample_rate: int
     programme_lufs: float
     signals: tuple[SignalEntry, ...]
     programme: tuple[ProgrammeEntry, ...]
     source: Path
+    sequences: tuple[SequenceEntry, ...] = ()
 
 
 def _signal(path: Path, entry: dict[str, object]) -> SignalEntry:
@@ -126,6 +136,19 @@ def _programme(path: Path, entry: dict[str, object]) -> ProgrammeEntry:
     )
 
 
+def _sequence(path: Path, entry: dict[str, object], known: set[str]) -> SequenceEntry:
+    entry_id = str(entry.get("id", ""))
+    items = entry.get("items")
+    if not isinstance(items, list) or not items:
+        raise CorpusError(f"{path}: sequence {entry_id!r}: items must list programme ids")
+    unknown = [str(i) for i in items if str(i) not in known]
+    if unknown:
+        raise CorpusError(
+            f"{path}: sequence {entry_id!r}: items must name programme entries, not {unknown}"
+        )
+    return SequenceEntry(entry_id, tuple(str(i) for i in items))
+
+
 def load_corpus(path: Path) -> Corpus:
     """Read and validate the manifest; errors name the file and the field."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -133,8 +156,10 @@ def load_corpus(path: Path) -> Corpus:
         raise CorpusError(f"{path}: missing whole-number field 'sample_rate'")
     found = tuple(_signal(path, e) for e in data.get("signal", []))
     programme = tuple(_programme(path, e) for e in data.get("programme", []))
-    ids = [e.id for e in found] + [e.id for e in programme]
+    known = {e.id for e in programme}
+    sequences = tuple(_sequence(path, e, known) for e in data.get("sequence", []))
+    ids = [e.id for e in found] + [e.id for e in programme] + [e.id for e in sequences]
     if len(ids) != len(set(ids)):
         raise CorpusError(f"{path}: every id must be unique, got {ids}")
     level = float(data.get("programme_lufs", DEFAULT_PROGRAMME_LUFS))
-    return Corpus(int(data["sample_rate"]), level, found, programme, path)
+    return Corpus(int(data["sample_rate"]), level, found, programme, path, sequences)

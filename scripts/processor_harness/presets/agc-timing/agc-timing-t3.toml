@@ -1,0 +1,19 @@
+# AGC timing step: agc.liq alone at R10's -18 LUFS. Slow with a 6 dB window: release 0.5, window rate 0.1, 10 s detector, attack 2.
+id = "agc-timing-t3"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/agc_only.liq"
+description = "Slow with a 6 dB window: release 0.5, window rate 0.1, 10 s detector, attack 2."
+[params]
+target = -18.0
+idle = 0.0
+window = 6.0
+release_rate = 0.5
+window_rate = 0.1
+window_s = 10.0
+attack_rate = 2.0
+[gauge_limits]
+agc_gain = [-10.0, 10.0]
+[level_check]
+gauge = "agc_gain"
+target_lufs = -18.0

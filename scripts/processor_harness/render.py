@@ -18,6 +18,8 @@ a render can lose up to 20 ms of it.
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import string
@@ -33,6 +35,8 @@ from processor_harness.audio_io import read_wav
 from processor_harness.presets import ParamValue
 
 GAUGE_PREFIX = "HARNESS_GAUGE\t"
+_FLOAT = r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|-?inf|nan"
+_GAUGE_LINE = re.compile(rf"^HARNESS_GAUGE\t({_FLOAT})\t([^\t,]+)\t({_FLOAT})$")
 _CACHE_VARS = ("LIQ_CACHE_DIR", "LIQ_CACHE_USER_DIR", "LIQ_CACHE_SYSTEM_DIR")
 _CPU_SAMPLE_S = 0.02
 # A render gets this long per second of audio, plus startup (cold script cache ~5 s).
@@ -139,6 +143,36 @@ def _run_timed(
     return cpu
 
 
+def _save_cpu(output: Path, cpu: float) -> None:
+    """The render's CPU time beside it, so a later run can reuse the render (reuse_run)."""
+    output.with_suffix(".run.json").write_text(json.dumps({"cpu_seconds": cpu}), encoding="utf-8")
+
+
+def reuse_run(output: Path, liquidsoap: bool) -> RenderRun | None:
+    """A finished render rebuilt from its files, or None if its WAV is missing. Gauges are
+    extracted again from the Liquidsoap log, so a fixed parser applies to old runs; without
+    a CPU sidecar (renders from before it existed) the CPU time is nan."""
+    if not output.is_file():
+        return None
+    sidecar = output.with_suffix(".run.json")
+    cpu = math.nan
+    if sidecar.is_file():
+        cpu = float(json.loads(sidecar.read_text(encoding="utf-8"))["cpu_seconds"])
+    mp3 = output.with_suffix(".mp3")
+    log = output.with_suffix(".log")
+    gauges = None
+    if liquidsoap and log.is_file():
+        gauges = output.with_suffix(".gauges.csv")
+        _write_gauges(log, gauges)
+    return RenderRun(
+        output,
+        mp3 if liquidsoap and mp3.is_file() else None,
+        gauges,
+        cpu,
+        _audio_seconds(output),
+    )
+
+
 def render_ffmpeg(ffmpeg: Path, graph: str, source: Path, output: Path) -> RenderRun:
     """Render through a filtergraph (input ``[0:a]``, output ``[out]``) to 32-bit float WAV."""
     audio_s = _audio_seconds(source)
@@ -148,6 +182,7 @@ def render_ffmpeg(ffmpeg: Path, graph: str, source: Path, output: Path) -> Rende
     ]  # fmt: skip
     timeout = _TIMEOUT_STARTUP_S + _TIMEOUT_PER_AUDIO_S * audio_s
     cpu = _run_timed(command, output.with_suffix(".log"), None, timeout)
+    _save_cpu(output, cpu)
     return RenderRun(output, None, None, cpu, audio_s)
 
 
@@ -180,9 +215,10 @@ def _liq_params(params: Mapping[str, ParamValue]) -> dict[str, str]:
 def _write_gauges(log: Path, csv: Path) -> None:
     rows = ["time_s,name,value"]
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith(GAUGE_PREFIX):
-            t, name, value = line[len(GAUGE_PREFIX) :].split("\t")
-            rows.append(f"{t},{name},{value}")
+        # Liquidsoap's own log shares stdout and can land inside a gauge line: keep whole ones.
+        whole = _GAUGE_LINE.match(line)
+        if whole:
+            rows.append(",".join(whole.groups()))
     csv.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
@@ -218,13 +254,18 @@ def render_liquidsoap(
         raise RenderError(f"liquidsoap wrote no output for {source}:\n{tail}")
     gauges = output.with_suffix(".gauges.csv")
     _write_gauges(log, gauges)
+    _save_cpu(output, cpu)
     return RenderRun(output, mp3, gauges, cpu, audio_s)
 
 
 def ffmpeg_version(ffmpeg: Path) -> str:
     """First line of ``ffmpeg -version`` plus its libavfilter version."""
     out = subprocess.run(
-        [str(ffmpeg), "-hide_banner", "-version"], capture_output=True, text=True, check=True
+        [str(ffmpeg), "-hide_banner", "-version"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout
     first = out.splitlines()[0]
     build = " ".join(first.split()[:3])
@@ -237,7 +278,11 @@ def liquidsoap_version(liquidsoap: Path) -> str:
     """``liquidsoap --version`` plus the FFmpeg libraries linked into the binary, read from
     the version strings libavcodec and libavformat embed (Liquidsoap reports neither)."""
     out = subprocess.run(
-        [str(liquidsoap), "--version"], capture_output=True, text=True, check=True
+        [str(liquidsoap), "--version"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout
     data = liquidsoap.read_bytes()
     found = []

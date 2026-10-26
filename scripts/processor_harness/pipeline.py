@@ -14,10 +14,16 @@ from pathlib import Path
 
 from processor_harness.audio_io import Audio, read_wav
 from processor_harness.codec import decode, encode_mp3
-from processor_harness.measure import PROGRAMME, Rendered, measure, read_gauges
+from processor_harness.measure import PROGRAMME, SEQUENCE, Rendered, measure, read_gauges
 from processor_harness.prepare import PreparedInput
-from processor_harness.presets import Backend, Preset
-from processor_harness.render import RenderRun, fill_graph, render_ffmpeg, render_liquidsoap
+from processor_harness.presets import Backend, ParamValue, Preset
+from processor_harness.render import (
+    RenderRun,
+    fill_graph,
+    render_ffmpeg,
+    render_liquidsoap,
+    reuse_run,
+)
 
 
 @dataclass(frozen=True)
@@ -33,16 +39,32 @@ class PresetRenders:
     startup_cpu_s: float
 
 
-def _render(preset: Preset, tools: Tools, source: Path, output: Path) -> RenderRun:
+def render_params(preset: Preset, item: PreparedInput) -> dict[str, ParamValue]:
+    """The preset's params, plus a playlist's song start times as ``boundaries`` (seconds,
+    space-separated), so a chain can do at each song start what session.liq does."""
+    params = dict(preset.params)
+    if item.kind == SEQUENCE:
+        params["boundaries"] = " ".join(str(seg.start_s) for seg in item.segments)
+    return params
+
+
+def _render(
+    preset: Preset,
+    tools: Tools,
+    source: Path,
+    output: Path,
+    params: Mapping[str, ParamValue] | None = None,
+) -> RenderRun:
+    params = preset.params if params is None else params
     if preset.backend is Backend.LIQUIDSOAP:
         if tools.liquidsoap is None or preset.chain is None:
             raise ValueError(f"{preset.source}: a Liquidsoap preset needs --liquidsoap")
         return render_liquidsoap(
-            tools.liquidsoap, preset.chain, preset.params, source, output, tools.cache_dir
+            tools.liquidsoap, preset.chain, params, source, output, tools.cache_dir
         )
     if preset.graph is None:
         raise ValueError(f"{preset.source}: an FFmpeg preset needs a graph")
-    return render_ffmpeg(tools.ffmpeg, fill_graph(preset.graph, preset.params), source, output)
+    return render_ffmpeg(tools.ffmpeg, fill_graph(preset.graph, params), source, output)
 
 
 def render_inputs(
@@ -51,11 +73,19 @@ def render_inputs(
     tools: Tools,
     directory: Path,
     startup_source: Path,
+    reuse: bool = False,
 ) -> PresetRenders:
-    """Render the startup probe, then every input, into ``directory``."""
+    """Render the startup probe, then every input, into ``directory``. With ``reuse``, a
+    render already in ``directory`` is measured as it is instead of being made again."""
     directory.mkdir(parents=True, exist_ok=True)
-    startup = _render(preset, tools, startup_source, directory / "_startup.wav")
-    runs = {i.id: _render(preset, tools, i.path, directory / f"{i.id}.wav") for i in inputs}
+    liquidsoap = preset.backend is Backend.LIQUIDSOAP
+
+    def made(source: Path, output: Path, params: Mapping[str, ParamValue]) -> RenderRun:
+        found = reuse_run(output, liquidsoap) if reuse else None
+        return found or _render(preset, tools, source, output, params)
+
+    startup = made(startup_source, directory / "_startup.wav", preset.params)
+    runs = {i.id: made(i.path, directory / f"{i.id}.wav", render_params(preset, i)) for i in inputs}
     return PresetRenders(runs, startup.cpu_seconds)
 
 
@@ -86,6 +116,7 @@ def measure_renders(
             category=item.category,
             model=preset.model,
             gauge_limits=preset.gauge_limits,
+            level_check=preset.level_check,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":
