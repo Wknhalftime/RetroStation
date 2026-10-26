@@ -1,0 +1,14 @@
+# Phase-rotator step (math item 8; Lance, 2026-10-25): no rotator (the same graph, passing the audio through). Measured on the 14 songs at the
+# stream's -18 LUFS item-gain level and on the 50 station liners (the stream's speech), where it
+# sits in the chain: before the AGC. It stays only if it lowers true peak on music without
+# raising it on any song, or survives as speech only if it lowers the worst liner's true peak by
+# at least 1 dB.
+id = "pr-none"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/phase_rotator.liq"
+description = "no rotator (the same graph, passing the audio through)."
+[params]
+corners = ""
+order = 1
+q = 0.707

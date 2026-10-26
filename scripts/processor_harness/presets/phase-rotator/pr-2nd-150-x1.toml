@@ -1,0 +1,14 @@
+# Phase-rotator step (math item 8; Lance, 2026-10-25): one second-order section at 150 Hz, Q 0.707. Measured on the 14 songs at the
+# stream's -18 LUFS item-gain level and on the 50 station liners (the stream's speech), where it
+# sits in the chain: before the AGC. It stays only if it lowers true peak on music without
+# raising it on any song, or survives as speech only if it lowers the worst liner's true peak by
+# at least 1 dB.
+id = "pr-2nd-150-x1"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/phase_rotator.liq"
+description = "one second-order section at 150 Hz, Q 0.707."
+[params]
+corners = "150"
+order = 2
+q = 0.707
