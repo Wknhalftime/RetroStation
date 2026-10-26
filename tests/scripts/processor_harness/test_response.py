@@ -74,3 +74,28 @@ def test_third_octave_response_reports_each_band() -> None:
     assert centres[0] == pytest.approx(25.0, rel=0.03)
     assert centres[-1] == pytest.approx(16000.0, rel=0.03)
     np.testing.assert_allclose(levels, -6.02, atol=0.01)
+
+
+def test_the_impulse_gives_the_exact_low_frequency_response_and_group_delay() -> None:
+    # The high-pass step (Lance, 2026-10-25): -0.1 dB or better at 40 Hz, the attenuation at
+    # 20 Hz, and the group delay it adds at the low end (relative to 1 kHz).
+    stim = signals.impulse(FS, -6.0, 3.0, 0.5)
+    sos = sp.butter(4, 30.0, "highpass", fs=FS, output="sos")
+    out = sp.sosfilt(sos, stim.samples, axis=0)
+    w, h = sp.sosfreqz(sos, worN=[20.0, 40.0, 1000.0], fs=FS)
+
+    def delay_s(f: float) -> float:  # from the filter's own phase (a single b/a is ill-conditioned)
+        _, pair = sp.sosfreqz(sos, worN=[f - 0.05, f + 0.05], fs=FS)
+        turn = np.angle(pair[1] / pair[0])
+        return float(-turn / (2 * np.pi * 0.1))
+
+    assert response.response_at_db(stim.samples, out, FS, 40.0) == pytest.approx(
+        20 * np.log10(abs(h[1])), abs=0.01
+    )
+    assert response.response_at_db(stim.samples, out, FS, 20.0) == pytest.approx(
+        20 * np.log10(abs(h[0])), abs=0.05
+    )
+    expected_ms = 1000 * (delay_s(40.0) - delay_s(1000.0))
+    assert response.group_delay_ms(stim.samples, out, FS, 40.0) == pytest.approx(
+        expected_ms, rel=0.05
+    )

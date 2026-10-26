@@ -1,0 +1,10 @@
+# High-pass step (Lance, 2026-10-25): Butterworth order 1 at 5 Hz, a lower corner after every
+# variant up to 30 Hz raised true peak on dense masters by more than 0.5 dB.
+id = "hp-o1-5"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/high_pass.liq"
+description = "Butterworth high-pass, order 1 at 5 Hz."
+[params]
+hp_hz = 5.0
+hp_order = 1

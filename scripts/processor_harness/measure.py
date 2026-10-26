@@ -78,6 +78,11 @@ def _impulse(r: Rendered) -> dict[str, float]:
         "band_sum_max_db": high,
         "latency_ms": 1000 * latency_s,
     }
+    # The low end exactly, for a high-pass: its gain at the corner checks and its added delay.
+    for freq in (20, 30, 40):
+        row[f"lf_response_{freq}hz_db"] = response.response_at_db(r.inp, r.out, r.fs, freq)
+    for freq in (20, 40):
+        row[f"lf_group_delay_{freq}hz_ms"] = response.group_delay_ms(r.inp, r.out, r.fs, freq)
     # The click's pre-ring lines up by the latency just measured on it.
     row |= _pre_ring(r, latency_s)
     # The shape of the response (the band's shape, for a preset that renders one band solo).
