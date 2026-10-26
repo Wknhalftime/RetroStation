@@ -51,6 +51,7 @@ class Rendered:
     gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
     level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
     band_edges: tuple[float, ...] = ()  # the chain's crossover, for per-band measures
+    band_makeup_db: tuple[float, ...] = ()  # each band's makeup, left out of its reduction
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -206,9 +207,20 @@ def _bands(r: Rendered) -> dict[str, float]:
         "octave_drift_db": grid.drift_db,
         "octave_change_db": grid.change_db,
     }
-    for k, values in enumerate(zip(c.in_db, c.out_db, c.gr_mean_db, c.gr_p95_db, strict=True)):
-        for name, value in zip(("in_db", "out_db", "gr_mean_db", "gr_p95_db"), values, strict=True):
-            row[f"band.{k + 1}.{name}"] = value
+    per_band = {
+        "in_db": c.in_db,
+        "out_db": c.out_db,
+        "gr_mean_db": c.gr_mean_db,
+        "gr_p50_db": c.gr_p50_db,  # a band averaging 2 dB with a p95 of 10 is pumping
+        "gr_p95_db": c.gr_p95_db,
+    }
+    # The level change includes the band's makeup; its compressor's reduction does not.
+    makeup = r.band_makeup_db or (0.0,) * len(c.in_db)
+    for name in ("gr_mean_db", "gr_p50_db", "gr_p95_db"):
+        per_band[name] = tuple(g + m for g, m in zip(per_band[name], makeup, strict=True))
+    for name, values in per_band.items():
+        for k, value in enumerate(values, start=1):
+            row[f"band.{k}.{name}"] = value
     # The same octaves for every edge set, so balance compares between songs fairly.
     octave_in, octave_out = bands.octave_levels(r.inp, r.fs), bands.octave_levels(r.out, r.fs)
     for i, label in enumerate(bands.OCTAVE_LABELS):

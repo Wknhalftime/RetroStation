@@ -1,0 +1,19 @@
+# Band step, 2 kHz check (Lance, 2026-10-25): the R13 curve (2.5:1, 9 dB knee, RMS, 2 dB mean
+# gain reduction per band, makeup for long-term balance, calibrated on the T3 renders) with
+# the band 3/4 edge moved from 1800 to 2500 Hz. Picked by the 2 kHz octave's between-song spread without worsening the others.
+id = "bc2-x2500"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "R13 curve, the band 3/4 edge moved from 1800 to 2500 Hz."
+[params]
+split = "100 520 2500 6000"
+delay = 0.02
+threshold_db = "-26.0 -23.6 -25.5 -30.0 -34.5"
+ratio = "2.5 2.5 2.5 2.5 2.5"
+knee_db = "9.03 9.03 9.03 9.03 9.03"
+makeup_db = "2.9 2.6 3.1 3.1 3.3"
+attack_ms = "34 33 33 25 25"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 1
+link = 0

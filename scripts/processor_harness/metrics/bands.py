@@ -101,6 +101,7 @@ class BandComparison:
     in_db: tuple[float, ...]  # each band's input level over the sounding blocks
     out_db: tuple[float, ...]
     gr_mean_db: tuple[float, ...]
+    gr_p50_db: tuple[float, ...]
     gr_p95_db: tuple[float, ...]
     drift_db: float
     change_db: float
@@ -135,12 +136,14 @@ def compare(
     active = sounding & (_db(p_in) >= BAND_FLOOR_DBFS)
     pairs = list(zip(gr, active, strict=True))
     gr_mean = tuple(float(np.mean(g[a])) if a.any() else math.nan for g, a in pairs)
+    gr_p50 = tuple(float(np.percentile(g[a], 50)) if a.any() else math.nan for g, a in pairs)
     gr_p95 = tuple(float(np.percentile(g[a], 95)) if a.any() else math.nan for g, a in pairs)
     balance = _balance(gr[:, active.all(axis=0)])
     return BandComparison(
         in_db=tuple(_mean_db(p[sounding]) for p in p_in),
         out_db=tuple(_mean_db(p[sounding]) for p in p_out),
         gr_mean_db=gr_mean,
+        gr_p50_db=gr_p50,
         gr_p95_db=gr_p95,
         drift_db=balance.drift_db,
         change_db=balance.change_db,
@@ -217,16 +220,21 @@ def calibration_traces(
     edges: Sequence[float],
     settings: Sequence[Settings],
     block_s: float = BLOCK_S,
+    shared: Sequence[int] = (),
 ) -> list[BandTrace]:
     """Every band of one input, split as the chain splits it and run through the 3a detector
     with that band's attack, release, detection and link (the threshold does not change the
-    detector, so one pass serves every threshold tried)."""
+    detector, so one pass serves every threshold tried). Bands listed in ``shared`` (0-based)
+    take their detector from the sum of those bands, as the chain's shared sidechain does."""
     block = round(block_s * fs)
     sounding = _sounding(x, fs, block_s)
+    rows = kernels(edges, fs)
+    key = _band(x, rows[list(shared)].sum(axis=0)) if shared else None
     traces = []
-    for kernel, s in zip(kernels(edges, fs), settings, strict=True):
+    for index, (kernel, s) in enumerate(zip(rows, settings, strict=True)):
         band = _band(x, kernel)
-        level = acompressor.detector(band, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
+        source = key if key is not None and index in shared else band
+        level = acompressor.detector(source, fs, s.attack_ms, s.release_ms, s.rms, s.link_max)
         power = np.mean(band**2, axis=1)
         blocks = len(power) // block
         counted = sounding[:blocks] & (_db(_block_mean(power, block)) >= BAND_FLOOR_DBFS)
@@ -270,4 +278,26 @@ def thresholds_for_gain_reduction(
             else:
                 high = mid
         found.append((low + high) / 2)
+    return found
+
+
+def makeups_for_balance(
+    traces: Sequence[Sequence[BandTrace]], settings: Sequence[Settings]
+) -> list[float]:
+    """Per band, the makeup (dB) that brings the band's long-term output level back to its
+    input level, averaged over the inputs (each input's level change counts once), so the
+    processed output keeps the input's long-term balance (Lance, 2026-10-25). ``settings``
+    carry the thresholds to use; their own makeup is ignored."""
+    found = []
+    for band, s in enumerate(settings):
+        squared = (acompressor.gain(_level_bins(s.rms), replace(s, makeup=1.0)) ** 2).astype(
+            np.float32
+        )
+        changes = []
+        for t in (trace[band] for trace in traces):
+            if t.weights.size:
+                p_in = float(t.weights.sum(dtype=np.float64))
+                p_out = float((t.weights @ squared).sum(dtype=np.float64))
+                changes.append(10 * math.log10(p_in / p_out))
+        found.append(float(np.mean(changes)) if changes else 0.0)
     return found

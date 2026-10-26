@@ -34,6 +34,7 @@ class PreparedInput:
     category: str  # programme category; "" for stimuli
     path: Path
     segments: tuple[Segment, ...]
+    band: int | None = None  # the multiband band a stimulus is aimed at
 
 
 def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, out: Path) -> float:
@@ -84,7 +85,9 @@ def prepare_inputs(
         stimulus = entry.build(fs)
         path = directory / f"{entry.id}.wav"
         write_wav(path, stimulus.samples, fs)
-        prepared.append(PreparedInput(entry.id, entry.kind, "", path, stimulus.segments))
+        prepared.append(
+            PreparedInput(entry.id, entry.kind, "", path, stimulus.segments, entry.band)
+        )
     for item in corpus.programme:
         assert ffmpeg is not None
         path = directory / f"{item.id}.wav"

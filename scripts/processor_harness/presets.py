@@ -30,7 +30,9 @@ so the active value is never ambiguous.
 A multiband preset's ``split`` param (crossover frequencies, space-separated) gives its band
 edges; with ``threshold_db``, ``ratio``, ``knee_db``, ``makeup_db``, ``attack_ms`` and
 ``release_ms`` as one value per band (space-separated) and ``detection`` (0 peak, 1 rms) and
-``link`` (0 average, 1 maximum), it also gives each band's compressor settings.
+``link`` (0 average, 1 maximum), it also gives each band's compressor settings. ``shared``
+names bands (1-based, ascending, two or more) that compress from one detector fed by their
+sum.
 """
 
 from __future__ import annotations
@@ -83,6 +85,7 @@ class Preset:
     level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
     band_edges: tuple[float, ...] = ()
     band_models: tuple[Settings, ...] = ()  # one per band, from the per-band params
+    band_shared: tuple[int, ...] = ()  # 1-based bands sharing one detector
 
 
 def _param_value(path: Path, name: str, value: object) -> ParamValue:
@@ -182,6 +185,22 @@ def _band_models(
     )
 
 
+def _band_shared(
+    path: Path, params: Mapping[str, ParamValue], edges: tuple[float, ...]
+) -> tuple[int, ...]:
+    """The bands sharing one detector, checked against the preset's bands."""
+    if "shared" not in params:
+        return ()
+    bands = [int(v) for v in _numbers(path, params, "shared")]
+    valid = len(bands) >= 2 and bands == sorted(set(bands))
+    if not valid or bands[0] < 1 or bands[-1] > len(edges) + 1:
+        raise PresetError(
+            f"{path}: param 'shared' must name two or more of bands 1-{len(edges) + 1}, "
+            "in ascending order"
+        )
+    return tuple(bands)
+
+
 def _gauge_limits(path: Path, table: object) -> dict[str, tuple[float, float]]:
     """[gauge_limits]: each gauge name to its [low, high] range."""
     if table is None:
@@ -236,4 +255,5 @@ def load_preset(path: Path) -> Preset:
         level_check=_level_check(path, data.get("level_check")),
         band_edges=edges,
         band_models=_band_models(path, params, edges),
+        band_shared=_band_shared(path, params, edges),
     )

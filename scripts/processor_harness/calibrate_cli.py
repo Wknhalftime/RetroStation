@@ -1,8 +1,9 @@
 """Command line: per-band thresholds at which a multiband preset's compressors average a target
 gain reduction over programme files, measured as the harness measures a render (metrics.bands).
 The band step sets its starting thresholds this way (Lance, 2026-10-25: each band averaging
-2-4 dB of gain reduction on the T3 renders). Each preset's ``threshold_db`` list is printed for
-its file; a render through the preset then confirms it.
+2-4 dB of gain reduction on the T3 renders), and the makeup that keeps each band's long-term
+level, so the output keeps the input's balance. Each preset's ``threshold_db`` and
+``makeup_db`` lists are printed for its file; a render through the preset then confirms them.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from processor_harness.audio_io import read_wav
@@ -38,7 +40,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         traces = []
         for path in args.inputs:
             x, fs = read_wav(path)
-            traces.append(bands.calibration_traces(x, fs, preset.band_edges, preset.band_models))
+            shared = [b - 1 for b in preset.band_shared]
+            traces.append(
+                bands.calibration_traces(
+                    x, fs, preset.band_edges, preset.band_models, shared=shared
+                )
+            )
         found = bands.thresholds_for_gain_reduction(traces, preset.band_models, args.target_gr)
+        tuned = [
+            replace(m, threshold=10 ** (t / 20))
+            for m, t in zip(preset.band_models, found, strict=True)
+        ]
+        makeups = bands.makeups_for_balance(traces, tuned)
         print(f'{preset.id}: threshold_db = "{" ".join(f"{t:.1f}" for t in found)}"')
+        print(f'{preset.id}: makeup_db = "{" ".join(f"{m:.1f}" for m in makeups)}"')
     return 0

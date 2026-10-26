@@ -4,6 +4,7 @@ set so each band averages 2-4 dB of gain reduction on the T3 renders)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,13 @@ def test_prints_each_presets_thresholds_for_the_target(
     ]
     expected = bands.thresholds_for_gain_reduction(traces, preset.band_models, 3.0)
     assert values == pytest.approx(expected, abs=0.051)  # printed to 0.1 dB
+    assert 'gentle: makeup_db = "' in printed
+    makeups = [float(v) for v in printed.split('makeup_db = "')[1].split('"')[0].split()]
+    tuned = [
+        replace(m, threshold=10 ** (t / 20))
+        for m, t in zip(preset.band_models, expected, strict=True)
+    ]
+    assert makeups == pytest.approx(bands.makeups_for_balance(traces, tuned), abs=0.051)
 
 
 def test_a_preset_without_band_compressors_is_refused(
@@ -64,3 +72,23 @@ def test_a_preset_without_band_compressors_is_refused(
 
     assert code == 2
     assert "plain.toml" in capsys.readouterr().err
+
+
+def test_bands_sharing_a_detector_get_one_threshold(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "chain.liq").write_text("def chain(s) = s end\n", encoding="utf-8")
+    preset_path = tmp_path / "shared.toml"
+    preset_path.write_text(
+        PRESET.replace('id = "gentle"', 'id = "shared"').replace('"34 33 25"', '"34 25 25"')
+        + 'shared = "2 3"\n',
+        encoding="utf-8",
+    )
+    song = tmp_path / "song.wav"
+    audio_io.write_wav(song, signals.noise_with_pauses(FS, 6.0, 0.5, 1, -16.0).samples, FS)
+
+    assert calibrate_cli.main([str(preset_path), "--inputs", str(song)]) == 0
+
+    printed = capsys.readouterr().out
+    values = [float(v) for v in printed.split('threshold_db = "')[1].split('"')[0].split()]
+    assert values[1] == values[2]

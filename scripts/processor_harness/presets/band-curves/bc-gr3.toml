@@ -1,0 +1,22 @@
+# Band step, static curves (Lance, 2026-10-25): edges A (R12) with the gentle curve at 3 dB of
+# mean gain reduction per band on the T3 renders. Ratio 2.5:1, 9 dB soft knee, RMS detection,
+# stereo average, today's attacks (band 1 34 ms) and 1 s release. Thresholds and makeup from
+# scripts/run_band_calibration.py: makeup brings each band's long-term level back to its
+# input level over the corpus, so the output keeps the input's balance (loudness comes from
+# makeup later, R8).
+id = "bc-gr3"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "Edges A, gentle curve, 3 dB mean gain reduction per band, makeup for balance."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+threshold_db = "-28.6 -25.8 -28.9 -30.3 -36.9"
+ratio = "2.5 2.5 2.5 2.5 2.5"
+knee_db = "9.03 9.03 9.03 9.03 9.03"
+makeup_db = "4.2 3.7 4.4 4.4 4.6"
+attack_ms = "34 33 33 25 25"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 1
+link = 0

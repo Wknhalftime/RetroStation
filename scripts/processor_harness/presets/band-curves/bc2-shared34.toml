@@ -1,0 +1,21 @@
+# Band step, 2 kHz check (Lance, 2026-10-25): the R13 curve (2.5:1, 9 dB knee, RMS, 2 dB mean
+# gain reduction per band, makeup for long-term balance, calibrated on the T3 renders) with
+# edges A and bands 3 and 4 sharing one detector. Picked by the 2 kHz octave's between-song spread without worsening the others.
+# Band 3 takes band 4's 25 ms attack so both read the shared key with the same smoothing.
+id = "bc2-shared34"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/multiband_linear.liq"
+description = "R13 curve, edges A and bands 3 and 4 sharing one detector."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02
+threshold_db = "-26.0 -23.6 -23.9 -23.9 -34.5"
+ratio = "2.5 2.5 2.5 2.5 2.5"
+knee_db = "9.03 9.03 9.03 9.03 9.03"
+makeup_db = "2.9 2.6 3.1 2.9 3.3"
+attack_ms = "34 33 25 25 25"
+release_ms = "1000 1000 1000 1000 1000"
+detection = 1
+link = 0
+shared = "3 4"

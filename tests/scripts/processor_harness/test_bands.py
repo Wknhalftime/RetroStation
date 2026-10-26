@@ -61,6 +61,7 @@ def test_a_band_turned_down_shows_as_that_bands_gain_reduction() -> None:
     c = bands.compare(x, out, FS, EDGES, latency_s=0.0)
 
     assert c.gr_mean_db[2] == pytest.approx(3.0, abs=0.05)
+    assert c.gr_p50_db[2] == pytest.approx(3.0, abs=0.05)
     assert np.allclose(np.delete(c.gr_mean_db, 2), 0.0, atol=0.05)
     assert c.out_db[2] == pytest.approx(c.in_db[2] - 3.0, abs=0.05)
 
@@ -183,3 +184,44 @@ def test_octave_drift_sees_a_band_moving_whatever_the_edges() -> None:
     assert steady.drift_db < 0.1
     assert steady.change_db > 1.0
     assert moving.drift_db > 1.0
+
+
+def test_makeup_brings_a_compressed_band_back_to_its_input_level() -> None:
+    # Lance, 2026-10-25: makeup per band so the output keeps the input's long-term balance.
+    x = np.concatenate([pink(6.0, -14.0, seed=1), pink(6.0, -22.0, seed=2)])
+    s = Settings.from_db(-30.0, 2.5, 9.03, 0.0, 33.0, 1000.0)
+    traces = [bands.calibration_traces(x, FS, EDGES, [s] * 5)]
+
+    makeup_db = bands.makeups_for_balance(traces, [s] * 5)[2]
+
+    k = bands.kernels(EDGES, FS)[2]
+    part = np.stack([np.convolve(x[:, c], k, mode="same") for c in range(2)], axis=1)
+    tuned = Settings.from_db(-30.0, 2.5, 9.03, makeup_db, 33.0, 1000.0)
+    out = x - part + acompressor.process(part, FS, tuned)
+    c = bands.compare(x, out, FS, EDGES, latency_s=0.0)
+    assert makeup_db > 1.0
+    assert c.out_db[2] == pytest.approx(c.in_db[2], abs=0.3)
+
+
+def test_bands_sharing_a_detector_are_calibrated_on_their_sum() -> None:
+    # Bands 3 and 4 (0-based 2 and 3) compress from one detector fed by both: with the same
+    # settings they get one threshold, and the exact model run that way meets the target.
+    x = np.concatenate([pink(6.0, -14.0, seed=1), pink(6.0, -24.0, seed=2)])
+    s = Settings.from_db(0.0, 2.5, 9.03, 0.0, 33.0, 1000.0)
+    traces = [bands.calibration_traces(x, FS, EDGES, [s] * 5, shared=[2, 3])]
+
+    found = bands.thresholds_for_gain_reduction(traces, [s] * 5, 2.0)
+
+    assert found[2] == pytest.approx(found[3], abs=0.01)
+    k = bands.kernels(EDGES, FS)
+    parts = [
+        np.stack([np.convolve(x[:, c], k[b], mode="same") for c in range(2)], 1) for b in (2, 3)
+    ]
+    key = parts[0] + parts[1]
+    tuned = Settings.from_db(found[2], 2.5, 9.03, 0.0, 33.0, 1000.0)
+    level = acompressor.detector(key, FS, 33.0, 1000.0, True, False)
+    g = acompressor.gain(level, tuned)[:, np.newaxis]
+    out = x - key + key * g
+    c = bands.compare(x, out, FS, EDGES, latency_s=0.0)
+    assert c.gr_mean_db[2] == pytest.approx(2.0, abs=0.3)
+    assert c.gr_mean_db[3] == pytest.approx(2.0, abs=0.3)

@@ -396,6 +396,7 @@ def test_programme_through_a_band_preset_reports_each_band() -> None:
     assert row["balance_change_db"] > 1.0
     assert row["balance_drift_db"] < 0.1
     assert "band.5.gr_p95_db" in row
+    assert row["band.3.gr_p50_db"] == pytest.approx(3.0, abs=0.05)
     assert row["octave.1000hz.out_db"] < row["octave.1000hz.in_db"]
     assert row["octave_drift_db"] < 0.1 and row["octave_change_db"] > 0.5
 
@@ -406,3 +407,22 @@ def test_programme_without_band_edges_has_no_band_rows() -> None:
     row = measure.measure(measure.PROGRAMME, untouched(stim))
 
     assert not [k for k in row if k.startswith(("band.", "balance_"))]
+
+
+def test_band_gain_reduction_leaves_out_the_bands_makeup() -> None:
+    # Band 3 compressed 3 dB, then made up 2 dB: its level drops 1 dB, its compressor still
+    # took 3 dB off.
+    edges = (100.0, 520.0, 1800.0, 6000.0)
+    stim = signals.noise_with_pauses(FS, 8.0, 0.0, 1, -20.0)
+    part = sp.oaconvolve(stim.samples, bands.kernels(edges, FS)[2][:, np.newaxis], "same", axes=0)
+    out = stim.samples - part * (1 - 10 ** (-1 / 20))
+    makeup = (0.0, 0.0, 2.0, 0.0, 0.0)
+    rendered = Rendered(
+        **{**untouched(stim).__dict__, "out": out, "band_edges": edges, "band_makeup_db": makeup}
+    )
+
+    row = measure.measure(measure.PROGRAMME, rendered)
+
+    assert row["band.3.gr_mean_db"] == pytest.approx(3.0, abs=0.05)
+    assert row["band.3.gr_p50_db"] == pytest.approx(3.0, abs=0.05)
+    assert row["band.3.out_db"] == pytest.approx(row["band.3.in_db"] - 1.0, abs=0.05)
