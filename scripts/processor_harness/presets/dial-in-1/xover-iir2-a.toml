@@ -1,0 +1,9 @@
+# Dial-in step 1 (crossover): every band at unity, summed. IIR acrossover, 2nd order, today's edges.
+id = "xover-iir2-a"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_iir.liq"
+description = "IIR acrossover, 2nd order, today's edges."
+[params]
+split = "100 520 1800 6000"
+order = 0

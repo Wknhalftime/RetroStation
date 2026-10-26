@@ -83,6 +83,8 @@ def measure_renders(
             decoded=_decoded(run, ffmpeg) if item.kind == PROGRAMME else None,
             ceiling_dbtp=preset.ceiling_dbtp,
             latency_s=latency_s,
+            category=item.category,
+            model=preset.model,
         )
         row = measure(item.kind, rendered)
         if item.kind == "impulse":

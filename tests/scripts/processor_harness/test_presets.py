@@ -87,3 +87,53 @@ def test_invalid_presets_name_the_file_and_the_field(tmp_path: Path, body: str, 
 
     with pytest.raises(PresetError, match=rf"bad\.toml.*{field}"):
         load_preset(path)
+
+
+MODEL = (
+    '[model]\nkind = "acompressor"\nthreshold_db = -24.0\nratio = 4.0\nknee_db = 9.03\n'
+    'makeup_db = 6.0\nattack_ms = 20.0\nrelease_ms = 250.0\ndetection = "peak"\nlink = "maximum"\n'
+)
+
+
+def test_a_model_table_declares_what_the_compressor_is_set_to(tmp_path: Path) -> None:
+    preset = load_preset(
+        write(
+            tmp_path / "p.toml",
+            'id = "x"\nversion = 1\nbackend = "ffmpeg"\ngraph = "[0:a]anull[out]"\n' + MODEL,
+        )
+    )
+
+    assert preset.model is not None
+    assert preset.model.threshold == pytest.approx(10 ** (-24 / 20))
+    assert (preset.model.ratio, preset.model.attack_ms, preset.model.release_ms) == (
+        4.0,
+        20.0,
+        250.0,
+    )
+    assert (preset.model.rms, preset.model.link_max) == (False, True)
+
+
+def test_presets_without_a_model_have_none(tmp_path: Path) -> None:
+    preset = load_preset(
+        write(tmp_path / "p.toml", 'id = "x"\nversion = 1\nbackend = "ffmpeg"\ngraph = "g"\n')
+    )
+
+    assert preset.model is None
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ('detection = "peak"', 'detection = "loud"'),
+        ("ratio = 4.0\n", ""),
+        ('kind = "acompressor"', 'kind = "compress"'),
+    ],
+)
+def test_bad_model_tables_name_the_file_and_the_field(
+    tmp_path: Path, change: str, field: str
+) -> None:
+    body = 'id = "x"\nversion = 1\nbackend = "ffmpeg"\ngraph = "g"\n' + MODEL.replace(change, field)
+    path = write(tmp_path / "bad.toml", body)
+
+    with pytest.raises(PresetError, match=r"bad\.toml.*model"):
+        load_preset(path)

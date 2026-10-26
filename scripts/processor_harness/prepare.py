@@ -4,6 +4,9 @@ Stimuli are generated; programme excerpts are cut and resampled by FFmpeg, then 
 corpus's programme_lufs, the level songs reach the chain at in the stream (the decks apply each
 item's gain first), so the AGC sees what it sees live. An entry can move off that level by
 offset_db, or keep its mastered level (native), to give the AGC level variation to work on.
+A recorded drum intro can have everything before its first hit silenced (isolate_first_hit):
+its room sound sits only 30-40 dB under the hit, which would swamp pre-ringing measured down to
+-60 dB.
 """
 
 from __future__ import annotations
@@ -14,11 +17,14 @@ from pathlib import Path
 
 import numpy as np
 
-from processor_harness.audio_io import read_wav, write_wav
+from processor_harness.audio_io import Audio, read_wav, write_wav
 from processor_harness.corpus import Corpus, ProgrammeEntry
 from processor_harness.measure import PROGRAMME
 from processor_harness.metrics import loudness
 from processor_harness.signals import Segment
+
+_HIT_DB = -12.0  # the first hit: where a 1 ms envelope first comes within 12 dB of the peak
+_HIT_WINDOW_S = 0.001
 
 
 @dataclass(frozen=True)
@@ -44,12 +50,25 @@ def _excerpt(ffmpeg: Path, entry: ProgrammeEntry, fs: int, target_lufs: float, o
     if run.returncode != 0:
         raise RuntimeError(f"ffmpeg could not cut {entry.path}:\n{run.stderr[-4000:]}")
     x, _ = read_wav(out)
+    if entry.isolate_first_hit:
+        x = _isolate_first_hit(x, fs)
     level = loudness.integrated(x, fs)
-    if entry.native:
-        return level
-    target = target_lufs + entry.offset_db
+    target = level if entry.native else target_lufs + entry.offset_db
     write_wav(out, x * 10 ** ((target - level) / 20), fs)
     return target
+
+
+def _isolate_first_hit(x: Audio, fs: int) -> Audio:
+    """Zero everything before the first hit's attack. The 1 ms trailing envelope crosses
+    -12 dB re peak up to 1 ms into the attack, so the cut goes 1 ms before that crossing."""
+    window = round(_HIT_WINDOW_S * fs)
+    power = np.mean(x * x, axis=1)
+    running = np.concatenate([np.zeros(window), np.cumsum(power)])
+    envelope = np.sqrt((running[window:] - running[:-window]) / window)
+    crossing = int(np.argmax(envelope >= np.max(envelope) * 10 ** (_HIT_DB / 20)))
+    isolated = x.copy()
+    isolated[: max(0, crossing - window)] = 0.0
+    return isolated
 
 
 def prepare_inputs(

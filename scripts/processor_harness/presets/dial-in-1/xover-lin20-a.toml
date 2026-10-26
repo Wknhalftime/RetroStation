@@ -1,0 +1,9 @@
+# Dial-in step 1 (crossover): every band at unity, summed. Linear phase, 20 ms FIR, today's edges.
+id = "xover-lin20-a"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_linear.liq"
+description = "Linear phase, 20 ms FIR, today's edges."
+[params]
+split = "100 520 1800 6000"
+delay = 0.02

@@ -1,0 +1,12 @@
+# Dial-in step 1 (crossover): Band 2 (100-520 Hz) alone, IIR 4 order: its shape.
+id = "xover-iir4-a-solo2"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/crossover_iir.liq"
+description = "Band 2 (100-520 Hz) alone, IIR 4 order: its shape."
+[params]
+split = "100 520 1800 6000"
+# Dial-in step 1 (crossover): IIR acrossover, 4th order (today's), today's edges.
+description = "IIR acrossover, 4th order (today's), today's edges."
+order = 1
+solo = 2

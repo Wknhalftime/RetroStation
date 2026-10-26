@@ -124,6 +124,36 @@ def ccif_twin_tone(fs: int, level_dbfs: float, seconds: float) -> Stimulus:
     return twin_tone(fs, f1=19000.0, f2=20000.0, ratio=1.0, level_dbfs=level_dbfs, seconds=seconds)
 
 
+def _hit(
+    fs: int, level_dbfs: float, seconds: float, at_s: float, hit: NDArray[np.float64]
+) -> Stimulus:
+    """A drum hit placed at at_s after digital silence, scaled to peak at level_dbfs."""
+    mono = np.zeros(round(seconds * fs))
+    start = round(at_s * fs)
+    mono[start : start + len(hit)] = hit[: len(mono) - start]
+    mono *= _lin(level_dbfs) / np.max(np.abs(mono))
+    return Stimulus(_stereo(mono), fs, (Segment(at_s, seconds, level_dbfs),))
+
+
+def kick(fs: int, level_dbfs: float, seconds: float, at_s: float) -> Stimulus:
+    """Synthetic kick drum from silence (pre-ringing): a sine gliding from 150 Hz down to 50 Hz
+    within about 30 ms, decaying with a 150 ms time constant."""
+    t = np.arange(round((seconds - at_s) * fs)) / fs
+    freq = 50.0 + 100.0 * np.exp(-t / 0.03)
+    hit = np.sin(2 * np.pi * np.cumsum(freq) / fs) * np.exp(-t / 0.15)
+    return _hit(fs, level_dbfs, seconds, at_s, hit)
+
+
+def snare(fs: int, level_dbfs: float, seconds: float, at_s: float, seed: int = 0) -> Stimulus:
+    """Synthetic snare drum from silence (pre-ringing): a 190 Hz body (80 ms decay) under
+    white-noise wires (120 ms decay)."""
+    t = np.arange(round((seconds - at_s) * fs)) / fs
+    wires = np.random.default_rng(seed).standard_normal(len(t))
+    hit = 0.5 * np.sin(2 * np.pi * 190.0 * t) * np.exp(-t / 0.08)
+    hit += 0.5 * wires * np.exp(-t / 0.12)
+    return _hit(fs, level_dbfs, seconds, at_s, hit)
+
+
 def _pink(n: int, rng: np.random.Generator) -> NDArray[np.float64]:
     spectrum = np.fft.rfft(rng.standard_normal(n))
     f = np.fft.rfftfreq(n)

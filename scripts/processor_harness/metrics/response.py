@@ -18,6 +18,12 @@ BAND_LO_HZ = 20.0
 BAND_HI_HZ = 20000.0
 # Third-octave centres 1000 * 2^(k/3), 25 Hz .. 16 kHz (the 20 kHz band crosses Nyquist).
 THIRD_OCTAVE_CENTRES = 1000.0 * 2.0 ** (np.arange(-16, 13) / 3.0)
+# Their ISO 266 nominal labels, used in metric names.
+THIRD_OCTAVE_LABELS = (
+    "25", "31.5", "40", "50", "63", "80", "100", "125", "160", "200", "250", "315", "400", "500",
+    "630", "800", "1000", "1250", "1600", "2000", "2500", "3150", "4000", "5000", "6300", "8000",
+    "10000", "12500", "16000",
+)  # fmt: skip
 
 
 def _spectra(

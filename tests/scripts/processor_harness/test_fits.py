@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from processor_harness import signals
-from processor_harness.metrics import fits
+from processor_harness.metrics import acompressor, fits
+from processor_harness.metrics.acompressor import Settings
 from processor_harness.signals import Segment
 
 FS = 44100
@@ -103,3 +107,59 @@ def test_pause_rise_ignores_falling_gain() -> None:
     times = np.arange(0.0, 4.0, 0.02)
 
     assert fits.pause_rise(times, -times, pauses) == pytest.approx(0.0, abs=1e-9)
+
+
+TRUE = Settings.from_db(
+    threshold_db=-24.0, ratio=4.0, knee_db=9.03, makeup_db=6.0, attack_ms=20.0, release_ms=250.0
+)
+
+
+def test_acompressor_static_fit_recovers_the_settings_through_the_model() -> None:
+    # The detector rides a rectified sine between its mean and its peak, so the static curve
+    # is fitted by running the 3a model, not with a closed-form curve.
+    stim = signals.stepped_tone(FS, 1000.0, -40.0, 0.0, hold_s=1.0)
+    out = acompressor.process(stim.samples, FS, TRUE)
+
+    fit = fits.fit_acompressor_static(stim.segments, stim.samples, out, FS, TRUE, latency_s=0.0)
+
+    assert fit.threshold_db == pytest.approx(-24.0, abs=0.1)
+    assert fit.ratio == pytest.approx(4.0, rel=0.02)
+    assert fit.knee_db == pytest.approx(9.03, abs=0.3)
+    assert fit.makeup_db == pytest.approx(6.0, abs=0.05)
+    assert fit.rms_error_db < 0.05
+
+
+def test_acompressor_time_fit_recovers_attack_and_release_through_the_model() -> None:
+    stim = signals.tone_bursts(FS, 1000.0, base_dbfs=-30.0, step_db=10.0, hold_s=1.0, cycles=2)
+    out = acompressor.process(stim.samples, FS, TRUE)
+
+    start = replace(TRUE, attack_ms=40.0, release_ms=500.0)  # the fit must find them itself
+
+    times = fits.fit_acompressor_times(stim.segments, stim.samples, out, FS, start, latency_s=0.0)
+
+    assert times.attack_ms == pytest.approx(20.0, rel=0.05)
+    assert times.release_ms == pytest.approx(250.0, rel=0.05)
+    assert times.rms_error_db < 0.05
+
+
+def test_acompressor_time_fit_reports_nothing_when_the_gain_barely_moves() -> None:
+    # Threshold above the loud burst: the gain hardly moves, so no time constant is measurable,
+    # even though noise-free data would still pin the model's values.
+    idle = Settings.from_db(-18.0, 4.0, 0.0, 0.0, 20.0, 250.0)
+    stim = signals.tone_bursts(FS, 1000.0, base_dbfs=-30.0, step_db=10.0, hold_s=1.0, cycles=2)
+    out = acompressor.process(stim.samples, FS, idle)
+
+    times = fits.fit_acompressor_times(stim.segments, stim.samples, out, FS, idle, latency_s=0.0)
+
+    assert math.isnan(times.attack_ms) and math.isnan(times.release_ms)
+
+
+def test_acompressor_time_fit_lines_up_a_delayed_output() -> None:
+    stim = signals.tone_bursts(FS, 1000.0, base_dbfs=-30.0, step_db=10.0, hold_s=1.0, cycles=2)
+    out = np.roll(acompressor.process(stim.samples, FS, TRUE), round(0.020 * FS), axis=0)
+    start = replace(TRUE, attack_ms=10.0, release_ms=125.0)
+
+    times = fits.fit_acompressor_times(stim.segments, stim.samples, out, FS, start, latency_s=0.020)
+
+    assert times.attack_ms == pytest.approx(20.0, rel=0.05)
+    assert times.release_ms == pytest.approx(250.0, rel=0.05)

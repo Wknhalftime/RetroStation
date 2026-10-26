@@ -20,7 +20,7 @@ HARNESS = Path(__file__).resolve().parents[3] / "scripts" / "processor_harness"
 
 def test_the_shipped_corpus_and_presets_load() -> None:
     corpus = load_corpus(HARNESS / "corpus.toml")
-    presets = [load_preset(p) for p in sorted((HARNESS / "presets").glob("*.toml"))]
+    presets = [load_preset(p) for p in sorted((HARNESS / "presets").rglob("*.toml"))]
 
     assert corpus.sample_rate == 44100
     assert {s.kind for s in corpus.signals} >= {

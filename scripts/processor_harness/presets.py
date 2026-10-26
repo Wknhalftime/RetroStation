@@ -14,6 +14,16 @@ so the active value is never ambiguous.
     description = "..."
     [params]
     target = -16.0
+    [model]                    # optional: what the chain's compressor is set to (item 3a);
+    kind = "acompressor"       # the stepped-tone and burst fits then run that model
+    threshold_db = -24.0
+    ratio = 4.0
+    knee_db = 9.03             # knee width; FFmpeg's knee = 10^(knee_db / 20)
+    makeup_db = 6.0
+    attack_ms = 20.0
+    release_ms = 250.0
+    detection = "rms"          # or "peak"
+    link = "average"           # or "maximum"
 """
 
 from __future__ import annotations
@@ -24,6 +34,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
+
+from processor_harness.metrics.acompressor import Settings
 
 type ParamValue = bool | int | float | str
 
@@ -59,6 +71,7 @@ class Preset:
     description: str
     superseded: tuple[Superseded, ...]
     source: Path
+    model: Settings | None = None
 
 
 def _param_value(path: Path, name: str, value: object) -> ParamValue:
@@ -101,6 +114,29 @@ def _chain(path: Path, data: Mapping[str, object]) -> Path:
     return chain
 
 
+_MODEL_NUMBERS = ("threshold_db", "ratio", "knee_db", "makeup_db", "attack_ms", "release_ms")
+_DETECTION = {"rms": True, "peak": False}
+_LINK = {"maximum": True, "average": False}
+
+
+def _model(path: Path, table: object) -> Settings | None:
+    """The [model] table as acompressor settings, or None when the preset has none."""
+    if table is None:
+        return None
+    if not isinstance(table, dict) or table.get("kind") != "acompressor":
+        raise PresetError(f'{path}: [model] kind must be "acompressor"')
+    numbers = {}
+    for name in _MODEL_NUMBERS:
+        value = table.get(name)
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise PresetError(f"{path}: [model] {name} must be a number")
+        numbers[name] = float(value)
+    detection, link = table.get("detection", "rms"), table.get("link", "average")
+    if detection not in _DETECTION or link not in _LINK:
+        raise PresetError(f"{path}: [model] detection must be rms or peak, link average or maximum")
+    return Settings.from_db(rms=_DETECTION[str(detection)], link_max=_LINK[str(link)], **numbers)
+
+
 def load_preset(path: Path) -> Preset:
     """Read and validate a preset file; errors name the file and the field."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -123,4 +159,5 @@ def load_preset(path: Path) -> Preset:
         description=str(data.get("description", "")),
         superseded=tuple(_superseded(path, e) for e in data.get("superseded", [])),
         source=path,
+        model=_model(path, data.get("model")),
     )

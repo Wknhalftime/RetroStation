@@ -13,7 +13,8 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from processor_harness.metrics import distortion, dynamics, fits, loudness, response
+from processor_harness.metrics import distortion, dynamics, fits, loudness, response, transients
+from processor_harness.metrics.acompressor import Settings
 from processor_harness.signals import SILENT, Segment
 
 Audio = NDArray[np.float64]
@@ -32,6 +33,8 @@ class Rendered:
     decoded: Audio | None
     ceiling_dbtp: float
     latency_s: float
+    category: str = ""  # programme category; "" for stimuli
+    model: Settings | None = None  # the chain's acompressor settings, when the preset says
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -47,10 +50,29 @@ def read_gauges(csv: Path) -> dict[str, Trace]:
 
 def _impulse(r: Rendered) -> dict[str, float]:
     low, high = response.band_sum_range(r.inp, r.out, r.fs)
-    return {
+    latency_s = response.latency(r.inp, r.out, r.fs)
+    row = {
         "band_sum_min_db": low,
         "band_sum_max_db": high,
-        "latency_ms": 1000 * response.latency(r.inp, r.out, r.fs),
+        "latency_ms": 1000 * latency_s,
+    }
+    # The click's pre-ring lines up by the latency just measured on it.
+    row |= _pre_ring(r, latency_s)
+    # The shape of the response (the band's shape, for a preset that renders one band solo).
+    _, levels = response.third_octave_response(r.inp, r.out, r.fs)
+    for label, level in zip(response.THIRD_OCTAVE_LABELS, levels, strict=True):
+        row[f"response_{label}hz_db"] = float(level)
+    return row
+
+
+def _pre_ring(r: Rendered, latency_s: float | None = None) -> dict[str, float]:
+    """Pre-ringing around the input's transient, lined up by the chain's latency."""
+    lag = r.latency_s if latency_s is None else latency_s
+    ring = transients.pre_ring(r.inp, r.out, r.fs, lag)
+    return {
+        "pre_ring_energy_db": ring.energy_db,
+        "pre_ring_reach_ms": ring.reach_ms,
+        "pre_ring_beyond_20ms_db": ring.beyond_20ms_db,
     }
 
 
@@ -59,7 +81,10 @@ def _sweep(r: Rendered) -> dict[str, float]:
 
 
 def _stepped_tone(r: Rendered) -> dict[str, float]:
-    fit = fits.fit_static_curve(fits.static_levels(r.segments, r.out, r.fs))
+    if r.model is not None:
+        fit = fits.fit_acompressor_static(r.segments, r.inp, r.out, r.fs, r.model, r.latency_s)
+    else:
+        fit = fits.fit_static_curve(fits.static_levels(r.segments, r.out, r.fs))
     return {
         "static_threshold_db": fit.threshold_db,
         "static_ratio": fit.ratio,
@@ -70,6 +95,15 @@ def _stepped_tone(r: Rendered) -> dict[str, float]:
 
 
 def _tone_bursts(r: Rendered) -> dict[str, float]:
+    if r.model is not None:
+        times = fits.fit_acompressor_times(r.segments, r.inp, r.out, r.fs, r.model, r.latency_s)
+        return {
+            "attack_ms": times.attack_ms,
+            "release_ms": times.release_ms,
+            "attack_tau_ms": times.attack_ms / 4,
+            "release_tau_ms": times.release_ms / 4,
+            "times_fit_error_db": times.rms_error_db,
+        }
     tc = fits.time_constants(r.segments, r.inp, r.out, r.fs, r.latency_s)
     return {"attack_tau_ms": 1000 * tc.attack_s, "release_tau_ms": 1000 * tc.release_s}
 
@@ -123,6 +157,8 @@ def _programme(r: Rendered) -> dict[str, float]:
         "sample_overs": float(dynamics.sample_overs(r.out, r.ceiling_dbtp)),
         "true_overs": float(dynamics.true_overs(r.out, r.fs, r.ceiling_dbtp)),
     }
+    if r.category == "transient":
+        row |= _pre_ring(r)
     if r.decoded is not None:
         row["codec_true_peak_dbtp"] = loudness.true_peak(r.decoded, r.fs)
         row["codec_true_overs"] = float(dynamics.true_overs(r.decoded, r.fs, r.ceiling_dbtp))
@@ -138,6 +174,8 @@ MEASURES: dict[str, Callable[[Rendered], dict[str, float]]] = {
     "smpte_imd": _smpte,
     "ccif_imd": _ccif,
     "noise_with_pauses": _pauses,
+    "kick": lambda r: _pre_ring(r),
+    "snare": lambda r: _pre_ring(r),
     PROGRAMME: _programme,
 }
 
