@@ -1,0 +1,10 @@
+# High-pass step (Lance, 2026-10-25): Butterworth order 2 at 15 Hz. The mark: -0.1 dB or better
+# at 40 Hz, without raising true peak on dense masters; then the lowest order and corner.
+id = "hp-o2-15"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/high_pass.liq"
+description = "Butterworth high-pass, order 2 at 15 Hz."
+[params]
+hp_hz = 15.0
+hp_order = 2

@@ -1,0 +1,10 @@
+# High-pass step (Lance, 2026-10-25): Butterworth order 4 at 25 Hz. The mark: -0.1 dB or better
+# at 40 Hz, without raising true peak on dense masters; then the lowest order and corner.
+id = "hp-o4-25"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/high_pass.liq"
+description = "Butterworth high-pass, order 4 at 25 Hz."
+[params]
+hp_hz = 25.0
+hp_order = 4

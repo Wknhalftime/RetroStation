@@ -1,0 +1,6 @@
+# High-pass step (Lance, 2026-10-25): no high-pass, the reference.
+id = "hp-none"
+version = 1
+backend = "liquidsoap"
+chain = "../../chains/bypass.liq"
+description = "No high-pass (reference)."
