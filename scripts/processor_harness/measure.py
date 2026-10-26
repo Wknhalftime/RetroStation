@@ -14,7 +14,15 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from processor_harness.metrics import distortion, dynamics, fits, loudness, response, transients
+from processor_harness.metrics import (
+    bands,
+    distortion,
+    dynamics,
+    fits,
+    loudness,
+    response,
+    transients,
+)
 from processor_harness.metrics.acompressor import Settings
 from processor_harness.signals import SILENT, Segment
 
@@ -42,6 +50,7 @@ class Rendered:
     model: Settings | None = None  # the chain's acompressor settings, when the preset says
     gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
     level_check: tuple[str, float] | None = None  # (gauge, target LUFS) for playlists
+    band_edges: tuple[float, ...] = ()  # the chain's crossover, for per-band measures
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -186,6 +195,28 @@ def _gauge_spread(r: Rendered) -> dict[str, float]:
     return row
 
 
+def _bands(r: Rendered) -> dict[str, float]:
+    """Each band's input and output level, its gain reduction (mean and 95th percentile),
+    and how the balance between bands moved (metrics.bands)."""
+    c = bands.compare(r.inp, r.out, r.fs, r.band_edges, r.latency_s)
+    grid = bands.octave_drift(r.inp, r.out, r.fs, r.latency_s)
+    row = {
+        "balance_drift_db": c.drift_db,
+        "balance_change_db": c.change_db,
+        "octave_drift_db": grid.drift_db,
+        "octave_change_db": grid.change_db,
+    }
+    for k, values in enumerate(zip(c.in_db, c.out_db, c.gr_mean_db, c.gr_p95_db, strict=True)):
+        for name, value in zip(("in_db", "out_db", "gr_mean_db", "gr_p95_db"), values, strict=True):
+            row[f"band.{k + 1}.{name}"] = value
+    # The same octaves for every edge set, so balance compares between songs fairly.
+    octave_in, octave_out = bands.octave_levels(r.inp, r.fs), bands.octave_levels(r.out, r.fs)
+    for i, label in enumerate(bands.OCTAVE_LABELS):
+        row[f"octave.{label}hz.in_db"] = float(octave_in[i])
+        row[f"octave.{label}hz.out_db"] = float(octave_out[i])
+    return row
+
+
 def _programme(r: Rendered) -> dict[str, float]:
     psr = dynamics.psr(r.out, r.fs)
     lufs = loudness.integrated(r.out, r.fs)
@@ -210,6 +241,8 @@ def _programme(r: Rendered) -> dict[str, float]:
     if r.category == "transient":
         row |= _pre_ring(r)
     row |= _gauge_spread(r)
+    if r.band_edges:
+        row |= _bands(r)
     if r.decoded is not None:
         row["codec_true_peak_dbtp"] = loudness.true_peak(r.decoded, r.fs)
         row["codec_true_overs"] = float(dynamics.true_overs(r.decoded, r.fs, r.ceiling_dbtp))

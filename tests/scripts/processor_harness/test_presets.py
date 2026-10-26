@@ -160,3 +160,43 @@ def test_gauge_limits_need_a_low_and_a_high(tmp_path: Path) -> None:
 
     with pytest.raises(PresetError, match=r"bad\.toml.*gauge_limits"):
         load_preset(path)
+
+
+BANDS = (
+    'id = "x"\nversion = 1\nbackend = "liquidsoap"\nchain = "chain.liq"\n'
+    '[params]\nsplit = "100 1000"\nthreshold_db = "-30 -28 -26"\nratio = "2.5 2.5 3"\n'
+    'knee_db = "9.03 9.03 9.03"\nmakeup_db = "0 0 0"\nattack_ms = "34 33 25"\n'
+    'release_ms = "1000 1000 1000"\ndetection = 1\nlink = 0\n'
+)
+
+
+def test_a_split_param_gives_the_presets_band_edges(tmp_path: Path) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+
+    banded = load_preset(write(tmp_path / "p.toml", BANDS))
+    plain = load_preset(
+        write(tmp_path / "q.toml", 'id = "y"\nversion = 1\nbackend = "ffmpeg"\ngraph = "g"\n')
+    )
+
+    assert banded.band_edges == (100.0, 1000.0)
+    assert plain.band_edges == ()
+
+
+def test_band_presets_give_one_compressor_setting_per_band(tmp_path: Path) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+
+    preset = load_preset(write(tmp_path / "p.toml", BANDS))
+
+    assert len(preset.band_models) == 3
+    top = preset.band_models[2]
+    assert top.threshold == pytest.approx(10 ** (-26 / 20))
+    assert (top.ratio, top.attack_ms, top.release_ms) == (3.0, 25.0, 1000.0)
+    assert (top.rms, top.link_max) == (True, False)
+
+
+def test_band_lists_need_one_value_per_band(tmp_path: Path) -> None:
+    write(tmp_path / "chain.liq", "def chain(s) = s end\n")
+    path = write(tmp_path / "p.toml", BANDS.replace('ratio = "2.5 2.5 3"', 'ratio = "2.5 3"'))
+
+    with pytest.raises(PresetError, match=r"p\.toml.*ratio"):
+        load_preset(path)
