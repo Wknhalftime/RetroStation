@@ -263,3 +263,76 @@ def test_a_declared_acompressor_switches_the_fits_to_its_model() -> None:
     assert times["attack_ms"] == pytest.approx(20.0, rel=0.05)
     assert times["attack_tau_ms"] == pytest.approx(5.0, rel=0.05)
     assert times["release_tau_ms"] == pytest.approx(62.5, rel=0.05)
+
+
+def test_programme_reports_where_each_logged_gain_spent_its_time() -> None:
+    # The AGC-target step asks how close agc.liq's gain runs to its +-10 dB range: the spread of
+    # every logged gauge over the render (5th, 50th and 95th percentile, extremes).
+    stim = signals.noise_with_pauses(FS, burst_s=10.0, pause_s=0.5, bursts=1, level_dbfs=-18.0)
+    times = np.arange(0.0, 10.0, 0.02)
+    gain = np.linspace(-2.0, 8.0, len(times))
+    rendered = Rendered(
+        inp=stim.samples,
+        out=stim.samples,
+        fs=FS,
+        segments=stim.segments,
+        gauges={"agc_gain": (times, gain)},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+    )
+
+    row = measure.measure("programme", rendered)
+
+    assert row["gauge.agc_gain.min"] == pytest.approx(-2.0)
+    assert row["gauge.agc_gain.max"] == pytest.approx(8.0)
+    assert row["gauge.agc_gain.p50"] == pytest.approx(3.0, abs=0.05)
+    assert row["gauge.agc_gain.p05"] == pytest.approx(-1.5, abs=0.05)
+    assert row["gauge.agc_gain.p95"] == pytest.approx(7.5, abs=0.05)
+
+
+def test_pinned_time_counts_frames_within_1_db_of_a_declared_limit() -> None:
+    # Lance, 2026-10-24: report how long the AGC's gain is pinned near its +-10 dB range.
+    stim = signals.noise_with_pauses(FS, burst_s=10.0, pause_s=0.5, bursts=1, level_dbfs=-18.0)
+    times = np.arange(0.0, 10.0, 0.02)  # 500 frames
+    gain = np.zeros(len(times))
+    gain[:50] = 9.5  # within 1 dB of +10
+    gain[50:75] = -9.2  # within 1 dB of -10
+    gain[75:100] = 8.9  # just outside
+    rendered = Rendered(
+        inp=stim.samples,
+        out=stim.samples,
+        fs=FS,
+        segments=stim.segments,
+        gauges={"agc_gain": (times, gain)},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+        gauge_limits={"agc_gain": (-10.0, 10.0)},
+    )
+
+    row = measure.measure("programme", rendered)
+
+    assert row["gauge.agc_gain.pinned_pct"] == pytest.approx(15.0)
+
+
+def test_programme_reports_its_loudness_range_change() -> None:
+    # Squeezing a song's dynamics is a cost for a music stream (R7): LRA out minus LRA in.
+    loud = signals.noise_with_pauses(FS, burst_s=10.0, pause_s=0.1, bursts=1, level_dbfs=-14.0)
+    soft = signals.noise_with_pauses(FS, burst_s=10.0, pause_s=0.1, bursts=1, level_dbfs=-24.0)
+    inp = np.concatenate([loud.samples, soft.samples])
+    out = np.concatenate([loud.samples, soft.samples * 10 ** (5 / 20)])  # range squeezed by 5 dB
+    rendered = Rendered(
+        inp=inp,
+        out=out,
+        fs=FS,
+        segments=loud.segments,
+        gauges={},
+        decoded=None,
+        ceiling_dbtp=-1.0,
+        latency_s=0.0,
+    )
+
+    row = measure.measure("programme", rendered)
+
+    assert row["lra_change_lu"] == pytest.approx(-5.0, abs=0.7)

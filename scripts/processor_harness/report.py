@@ -51,9 +51,13 @@ class PresetResult:
 def _rule(metric: str) -> Callable[[list[float]], float]:
     if metric in _SUM:
         return lambda v: float(sum(v))
-    if metric in _MAX or metric.startswith("pause_rise."):
+    if (
+        metric in _MAX
+        or metric.startswith("pause_rise.")
+        or metric.endswith((".max", ".pinned_pct"))
+    ):
         return lambda v: float(max(v))
-    if metric in _MIN:
+    if metric in _MIN or (metric.startswith("gauge.") and metric.endswith(".min")):
         return lambda v: float(min(v))
     return lambda v: float(median(v))
 

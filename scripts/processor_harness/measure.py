@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,7 @@ Audio = NDArray[np.float64]
 Trace = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 PROGRAMME = "programme"
+PINNED_WITHIN_DB = 1.0  # a gauge this close to a declared limit counts as pinned
 
 
 @dataclass(frozen=True, eq=False)
@@ -35,6 +36,7 @@ class Rendered:
     latency_s: float
     category: str = ""  # programme category; "" for stimuli
     model: Settings | None = None  # the chain's acompressor settings, when the preset says
+    gauge_limits: Mapping[str, tuple[float, float]] = field(default_factory=dict)
 
 
 def read_gauges(csv: Path) -> dict[str, Trace]:
@@ -138,6 +140,25 @@ def _percentile(values: NDArray[np.float64], q: float) -> float:
     return float(np.percentile(values, q)) if values.size else math.nan
 
 
+def _gauge_spread(r: Rendered) -> dict[str, float]:
+    """Where each logged gauge spent the render: extremes and 5th / 50th / 95th percentile
+    (for the AGC, how close its gain runs to its range limits)."""
+    row = {}
+    for name, (_, values) in r.gauges.items():
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            continue
+        row[f"gauge.{name}.min"] = float(np.min(finite))
+        row[f"gauge.{name}.max"] = float(np.max(finite))
+        for q in (5, 50, 95):
+            row[f"gauge.{name}.p{q:02d}"] = float(np.percentile(finite, q))
+        if name in r.gauge_limits:
+            low, high = r.gauge_limits[name]
+            pinned = (finite <= low + PINNED_WITHIN_DB) | (finite >= high - PINNED_WITHIN_DB)
+            row[f"gauge.{name}.pinned_pct"] = 100 * float(np.mean(pinned))
+    return row
+
+
 def _programme(r: Rendered) -> dict[str, float]:
     psr = dynamics.psr(r.out, r.fs)
     lufs = loudness.integrated(r.out, r.fs)
@@ -146,6 +167,8 @@ def _programme(r: Rendered) -> dict[str, float]:
         "lufs_i": lufs,
         "loudness_change_lu": lufs - loudness.integrated(r.inp, r.fs),
         "lra_lu": loudness.loudness_range(r.out, r.fs),
+        "lra_change_lu": loudness.loudness_range(r.out, r.fs)
+        - loudness.loudness_range(r.inp, r.fs),
         "true_peak_dbtp": peak,
         "true_peak_rise_db": peak - loudness.true_peak(r.inp, r.fs),
         "sample_peak_dbfs": loudness.to_db(float(np.max(np.abs(r.out)))),
@@ -159,6 +182,7 @@ def _programme(r: Rendered) -> dict[str, float]:
     }
     if r.category == "transient":
         row |= _pre_ring(r)
+    row |= _gauge_spread(r)
     if r.decoded is not None:
         row["codec_true_peak_dbtp"] = loudness.true_peak(r.decoded, r.fs)
         row["codec_true_overs"] = float(dynamics.true_overs(r.decoded, r.fs, r.ceiling_dbtp))
