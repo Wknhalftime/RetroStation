@@ -38,10 +38,10 @@ def through(tmp_path: Path, params: dict[str, ParamValue]) -> tuple[np.ndarray, 
     return stim.samples, padded
 
 
-@pytest.mark.parametrize("order", [2, 4, 8])
-def test_the_high_pass_is_a_butterworth(tmp_path: Path, order: int) -> None:
-    inp, out = through(tmp_path, {"hp_hz": 30.0, "hp_order": order})
-    _, h = sp.sosfreqz(sp.butter(order, 30.0, "highpass", fs=FS, output="sos"), [20.0, 40.0], fs=FS)
+@pytest.mark.parametrize(("order", "hz"), [(2, 30.0), (4, 30.0), (8, 30.0), (1, 10.0), (3, 30.0)])
+def test_the_high_pass_is_a_butterworth(tmp_path: Path, order: int, hz: float) -> None:
+    inp, out = through(tmp_path, {"hp_hz": hz, "hp_order": order})
+    _, h = sp.sosfreqz(sp.butter(order, hz, "highpass", fs=FS, output="sos"), [20.0, 40.0], fs=FS)
 
     assert response.response_at_db(inp, out, FS, 40.0) == pytest.approx(
         20 * np.log10(abs(h[1])), abs=0.05
