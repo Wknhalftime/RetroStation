@@ -70,3 +70,19 @@ def test_the_command_writes_each_variants_gain_reduction_beside_its_run(
     written = json.loads((tmp_path / "lim-a5-v1.limiter_gr.json").read_text(encoding="utf-8"))
     assert written["song"]["lim_gr_p95_db"] == pytest.approx(2.0, abs=0.05)
     assert "lim-a5-v1" in capsys.readouterr().out
+
+
+def test_an_input_with_under_a_second_of_sound_is_left_out(tmp_path: Path) -> None:
+    # The run's impulse is one sounding block: an oversampled limiter's resamplers spread it,
+    # which read as 0.34 dB of "gain reduction" on every block it has (2026-10-26).
+    click = signals.impulse(FS, -6.0, 3.0, 0.5).samples
+    song = signals.noise_with_pauses(FS, 6.0, 0.0, 1, -12.0).samples
+    for name in ("reference", "variant"):
+        (tmp_path / name).mkdir()
+        audio_io.write_wav(tmp_path / name / "song.wav", song, FS)
+    audio_io.write_wav(tmp_path / "reference" / "impulse.wav", click, FS)
+    audio_io.write_wav(tmp_path / "variant" / "impulse.wav", click * 0.9, FS)
+
+    rows = limiter_gr.compare_runs(tmp_path / "reference", tmp_path / "variant")
+
+    assert set(rows) == {"song"}

@@ -21,6 +21,7 @@ from processor_harness.audio_io import Audio, read_wav
 BLOCK_S = 0.005
 FLOOR_DBFS = -60.0  # quieter blocks have nothing for a limiter to do
 ACTIVE_DB = 0.1  # a block counts as limited when the limiter takes this much off
+MIN_SOUNDING_S = 1.0  # less sound than this (a test click) says nothing about a limiter
 _LAG_SPAN_S = 30.0
 _MAX_LAG_S = 0.05
 
@@ -60,7 +61,7 @@ def gain_reduction(reference: Audio, limited: Audio, fs: int) -> GainReduction:
     block = round(BLOCK_S * fs)
     ref_db, lim_db = _block_db(reference[:n], block), _block_db(limited[:n], block)
     gr = (ref_db - lim_db)[ref_db >= FLOOR_DBFS]
-    if not gr.size:
+    if gr.size * BLOCK_S < MIN_SOUNDING_S:
         return GainReduction(math.nan, math.nan, math.nan, math.nan)
     return GainReduction(
         p50_db=float(np.percentile(gr, 50)),
@@ -72,7 +73,8 @@ def gain_reduction(reference: Audio, limited: Audio, fs: int) -> GainReduction:
 
 def compare_runs(reference_dir: Path, variant_dir: Path) -> dict[str, dict[str, float]]:
     """Per input rendered in both run directories (a preset's folder in a harness run), the
-    variant's limiter gain reduction against the reference."""
+    variant's limiter gain reduction against the reference. Inputs with under a second of
+    sound (the run's impulse) are left out."""
     rows = {}
     for path in sorted(variant_dir.glob("*.wav")):
         name = path.stem
@@ -83,6 +85,8 @@ def compare_runs(reference_dir: Path, variant_dir: Path) -> dict[str, dict[str, 
             continue
         ref, fs = read_wav(ref_path)
         gr = gain_reduction(ref, read_wav(path)[0], fs)
+        if math.isnan(gr.p50_db):
+            continue  # under a second of sound: nothing to say about the limiter
         rows[name] = {
             "lim_gr_p50_db": gr.p50_db,
             "lim_gr_p95_db": gr.p95_db,
