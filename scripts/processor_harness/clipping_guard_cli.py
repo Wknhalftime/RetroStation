@@ -132,3 +132,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{'PASSED' if passed else 'FAILED'}: {len(judged)} blocks judged -> "
           f"{clipping_guard.record_path(args.preset).name}")  # fmt: skip
     return 0 if passed else 1
+
+
+def rejudge_main(argv: Sequence[str] | None = None) -> int:
+    """A preset's guard record judged again under R17's guard as it is now, from the record's
+    measurements: for a change to the guard, not to the preset or its chain."""
+    parser = argparse.ArgumentParser(description="Re-judge a preset's guard record under R17.")
+    parser.add_argument("preset", type=Path, help="the chain preset's TOML file")
+    args = parser.parse_args(argv)
+    old = clipping_guard.read_record(args.preset)
+    if old is None:
+        raise SystemExit(f"{args.preset} has no guard record; run the guard")
+    if old.fingerprint != clipping_guard.fingerprint(args.preset):
+        raise SystemExit(
+            f"{args.preset.name} or a script its chain includes changed since run {old.run}; "
+            "render it again and run the guard"
+        )
+    try:
+        new = clipping_guard.rejudge(old, R17)
+    except ValueError as e:
+        raise SystemExit(f"{args.preset.name}: {e}") from None
+    clipping_guard.write_record(args.preset, new)
+    for b in new.blocks[:3]:
+        print(f"  {b.song:24} {b.time_s:7.1f} s  worst {b.worst_dbtp:+.3f}  "
+              f"{'pass' if b.passed else 'FAIL'}")  # fmt: skip
+    print(f"{'PASSED' if new.passed else 'FAILED'} under {R17} (run {new.run})")
+    return 0 if new.passed else 1

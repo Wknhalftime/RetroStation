@@ -30,4 +30,8 @@ def test_the_chain_preset_has_a_fresh_passing_guard_record(preset: Path) -> None
         f"{preset.name} or a script its chain includes changed since its guard record was "
         f"made (run {record.run}); render it again and re-run the guard"
     )
+    assert record.guard == clipping_guard.R17, (
+        f"{preset.name}'s guard record was judged under {record.guard}, not R17's guard now; "
+        "re-judge it: uv run python scripts/rejudge_clipping_guard.py <preset.toml>"
+    )
     assert record.passed, f"{preset.name} failed the clipping guard: {record.blocks[:3]}"
