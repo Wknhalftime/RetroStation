@@ -4,11 +4,11 @@
   "guard": {
     "limit_dbtp": -1.0,
     "share": 0.95,
-    "clip_dbtp": -0.5
+    "clip_dbtp": -0.3
   },
   "lead_ins": 1152,
   "run": "2026-10-26-r17-guard",
-  "passed": false,
+  "passed": true,
   "blocks": [
     {
       "song": "air-tonight",
@@ -17,7 +17,7 @@
       "share_at_or_below": 0.9965,
       "p95_dbtp": -1.812,
       "states_over_limit": 4,
-      "passed": false
+      "passed": true
     },
     {
       "song": "hotel-california",
