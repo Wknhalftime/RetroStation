@@ -14,6 +14,7 @@ from processor_harness import (
     calibrate_cli,
     cli,
     clipping_guard_cli,
+    host_load_cli,
     limiter_gr_cli,
 )
 
@@ -52,8 +53,14 @@ class MovedError(Exception):
 
 @pytest.mark.parametrize(
     "command",
-    [cli.main, clipping_guard_cli.main, limiter_gr_cli.main, calibrate_cli.main],
-    ids=["run_processor_harness", "run_clipping_guard", "run_limiter_gr", "calibrate"],
+    [
+        cli.main,
+        clipping_guard_cli.main,
+        limiter_gr_cli.main,
+        calibrate_cli.main,
+        host_load_cli.main,
+    ],
+    ids=["run_processor_harness", "run_clipping_guard", "run_limiter_gr", "calibrate", "host_load"],
 )
 def test_each_harness_command_moves_off_the_reserved_cores_before_any_work(
     command: Callable[[list[str]], int], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
