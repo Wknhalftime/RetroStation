@@ -19,8 +19,11 @@ settings.log.stdout := true
 settings.log.file := false
 settings.log.level := 3
 settings.harbor.bind_addrs := ["127.0.0.1"]
-%include "agc.liq"
-%include "multiband.liq"
+# The processing chain (R10-R17; on air since 2026-10-27, Lance): the chain the harness
+# measured and the clipping guard passed, at the guarded preset's values (chain_params.liq is
+# generated from scripts/processor_harness/presets/limiter/chain-r17.toml).
+%include "chain_params.liq"
+%include "chain.liq"
 
 session_id = environment.get("SESSION_ID")
 port = int_of_string(environment.get("HARBOR_PORT"))
@@ -481,27 +484,17 @@ def drop_item_gain(m) =
   list.filter(fun (kv) -> fst(kv) != "liq_amplify", m)
 end
 s = metadata.map(id="no_item_gain", update=false, drop_item_gain, s)
-# ---- processing, modelled on an Optimod preset ----
-# Not used, measured on 2.4.5: stereo.width cuts centred (mono) sound by 10 dB even at 0.;
-# compress.multiband's crossovers notch 7-16 dB at each crossover frequency; and compress
-# with a lookahead outputs nothing but silence in most runs.
-# AGC (agc.liq): windowed and gated like the Optimod's, set from Lance's Rock-Light preset
-# (release 3 dB/s, window 3 dB at 0.5 dB/s). Songs arrive at -18 LUFS (liq_amplify), so the
-# idle gain is +2 dB; the gate at -33 sits 15 dB below program (Rock-Light's -40 is on
-# Orban's own scale: -40 here sent entrances hotter). For 12 s after a song starts the gain
-# only creeps up, so a quiet intro is not lifted into the band's entrance (Smells Like Teen
-# Spirit: +5.0 -> +3.0 dB over usual). One band (crossover=0.): the bass band's per-frame
-# work widened the end-of-schedule race (8 resets in 224 under load against 0), and the
-# multiband's bands 1-2 control bass dynamics anyway.
-s = agc(target=-16., idle=2., threshold=-33., crossover=0., s)
-song_started := s.hold
-# No EQ (Lance, 2026-10-22): the Rock-Light bass shelf and the 266 Hz / 5209 Hz bells
-# coloured every song on top of their own mastering.
-# Five-band compression and peak control (multiband.liq), from Lance's Optimod Rock-Light
-# preset, in one ffmpeg filter graph: it evens out tone song to song and holds peaks under
-# -2 dBFS (the MP3 encode adds up to 1.5 dB on dense material). A filter graph's output is
-# fallible; mksafe plays silence if it ever stops.
-s = mksafe(multiband(s))
+# ---- processing: the R17 chain (the processor build brief, R8-R18) ----
+# The DC blocker (R16); agc.liq at -18 LUFS with T3 timing and a 12 s intro hold (R10, R11):
+# songs arrive at -18 LUFS (liq_amplify), so the AGC idles at 0 dB; the linear-phase five-band
+# multiband (R6, R12-R14); makeup to R8's -14 LUFS; and alimiter, 4x oversampled, at -2.5 dBFS
+# (R17), whose decoded MP3 stays under -1.0 dBTP in 95% of encoder states and under -0.3 dBTP
+# in all (the clipping guard's record beside chain-r17.toml). The chain's graphs' output is
+# fallible; mksafe plays silence if it ever stops. Its hold is the AGC's: called as each song
+# starts (above), so a quiet intro is not lifted into the band's entrance.
+processed = chain(s)
+song_started := processed.hold
+s = mksafe(processed)
 
 o =
   output.harbor(

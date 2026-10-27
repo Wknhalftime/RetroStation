@@ -190,7 +190,7 @@ def _liq_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _liq_params(params: Mapping[str, ParamValue]) -> dict[str, str]:
+def liq_params(params: Mapping[str, ParamValue]) -> dict[str, str]:
     def pairs(values: dict[str, str]) -> str:
         return ", ".join(f"({_liq_string(k)}, {v})" for k, v in values.items())
 
@@ -240,7 +240,7 @@ def render_liquidsoap(
             source=source.resolve().as_posix(),
             wav=output.resolve().as_posix(),
             mp3=mp3.resolve().as_posix(),
-            **_liq_params(params),
+            **liq_params(params),
         ),
         encoding="utf-8",
     )

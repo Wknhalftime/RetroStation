@@ -23,14 +23,15 @@ R17 = REPO / "scripts" / "processor_harness" / "presets" / "limiter" / "chain-r1
 def test_the_warm_up_covers_every_script_of_the_r17_chain(tmp_path: Path) -> None:
     chain = load_preset(R17).chain
     assert chain is not None
-    scripts = [s.relative_to(REPO) for s in clipping_guard.chain_scripts(chain)]
+    walk = clipping_guard.chain_scripts(chain)
+    # The harness's wrappers under scripts/ only point at the chain; what airs is under backend/.
+    scripts = [s.relative_to(REPO) for s in walk if s.is_relative_to(REPO / "backend")]
+    assert Path("backend/playout/chain.liq") in scripts
     for script in scripts:  # each in its place in the repository, so includes resolve as there
         (tmp_path / script).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / script, tmp_path / script)
     session = tmp_path / "backend" / "playout" / "session_r17.liq"  # beside session.liq
-    session.write_text(
-        '%include "../../scripts/processor_harness/chains/full_chain.liq"\n', encoding="utf-8"
-    )
+    session.write_text('%include "chain.liq"\n', encoding="utf-8")  # as session.liq does
     warmed = script_fingerprint(session)
 
     uncovered = []
@@ -43,4 +44,4 @@ def test_the_warm_up_covers_every_script_of_the_r17_chain(tmp_path: Path) -> Non
         copy.write_bytes(original)
 
     assert not uncovered, f"the cache warm-up would miss an edit to {uncovered}"
-    assert len(scripts) >= 6  # full_chain, agc and the four chain libraries
+    assert len(scripts) >= 6  # chain.liq, agc.liq and the four chain_*.liq stages
