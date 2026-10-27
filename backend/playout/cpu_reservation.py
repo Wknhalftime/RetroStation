@@ -54,31 +54,32 @@ def affinity_mask(cpus: Sequence[int]) -> int:
     return mask
 
 
-def physical_cores() -> list[tuple[int, ...]]:
-    """This machine's physical cores. Off Windows, where streaming does not run (D5), each
-    logical processor counts as a core."""
-    if sys.platform == "win32":
-        return _windows_cores()
-    return [(cpu,) for cpu in range(os.cpu_count() or 1)]
-
-
-def _windows_cores() -> list[tuple[int, ...]]:  # pragma: no cover - Windows only
+if sys.platform == "win32":  # an if-statement, so mypy --platform linux skips the body
     import ctypes
     from ctypes import wintypes
 
-    class _Info(ctypes.Structure):  # SYSTEM_LOGICAL_PROCESSOR_INFORMATION
+    class _ProcessorInfo(ctypes.Structure):  # SYSTEM_LOGICAL_PROCESSOR_INFORMATION
         _fields_ = [
             ("ProcessorMask", ctypes.c_size_t),
             ("Relationship", ctypes.c_int),
             ("_union", ctypes.c_ubyte * 16),
         ]
 
-    relation_processor_core = 0
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    size = wintypes.DWORD(0)
-    kernel32.GetLogicalProcessorInformation(None, ctypes.byref(size))
-    entries = (_Info * (size.value // ctypes.sizeof(_Info)))()
-    if not kernel32.GetLogicalProcessorInformation(entries, ctypes.byref(size)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    masks = [e.ProcessorMask for e in entries if e.Relationship == relation_processor_core]
-    return sorted(tuple(cpu for cpu in range(64) if mask >> cpu & 1) for mask in masks)
+    _RELATION_PROCESSOR_CORE = 0
+
+    def physical_cores() -> list[tuple[int, ...]]:
+        """This machine's physical cores, each as its logical processors."""
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        size = wintypes.DWORD(0)
+        kernel32.GetLogicalProcessorInformation(None, ctypes.byref(size))
+        entries = (_ProcessorInfo * (size.value // ctypes.sizeof(_ProcessorInfo)))()
+        if not kernel32.GetLogicalProcessorInformation(entries, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        masks = [e.ProcessorMask for e in entries if e.Relationship == _RELATION_PROCESSOR_CORE]
+        return sorted(tuple(cpu for cpu in range(64) if mask >> cpu & 1) for mask in masks)
+
+else:
+
+    def physical_cores() -> list[tuple[int, ...]]:
+        """Off Windows, where streaming does not run (D5), each logical processor is a core."""
+        return [(cpu,) for cpu in range(os.cpu_count() or 1)]
