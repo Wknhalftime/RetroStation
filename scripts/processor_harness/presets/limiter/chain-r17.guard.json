@@ -1,0 +1,194 @@
+{
+  "preset": "chain-r17",
+  "fingerprint": "4d7822233807f09bd71082ade8ab7f52a006c5ad2af1de3d2b7a96149e127d70",
+  "guard": {
+    "limit_dbtp": -1.0,
+    "share": 0.95,
+    "clip_dbtp": -0.3
+  },
+  "lead_ins": 1152,
+  "run": "2026-10-26-r17-guard",
+  "passed": true,
+  "blocks": [
+    {
+      "song": "air-tonight",
+      "time_s": 223.1,
+      "worst_dbtp": -0.468,
+      "share_at_or_below": 0.9965,
+      "p95_dbtp": -1.812,
+      "states_over_limit": 4,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 155.2,
+      "worst_dbtp": -0.681,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -2.178,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 87.8,
+      "worst_dbtp": -0.769,
+      "share_at_or_below": 0.9983,
+      "p95_dbtp": -1.787,
+      "states_over_limit": 2,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 129.2,
+      "worst_dbtp": -0.857,
+      "share_at_or_below": 0.9983,
+      "p95_dbtp": -1.859,
+      "states_over_limit": 2,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 100.0,
+      "worst_dbtp": -0.904,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -1.855,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 79.7,
+      "worst_dbtp": -0.919,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -1.886,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 246.2,
+      "worst_dbtp": -0.97,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -2.251,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 152.0,
+      "worst_dbtp": -0.973,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -1.999,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "power-of-love",
+      "time_s": 109.4,
+      "worst_dbtp": -0.985,
+      "share_at_or_below": 0.9991,
+      "p95_dbtp": -1.805,
+      "states_over_limit": 1,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 84.5,
+      "worst_dbtp": -1.009,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.833,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 234.0,
+      "worst_dbtp": -1.041,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.963,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 115.4,
+      "worst_dbtp": -1.05,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -2.073,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "blister-in-the-sun",
+      "time_s": 24.2,
+      "worst_dbtp": -1.062,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.69,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 161.8,
+      "worst_dbtp": -1.084,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -2.052,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 95.1,
+      "worst_dbtp": -1.087,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.988,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 128.4,
+      "worst_dbtp": -1.088,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -2.642,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "stairway",
+      "time_s": 144.1,
+      "worst_dbtp": -1.089,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -2.379,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "air-tonight",
+      "time_s": 223.2,
+      "worst_dbtp": -1.089,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.97,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 140.6,
+      "worst_dbtp": -1.091,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.754,
+      "states_over_limit": 0,
+      "passed": true
+    },
+    {
+      "song": "hotel-california",
+      "time_s": 152.8,
+      "worst_dbtp": -1.111,
+      "share_at_or_below": 1.0,
+      "p95_dbtp": -1.715,
+      "states_over_limit": 0,
+      "passed": true
+    }
+  ]
+}
