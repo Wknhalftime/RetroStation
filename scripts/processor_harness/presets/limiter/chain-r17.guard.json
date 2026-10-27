@@ -1,13 +1,13 @@
 {
   "preset": "chain-r17",
-  "fingerprint": "4d7822233807f09bd71082ade8ab7f52a006c5ad2af1de3d2b7a96149e127d70",
+  "fingerprint": "a6d7128fc3bf0561b87fcda42fe45399db59f47c5cf6df6af3961453e1940355",
   "guard": {
     "limit_dbtp": -1.0,
     "share": 0.95,
     "clip_dbtp": -0.3
   },
   "lead_ins": 1152,
-  "run": "2026-10-26-r17-guard",
+  "run": "2026-10-27-r17-guard",
   "passed": true,
   "blocks": [
     {
