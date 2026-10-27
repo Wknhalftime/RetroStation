@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     server_port: int = 8010
     # Streaming is opt-in: it warms Liquidsoap's cache and prunes logs at startup.
     stream_enabled: bool = False
+    # Physical cores kept for listener sessions (R18): sessions run there at above-normal
+    # priority and the harness keeps off them; D91's listener limit is 4 a core. 0: none.
+    stream_reserved_cores: int = 2
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -75,6 +78,13 @@ class Settings(BaseSettings):
     def _server_port_in_range(cls, value: int) -> int:
         if not 1 <= value <= 65535:
             raise ValueError(f"SERVER_PORT (.env): must be 1..65535, got {value}")
+        return value
+
+    @field_validator("stream_reserved_cores")
+    @classmethod
+    def _reserved_cores_not_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(f"STREAM_RESERVED_CORES (.env): must be 0 or more, got {value}")
         return value
 
     @model_validator(mode="after")

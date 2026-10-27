@@ -14,12 +14,14 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from processor_harness import affinity
 from processor_harness.audio_io import read_wav
 from processor_harness.metrics import bands
 from processor_harness.presets import PresetError, load_preset
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    affinity.stay_off_stream_cores()  # R18: off the listener sessions' cores
     parser = argparse.ArgumentParser(
         description="Find each band's threshold for a target mean gain reduction."
     )
