@@ -22,7 +22,9 @@ function describeError(error: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// D91: half the threads, a quarter of the memory — the live meter row's
+// D91: a quarter of the memory, and for the processor 4 listeners a core
+// reserved for sessions (R18, STREAM_RESERVED_CORES), or half the threads
+// when none is reserved — the live meter row's
 // suggestion, computed from the cost averaged over the last 30 seconds (I2),
 // so it holds still between the meter's 2 s ticks. With streaming off there
 // is no meter row, so no suggestion.

@@ -10,6 +10,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from processor_harness import affinity
 from processor_harness.corpus import CorpusError, load_corpus
 from processor_harness.pipeline import Tools, check_aimed_tones, measure_renders, render_inputs
 from processor_harness.prepare import prepare_inputs, silence
@@ -49,6 +50,7 @@ def _tools(args: argparse.Namespace, presets: Sequence[Preset]) -> Tools:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    affinity.stay_off_stream_cores()  # R18: off the listener sessions' cores
     args = _arguments(argv)
     try:
         corpus = load_corpus(args.corpus)

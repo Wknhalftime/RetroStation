@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from processor_harness import clipping_guard
+from processor_harness import affinity, clipping_guard
 from processor_harness.audio_io import Audio, read_wav
 from processor_harness.clipping_guard import R17, GuardRecord, JudgedBlock
 from processor_harness.codec_states import LEAD_INS, block_peaks, worst_blocks
@@ -80,6 +80,7 @@ def _judged(song: str, states: NDArray[np.float64]) -> list[JudgedBlock]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    affinity.stay_off_stream_cores()  # R18: off the listener sessions' cores
     parser = argparse.ArgumentParser(description="R17's clipping guard on one run of a preset.")
     parser.add_argument("preset", type=Path, help="the chain preset's TOML file")
     parser.add_argument("run", type=Path, help="the run folder its renders are in (var/harness/…)")

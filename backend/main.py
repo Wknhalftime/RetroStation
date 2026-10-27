@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,9 +33,15 @@ from backend.db.repositories.station_liners import PgPlayableLinerRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.stream_reads import ReadBounds, bounded_connection
 from backend.db.sync_conn import connect_sync
+from backend.domain.stream_capacity import CapacityBudget
 from backend.domain.system import StorageUnavailableError
 from backend.logging_config import configure_logging
 from backend.playout.assets import ensure_stream_assets
+from backend.playout.cpu_reservation import (
+    CoreReservationError,
+    physical_cores,
+    reserved_cpus,
+)
 from backend.playout.liquidsoap_process import (
     SESSION_SCRIPT,
     EngineConfig,
@@ -258,6 +264,18 @@ def _start_watchdog(service: StreamService) -> asyncio.Task[None]:
     return watchdog
 
 
+def stream_cpus(settings: Settings, cores: Sequence[Sequence[int]]) -> tuple[int, ...]:
+    """The CPUs listener sessions are pinned to, at above-normal priority (R18): the last
+    ``STREAM_RESERVED_CORES`` physical cores. Raises ``CoreReservationError`` when they leave
+    no core for everything else."""
+    return reserved_cpus(cores, settings.stream_reserved_cores)
+
+
+def stream_budget(settings: Settings) -> CapacityBudget:
+    """D91's budget, its processor room taken from the same reserved cores (R18)."""
+    return CapacityBudget(reserved_cores=settings.stream_reserved_cores)
+
+
 async def start_streaming(settings: Settings) -> StreamingRuntime | None:
     """Streaming when enabled and able; None, streaming off, otherwise (I5, D34, D35)."""
     if not settings.stream_enabled:
@@ -280,10 +298,15 @@ async def start_streaming(settings: Settings) -> StreamingRuntime | None:
         return None
     engine, cache = prepared
     # Lazy: windows_job raises ImportError off Windows, and this line is reached only on win32.
-    from backend.playout.windows_job import KillOnCloseJob
+    from backend.playout.windows_job import ABOVE_NORMAL, KillOnCloseJob
 
     try:
-        job = KillOnCloseJob()
+        cpus = stream_cpus(settings, physical_cores())
+    except CoreReservationError as error:
+        _engine_unavailable("the cores reserved for sessions do not fit this machine", str(error))
+        return None
+    try:
+        job = KillOnCloseJob(cpus=cpus, priority_class=ABOVE_NORMAL if cpus else None)
     except OSError as error:
         _engine_unavailable("the job that ends engines with the app was refused", str(error))
         return None
@@ -357,13 +380,18 @@ def meter_connect(database_url: str) -> Connect:
 
 async def start_meter(runtime: StreamingRuntime | None, connect: Connect) -> LiveMeter | None:
     """The audio engine cost meter while streaming runs (D90, D95; C1): the running engines,
-    read with psutil, budgeted by D91, written through ``connect``'s connection. None, and
+    read with psutil, budgeted by D91 and the reserved cores (R18), written through
+    ``connect``'s connection. None, and
     no connection opened, when streaming is off."""
     if runtime is None:
         return None
     writer = ProgressWriter(connect)
     ports = MeterPorts(
-        pids=runtime.service.engine_pids, meter=PsutilMeter(), writer=writer, clock=meter_clock
+        pids=runtime.service.engine_pids,
+        meter=PsutilMeter(),
+        writer=writer,
+        clock=meter_clock,
+        budget=stream_budget(get_settings()),
     )
     return LiveMeter(start_meter_task(ports, asyncio.sleep), writer)
 

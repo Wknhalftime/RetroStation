@@ -3,14 +3,20 @@
 The API process holds one job for its lifetime. When the API exits, even by a crash, the
 kernel closes the handle and every Liquidsoap child dies with it (spec: Engine). A process
 killed this way exits with code 0, so callers must check that it is gone, not its code.
+
+The job can also pin its processes (R18, Lance 2026-10-27): given CPUs and a priority class,
+every assigned process, and every process one starts, runs on those CPUs at that class.
 """
 
 from __future__ import annotations
 
 import ctypes
 import sys
+from collections.abc import Sequence
 from ctypes import wintypes
 from types import TracebackType
+
+from backend.playout.cpu_reservation import affinity_mask
 
 if sys.platform != "win32":  # pragma: no cover - CI (Linux) skips everything that imports this
     raise ImportError("backend.playout.windows_job requires Windows")
@@ -36,6 +42,9 @@ _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _EXTENDED_LIMIT_INFORMATION = 9
 _LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_LIMIT_AFFINITY = 0x0010
+_LIMIT_PRIORITY_CLASS = 0x0020
+ABOVE_NORMAL = 0x8000  # ABOVE_NORMAL_PRIORITY_CLASS
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 
@@ -91,13 +100,21 @@ def _check(ok: object, action: str) -> None:
 
 
 class KillOnCloseJob:
-    """Owns one job handle; processes assigned to it die when it is closed."""
+    """Owns one job handle; processes assigned to it die when it is closed, and run on ``cpus``
+    at ``priority_class`` when those are given."""
 
-    def __init__(self) -> None:
+    def __init__(self, cpus: Sequence[int] = (), priority_class: int | None = None) -> None:
         handle = _kernel32.CreateJobObjectW(None, None)
         _check(handle, "CreateJobObjectW")
         limits = _ExtendedLimits()
-        limits.BasicLimitInformation.LimitFlags = _LIMIT_KILL_ON_JOB_CLOSE
+        basic = limits.BasicLimitInformation
+        basic.LimitFlags = _LIMIT_KILL_ON_JOB_CLOSE
+        if cpus:
+            basic.LimitFlags |= _LIMIT_AFFINITY
+            basic.Affinity = affinity_mask(cpus)
+        if priority_class is not None:
+            basic.LimitFlags |= _LIMIT_PRIORITY_CLASS
+            basic.PriorityClass = priority_class
         ok = _kernel32.SetInformationJobObject(
             handle, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
         )

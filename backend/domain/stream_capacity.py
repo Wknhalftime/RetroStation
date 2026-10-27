@@ -1,8 +1,10 @@
 """Stream capacity: what one stream's audio engine costs, and the suggested listener limit.
 
 D91: streams may use half the processor threads and a quarter of the memory; disk speed is
-not counted. A limit above the suggestion is allowed (the page warns). D95: the cost is the
-audio engines' only; the app's own share is not estimated. I4: an engine reading under
+not counted. A limit above the suggestion is allowed (the page warns). R18 (Lance,
+2026-10-27): when cores are reserved for the sessions, the processor room is
+``LISTENERS_PER_RESERVED_CORE`` listeners a reserved core instead of half the threads. D95: the
+cost is the audio engines' only; the app's own share is not estimated. I4: an engine reading under
 ``CPU_FLOOR`` is still warming, so a 0 % reading is never divided by. I2 (final review): one
 2 s sample is noisy, so the suggestion divides by ``CostWindow``'s rolling mean.
 """
@@ -53,13 +55,19 @@ class MachineTotals:
         _require_positive("MachineTotals", threads=self.threads, memory_mb=self.memory_mb)
 
 
+LISTENERS_PER_RESERVED_CORE = 4
+"""R18: the sessions a physical core holds inside the 50% p99.9 frame-load mark (on the 8-core
+desktop, 30 sessions passed and 40 failed, 2026-10-27)."""
+
+
 @dataclass(frozen=True)
 class CapacityBudget:
     """The share of the machine streams may use (D91: half the threads, a quarter of the
-    memory)."""
+    memory), and the physical cores reserved for them (R18; 0: none, the threads share holds)."""
 
     cpu_share: float = 0.5
     memory_share: float = 0.25
+    reserved_cores: int = 0
 
     def __post_init__(self) -> None:
         for name, share in (("cpu_share", self.cpu_share), ("memory_share", self.memory_share)):
@@ -67,6 +75,10 @@ class CapacityBudget:
                 raise InvalidStreamValueError(
                     f"CapacityBudget.{name} must be in (0, 1], got {share}"
                 )
+        if self.reserved_cores < 0:
+            raise InvalidStreamValueError(
+                f"CapacityBudget.reserved_cores must be >= 0, got {self.reserved_cores}"
+            )
 
 
 DEFAULT_BUDGET = CapacityBudget()
@@ -98,8 +110,12 @@ def suggest_max(
     cost: SessionCost, machine: MachineTotals, budget: CapacityBudget = DEFAULT_BUDGET
 ) -> Suggestion:
     """D91 (design note 14): the smaller of the processor and the memory room, never below
-    1; a tie is the processor's."""
-    by_cpu = math.floor(budget.cpu_share * machine.threads * 100 / cost.cpu_percent)
+    1; a tie is the processor's. With reserved cores (R18) the processor room is theirs."""
+    by_cpu = (
+        LISTENERS_PER_RESERVED_CORE * budget.reserved_cores
+        if budget.reserved_cores
+        else math.floor(budget.cpu_share * machine.threads * 100 / cost.cpu_percent)
+    )
     by_memory = math.floor(budget.memory_share * machine.memory_mb / cost.memory_mb)
     if by_cpu <= by_memory:
         return Suggestion(max(1, by_cpu), LimitedBy.PROCESSOR)

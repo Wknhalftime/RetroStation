@@ -11,10 +11,12 @@ import statistics
 from collections.abc import Sequence
 from pathlib import Path
 
+from processor_harness import affinity
 from processor_harness.limiter_gr import compare_runs
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    affinity.stay_off_stream_cores()  # R18: off the listener sessions' cores
     parser = argparse.ArgumentParser(description="Limiter gain reduction against a reference.")
     parser.add_argument("--reference", type=Path, required=True, help="no-limiter run folder")
     parser.add_argument("variants", nargs="+", type=Path, help="limiter run folders")
