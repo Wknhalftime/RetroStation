@@ -62,7 +62,7 @@ def _text(path: Path) -> bytes:
     return path.read_bytes().replace(b"\r\n", b"\n")
 
 
-def _scripts(liq: Path) -> list[Path]:
+def chain_scripts(liq: Path) -> list[Path]:
     """The script and every script it includes, depth first, each once."""
     found: list[Path] = []
 
@@ -81,7 +81,7 @@ def fingerprint(preset_path: Path) -> str:
     """SHA-256 over the preset file and every script its chain includes."""
     chain = load_preset(preset_path).chain
     digest = hashlib.sha256(_text(preset_path))
-    for script in _scripts(chain) if chain else []:
+    for script in chain_scripts(chain) if chain else []:
         digest.update(_text(script))
     return digest.hexdigest()
 
