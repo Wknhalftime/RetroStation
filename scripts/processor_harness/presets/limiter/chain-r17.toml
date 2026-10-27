@@ -1,7 +1,7 @@
 # The full chain as ruled (Lance, 2026-10-26): the DC blocker (R16), agc.liq at -18 LUFS with
 # T3 timing (R10, R11), the multiband (R12-R14), makeup +4.12 dB to put the median song at
 # R8's -14 LUFS, and the final limiter (R17): alimiter 4x oversampled (176.4 kHz between two
-# aresample stages), attack 1 ms, release 50 ms, level off, ceiling -2.0 dBFS. R17's criterion is
+# aresample stages), attack 1 ms, release 50 ms, level off, ceiling -2.5 dBFS. R17's criterion is
 # statistical: MP3 overshoot depends on the encoder's frame alignment, which is random on air, so
 # at least 95% of alignment states must decode at or below -1.0 dBTP on the worst transient and
 # none above -0.5 dBTP.
@@ -10,7 +10,7 @@ version = 1
 backend = "liquidsoap"
 chain = "../../chains/full_chain.liq"
 ceiling_dbtp = -1.0
-description = "The full chain as ruled (R10-R17): DC blocker, AGC, multiband, makeup +4.12 dB, alimiter 4x oversampled, 1 ms / 50 ms, ceiling -2.0 dBFS."
+description = "The full chain as ruled (R10-R17): DC blocker, AGC, multiband, makeup +4.12 dB, alimiter 4x oversampled, 1 ms / 50 ms, ceiling -2.5 dBFS."
 [params]
 hp_hz = 5.0
 hp_order = 1
@@ -33,7 +33,7 @@ detection = 1
 link = 0
 limiter = 1
 out_makeup_db = 4.12
-limit_db = -2.0
+limit_db = -2.5
 lim_attack_ms = 1.0
 lim_release_ms = 50.0
 oversample = 4

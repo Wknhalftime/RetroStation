@@ -5,7 +5,7 @@ version = 1
 backend = "liquidsoap"
 chain = "../../chains/full_chain.liq"
 ceiling_dbtp = -1.0
-description = "The full chain as ruled (R10-R17): DC blocker, AGC, multiband, makeup +4.12 dB, alimiter at 44.1 kHz (not oversampled; the CPU step's comparison), 1 ms / 50 ms, ceiling -2.0 dBFS."
+description = "The full chain as ruled (R10-R17): DC blocker, AGC, multiband, makeup +4.12 dB, alimiter at 44.1 kHz (not oversampled; the CPU step's comparison), 1 ms / 50 ms, ceiling -2.5 dBFS."
 [params]
 hp_hz = 5.0
 hp_order = 1
@@ -28,7 +28,7 @@ detection = 1
 link = 0
 limiter = 1
 out_makeup_db = 4.12
-limit_db = -2.0
+limit_db = -2.5
 lim_attack_ms = 1.0
 lim_release_ms = 50.0
 oversample = 1
