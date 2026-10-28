@@ -1,9 +1,9 @@
 """Blind listening tests between two presets, so Lance's ear checks are recorded beside the
 measurements.
 
-- Clips are cut from each preset's 128k MP3 render (the stream's encoder), decoded, and set to
-  the same integrated loudness, so the louder version cannot win by being louder. Matching only
-  ever turns clips down, and further if needed to keep every peak under -0.5 dBFS.
+- Clips are cut from each preset's MP3 render (the stream's encoder and bitrate), decoded, and
+  set to the same integrated loudness, so the louder version cannot win by being louder.
+  Matching only ever turns clips down, and further if needed to keep every peak under -0.5 dBFS.
 - A session is 16 trials (ABX or preference). Each trial takes the next clip from a shuffled
   cycle and shuffles which preset is A and which is B (and, for ABX, which one is X). The key
   stays in the session file; the listener only ever sees A, B and X.

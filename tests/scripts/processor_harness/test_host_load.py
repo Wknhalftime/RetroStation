@@ -49,7 +49,7 @@ def test_the_session_script_runs_the_presets_chain_on_the_streams_encoder(tmp_pa
     assert preset.chain is not None
     assert f'%include "{preset.chain.as_posix()}"' in text
     assert '("limit_db", -2.5)' in text
-    assert 'codec="libmp3lame", b="128k", ar=44100' in text
+    assert 'codec="libmp3lame", b="256k", ar=44100' in text  # R20
     assert "clock.assign_new" not in text  # real time, like a listener's session
 
 

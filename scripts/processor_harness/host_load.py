@@ -3,8 +3,9 @@
 and the start-up cost of a tune-in.
 
 A session is songs from a playlist through the preset's chain to the stream's encoder
-(libmp3lame, 128k, 44.1 kHz), in real time, as a listener's session runs. Per tick it times the
-span from the MP3 output's start to the end of a trailing dummy output; about 0.4 ms of clock
+(libmp3lame at the stream's bitrate, 44.1 kHz), in real time, as a listener's session runs. Per
+tick it times the span from the MP3 output's start to the end of a trailing dummy output; about
+0.4 ms of clock
 bookkeeping per tick falls outside it (measured unsynced, 2026-10-27), and Liquidsoap's clock
 steps in about 1 ms on Windows. Frame load is that span against the 20 ms frame; the pass mark
 is a p99.9 under 50% (math item 14).
@@ -29,6 +30,7 @@ from typing import Protocol
 import numpy as np
 import psutil
 
+from processor_harness.codec import MP3_BITRATE
 from processor_harness.presets import Preset
 from processor_harness.render import liq_params
 
@@ -56,7 +58,7 @@ run_s = float_of_string(environment.get("RUN_S"))
 s = chain(playlist(mode="normal", reload_mode="never", environment.get("PLAYLIST")))
 o = output.file(
   fallible=true,
-  %ffmpeg(format="mp3", %audio(codec="libmp3lame", b="128k", ar=44100)),
+  %ffmpeg(format="mp3", %audio(codec="libmp3lame", b="$bitrate", ar=44100)),
   environment.get("OUT"),
   s
 )
@@ -119,7 +121,7 @@ def write_session_script(preset: Preset, path: Path) -> Path:
     if preset.chain is None:
         raise ValueError(f"{preset.source}: host load needs a Liquidsoap preset with a chain")
     text = string.Template(_SESSION).substitute(
-        chain=preset.chain.as_posix(), **liq_params(preset.params)
+        chain=preset.chain.as_posix(), bitrate=MP3_BITRATE, **liq_params(preset.params)
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

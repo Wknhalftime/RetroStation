@@ -498,7 +498,7 @@ s = mksafe(processed)
 
 o =
   output.harbor(
-    %ffmpeg(format = "mp3", %audio(codec = "libmp3lame", b = "128k", ar = 44100)),
+    %ffmpeg(format = "mp3", %audio(codec = "libmp3lame", b = "256k", ar = 44100)),
     port=port,
     mount="stream",
     s

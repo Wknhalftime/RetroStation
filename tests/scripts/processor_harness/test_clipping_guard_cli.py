@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from processor_harness import audio_io, clipping_guard, clipping_guard_cli, signals
+from processor_harness import audio_io, clipping_guard, clipping_guard_cli, codec, signals
 
 FS = 44100
 FFMPEG = shutil.which("ffmpeg")
@@ -36,10 +36,11 @@ def make_run(root: Path, levels_dbfs: dict[str, float]) -> tuple[Path, Path]:
     return preset, root / "run"
 
 
-def guard(preset: Path, run: Path) -> int:
+def guard(preset: Path, run: Path, *extra: str) -> int:
     return clipping_guard_cli.main(
-        [str(preset), str(run), "--ffmpeg", str(FFMPEG), "--lead-ins", "3", "--workers", "2"]
-    )
+        [str(preset), str(run), "--ffmpeg", str(FFMPEG), "--lead-ins", "3", "--workers", "2",
+         *extra]
+    )  # fmt: skip
 
 
 def test_a_loud_song_fails_the_guard_and_its_record_says_so(tmp_path: Path) -> None:
@@ -68,6 +69,20 @@ def test_a_quiet_run_passes_and_judges_its_worst_blocks_worst_first(tmp_path: Pa
     worst = [b.worst_dbtp for b in record.blocks]
     assert worst == sorted(worst, reverse=True)
     assert {b.song for b in record.blocks} <= {"a", "b"}
+
+
+def test_a_run_at_another_bitrate_keeps_the_streams_record(tmp_path: Path) -> None:
+    preset, run = make_run(tmp_path, {"a": -24.0})
+
+    guard(preset, run)
+    guard(preset, run, "--bitrate", "128k")
+
+    at_stream = clipping_guard.read_record(preset)
+    at_128k = clipping_guard.read_record(preset, "128k")
+    assert at_stream is not None and at_stream.bitrate == codec.MP3_BITRATE
+    assert at_128k is not None and at_128k.bitrate == "128k"
+    # LAME turns 128k encodes down by 0.45 dB (codec.py), so their peaks decode lower.
+    assert at_128k.blocks[0].worst_dbtp < at_stream.blocks[0].worst_dbtp
 
 
 def test_a_run_without_the_presets_renders_is_an_error(tmp_path: Path) -> None:
