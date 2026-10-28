@@ -10,9 +10,11 @@ not monotonic in the ceiling (Hotel California 155.2 s: -0.921 at -2.0 dBFS, -0.
 
 The encoder's state when a song reaches it is random on air and moves a transient's decoded peak
 by up to about 2 dB (see codec_states), so the guard judges a distribution, not one encode. Each
-chain preset carries a record of its last guard run beside it (``chain-x.guard.json``), with a
-fingerprint of the preset and every Liquidsoap script its chain includes; a test fails when the
-files no longer match the record (tests/scripts/processor_harness/test_clipping_guard_records.py).
+chain preset carries its last guard run at each bitrate beside it (``chain-x.guard.json``), with
+a fingerprint of the preset and every Liquidsoap script its chain includes; a test fails when the
+files no longer match a record (tests/scripts/processor_harness/test_clipping_guard_records.py).
+The stream's bitrate must pass; the others are kept for a bitrate setting (Lance, 2026-10-28):
+LAME turns 128k down by 0.45 dB and 256k not at all (codec.py), so the margin differs.
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from processor_harness.codec import MP3_BITRATE
 from processor_harness.presets import load_preset
 
 _INCLUDE = re.compile(r'^\s*%include\s+"([^"]+)"', re.MULTILINE)
@@ -106,6 +109,7 @@ class GuardRecord:
     run: str  # the run folder the renders came from
     passed: bool
     blocks: tuple[JudgedBlock, ...]  # the worst blocks, worst first
+    bitrate: str = MP3_BITRATE  # the MP3 bitrate the states were encoded at
 
 
 def rejudge(record: GuardRecord, guard: Guard) -> GuardRecord:
@@ -130,22 +134,48 @@ def record_path(preset_path: Path) -> Path:
     return preset_path.with_suffix(".guard.json")
 
 
-def write_record(preset_path: Path, record: GuardRecord) -> None:
-    text = json.dumps(asdict(record), indent=2) + "\n"
-    record_path(preset_path).write_text(text, encoding="utf-8")
-
-
-def read_record(preset_path: Path) -> GuardRecord | None:
-    path = record_path(preset_path)
+def _kept(path: Path) -> dict[str, GuardRecord]:
+    """The guard file's records by bitrate, lowest first. Before R20 (2026-10-28) the file held
+    one record, with no bitrate: it was judged at the stream's 128k then."""
     if not path.is_file():
-        return None
+        return {}
     data = json.loads(path.read_text(encoding="utf-8"))
-    return GuardRecord(
-        preset=data["preset"],
-        fingerprint=data["fingerprint"],
-        guard=Guard(**data["guard"]),
-        lead_ins=data["lead_ins"],
-        run=data["run"],
-        passed=data["passed"],
-        blocks=tuple(JudgedBlock(**b) for b in data["blocks"]),
-    )
+    if "preset" in data:  # one record, as written before R20
+        single = {"bitrate": "128k", **data}
+        data = {single["bitrate"]: single}
+    records = {
+        bitrate: GuardRecord(
+            preset=r["preset"],
+            fingerprint=r["fingerprint"],
+            guard=Guard(**r["guard"]),
+            lead_ins=r["lead_ins"],
+            run=r["run"],
+            passed=r["passed"],
+            blocks=tuple(JudgedBlock(**b) for b in r["blocks"]),
+            bitrate=r["bitrate"],
+        )
+        for bitrate, r in data.items()
+    }
+    return {b: records[b] for b in _lowest_first(records)}
+
+
+def _lowest_first(bitrates: Iterable[str]) -> list[str]:
+    return sorted(bitrates, key=lambda b: int(b.removesuffix("k")))
+
+
+def write_record(preset_path: Path, record: GuardRecord) -> None:
+    """Keep ``record`` in the preset's guard file, beside its records at other bitrates."""
+    path = record_path(preset_path)
+    kept = _kept(path) | {record.bitrate: record}
+    ordered = {b: asdict(kept[b]) for b in _lowest_first(kept)}
+    path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
+
+
+def read_record(preset_path: Path, bitrate: str = MP3_BITRATE) -> GuardRecord | None:
+    """The preset's guard record at ``bitrate`` (by default the stream's), or None."""
+    return _kept(record_path(preset_path)).get(bitrate)
+
+
+def read_records(preset_path: Path) -> list[GuardRecord]:
+    """Every guard record the preset keeps, lowest bitrate first."""
+    return list(_kept(record_path(preset_path)).values())

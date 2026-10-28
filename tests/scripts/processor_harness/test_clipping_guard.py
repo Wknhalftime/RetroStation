@@ -4,6 +4,8 @@ chain preset's guard record names the files it was measured with."""
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -115,6 +117,50 @@ def test_a_record_reads_back_as_written(tmp_path: Path) -> None:
 
     assert clipping_guard.record_path(preset) == tmp_path / "presets" / "chain-x.guard.json"
     assert clipping_guard.read_record(preset) == record
+
+
+def record_at(preset: Path, bitrate: str, worst_dbtp: float) -> GuardRecord:
+    return GuardRecord(
+        preset="chain-x",
+        fingerprint=clipping_guard.fingerprint(preset),
+        guard=GUARD,
+        lead_ins=1152,
+        run="2026-10-27-r17-guard",
+        passed=True,
+        blocks=(JudgedBlock("air-tonight", 223.1, worst_dbtp, 0.9965, -1.812, 4, True),),
+        bitrate=bitrate,
+    )
+
+
+def test_records_at_two_bitrates_are_kept_side_by_side(tmp_path: Path) -> None:
+    # A bitrate setting would need each bitrate's guard result (Lance, 2026-10-28), so a run at
+    # one bitrate keeps the records at the others.
+    preset = make_chain(tmp_path)
+    at_128k, at_256k = record_at(preset, "128k", -0.468), record_at(preset, "256k", -0.6)
+
+    clipping_guard.write_record(preset, at_128k)
+    clipping_guard.write_record(preset, at_256k)
+
+    assert clipping_guard.read_record(preset, "128k") == at_128k
+    assert clipping_guard.read_record(preset, "256k") == at_256k
+    assert clipping_guard.read_records(preset) == [at_128k, at_256k]
+
+
+def test_a_record_reads_at_the_streams_bitrate_unless_told_otherwise(tmp_path: Path) -> None:
+    preset = make_chain(tmp_path)
+    clipping_guard.write_record(preset, record_at(preset, "128k", -0.468))
+
+    assert clipping_guard.read_record(preset) is None  # the stream is at 256k (R20)
+
+
+def test_a_guard_file_from_before_r20_reads_as_its_128k_record(tmp_path: Path) -> None:
+    # Before R20 (2026-10-28) the file held one record, judged at the stream's 128k then.
+    preset = make_chain(tmp_path)
+    at_128k = record_at(preset, "128k", -0.468)
+    flat = {k: v for k, v in dataclasses.asdict(at_128k).items() if k != "bitrate"}
+    clipping_guard.record_path(preset).write_text(json.dumps(flat), encoding="utf-8")
+
+    assert clipping_guard.read_record(preset, "128k") == at_128k
 
 
 def test_a_missing_record_reads_as_none(tmp_path: Path) -> None:

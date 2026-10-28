@@ -35,3 +35,17 @@ def test_the_chain_preset_has_a_fresh_passing_guard_record(preset: Path) -> None
         "re-judge it: uv run python scripts/rejudge_clipping_guard.py <preset.toml>"
     )
     assert record.passed, f"{preset.name} failed the clipping guard: {record.blocks[:3]}"
+
+
+@pytest.mark.parametrize("preset", CHAIN_PRESETS, ids=lambda p: p.stem)
+def test_every_kept_guard_record_is_of_the_files_as_they_are_now(preset: Path) -> None:
+    # Records at bitrates the stream is not using are kept for a bitrate setting (Lance,
+    # 2026-10-28). The stream's own record must pass (above); the others may fail, but a stale
+    # one would mislead, so a chain change re-runs the guard at each kept bitrate (--bitrate)
+    # or drops that record.
+    for record in clipping_guard.read_records(preset):
+        assert record.fingerprint == clipping_guard.fingerprint(preset), (
+            f"{preset.name}'s {record.bitrate} guard record is of other files (run "
+            f"{record.run}); run the guard again with --bitrate {record.bitrate}"
+        )
+        assert record.guard == clipping_guard.R17

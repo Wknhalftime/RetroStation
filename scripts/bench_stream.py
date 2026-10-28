@@ -71,7 +71,7 @@ START_NEXT_S = 4  # sn_rem in stream_stub.item_annotations: decks overlap by thi
 SEQUENTIAL_SESSIONS = 3
 CONCURRENT_SESSIONS = 5
 RESOURCE_SPAN_S = 40
-STREAM_BYTES_PER_S = 128_000 / 8  # session.liq encodes MP3 at a constant 128 kbps
+STREAM_BYTES_PER_S = 256_000 / 8  # session.liq encodes MP3 at a constant 256 kbps (R20)
 MAX_BEHIND_S = 2.0  # a resources session further behind real time than this has stalled
 type Report = dict[str, object]
 

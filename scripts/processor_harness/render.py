@@ -7,8 +7,9 @@ The Liquidsoap back end wraps the chain file in a generated script that:
 - defines ``param_float``, ``param_int``, ``param_bool`` and ``param_string`` (name, default)
   for the preset's ``[params]``, and ``gauge(name, getter)`` for values to log every frame,
   all before including the chain, which must define ``chain(s)``;
-- writes 32-bit float WAV and the stream's MP3 (libmp3lame, 128k, 44.1 kHz, the encoder
-  session.liq uses), so the codec round trip goes through the same encoder as the stream;
+- writes 32-bit float WAV and the stream's MP3 (libmp3lame at the stream's bitrate, 44.1 kHz,
+  the encoder session.liq uses), so the codec round trip goes through the same encoder as the
+  stream;
 - runs on its own unsynced clock (``clock.assign_new(sync="none")``, src/libs/clock.liq line
   11), so a render runs faster than real time, and shuts down once both outputs stop.
 
@@ -32,6 +33,7 @@ from pathlib import Path
 import psutil
 
 from processor_harness.audio_io import read_wav
+from processor_harness.codec import MP3_BITRATE
 from processor_harness.presets import ParamValue
 
 GAUGE_PREFIX = "HARNESS_GAUGE\t"
@@ -82,7 +84,7 @@ wav = output.file(
 )
 mp3 = output.file(
   fallible=true,
-  %ffmpeg(format="mp3", %audio(codec="libmp3lame", b="128k", ar=44100)),
+  %ffmpeg(format="mp3", %audio(codec="libmp3lame", b="$bitrate", ar=44100)),
   "$mp3",
   s
 )
@@ -222,6 +224,20 @@ def _write_gauges(log: Path, csv: Path) -> None:
     csv.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
+def render_script(
+    chain: Path, params: Mapping[str, ParamValue], source: Path, wav: Path, mp3: Path
+) -> str:
+    """The generated script that renders ``source`` through ``chain(s)`` to ``wav`` and ``mp3``."""
+    return string.Template(_WRAPPER).substitute(
+        chain=chain.resolve().as_posix(),
+        source=source.resolve().as_posix(),
+        wav=wav.resolve().as_posix(),
+        mp3=mp3.resolve().as_posix(),
+        bitrate=MP3_BITRATE,
+        **liq_params(params),
+    )
+
+
 def render_liquidsoap(
     liquidsoap: Path,
     chain: Path,
@@ -234,16 +250,7 @@ def render_liquidsoap(
     audio_s = _audio_seconds(source)
     mp3 = output.with_suffix(".mp3")
     script = output.with_suffix(".liq")
-    script.write_text(
-        string.Template(_WRAPPER).substitute(
-            chain=chain.resolve().as_posix(),
-            source=source.resolve().as_posix(),
-            wav=output.resolve().as_posix(),
-            mp3=mp3.resolve().as_posix(),
-            **liq_params(params),
-        ),
-        encoding="utf-8",
-    )
+    script.write_text(render_script(chain, params, source, output, mp3), encoding="utf-8")
     cache_dir.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, **{v: str(cache_dir.resolve()) for v in _CACHE_VARS}}
     log = output.with_suffix(".log")

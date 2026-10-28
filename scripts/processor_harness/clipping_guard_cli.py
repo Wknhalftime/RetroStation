@@ -23,6 +23,7 @@ from numpy.typing import NDArray
 from processor_harness import affinity, clipping_guard
 from processor_harness.audio_io import Audio, read_wav
 from processor_harness.clipping_guard import R17, GuardRecord, JudgedBlock
+from processor_harness.codec import MP3_BITRATE
 from processor_harness.codec_states import LEAD_INS, block_peaks, worst_blocks
 from processor_harness.metrics.loudness import STEP_S
 from processor_harness.presets import load_preset
@@ -33,20 +34,20 @@ SEPARATION_S = 2.0  # blocks closer than this in one song are one transient
 TAIL_S = 2.0  # how far past its last screened block a swept song is encoded
 RECORDED_BLOCKS = 20
 
-Job = tuple[str, str, int, float | None]  # ffmpeg, render, lead-in, cut (s) or None
+Job = tuple[str, str, int, float | None, str]  # ffmpeg, render, lead-in, cut (s) or None, bitrate
 _loaded: dict[tuple[str, float | None], tuple[Audio, int]] = {}
 
 
 def _peaks(job: Job) -> tuple[str, int, NDArray[np.float64]]:
     """One render's decoded block peaks at one lead-in (runs in a worker process). Jobs come
     song by song, so each worker keeps only the render it is on."""
-    ffmpeg, render, lead_in, cut_s = job
+    ffmpeg, render, lead_in, cut_s, bitrate = job
     if (render, cut_s) not in _loaded:
         _loaded.clear()
         x, fs = read_wav(Path(render))
         _loaded[(render, cut_s)] = (x if cut_s is None else x[: round(cut_s * fs)], fs)
     x, fs = _loaded[(render, cut_s)]
-    return render, lead_in, block_peaks(Path(ffmpeg), x, fs, lead_in)
+    return render, lead_in, block_peaks(Path(ffmpeg), x, fs, lead_in, bitrate)
 
 
 def _renders(run: Path, preset_id: str, version: int) -> list[Path]:
@@ -87,13 +88,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--ffmpeg", type=Path, default=shutil.which("ffmpeg"))
     parser.add_argument("--lead-ins", type=int, default=LEAD_INS, help="states per block")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--bitrate", default=MP3_BITRATE, help="MP3 bitrate; default the stream's")
     args = parser.parse_args(argv)
     preset = load_preset(args.preset)
     renders = _renders(args.run, preset.id, preset.version)
     ffmpeg = str(args.ffmpeg)
 
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        screen = [(ffmpeg, str(r), k, None) for r in renders for k in SCREEN_LEAD_INS]
+        screen = [(ffmpeg, str(r), k, None, args.bitrate) for r in renders for k in SCREEN_LEAD_INS]
         screened: dict[str, NDArray[np.float64]] = {}
         for render, _, peaks in pool.map(_peaks, screen, chunksize=len(SCREEN_LEAD_INS)):
             seen = screened.get(render)
@@ -102,10 +104,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         worst = worst_blocks(screened, SCREEN_BLOCKS, SEPARATION_S)
         cuts = {b.song: max(c.time_s for c in worst if c.song == b.song) + TAIL_S for b in worst}
         names = ", ".join(Path(s).stem for s in cuts)
-        print(f"screened {len(renders)} renders; sweeping {len(cuts)} songs at {args.lead_ins} "
-              f"lead-ins: {names}", flush=True)  # fmt: skip
+        print(f"screened {len(renders)} renders at {args.bitrate}; sweeping {len(cuts)} songs "
+              f"at {args.lead_ins} lead-ins: {names}", flush=True)  # fmt: skip
 
-        sweep = [(ffmpeg, song, k, cut) for song, cut in cuts.items() for k in range(args.lead_ins)]
+        sweep = [
+            (ffmpeg, song, k, cut, args.bitrate)
+            for song, cut in cuts.items()
+            for k in range(args.lead_ins)
+        ]
         rows: dict[str, list[NDArray[np.float64]]] = {song: [] for song in cuts}
         for render, _, peaks in pool.map(_peaks, sweep, chunksize=4):
             rows[render].append(peaks)
@@ -124,6 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run=args.run.name,
         passed=passed,
         blocks=tuple(judged[:RECORDED_BLOCKS]),
+        bitrate=args.bitrate,
     )
     clipping_guard.write_record(args.preset, record)
     for b in record.blocks[:10]:
@@ -140,8 +147,9 @@ def rejudge_main(argv: Sequence[str] | None = None) -> int:
     measurements: for a change to the guard, not to the preset or its chain."""
     parser = argparse.ArgumentParser(description="Re-judge a preset's guard record under R17.")
     parser.add_argument("preset", type=Path, help="the chain preset's TOML file")
+    parser.add_argument("--bitrate", default=MP3_BITRATE, help="the record's bitrate")
     args = parser.parse_args(argv)
-    old = clipping_guard.read_record(args.preset)
+    old = clipping_guard.read_record(args.preset, args.bitrate)
     if old is None:
         raise SystemExit(f"{args.preset} has no guard record; run the guard")
     if old.fingerprint != clipping_guard.fingerprint(args.preset):

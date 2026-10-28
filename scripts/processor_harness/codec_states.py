@@ -1,7 +1,7 @@
-"""The MP3 encoder's states (R17; Lance, 2026-10-26). At the stream's 128k the decoded true peak
+"""The MP3 encoder's states (R17; Lance, 2026-10-26). At the stream's bitrate the decoded true peak
 of a transient depends on the encoder's state when the song reaches it: where the song falls in
 the encoder's frame grid (a frame is 1152 samples) and everything it encoded before. On air that
-state is random, and it moves one transient's decoded peak by up to about 2 dB.
+state is random, and it moved one transient's decoded peak by up to about 2 dB at 128k.
 
 A state here is a lead-in of silence ahead of the whole song. The memory is long, so an excerpt
 with a few seconds of pre-roll does not reproduce a whole-song encode (measured 2026-10-26: at
@@ -38,7 +38,9 @@ def _ffmpeg(ffmpeg: Path, *args: str, data: bytes = b"") -> bytes:
     return run.stdout
 
 
-def encode_decode(ffmpeg: Path, x: Audio, fs: int, lead_in: int) -> Audio:
+def encode_decode(
+    ffmpeg: Path, x: Audio, fs: int, lead_in: int, bitrate: str = MP3_BITRATE
+) -> Audio:
     """x through the stream's codec after ``lead_in`` samples of silence, on x's own timeline.
     Samples go to FFmpeg as float32, the values the harness's float WAVs carry."""
     channels = x.shape[1]
@@ -46,16 +48,18 @@ def encode_decode(ffmpeg: Path, x: Audio, fs: int, lead_in: int) -> Audio:
     with tempfile.TemporaryDirectory() as tmp:
         mp3 = Path(tmp) / "x.mp3"
         _ffmpeg(ffmpeg, "-f", "f32le", "-ar", str(fs), "-ac", str(channels), "-i", "pipe:0",
-                "-c:a", "libmp3lame", "-b:a", MP3_BITRATE, "-ar", str(MP3_RATE), str(mp3),
+                "-c:a", "libmp3lame", "-b:a", bitrate, "-ar", str(MP3_RATE), str(mp3),
                 data=padded.tobytes())  # fmt: skip
         raw = _ffmpeg(ffmpeg, "-i", str(mp3), "-f", "f32le", "-c:a", "pcm_f32le", "pipe:1")
     decoded = np.frombuffer(raw, np.float32).reshape(-1, channels).astype(np.float64)
     return decoded[lead_in : lead_in + len(x)]
 
 
-def block_peaks(ffmpeg: Path, x: Audio, fs: int, lead_in: int) -> NDArray[np.float64]:
+def block_peaks(
+    ffmpeg: Path, x: Audio, fs: int, lead_in: int, bitrate: str = MP3_BITRATE
+) -> NDArray[np.float64]:
     """Decoded true peak (dBTP) of each 100 ms block of x, after a lead-in of ``lead_in``."""
-    peaks = true_peak_blocks(encode_decode(ffmpeg, x, fs, lead_in), fs)
+    peaks = true_peak_blocks(encode_decode(ffmpeg, x, fs, lead_in, bitrate), fs)
     return np.asarray(20 * np.log10(np.maximum(peaks, 1e-12)), dtype=np.float64)
 
 

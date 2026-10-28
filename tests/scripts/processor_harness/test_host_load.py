@@ -49,7 +49,7 @@ def test_the_session_script_runs_the_presets_chain_on_the_streams_encoder(tmp_pa
     assert preset.chain is not None
     assert f'%include "{preset.chain.as_posix()}"' in text
     assert '("limit_db", -2.5)' in text
-    assert 'codec="libmp3lame", b="128k", ar=44100' in text
+    assert 'codec="libmp3lame", b="256k", ar=44100' in text  # R20
     assert "clock.assign_new" not in text  # real time, like a listener's session
 
 
@@ -79,6 +79,9 @@ def test_one_real_session_of_bypass_runs_in_real_time_well_inside_its_frames(
 
 @pytest.mark.slow
 @pytest.mark.skipif(LIQUIDSOAP is None, reason="LIQUIDSOAP_PATH unset")
+# Four script-cache builds (warm, cold, one per session count) and a cold start: about 36 s
+# alone, past the 60 s default in a full parallel run, where the timeout kills the worker.
+@pytest.mark.timeout(240)
 def test_the_command_reports_start_up_and_each_session_count(tmp_path: Path) -> None:
     assert LIQUIDSOAP is not None
     song = tmp_path / "tone.wav"
