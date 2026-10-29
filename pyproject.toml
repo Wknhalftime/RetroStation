@@ -231,6 +231,9 @@ hotspots    = "python scripts/audit/hotspots.py --since '12 months ago' --out au
 events          = "python scripts/audit/event_graph.py --summary --out audit/event-graph.json"
 events-check    = "python scripts/audit/event_graph.py --check audit/event-graph.baseline.json --out audit/event-graph.check.json"
 events-baseline = "python scripts/audit/event_graph.py --out audit/event-graph.baseline.json"
+# The gate (phase 0b, scripts/gate.py): clone the dev DB into this branch's copy, record the
+# base tree and the branch on it, compare. ARCHITECTURE.md (Flows) says what it never touches.
+gate = { cmd = "python scripts/gate.py round-trip", help = "Round trip on a gate copy: poe gate --base <worktree> [--allow F] [--mode S=M ...] [--tasks T ...] [--apply S ...]" }
 audit.sequence = ["lint", "lint-stats", "types", "layers", "deadcode", "deps", "vulns", "tests", "hotspots", "events"]
 audit.ignore_fail = "return_non_zero"
 

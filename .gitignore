@@ -45,3 +45,9 @@ results/
 
 # Tune-in streaming work dir (STREAM_WORK_DIR) and bench output
 var/
+
+# Phase 0b gate: snapshots, round-trip runs, the staging state and its own Huey queue
+audit/snapshots/
+huey_gate.db
+huey_gate.db-shm
+huey_gate.db-wal
