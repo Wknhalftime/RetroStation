@@ -111,7 +111,7 @@ def test_ledger_is_well_formed() -> None:
         ruling_id
         for e in entries
         for text in [*e["refs"], *e["supersedes"]]
-        for ruling_id in _RULING_ID.findall(text)
+        for ruling_id in cited(text)
     }
     assert sorted(named - set(ids)) == []
     problems = {

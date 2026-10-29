@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 import httpx
 import psycopg
 import pytest
+from huey.storage import MemoryStorage
 from mutagen.id3 import ID3, TIT2, TPE1
 from psycopg.rows import DictRow, dict_row
 
@@ -47,6 +48,7 @@ from backend.services.artist_matching_service import (
 from backend.services.matching_utils import is_likely_truncated
 from backend.services.normalization import normalize_artist
 from backend.tasks import artist_matching_tasks
+from backend.tasks.huey_app import huey
 from backend.tasks.ingestion_tasks import ingestion_task
 from tests.integration import stream_seed as seed
 from tests.integration.missing_file_seed import full_scan, put
@@ -57,6 +59,16 @@ MAX_LEN = 30  # Settings.broadcast_name_max_len
 KNOWN = "KNOWN BAND"
 UNKNOWN = "ZZYZX QUARTET"
 CUT_OFF = "QUIXOTIC VELVET HARMONY ORCHES"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def queue_in_memory() -> Iterator[None]:
+    """The hand-offs the writes queue land in memory, never in a worker's queue file (from the
+    main checkout, a -n 0 run's queue file is the dev worker's)."""
+    patch = pytest.MonkeyPatch()
+    patch.setattr(huey, "storage", MemoryStorage(huey.name))
+    yield
+    patch.undo()
 
 
 class MusicBrainzDown:
@@ -224,6 +236,7 @@ def test_a_stage_without_cut_off_names_never_calls_musicbrainz(
     conn: Conn, tmp_path: Path, musicbrainz_down: MusicBrainzDown
 ) -> None:
     playlist = _ingested(conn, tmp_path, KNOWN, UNKNOWN)
+    assert get_settings().broadcast_name_max_len == MAX_LEN
 
     artist_matching_tasks.artist_matching_task.call_local(str(playlist))
 
@@ -239,6 +252,7 @@ def test_a_stage_with_a_cut_off_name_fails_and_decides_nothing(
     conn: Conn, tmp_path: Path, musicbrainz_down: MusicBrainzDown
 ) -> None:
     playlist = _ingested(conn, tmp_path, KNOWN, UNKNOWN, CUT_OFF)
+    assert get_settings().broadcast_name_max_len == MAX_LEN
 
     with pytest.raises(httpx.HTTPStatusError):
         artist_matching_tasks.artist_matching_task.call_local(str(playlist))

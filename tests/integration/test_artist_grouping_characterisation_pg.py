@@ -25,11 +25,13 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from huey.storage import MemoryStorage
 from mutagen.id3 import ID3, TIT2, TPE1, TXXX
 from psycopg.rows import DictRow, dict_row
 
 from backend.config import get_settings
 from backend.tasks import artist_linking_tasks
+from backend.tasks.huey_app import huey
 from tests.fakes.mb_client import FakeMbClient
 from tests.integration.missing_file_seed import full_scan, put
 from tests.lifespan_client import lifespan_client
@@ -39,6 +41,17 @@ type Conn = psycopg.Connection[DictRow]
 # psycopg's async pool needs the selector event loop on Windows (as tests/routers/conftest.py).
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+@pytest.fixture(scope="module", autouse=True)
+def queue_in_memory() -> Iterator[None]:
+    """The hand-offs the writes queue land in memory, never in a worker's queue file (from the
+    main checkout, a -n 0 run's queue file is the dev worker's)."""
+    patch = pytest.MonkeyPatch()
+    patch.setattr(huey, "storage", MemoryStorage(huey.name))
+    yield
+    patch.undo()
+
 
 ALICE_BAND = "4d7928cd-7ed2-4282-8c29-c0c9f966f1bd"
 ALICE_SINGER = "ee58c59f-8e7f-4430-b8ca-236c4d3745ae"

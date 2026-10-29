@@ -32,11 +32,13 @@ from uuid import UUID
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from huey.storage import MemoryStorage
 from mutagen.id3 import ID3, TIT2, TPE1, TXXX
 from psycopg.rows import DictRow, dict_row
 
 from backend.config import get_settings
 from backend.tasks import library_enrichment_tasks
+from backend.tasks.huey_app import huey
 from tests.fakes.mb_client import FakeMbClient
 from tests.integration import stream_seed as seed
 from tests.integration.missing_file_seed import full_scan, put, retag
@@ -49,7 +51,17 @@ type Conn = psycopg.Connection[DictRow]
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# --- the app, the database and the tasks' settings --------------------------------------------
+# --- the app, the database, the task queue and the tasks' settings ------------------------------
+
+
+@pytest.fixture(scope="module", autouse=True)
+def queue_in_memory() -> Iterator[None]:
+    """The hand-offs the writes queue land in memory, never in a worker's queue file (from the
+    main checkout, a -n 0 run's queue file is the dev worker's)."""
+    patch = pytest.MonkeyPatch()
+    patch.setattr(huey, "storage", MemoryStorage(huey.name))
+    yield
+    patch.undo()
 
 
 @pytest.fixture(scope="module")
@@ -135,6 +147,14 @@ def work_id_of(conn: Conn, file_id: UUID) -> str:
     return str(row["work_id"])
 
 
+def recording_id_of(conn: Conn, file_id: UUID) -> str:
+    row = conn.execute(
+        "SELECT recording_id FROM library_files WHERE id = %s", (file_id,)
+    ).fetchone()
+    assert row is not None and row["recording_id"] is not None
+    return str(row["recording_id"])
+
+
 def matched_line(conn: Conn, file_id: UUID, *, artist: str, title: str) -> UUID:
     """A log line, auto-matched to *file_id*; returns the line (track identity) id."""
     identity = seed.identity(conn, title=title, artist=artist)
@@ -170,7 +190,7 @@ def test_new_file_arrives(conn: Conn, tmp_path: Path) -> None:
     A second copy of KISS joins its work and the scan keeps the work's master, though the new
     copy scores higher, so a line matched to the new copy plays the old one; a new song gets a
     work of its own, with itself as master. A line still waiting for a match plays nothing,
-    before and after: a new file does not match a line by itself.
+    before and after: the scan matches no line itself (matching runs from its hand-off).
     """
     root = tmp_path / "library"
     tagged(root / "kiss-single.mp3", "Prince", "Kiss", release_type="single")
@@ -228,7 +248,9 @@ def test_missing_file_folds_into_its_replacement(conn: Conn, tmp_path: Path) -> 
     retag(tagged(root / "new" / "loser-retagged.mp3", "3 Doors Down", "Loser", **same_recording))
     full_scan(conn, root)
 
-    assert plays(conn, loser_at_kaaa) == file_named(conn, "loser-retagged.mp3")
+    replacement = file_named(conn, "loser-retagged.mp3")
+    assert replacement != gone  # a new row took over, not the old row at a new path
+    assert plays(conn, loser_at_kaaa) == replacement
 
 
 _RELEASE = "0a000000-0000-4000-8000-000000000e01"
@@ -317,6 +339,7 @@ def test_set_master_picks_a_file_of_another_recording(
     full_scan(conn, root)
     studio, live = file_named(conn, "nem-studio.mp3"), file_named(conn, "nem-live.mp3")
     work = work_id_of(conn, studio)
+    assert recording_id_of(conn, live) != recording_id_of(conn, studio)  # the premise
     kaaa, kbbb = seed.station(conn, "AC"), seed.station(conn, "CHR")
     studio_at_kaaa = play_at(
         conn, kaaa, matched_line(conn, studio, artist="METALLICA", title="NOTHING ELSE MATTERS")
@@ -528,33 +551,41 @@ def test_formatless_station(conn: Conn, client: TestClient, tmp_path: Path) -> N
 
 
 @contextmanager
-def master_writes_refused(conn: Conn) -> Iterator[None]:
-    """Every song-master write fails in the database until the block ends."""
-    conn.execute(
-        """CREATE FUNCTION phase0a_refuse_master_write() RETURNS trigger
-           LANGUAGE plpgsql AS $$
-           BEGIN
-               RAISE EXCEPTION 'phase 0a: song master write refused';
-           END $$"""
-    )
-    conn.execute(
-        """CREATE TRIGGER phase0a_refuse_master_write
-           BEFORE INSERT OR UPDATE ON song_masters
-           FOR EACH ROW EXECUTE FUNCTION phase0a_refuse_master_write()"""
-    )
-    conn.commit()
-    try:
-        yield
-    finally:
-        conn.rollback()
-        conn.execute("DROP TRIGGER phase0a_refuse_master_write ON song_masters")
-        conn.execute("DROP FUNCTION phase0a_refuse_master_write()")
-        conn.commit()
+def master_writes_refused(db_url: str) -> Iterator[None]:
+    """Every song-master write fails in the database until the block ends.
+
+    The trigger is created and dropped on a connection of its own, in autocommit, so nothing
+    the test's own connection does can leave it behind for later tests.
+    """
+    with psycopg.connect(db_url, autocommit=True) as admin:
+        admin.execute(
+            """CREATE OR REPLACE FUNCTION phase0a_refuse_master_write() RETURNS trigger
+               LANGUAGE plpgsql AS $$
+               BEGIN
+                   RAISE EXCEPTION 'phase 0a: song master write refused';
+               END $$"""
+        )
+        admin.execute(
+            """CREATE TRIGGER phase0a_refuse_master_write
+               BEFORE INSERT OR UPDATE ON song_masters
+               FOR EACH ROW EXECUTE FUNCTION phase0a_refuse_master_write()"""
+        )
+        try:
+            yield
+        finally:
+            admin.execute("DROP TRIGGER IF EXISTS phase0a_refuse_master_write ON song_masters")
+            admin.execute("DROP FUNCTION IF EXISTS phase0a_refuse_master_write()")
 
 
-def test_failed_write_changes_nothing(conn: Conn, client: TestClient, tmp_path: Path) -> None:
+def test_failed_write_changes_nothing(
+    conn: Conn, client: TestClient, tmp_path: Path, migrated_db: str
+) -> None:
     """E4: a split that fails halfway (at its song-master write, after the file has moved to
-    the new work) rolls back, and what plays is unchanged."""
+    the new work) rolls back, and what plays is unchanged.
+
+    The failure is injected where split writes today; a phase that changes split's writes may
+    move the injection point to another of them, without changing what is asserted.
+    """
     root = tmp_path / "library"
     tagged(root / "lithium.mp3", "Nirvana", "Lithium")
     full_scan(conn, root)
@@ -572,7 +603,8 @@ def test_failed_write_changes_nothing(conn: Conn, client: TestClient, tmp_path: 
     conn.commit()
     assert (plays(conn, studio_at_kaaa), plays(conn, live_at_kaaa)) == (studio, studio)
 
-    with master_writes_refused(conn):
+    conn.commit()  # end this read: dropping the trigger needs song_masters to itself
+    with master_writes_refused(migrated_db):
         response = client.post(f"/api/v1/library/works/{work}/split", json={"file_id": str(live)})
 
     assert not response.is_success
