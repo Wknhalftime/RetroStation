@@ -5,7 +5,7 @@
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`). Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of
+`audit/rulings.jsonl` (AUD-R015..R046 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -154,14 +154,14 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE) | ingest, matchers, review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028) |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE) | ingest, matchers, review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
-| `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026) | local-artist linking (`link_local_artists_task`) |
-| `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026) |
+| `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
+| `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026, in part superseded by AUD-R036) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`), or for a station liner's hash (LR4) | cue upserts | cue analysis (liners first) |
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration `0039_stream_cues_audio_silent` deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports; the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
@@ -172,9 +172,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
     `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020)
   - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
-    `mb_enrichment_task` → `link_local_artists_task` (AUD-R026), then
-    `rematch_undecided_task("changed")` → `artist_matching_task` per playlist with pending
-    work → `identity_matching_task` (AUD-R022 D1). The MB pass queues both; on `-w 1` the
+    `mb_enrichment_task` → `link_local_artists_task` (AUD-R026, in part superseded by
+    AUD-R036), then `rematch_undecided_task("changed")` → `artist_matching_task` per playlist
+    with pending work → `identity_matching_task` (AUD-R022 D1; its D2 and D6 amended by
+    AUD-R039 and AUD-R036). The MB pass queues both; on `-w 1` the
     re-check runs after the linking, and its wave also holds the names just linked.
   - watcher poll (every 4 min) → `library_scan_files_task` → `library_enrichment_task` →
     `mb_enrichment_task` → `link_local_artists_task`, then `rematch_undecided_task("changed")`
@@ -191,7 +192,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   cue-analysis resume (every 5 min each), cue prune, progress prune (daily). Matching has no periodic reconcile: work a
   lost fan-out leaves pending waits for the next re-check (an MB pass or the Re-run Matching
   button), and so does a song a MusicBrainz outage deferred (MB_UNAVAILABLE), which every
-  re-check rewinds (AUD-R028).
+  re-check rewinds (AUD-R028, extended by AUD-R042).
 - **Every re-check's rewind** takes undecided artists (`needs_review`, `auto_rejected`) and
   undecided songs (those two plus `manual_rejected`): a song the curator rejected waits for
   the next run, then is re-scored without its rejected files. A manually rejected artist is
