@@ -461,8 +461,8 @@ def coalesce_artist_searches(
 class ArtistMatchThresholds:
     """Score thresholds and limits shared by every phase of artist matching.
 
-    Threaded through match_artists_for_playlist, _run_local_phase and
-    _run_mb_or_deferred_phase as one object instead of five loose ints — see
+    Threaded through match_artists_for_playlist and the engine builders
+    (ArtistEngineInputs) as one object instead of five loose ints — see
     AUD-040. Defaults are identical to the loose parameter defaults it replaced.
     """
 
@@ -480,27 +480,13 @@ _DEFAULT_ARTIST_MATCH_THRESHOLDS = ArtistMatchThresholds()
 
 def _run_local_phase(
     pending: list[BroadcastArtist],
-    rules: list[MappingRule],
-    all_canonical: list[Artist],
-    thresholds: ArtistMatchThresholds,
+    engine: ArtistMatchingEngine,
 ) -> tuple[dict[UUID, ArtistMatchResult], list[BroadcastArtist]]:
-    """Phase 1: local engine — runs for every artist.
+    """Phase 1: the local engine (build_local_artist_engine) — runs for every artist.
 
     Returns (resolved_results, unresolved_artists). Unresolved artists fall
     through to Phase 2 (truncated-MB + DeferredRetryStrategy fallback).
     """
-    engine = ArtistMatchingEngine(
-        [
-            MappingRuleStrategy(rules),
-            NormalizationStrategy(
-                all_canonical,
-                thresholds.strong_match_threshold,
-                thresholds.mb_score_gap,
-                thresholds.mb_auto_link_score,
-                min_presentation_score=thresholds.min_presentation_score,
-            ),
-        ]
-    )
     resolved: dict[UUID, ArtistMatchResult] = {}
     unresolved: list[BroadcastArtist] = []
     for broadcast_artist in pending:
@@ -548,44 +534,18 @@ def _build_truncated_search_map(
 
 def _run_mb_or_deferred_phase(
     unresolved: list[BroadcastArtist],
-    mb_client: MusicBrainzClientProtocol,
-    search_map: dict[str, list[MbArtistResult]],
-    thresholds: ArtistMatchThresholds,
+    engine: ArtistMatchingEngine,
 ) -> dict[UUID, ArtistMatchResult]:
-    """Phase 2: TruncatedNameMbStrategy → DeferredRetryStrategy.
+    """Phase 2: the engine build_mb_artist_engine builds (TruncatedNameMbStrategy →
+    DeferredRetryStrategy).
 
     DeferredRetryStrategy is terminal — every artist gets a result
-    (Invariant 2 — no orphaned ``result is None`` state).
+    (Invariant 2 — no orphaned ``result is None`` state; resolve_one_name enforces it).
     """
-    engine = ArtistMatchingEngine(
-        [
-            TruncatedNameMbStrategy(
-                inner=MusicBrainzApiStrategy(
-                    mb_client,
-                    thresholds.strong_match_threshold,
-                    thresholds.mb_score_gap,
-                    thresholds.mb_auto_link_score,
-                    search_map=search_map,
-                ),
-                max_len=thresholds.broadcast_name_max_len,
-            ),
-            DeferredRetryStrategy(),
-        ]
-    )
-    out: dict[UUID, ArtistMatchResult] = {}
-    for broadcast_artist in unresolved:
-        result = engine.resolve(broadcast_artist)
-        # Invariant 2: DeferredRetryStrategy is the terminal tier and never
-        # returns None. RuntimeError (not assert) so this stays load-bearing
-        # under python -O, where asserts are stripped.
-        if result is None:
-            raise RuntimeError(
-                "Invariant 2 violated: Phase-2 engine returned None for "
-                f"broadcast_artist {broadcast_artist.id}; DeferredRetryStrategy "
-                "should make every artist terminal."
-            )
-        out[broadcast_artist.id] = result
-    return out
+    return {
+        broadcast_artist.id: resolve_one_name(broadcast_artist, engine)
+        for broadcast_artist in unresolved
+    }
 
 
 def _persist_artist_result(
@@ -654,6 +614,87 @@ class ArtistMatchingRepos:
     rules_repo: MappingRuleRepository
 
 
+@dataclass(frozen=True)
+class ArtistEngineInputs:
+    """What the artist engines are built from (phase 0b, S6).
+
+    match_artists_for_playlist builds its engines from one of these, and so does the gate's
+    matching dry run (scripts/dry_run_matching.py), so a dry run decides what the task would.
+    """
+
+    repos: ArtistMatchingRepos
+    mb_client: MusicBrainzClientProtocol
+    thresholds: ArtistMatchThresholds
+
+
+def build_local_artist_engine(inputs: ArtistEngineInputs) -> ArtistMatchingEngine:
+    """Phase 1's engine: the mapping rules, then normalization against the local catalog.
+
+    Reads the rules and every catalog artist once, when it is built.
+    """
+    thresholds = inputs.thresholds
+    return ArtistMatchingEngine(
+        [
+            MappingRuleStrategy(inputs.repos.rules_repo.list_ordered()),
+            NormalizationStrategy(
+                inputs.repos.artist_repo.list_all(),
+                thresholds.strong_match_threshold,
+                thresholds.mb_score_gap,
+                thresholds.mb_auto_link_score,
+                min_presentation_score=thresholds.min_presentation_score,
+            ),
+        ]
+    )
+
+
+def build_mb_artist_engine(
+    inputs: ArtistEngineInputs, search_map: dict[str, list[MbArtistResult]]
+) -> ArtistMatchingEngine:
+    """Phase 2's engine: MusicBrainz for a name that looks truncated, else DEFERRED_RETRY.
+
+    Terminal: it decides every artist. ``search_map`` holds the coalesced searches
+    (_build_truncated_search_map); a truncated name missing from it is searched live.
+    """
+    thresholds = inputs.thresholds
+    return ArtistMatchingEngine(
+        [
+            TruncatedNameMbStrategy(
+                inner=MusicBrainzApiStrategy(
+                    inputs.mb_client,
+                    thresholds.strong_match_threshold,
+                    thresholds.mb_score_gap,
+                    thresholds.mb_auto_link_score,
+                    search_map=search_map,
+                ),
+                max_len=thresholds.broadcast_name_max_len,
+            ),
+            DeferredRetryStrategy(),
+        ]
+    )
+
+
+def resolve_one_name(
+    broadcast_artist: BroadcastArtist, *engines: ArtistMatchingEngine
+) -> ArtistMatchResult:
+    """The first decision *engines*, tried in order, make for one log name.
+
+    The last engine must be terminal (build_mb_artist_engine's is). A MusicBrainz client
+    error propagates.
+    """
+    for engine in engines:
+        result = engine.resolve(broadcast_artist)
+        if result is not None:
+            return result
+    # Invariant 2: DeferredRetryStrategy is the terminal tier and never
+    # returns None. RuntimeError (not assert) so this stays load-bearing
+    # under python -O, where asserts are stripped.
+    raise RuntimeError(
+        "Invariant 2 violated: Phase-2 engine returned None for "
+        f"broadcast_artist {broadcast_artist.id}; DeferredRetryStrategy "
+        "should make every artist terminal."
+    )
+
+
 def match_artists_for_playlist(
     playlist_id: UUID,
     repos: ArtistMatchingRepos,
@@ -676,32 +717,22 @@ def match_artists_for_playlist(
     persisted (spec 2026-10-17).
     """
     pending = repos.broadcast_artist_repo.get_pending_for_playlist(playlist_id)
-    rules = repos.rules_repo.list_ordered()
-    all_canonical = repos.artist_repo.list_all()
+    inputs = ArtistEngineInputs(repos=repos, mb_client=mb_client, thresholds=thresholds)
+    local_engine = build_local_artist_engine(inputs)
 
     live_start = mb_client.live_fetches
     hits_start = mb_client.cache_hits
     distinct_search_keys = 0  # populated below; retained for the finally summary
 
     try:
-        resolved, unresolved = _run_local_phase(
-            pending,
-            rules,
-            all_canonical,
-            thresholds,
-        )
+        resolved, unresolved = _run_local_phase(pending, local_engine)
         search_map, distinct_search_keys = _build_truncated_search_map(
             unresolved,
             mb_client,
             thresholds.broadcast_name_max_len,
         )
         resolved.update(
-            _run_mb_or_deferred_phase(
-                unresolved,
-                mb_client,
-                search_map,
-                thresholds,
-            )
+            _run_mb_or_deferred_phase(unresolved, build_mb_artist_engine(inputs, search_map))
         )
 
         written_ids: set[UUID] = set()
