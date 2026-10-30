@@ -55,14 +55,13 @@ _RECORDING_TOOLS = {
 
 
 def copy_name(branch: str) -> str:
-    """The branch's copy: ``retrostation_bench_gate_<branch>``, lowercase letters, digits and
-    underscores, at most 63 bytes; a long name keeps a hash of the branch, so two never meet."""
+    """The branch's copy: ``retrostation_bench_gate_<branch>_<hash>``, lowercase letters,
+    digits and underscores, at most 63 bytes. The hash of the branch's exact name keeps apart
+    two branches whose names read alike here (``feat/x-y``, ``feat/x_y``, a long pair)."""
     slug = re.sub(r"[^a-z0-9]+", "_", branch.lower()).strip("_")
-    room = _MAX_NAME - len(COPY_PREFIX)
-    if len(slug) > room:
-        digest = hashlib.sha1(branch.encode()).hexdigest()[:8]
-        slug = f"{slug[: room - len(digest) - 1].rstrip('_')}_{digest}"
-    return COPY_PREFIX + slug
+    digest = hashlib.sha1(branch.encode()).hexdigest()[:8]
+    room = _MAX_NAME - len(COPY_PREFIX) - len(digest) - 1
+    return f"{COPY_PREFIX}{slug[:room].rstrip('_')}_{digest}"
 
 
 def current_branch() -> str:
@@ -72,11 +71,16 @@ def current_branch() -> str:
         text=True,
         check=True,
     )
-    return done.stdout.strip()
+    branch = done.stdout.strip()
+    if branch == "HEAD":
+        raise SystemExit("this checkout is on a detached HEAD: name the copy with --branch")
+    return branch
 
 
 def _dev_dsn() -> str:
-    """The dev stack's database: the settings' default (the stack sets no DATABASE_URL)."""
+    """The dev stack's database: the settings' default (the stack sets no DATABASE_URL, and
+    the main checkout's .env names none; a DATABASE_URL in .env would not be seen here)."""
+    gate_common.set_process_guards()  # this loads backend code (S10)
     from backend.config import Settings
 
     return str(Settings.model_fields["database_url"].default)
@@ -146,7 +150,8 @@ def _tablespace(admin_dsn: str) -> str | None:
 
 
 def _refuse_source(source_name: str, target: str) -> None:
-    if "test" in source_name or "bench" in source_name or source_name == target:
+    lowered = source_name.lower()
+    if "test" in lowered or "bench" in lowered or lowered == target:
         raise SystemExit(
             f"refusing to copy {source_name!r}: a test or bench database, or the copy itself"
         )
@@ -300,14 +305,17 @@ def _must(code: int, what: str) -> None:
         raise SystemExit(f"gate: {what} failed (exit {code})")
 
 
-def _recording_commands(tree: Path, copy: str, out: Path, sample: Path) -> dict[str, list[Any]]:
-    scripts = tree / "scripts"
-    for tool in sorted(set(_RECORDING_TOOLS.values())):
-        if not (scripts / f"{tool}.py").is_file():
+def _require_tools(tree: Path) -> None:
+    for tool in sorted({"gate", *_RECORDING_TOOLS.values()}):
+        if not (tree / "scripts" / f"{tool}.py").is_file():
             raise SystemExit(
                 f"{tree} has no scripts/{tool}.py: for a 0-phase PR, base the gate on a second "
                 "worktree of the branch"
             )
+
+
+def _recording_commands(tree: Path, copy: str, out: Path, sample: Path) -> dict[str, list[Any]]:
+    scripts = tree / "scripts"
     extra = {
         "airplay": [],
         "golden": ["--sample", sample],
@@ -328,9 +336,15 @@ def _recording_commands(tree: Path, copy: str, out: Path, sample: Path) -> dict[
     }
 
 
+def _migrate_from(tree: Path, copy: str) -> None:
+    command = [sys.executable, tree / "scripts" / "gate.py", "migrate", "--dsn", copy]
+    _must(_run(command, cwd=tree), f"migrate from {tree}")
+
+
 def _record(tree: Path, copy: str, out: Path, sample: Path) -> None:
     """The four recordings from *tree*: the snapshot alone (its timing record must not share
     the machine), then the other three at once (they only read)."""
+    _require_tools(tree)
     commands = _recording_commands(tree, copy, out, sample)
     _must(_run(commands.pop("airplay"), cwd=tree), f"recording airplay from {tree}")
     codes = _run_together(list(commands.values()), cwd=tree)
@@ -362,21 +376,41 @@ def _branch_steps(args: argparse.Namespace, copy: str, out_dir: Path) -> None:
     gate_py = gate_common.SCRIPTS / "gate.py"
     root = gate_common.ROOT
     _step("migrate")
-    _must(_run([sys.executable, gate_py, "migrate", "--dsn", copy], cwd=root), "migrate")
+    _migrate_from(root, copy)
     _step("task")
     for task in args.tasks:
         command = [sys.executable, gate_py, "run-task", task, "--dsn", copy]
         _must(_run(command, cwd=root), f"run-task {task}")
     _step("apply")
-    env = {**os.environ, "GATE_RUN_DIR": str(out_dir)}
+    # An apply script's settings point at the copy too, never at the shell's DATABASE_URL.
+    env = {**os.environ, "GATE_RUN_DIR": str(out_dir), "DATABASE_URL": copy}
     for script in args.apply:
         _must(_run([sys.executable, script, "--dsn", copy], cwd=root, env=env), f"apply {script}")
 
 
+def _warn_unused(args: argparse.Namespace, out_dir: Path) -> None:
+    """A --mode section none of the four recordings has, and an allowlist line no compare
+    used: the round trip passes both to all four compares, which each ignore the others'."""
+    sections: set[str] = {"timing"}
+    used: set[tuple[str, str]] = set()
+    for name in RECORDINGS:
+        sections |= set(gate_common.read_doc(out_dir / "base" / f"{name}.json")["sections"])
+        report = gate_common.read_doc(out_dir / f"compare-{name}.json")
+        used |= {(entry["section"], entry["key"]) for entry in report["allowed"]}
+    for pair in args.mode:
+        if pair.partition("=")[0] not in sections:
+            print(f"gate: warning: --mode {pair} names no section of the four recordings")
+    allowed = gate_common.read_allowlist(args.allow)
+    for section, key in sorted(allowed if isinstance(allowed, dict) else {}):
+        if (section, key) not in used:
+            print(f"gate: warning: the allowlist line {section} {key} matched no difference")
+
+
 def round_trip(args: argparse.Namespace) -> int:
-    """S9: clone; the four recordings from the base tree; migrate, the run-once tasks and the
-    apply scripts from the branch; the four again; the four compares. 0 only when the compares
-    find nothing that is not allowed. The copy is left for inspection (``drop`` ends it)."""
+    """S9: clone; from the base tree, migrate (so a base with migrations the dev DB lacks can
+    read the copy) and the four recordings; migrate, the run-once tasks and the apply scripts
+    from the branch; the four again; the four compares. 0 only when the compares find nothing
+    that is not allowed. The copy is left for inspection (``drop`` ends it)."""
     branch = args.branch or current_branch()
     # Absolute, as given: the steps run in two trees, and the commands name these paths.
     out_dir = (
@@ -391,13 +425,17 @@ def round_trip(args: argparse.Namespace) -> int:
         _show(["gate.py", "clone", "--source-dsn", source, "--branch", branch])
         copy = clone(source, branch, args.pg_bin)
         _step("base")
-        _record(args.base.absolute(), copy, out_dir / "base", sample)
+        base = args.base.absolute()
+        _require_tools(base)
+        _migrate_from(base, copy)
+        _record(base, copy, out_dir / "base", sample)
         _branch_steps(args, copy, out_dir)
         _step("branch")
         _record(gate_common.ROOT, copy, out_dir / "branch", sample)
         _step("compare")
         compares = [_compare_command(name, out_dir, args) for name in RECORDINGS]
         codes = dict(zip(RECORDINGS, _run_together(compares, cwd=gate_common.ROOT), strict=True))
+    _warn_unused(args, out_dir)
     for name, code in codes.items():
         print(f"gate: {name}: {'no differences that are not allowed' if code == 0 else 'FAILED'}")
     print(f"gate: the copy {copy_name(branch)} is left for inspection; `gate.py drop` ends it")

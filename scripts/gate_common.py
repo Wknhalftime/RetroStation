@@ -90,10 +90,17 @@ def guard_from_argv(argv: Sequence[str]) -> None:
 
 
 def point_at(dsn: str) -> None:
-    """The guards, then ``bench_enrich.point_app_at`` (which clears the settings cache)."""
+    """The guards, then ``bench_enrich.point_app_at`` (which clears the settings cache). The
+    run ends if ``backend`` comes from another tree than the tool's: a base run that loaded the
+    branch's code (or the reverse) would make the gate prove nothing."""
     set_guards(dsn)
     from bench_enrich import point_app_at
 
+    import backend
+
+    loaded = Path(str(backend.__file__)).resolve()
+    if not loaded.is_relative_to(ROOT.resolve()):
+        raise SystemExit(f"backend comes from {loaded.parent}, not this tool's tree {ROOT}")
     point_app_at(dsn)
 
 
@@ -232,10 +239,11 @@ def active_links(conn: psycopg.Connection[Any]) -> dict[str, dict[str, str]]:
 # --- compare (S2) --------------------------------------------------------------------------------
 
 MODES = ("exact", "only-down", "additions")
-# Timing fails above 2x (S2). Below this many milliseconds of change it never fails: a reader
-# that takes a millisecond on a small database doubles on scheduler noise alone.
+# Timing fails above 2x (S2). A rise of no more than this many milliseconds never fails: a
+# reader that takes a millisecond on a small database doubles on scheduler noise alone. The
+# copy's fastest reader (the M3U one, about 2 ms) still fails from about 4 ms.
 TIMING_FACTOR = 2.0
-TIMING_FLOOR_MS = 5.0
+TIMING_FLOOR_MS = 2.0
 # Header fields two files must share; the commits are outside the compared payload.
 _SAME_HEADER = ("tool", "format_version", "copy", "stage")
 _HEADER_WORDS = {"format_version": "format version"}
@@ -288,8 +296,10 @@ def add_compare_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mode", action="extend", nargs="+", default=[], metavar="SECTION=MODE")
 
 
-def _read_allowlist(path: Path | None) -> dict[tuple[str, str], str] | str:
-    """(section, key) -> reason, or why the file is refused."""
+def read_allowlist(path: Path | None) -> dict[tuple[str, str], str] | str:
+    """(section, key) -> reason, or why the file is refused. A line is ``<section> <key>
+    <reason>``; when a key holds a space (an override for the "Hot AC" format), the line's three
+    fields are separated by tabs instead."""
     if path is None:
         return {}
     allowed: dict[tuple[str, str], str] = {}
@@ -297,8 +307,8 @@ def _read_allowlist(path: Path | None) -> dict[tuple[str, str], str] | str:
         text = line.strip()
         if not text or text.startswith("#"):
             continue
-        parts = text.split(maxsplit=2)
-        if len(parts) < 3:
+        parts = [p.strip() for p in text.split("\t", 2)] if "\t" in text else text.split(None, 2)
+        if len(parts) < 3 or not all(parts):
             return f"allowlist line {number} has no reason: {text!r}"
         allowed[(parts[0], parts[1])] = parts[2]
     return allowed
@@ -316,7 +326,7 @@ def _read_modes(pairs: Sequence[str]) -> dict[str, str] | str:
 
 def read_options(args: argparse.Namespace) -> CompareOptions | str:
     """The compare's options, or why they are refused."""
-    allowed = _read_allowlist(args.allow)
+    allowed = read_allowlist(args.allow)
     if isinstance(allowed, str):
         return allowed
     modes = _read_modes(args.mode)
@@ -457,12 +467,18 @@ def run_compare(args: argparse.Namespace, spec: CompareSpec) -> int:
     """``--compare OLD NEW``: 0 when every difference is allowed, 1 when one is not, 2 when
     the files or the options are refused. Writes ``--report`` and prints a summary."""
     old_path, new_path = args.compare
-    old, new = read_doc(old_path), read_doc(new_path)
+    missing = [str(p) for p in (old_path, new_path) if not p.is_file()]
     options = read_options(args)
-    if isinstance(options, str):
-        report: dict[str, Any] = {"refused": options, "failed": [], "allowed": []}
-    elif (refused := header_refusal(old, new)) is not None:
-        report = {"refused": refused, "failed": [], "allowed": []}
+    refused: str | None
+    if missing:
+        refused = f"no file at {', '.join(missing)}"
+    elif isinstance(options, str):
+        refused = options
+    else:
+        old, new = read_doc(old_path), read_doc(new_path)
+        refused = header_refusal(old, new)
+    if refused is not None or isinstance(options, str):
+        report: dict[str, Any] = {"refused": refused, "failed": [], "allowed": []}
     else:
         report = compare_docs(old, new, spec, options)
     if args.report is not None:

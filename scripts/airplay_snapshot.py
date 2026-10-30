@@ -14,7 +14,8 @@ strings ``--mode`` and allowlists use, and a timing record:
 - ``file-work`` and ``tags``: every present file -> its work; its artist name, normalized
   name and artist MBID;
 - ``masters``: work -> master file; ``overrides``: ``<work>/<column>=<value>`` -> file;
-- ``missing-matches``: station -> how many lines the station's missing-matches report lists;
+- ``missing-matches``: station -> the total of the station's missing-matches report, from the
+  report's own route function (so a change to the report shows);
 - ``names``: every log name -> status, reason and active links (``gate_common.active_links``);
 - ``artists``: every artist but an unnamed stub (name = MBID) -> name, MBID and origin.
 
@@ -28,6 +29,7 @@ It reads one REPEATABLE READ, READ ONLY transaction, rolled back, and refuses a 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import statistics
 import sys
@@ -38,6 +40,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import UUID
+
+import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gate_common  # noqa: E402
@@ -91,22 +95,6 @@ SELECT id, work_id, artist_name, normalized_artist_name, artist_mbid
 FROM library_files WHERE file_status = 'present'
 """
 
-# The missing-matches report's count (routers/stations.py, get_missing_matches_report): a line
-# a station played whose own status or whose name's status is unresolved. Every station, so a
-# station with none reads 0.
-_UNRESOLVED = ["pending", "needs_review", "auto_rejected", "manual_rejected"]
-_MISSING_SQL = """
-SELECT s.id, count(m.identity_id) AS missing
-FROM stations s
-LEFT JOIN (
-    SELECT sip.station_id, sip.identity_id
-    FROM station_identity_plays sip
-    JOIN track_identities ti ON ti.id = sip.identity_id
-    JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
-    WHERE ti.match_status = ANY(%(unresolved)s) OR ba.match_status = ANY(%(unresolved)s)
-) m ON m.station_id = s.id
-GROUP BY s.id
-"""
 
 # An override's key: its work, then every other column that tells two overrides of one work
 # apart (format_name today; a version text later), when set.
@@ -191,7 +179,45 @@ def _artists(conn: Any) -> dict[str, Any]:
     }
 
 
-def _sections(conn: Any) -> tuple[dict[str, Any], list[Pair]]:
+async def _report_totals(dsn: str, snapshot: str, stations: Sequence[UUID]) -> dict[str, int]:
+    """Each station's missing-matches total from the report's own route function
+    (``routers/stations.py``, ``get_missing_matches_report``), so a change to the report shows
+    here; read in the run's snapshot, on a connection of its own (the route is async)."""
+    from psycopg import sql as pg_sql
+    from psycopg.rows import dict_row
+
+    from backend.routers.stations import get_missing_matches_report
+
+    aconn = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row)
+    async with aconn:
+        await aconn.set_isolation_level(psycopg.IsolationLevel.REPEATABLE_READ)
+        await aconn.set_read_only(True)
+        await aconn.execute(
+            pg_sql.SQL("SET TRANSACTION SNAPSHOT {}").format(pg_sql.Literal(snapshot))
+        )
+        totals: dict[str, int] = {}
+        for station in stations:
+            report = await get_missing_matches_report(
+                station_id=station, conn=aconn, _token="gate", limit=1, offset=0
+            )
+            totals[str(station)] = report.total
+        await aconn.rollback()
+    return totals
+
+
+def _missing_matches(conn: Any, dsn: str) -> dict[str, int]:
+    """Every station's missing-matches total (a station with none reads 0)."""
+    stations = [row["id"] for row in conn.execute("SELECT id FROM stations ORDER BY id")]
+    if not stations:
+        return {}
+    snapshot = conn.execute("SELECT pg_export_snapshot() AS id").fetchone()["id"]
+    # The selector loop: psycopg's async connections can't run on Windows' default one.
+    return asyncio.run(
+        _report_totals(dsn, snapshot, stations), loop_factory=asyncio.SelectorEventLoop
+    )
+
+
+def _sections(conn: Any, dsn: str) -> tuple[dict[str, Any], list[Pair]]:
     air, work_source, pairs = _air_play(conn)
     file_work, tags = _files(conn)
     matches = {
@@ -202,10 +228,7 @@ def _sections(conn: Any) -> tuple[dict[str, Any], list[Pair]]:
         str(row["work_id"]): _text(row["preferred_file_id"])
         for row in conn.execute("SELECT work_id, preferred_file_id FROM song_masters").fetchall()
     }
-    missing = {
-        str(row["id"]): int(row["missing"])
-        for row in conn.execute(_MISSING_SQL, {"unresolved": _UNRESOLVED}).fetchall()
-    }
+    missing = _missing_matches(conn, dsn)
     sections = {
         "air-play": air,
         "work-source": work_source,
@@ -261,7 +284,7 @@ def record(dsn: str) -> dict[str, Any]:
     """The snapshot of *dsn*: header, sections and timing, from one read-only snapshot."""
     with gate_common.snapshot_read(dsn) as conn, gate_common.quiet_logging():
         head = gate_common.header(TOOL, FORMAT_VERSION, conn)
-        sections, pairs = _sections(conn)
+        sections, pairs = _sections(conn, dsn)
         timing = _timing(conn, pairs)
     return {"header": head, "sections": sections, "timing": timing}
 

@@ -153,7 +153,10 @@ def _pages(client: Any, path: str, pages: int, totals: Sequence[str]) -> dict[st
 
 
 def _answer(response: Any) -> Any:
-    """The route's answer, or ``{"status": code}`` when it found nothing to answer with."""
+    """The route's answer, or ``{"status": code}`` for a client error (a sample id it does not
+    find). A server error ends the run: the same 500 on both sides would compare equal."""
+    if response.status_code >= 500:
+        raise SystemExit(f"{response.request.url} answered {response.status_code}")
     if response.status_code != 200:
         return {"status": response.status_code}
     return clean(response.json())

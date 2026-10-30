@@ -6,8 +6,10 @@ gate copy, so Lance can use the pages he must review before the feature's single
 
 Both processes carry S10's guards: ``DATABASE_URL`` the copy (a bench database, or nothing
 starts), ``STREAM_ENABLED=false`` and their own Huey file (``PYTEST_XDIST_WORKER=gate``). The API
-listens on port 8020, beside the dev stack's 8010. ``up`` records their process ids in the state
-file; ``down`` stops exactly those processes, and their children.
+listens on port 8020, beside the dev stack's 8010; the worker runs no periodic tasks. ``up``
+records their process ids in the state file; ``down`` stops exactly those processes, and their
+children. The frontend's API address is fixed at 8010 today, so the pages reach this API only
+once that is configurable (a follow-up before 4.2's Link check).
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ import gate_common  # noqa: E402
 API_PORT = 8020
 DEFAULT_STATE = gate_common.ROOT / "audit" / "snapshots" / "staging.json"
 API = ["-m", "backend.run_server"]
-WORKER = ["-m", "huey.bin.huey_consumer", "backend.tasks.huey_app.huey", "-w", "1"]
+# No periodic tasks: the watcher would scan the real library and enrich through MusicBrainz
+# beside the dev stack's own worker, and the hash backfill would compete for its disk.
+WORKER = ["-m", "huey.bin.huey_consumer", "backend.tasks.huey_app.huey", "-w", "1", "--no-periodic"]
 _STACK_MODULES = ("backend.run_server", "huey.bin.huey_consumer")
 
 
