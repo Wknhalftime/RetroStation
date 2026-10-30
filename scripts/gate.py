@@ -149,6 +149,26 @@ def _tablespace(admin_dsn: str) -> str | None:
     return TEST_TABLESPACE if found else None
 
 
+def _client_bin(admin_dsn: str, explicit: str | None) -> str | None:
+    """*explicit*, else the client tools of the server's own major version where PostgreSQL
+    installs them, else None (``bench_enrich`` then takes them from PATH). A newer pg_dump
+    writes settings an older server refuses on restore (pg_dump 17's ``transaction_timeout``
+    on a 16 server), and Debian's wrapper puts the newest client on PATH."""
+    if explicit:
+        return explicit
+    with psycopg.connect(admin_dsn, autocommit=True) as admin:
+        major = admin.info.server_version // 10000
+    tool = "pg_dump.exe" if sys.platform == "win32" else "pg_dump"
+    for folder in (
+        f"/usr/lib/postgresql/{major}/bin",
+        f"C:/Program Files/PostgreSQL/{major}/bin",
+        f"D:/Program Files/PostgreSQL/{major}/bin",
+    ):
+        if (Path(folder) / tool).is_file():
+            return folder
+    return None
+
+
 def _refuse_source(source_name: str, target: str) -> None:
     lowered = source_name.lower()
     if "test" in lowered or "bench" in lowered or lowered == target:
@@ -178,7 +198,7 @@ def clone(source_dsn: str, branch: str, pg_bin: str | None) -> str:
             source_dsn,
             admin_dsn,
             target,
-            pg_bin,
+            _client_bin(admin_dsn, pg_bin),
             tablespace=_tablespace(admin_dsn),
             dump_options=(LOCK_WAIT,),
         )

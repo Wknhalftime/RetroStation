@@ -80,6 +80,14 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --all-extras
+      # The gate's clone tests dump and restore the pg16 service: they need the 16 client
+      # tools, which scripts/gate.py picks from /usr/lib/postgresql/16/bin (a newer pg_dump
+      # writes settings a 16 server refuses on restore).
+      - name: PostgreSQL 16 client tools
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo apt-get update && sudo apt-get install -y postgresql-client-16
+          fi
       - run: uv run pytest --cov=backend --cov-branch --cov-fail-under=80
 
   frontend:
