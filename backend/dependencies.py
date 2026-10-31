@@ -27,7 +27,11 @@ from backend.services.audio_tags import probe_clip
 from backend.services.master_choice_service import MasterChoiceRepos
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
-from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.repository_factory import (
+    RepositoryFactory,
+    reconciliation_repos,
+    work_curation_repos,
+)
 from backend.services.streaming.cue_editor import CueEditorPorts, ReadPeaks
 from backend.services.streaming.liner_cues import LinerCuePorts
 from backend.services.streaming.liners import LinerPorts, liner_folder
@@ -35,6 +39,7 @@ from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
 from backend.services.streaming.stream_settings import StreamingState, streaming_state
+from backend.services.work_curation_service import WorkCurationRepos
 from backend.services.work_move_service import WorkMoveRepos
 
 logger = structlog.get_logger()
@@ -161,6 +166,11 @@ SyncRepos = Annotated[RepositoryFactory, Depends(get_sync_repos, scope="function
 def get_reconciliation_repos(repos: SyncRepos) -> ReconciliationRepos:
     """The fold repositories for one request, on the request's connection."""
     return reconciliation_repos(repos)
+
+
+def get_work_curation_repos(repos: SyncRepos) -> WorkCurationRepos:
+    """The works writes' repositories, on the request's connection (phase 0c, C75)."""
+    return work_curation_repos(repos)
 
 
 def get_station_year_repos(repos: SyncRepos) -> StationYearRepos:

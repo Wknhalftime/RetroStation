@@ -29,10 +29,11 @@ FORMAT_BONUS: dict[str, int] = {"flac": 10, "aac": 6, "ogg": 6, "mp3": 3}
 
 
 def score_file_row(row: dict[str, Any]) -> tuple[int, int, int]:
-    """Return (score, bitrate, duration_ms) for a raw DB row dict.
+    """Return (score, bitrate, duration_ms) for a row of stored file columns.
 
-    Used by async router helpers that work with psycopg row dicts rather than
-    domain objects. Shares the same scoring constants as :func:`_score_file`.
+    Used by ``work_curation_service``'s master recalculation, on a
+    ``MasterCandidate`` as a dict, rather than on a domain ``LibraryFile``.
+    Shares the same scoring constants as :func:`_score_file`.
     """
     score = 0
     rs = row.get("release_status")

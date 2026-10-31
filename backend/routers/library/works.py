@@ -2,29 +2,50 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.concurrency import run_in_threadpool
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_token, get_db_connection, get_master_choice_repos
+from backend.dependencies import (
+    SyncRepos,
+    get_current_token,
+    get_db_connection,
+    get_master_choice_repos,
+    get_work_curation_repos,
+)
 from backend.domain.curation import (
+    CurationFileMissingError,
+    CurationFileNotFoundError,
+    CurationFileNotOnWorkError,
+    CurationWorkNotFoundError,
+    FileAlreadyOnWorkError,
+    FormatOverrideExistsError,
+    FormatOverrideNotFoundError,
     MasterFileMissingError,
     MasterFileNotOnWorkError,
     MasterWorkNotFoundError,
+    MergeTargetInSourcesError,
+    NewFormatOverride,
+    SongMasterNotFoundError,
+    WorkCurationError,
 )
-from backend.domain.enums import CatalogSource, FileStatus, TargetType
+from backend.domain.enums import FileStatus
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+from backend.services import work_curation_service as curation
 from backend.services.master_choice_service import MasterChoiceRepos, choose_master
-from backend.services.master_selection_service import score_file_row
+from backend.services.work_curation_service import WorkCurationRepos
 
 router = APIRouter()
 
+# The read routes' async connection; the writes run on SyncRepos.
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
+# Declared first in every write route: FastAPI resolves dependencies in declaration order, so
+# a request without a token gets its 401 before a connection is opened.
 Token = Annotated[str, Depends(get_current_token)]
 ChoiceRepos = Annotated[MasterChoiceRepos, Depends(get_master_choice_repos)]
+CurationRepos = Annotated[WorkCurationRepos, Depends(get_work_curation_repos)]
 
 
 # ---------------------------------------------------------------------------
@@ -160,161 +181,6 @@ class ReassignResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
-
-async def _recalculate_song_master(conn: AsyncConnection[Any], work_id: str) -> None:
-    """Recalculate the auto song master for a work using async SQL.
-
-    Honors a manual master only if its preferred_file_id still belongs to the
-    work; otherwise falls through to auto-recalculation so split_work and
-    reassign_file_work cannot leave a stale pointer.
-    """
-    sm_cur = await conn.execute(
-        "SELECT id, preferred_file_id, selection_method FROM song_masters WHERE work_id = %s",
-        (work_id,),
-    )
-    sm_row = await sm_cur.fetchone()
-    if sm_row is not None and sm_row["selection_method"] == "manual":
-        member_cur = await conn.execute(
-            """
-            SELECT 1
-            FROM library_files lf
-            WHERE lf.id = %s AND lf.work_id = %s AND lf.file_status = 'present'
-            """,
-            (sm_row["preferred_file_id"], work_id),
-        )
-        if await member_cur.fetchone() is not None:
-            return
-
-    files_cur = await conn.execute(
-        """
-        SELECT
-            lf.id,
-            lf.release_status,
-            lf.release_type,
-            lf.format,
-            lf.bitrate,
-            lf.duration_ms
-        FROM library_files lf
-        WHERE lf.work_id = %s AND lf.file_status = 'present'
-        """,
-        (work_id,),
-    )
-    file_rows = await files_cur.fetchall()
-    if not file_rows:
-        # As master_selection_service._decide_master: with no present file to
-        # pick, a master on one of the work's own files stays (it may come
-        # back); one on a file of another work is removed.
-        await conn.execute(
-            """
-            DELETE FROM song_masters sm
-            WHERE sm.work_id = %s
-              AND NOT EXISTS (
-                  SELECT 1 FROM library_files lf
-                  WHERE lf.id = sm.preferred_file_id AND lf.work_id = sm.work_id
-              )
-            """,
-            (work_id,),
-        )
-        return
-
-    best = max(file_rows, key=score_file_row)
-    score_val, _, _ = score_file_row(best)
-
-    master_id = sm_row["id"] if sm_row is not None else uuid4()
-    await conn.execute(
-        """
-        INSERT INTO song_masters
-            (id, work_id, preferred_file_id, selection_method, score, updated_at)
-        VALUES (%s, %s, %s, 'auto', %s, now())
-        ON CONFLICT (work_id) DO UPDATE SET
-            preferred_file_id = EXCLUDED.preferred_file_id,
-            selection_method  = 'auto',
-            score             = EXCLUDED.score,
-            updated_at        = now()
-        """,
-        (master_id, work_id, best["id"], score_val),
-    )
-
-
-async def _consolidate_recordings(
-    conn: AsyncConnection[Any],
-    source_work_ids: list[str],
-    target_work_id: str,
-) -> None:
-    """Move recordings from source works to target, merging duplicates.
-
-    When a source recording has the same version_type as an existing target
-    recording, reassign files from the source recording to the target one
-    and delete the duplicate source recording. Non-conflicting recordings
-    are simply moved to the target work.
-    """
-    if not source_work_ids:
-        return
-
-    src_ph = ", ".join("%s" for _ in source_work_ids)
-
-    src_cur = await conn.execute(
-        f"SELECT id, version_type FROM recordings WHERE work_id IN ({src_ph})",
-        source_work_ids,
-    )
-    src_recs = await src_cur.fetchall()
-
-    for src_rec in src_recs:
-        tgt_cur = await conn.execute(
-            "SELECT id FROM recordings WHERE work_id = %s AND version_type = %s",
-            (target_work_id, src_rec["version_type"]),
-        )
-        tgt_row = await tgt_cur.fetchone()
-
-        if tgt_row:
-            await conn.execute(
-                "UPDATE library_files SET recording_id = %s WHERE recording_id = %s",
-                (tgt_row["id"], src_rec["id"]),
-            )
-            await conn.execute(
-                "DELETE FROM recordings WHERE id = %s",
-                (src_rec["id"],),
-            )
-        else:
-            await conn.execute(
-                "UPDATE recordings SET work_id = %s WHERE id = %s",
-                (target_work_id, src_rec["id"]),
-            )
-
-
-async def _move_file_matches(
-    conn: AsyncConnection[Any],
-    file_id: UUID,
-    work_id: str,
-) -> None:
-    """Point the file's matches at the work the file now belongs to.
-
-    ``matches.work_id`` (0024) mirrors ``library_files.work_id`` for the
-    matched file, so it must follow the file when split or reassign moves it.
-    """
-    await conn.execute(
-        "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
-        (work_id, str(file_id)),
-    )
-
-
-async def _release_work_matches(conn: AsyncConnection[Any], work_id: str) -> None:
-    """Move any match still naming an emptied work to its file's current work.
-
-    ``matches.work_id`` is an FK without ON DELETE, so this must run before
-    the work is deleted. A match without a file is left with a NULL work_id.
-    """
-    await conn.execute(
-        """
-        UPDATE matches m
-        SET work_id = (
-            SELECT lf.work_id FROM library_files lf WHERE lf.id = m.library_file_id
-        )
-        WHERE m.work_id = %s
-        """,
-        (work_id,),
-    )
 
 
 def _file_info(
@@ -589,13 +455,34 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
 
 
 # ---------------------------------------------------------------------------
-# Routes — master management
+# Routes — writes: sync routes on the request's one connection (SyncRepos, C75), each
+# calling work_curation_service (or master_choice_service); a refusal's detail is the
+# service error's message
 # ---------------------------------------------------------------------------
+
+_REFUSAL_STATUS: dict[type[WorkCurationError], int] = {
+    CurationWorkNotFoundError: status.HTTP_404_NOT_FOUND,
+    CurationFileNotFoundError: status.HTTP_404_NOT_FOUND,
+    FormatOverrideNotFoundError: status.HTTP_404_NOT_FOUND,
+    SongMasterNotFoundError: status.HTTP_404_NOT_FOUND,
+    FormatOverrideExistsError: status.HTTP_409_CONFLICT,
+    CurationFileNotOnWorkError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    CurationFileMissingError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    FileAlreadyOnWorkError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    MergeTargetInSourcesError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+}
+_REFUSALS = tuple(_REFUSAL_STATUS)
+
+
+def _refused(error: WorkCurationError) -> HTTPException:
+    """The refusal's status: its own class's, else the nearest mapped base class's."""
+    code = next(_REFUSAL_STATUS[cls] for cls in type(error).__mro__ if cls in _REFUSAL_STATUS)
+    return HTTPException(status_code=code, detail=str(error))
 
 
 @router.put("/works/{work_id}/master", response_model=SongMasterResponse)
-async def set_work_master(
-    work_id: str, body: SetMasterRequest, repos: ChoiceRepos, _token: Token
+def set_work_master(
+    _token: Token, work_id: str, body: SetMasterRequest, repos: ChoiceRepos
 ) -> SongMasterResponse:
     """Make a file the work's manual master (UPSERT).
 
@@ -603,7 +490,7 @@ async def set_work_master(
     this work first.
     """
     try:
-        master = await run_in_threadpool(choose_master, work_id, body.preferred_file_id, repos)
+        master = choose_master(work_id, body.preferred_file_id, repos)
     except MasterWorkNotFoundError as missing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(missing)) from missing
     except (MasterFileNotOnWorkError, MasterFileMissingError) as refused:
@@ -621,20 +508,12 @@ async def set_work_master(
 
 
 @router.delete("/works/{work_id}/master", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_work_master(work_id: str, conn: DbConn, _token: Token) -> None:
+def delete_work_master(_token: Token, work_id: str, repos: SyncRepos) -> None:
     """Remove the manual song master for a work."""
-    cur = await conn.execute("SELECT id FROM song_masters WHERE work_id = %s", (work_id,))
-    if await cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No master found for work {work_id}",
-        )
-    await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
-
-
-# ---------------------------------------------------------------------------
-# Routes — format overrides
-# ---------------------------------------------------------------------------
+    try:
+        curation.delete_master(work_id, repos.song_masters)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
 
 
 @router.post(
@@ -642,62 +521,24 @@ async def delete_work_master(work_id: str, conn: DbConn, _token: Token) -> None:
     response_model=FormatOverrideResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_format_override(
-    work_id: str, body: CreateFormatOverrideRequest, conn: DbConn, _token: Token
+def create_format_override(
+    _token: Token, work_id: str, body: CreateFormatOverrideRequest, repos: CurationRepos
 ) -> FormatOverrideResponse:
     """Create a per-format preferred file override for a work."""
-    work_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (work_id,))
-    if await work_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
-        )
-
-    file_cur = await conn.execute(
-        "SELECT file_status FROM library_files WHERE id = %s AND work_id = %s",
-        (body.preferred_file_id, work_id),
+    new = NewFormatOverride(
+        format_name=body.format_name, preferred_file_id=body.preferred_file_id, notes=body.notes
     )
-    file_row = await file_cur.fetchone()
-    if file_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {body.preferred_file_id} does not belong to work {work_id}",
-        )
-    if file_row["file_status"] != FileStatus.PRESENT:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {body.preferred_file_id} is missing from disk",
-        )
-
-    override_id = uuid4()
-    insert_cur = await conn.execute(
-        """
-        INSERT INTO format_overrides (id, work_id, format_name, preferred_file_id, notes)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (work_id, format_name) DO NOTHING
-        RETURNING id
-        """,
-        (override_id, work_id, body.format_name, body.preferred_file_id, body.notes),
-    )
-    if await insert_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Format override for work {work_id} and format '{body.format_name}' already exists"
-            ),
-        )
-
-    row_cur = await conn.execute("SELECT * FROM format_overrides WHERE id = %s", (override_id,))
-    row = await row_cur.fetchone()
-    if row is None:
-        raise RuntimeError("Expected row after INSERT")
+    try:
+        stored = curation.create_format_override(work_id, new, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
     return FormatOverrideResponse(
-        id=row["id"],
-        work_id=row["work_id"],
-        format_name=row["format_name"],
-        preferred_file_id=row["preferred_file_id"],
-        notes=row.get("notes"),
-        created_at=row["created_at"],
+        id=stored.id,
+        work_id=stored.work_id,
+        format_name=stored.format_name,
+        preferred_file_id=stored.preferred_file_id,
+        notes=stored.notes,
+        created_at=stored.created_at,
     )
 
 
@@ -705,168 +546,29 @@ async def create_format_override(
     "/works/{work_id}/format-overrides/{override_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_format_override(
-    work_id: str, override_id: UUID, conn: DbConn, _token: Token
+def delete_format_override(
+    _token: Token, work_id: str, override_id: UUID, repos: SyncRepos
 ) -> None:
     """Delete a format override by ID."""
-    cur = await conn.execute(
-        "SELECT id FROM format_overrides WHERE id = %s AND work_id = %s",
-        (override_id, work_id),
-    )
-    if await cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Format override {override_id} not found for work {work_id}",
-        )
-    await conn.execute("DELETE FROM format_overrides WHERE id = %s", (override_id,))
-
-
-# ---------------------------------------------------------------------------
-# Routes — merge / split / reassign
-# ---------------------------------------------------------------------------
+    try:
+        curation.delete_format_override(work_id, override_id, repos.format_overrides)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
 
 
 @router.post("/works/{target_id}/merge", response_model=MergeResponse)
-async def merge_works(
-    target_id: str, body: MergeRequest, conn: DbConn, _token: Token
+def merge_works(
+    _token: Token, target_id: str, body: MergeRequest, repos: CurationRepos
 ) -> MergeResponse:
     """Merge one or more source works into a target work."""
-    target_cur = await conn.execute("SELECT id, artist_id FROM works WHERE id = %s", (target_id,))
-    target_row = await target_cur.fetchone()
-    if target_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {target_id} not found",
-        )
-
-    if target_id in body.source_work_ids:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Target work ID must not appear in source_work_ids",
-        )
-
-    if not body.source_work_ids:
-        return MergeResponse(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
-
-    placeholders = ", ".join("%s" for _ in body.source_work_ids)
-    exist_cur = await conn.execute(
-        f"SELECT id, artist_id FROM works WHERE id IN ({placeholders})",
-        body.source_work_ids,
-    )
-    existing_source_rows = await exist_cur.fetchall()
-    existing_source_ids = [r["id"] for r in existing_source_rows]
-
-    if not existing_source_ids:
-        return MergeResponse(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
-
-    merged_file_count = 0
-    dropped_override_count = 0
-
-    src_placeholders = ", ".join("%s" for _ in existing_source_ids)
-
-    files_cur = await conn.execute(
-        f"UPDATE library_files SET work_id = %s WHERE work_id IN ({src_placeholders})",
-        [target_id, *existing_source_ids],
-    )
-    # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
-    merged_file_count = max(0, files_cur.rowcount)
-
-    # Drop source overrides that collide with an existing target override
-    # (target wins) OR collide with another source override for the same
-    # format_name (oldest source wins, id tie-break) so the subsequent bulk
-    # UPDATE cannot violate the UNIQUE (work_id, format_name) constraint.
-    drop_cur = await conn.execute(
-        f"""
-        SELECT id FROM format_overrides
-        WHERE work_id IN ({src_placeholders})
-          AND (
-            format_name IN (
-              SELECT format_name FROM format_overrides WHERE work_id = %s
-            )
-            OR id NOT IN (
-              SELECT DISTINCT ON (format_name) id
-              FROM format_overrides
-              WHERE work_id IN ({src_placeholders})
-                AND format_name NOT IN (
-                  SELECT format_name FROM format_overrides WHERE work_id = %s
-                )
-              ORDER BY format_name, created_at ASC, id ASC
-            )
-          )
-        """,
-        [*existing_source_ids, target_id, *existing_source_ids, target_id],
-    )
-    drop_rows = await drop_cur.fetchall()
-    dropped_override_count = len(drop_rows)
-
-    if drop_rows:
-        drop_ids = [r["id"] for r in drop_rows]
-        drop_placeholders = ", ".join("%s" for _ in drop_ids)
-        await conn.execute(
-            f"DELETE FROM format_overrides WHERE id IN ({drop_placeholders})",
-            drop_ids,
-        )
-
-    await conn.execute(
-        f"UPDATE format_overrides SET work_id = %s WHERE work_id IN ({src_placeholders})",
-        [target_id, *existing_source_ids],
-    )
-
-    await _consolidate_recordings(conn, existing_source_ids, target_id)
-
-    await conn.execute(
-        f"""
-        UPDATE matches
-        SET target_id = %s
-        WHERE target_type = %s AND target_id IN ({src_placeholders})
-        """,
-        [target_id, TargetType.WORK.value, *existing_source_ids],
-    )
-    await conn.execute(
-        f"UPDATE matches SET work_id = %s WHERE work_id IN ({src_placeholders})",
-        [target_id, *existing_source_ids],
-    )
-
-    await conn.execute(
-        f"DELETE FROM song_masters WHERE work_id IN ({src_placeholders})",
-        existing_source_ids,
-    )
-    deleted_cur = await conn.execute(
-        f"DELETE FROM works WHERE id IN ({src_placeholders}) RETURNING id",
-        existing_source_ids,
-    )
-    deleted_rows = await deleted_cur.fetchall()
-    deleted_work_count = len(deleted_rows)
-
-    await _recalculate_song_master(conn, target_id)
-
-    source_artist_ids = list({r["artist_id"] for r in existing_source_rows})
-    for artist_id in source_artist_ids:
-        if artist_id == target_row["artist_id"]:
-            continue
-        artist_cur = await conn.execute("SELECT origin FROM artists WHERE id = %s", (artist_id,))
-        artist_row = await artist_cur.fetchone()
-        if artist_row is None:
-            continue
-        if artist_row["origin"] != CatalogSource.LOCAL:
-            continue
-        works_cur = await conn.execute(
-            "SELECT id FROM works WHERE artist_id = %s LIMIT 1", (artist_id,)
-        )
-        if await works_cur.fetchone() is not None:
-            continue
-        # matches.target_id has no FK: an artist match must not be left dangling.
-        match_cur = await conn.execute(
-            "SELECT id FROM matches WHERE target_type = %s AND target_id = %s LIMIT 1",
-            (TargetType.ARTIST.value, artist_id),
-        )
-        if await match_cur.fetchone() is None:
-            await conn.execute("DELETE FROM artists WHERE id = %s", (artist_id,))
-
+    try:
+        merged = curation.merge_works(target_id, body.source_work_ids, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
     return MergeResponse(
-        merged_file_count=merged_file_count,
-        deleted_work_count=deleted_work_count,
-        dropped_override_count=dropped_override_count,
+        merged_file_count=merged.merged_file_count,
+        deleted_work_count=merged.deleted_work_count,
+        dropped_override_count=merged.dropped_override_count,
     )
 
 
@@ -875,251 +577,24 @@ async def merge_works(
     response_model=SplitResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def split_work(
-    work_id: str, body: SplitRequest, conn: DbConn, _token: Token
+def split_work(
+    _token: Token, work_id: str, body: SplitRequest, repos: CurationRepos
 ) -> SplitResponse:
     """Split a single file out of a work into its own new work."""
-    work_cur = await conn.execute(
-        "SELECT id, title, artist_id FROM works WHERE id = %s", (work_id,)
-    )
-    work_row = await work_cur.fetchone()
-    if work_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
-        )
-
-    file_cur = await conn.execute(
-        """
-        SELECT lf.id, lf.recording_id
-        FROM library_files lf
-        WHERE lf.id = %s AND lf.work_id = %s
-        """,
-        (body.file_id, work_id),
-    )
-    file_row = await file_cur.fetchone()
-    if file_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {body.file_id} does not belong to work {work_id}",
-        )
-
-    recording_id = file_row["recording_id"]
-
-    new_work_id = str(uuid4())
-    await conn.execute(
-        """
-        INSERT INTO works (id, title, artist_id, origin, needs_enhancement)
-        VALUES (%s, %s, %s, 'local', FALSE)
-        """,
-        (new_work_id, work_row["title"], work_row["artist_id"]),
-    )
-
-    if recording_id is not None:
-        rec_cur = await conn.execute(
-            "SELECT title, version_type, duration_ms FROM recordings WHERE id = %s",
-            (recording_id,),
-        )
-        rec_row = await rec_cur.fetchone()
-        new_rec_id = str(uuid4())
-        await conn.execute(
-            """INSERT INTO recordings
-                   (id, title, work_id, version_type, duration_ms,
-                    needs_enhancement)
-               VALUES (%s, %s, %s, %s, %s, FALSE)""",
-            (
-                new_rec_id,
-                rec_row["title"] if rec_row else work_row["title"],
-                new_work_id,
-                rec_row["version_type"] if rec_row else "original",
-                rec_row["duration_ms"] if rec_row else None,
-            ),
-        )
-        await conn.execute(
-            "UPDATE library_files SET recording_id = %s WHERE id = %s",
-            (new_rec_id, body.file_id),
-        )
-
-    await conn.execute(
-        "UPDATE library_files SET work_id = %s WHERE id = %s",
-        (new_work_id, body.file_id),
-    )
-    await _move_file_matches(conn, body.file_id, new_work_id)
-
-    new_master_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO song_masters
-            (id, work_id, preferred_file_id, selection_method, score, updated_at)
-        VALUES (%s, %s, %s, 'auto', NULL, now())
-        """,
-        (new_master_id, new_work_id, body.file_id),
-    )
-
-    count_cur = await conn.execute(
-        "SELECT COUNT(*) AS cnt FROM library_files WHERE work_id = %s",
-        (work_id,),
-    )
-    count_row = await count_cur.fetchone()
-    old_work_deleted = False
-    if count_row and count_row["cnt"] == 0:
-        await _release_work_matches(conn, work_id)
-        await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (work_id,))
-        await conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (work_id,))
-        await conn.execute("DELETE FROM recordings WHERE work_id = %s", (work_id,))
-        await conn.execute("DELETE FROM works WHERE id = %s", (work_id,))
-        old_work_deleted = True
-    else:
-        await _recalculate_song_master(conn, work_id)
-
-    return SplitResponse(new_work_id=new_work_id, old_work_deleted=old_work_deleted)
-
-
-async def _validate_reassign(
-    conn: AsyncConnection[Any], file_id: UUID, target_work_id: str
-) -> tuple[str | None, str | None]:
-    """Check the file and target work exist and are not already linked.
-
-    Returns (current_work_id, recording_id) for the file.
-    """
-    file_cur = await conn.execute(
-        """
-        SELECT lf.id, lf.recording_id, lf.work_id AS current_work_id
-        FROM library_files lf
-        WHERE lf.id = %s
-        """,
-        (file_id,),
-    )
-    file_row = await file_cur.fetchone()
-    if file_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File {file_id} not found",
-        )
-
-    current_work_id: str | None = file_row["current_work_id"]
-    recording_id: str | None = file_row["recording_id"]
-
-    target_cur = await conn.execute("SELECT id FROM works WHERE id = %s", (target_work_id,))
-    if await target_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {target_work_id} not found",
-        )
-
-    if current_work_id == target_work_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"File {file_id} is already assigned to work {target_work_id}",
-        )
-
-    return current_work_id, recording_id
-
-
-async def _repoint_recording(
-    conn: AsyncConnection[Any], file_id: UUID, recording_id: str, target_work_id: str
-) -> None:
-    """Move file_id's recording so it belongs to target_work_id.
-
-    The recording is shared with other files -> split off a new recording on
-    the target (copying title/version_type/duration_ms) and leave the shared
-    one with its remaining files. Owned solely by file_id -> the recording
-    itself moves. Either way, the target already has a recording with the
-    same version_type -> reuse it instead.
-    """
-    share_cur = await conn.execute(
-        "SELECT COUNT(*) AS cnt FROM library_files WHERE recording_id = %s AND id != %s",
-        (recording_id, str(file_id)),
-    )
-    share_row = await share_cur.fetchone()
-    is_shared = share_row is not None and share_row["cnt"] > 0
-
-    rec_cur = await conn.execute(
-        "SELECT title, version_type, duration_ms FROM recordings WHERE id = %s",
-        (recording_id,),
-    )
-    rec_row = await rec_cur.fetchone()
-    rec_version = rec_row["version_type"] if rec_row else "original"
-
-    tgt_cur = await conn.execute(
-        "SELECT id FROM recordings WHERE work_id = %s AND version_type = %s",
-        (target_work_id, rec_version),
-    )
-    tgt_rec = await tgt_cur.fetchone()
-
-    if tgt_rec:
-        await conn.execute(
-            "UPDATE library_files SET recording_id = %s WHERE id = %s",
-            (tgt_rec["id"], str(file_id)),
-        )
-    elif is_shared:
-        new_rec_id = str(uuid4())
-        await conn.execute(
-            """INSERT INTO recordings
-                   (id, title, work_id, version_type, duration_ms,
-                    needs_enhancement)
-               VALUES (%s, %s, %s, %s, %s, FALSE)""",
-            (
-                new_rec_id,
-                rec_row["title"] if rec_row else "",
-                target_work_id,
-                rec_version,
-                rec_row["duration_ms"] if rec_row else None,
-            ),
-        )
-        await conn.execute(
-            "UPDATE library_files SET recording_id = %s WHERE id = %s",
-            (new_rec_id, str(file_id)),
-        )
-    else:
-        await conn.execute(
-            "UPDATE recordings SET work_id = %s WHERE id = %s",
-            (target_work_id, recording_id),
-        )
-
-
-async def _cleanup_old_work(conn: AsyncConnection[Any], old_work_id: str) -> bool:
-    """Delete old_work_id if it now has zero files, else recalculate its master.
-
-    Returns whether the work was deleted.
-    """
-    count_cur = await conn.execute(
-        "SELECT COUNT(*) AS cnt FROM library_files WHERE work_id = %s",
-        (old_work_id,),
-    )
-    count_row = await count_cur.fetchone()
-    if count_row and count_row["cnt"] == 0:
-        await _release_work_matches(conn, old_work_id)
-        await conn.execute("DELETE FROM song_masters WHERE work_id = %s", (old_work_id,))
-        await conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (old_work_id,))
-        await conn.execute("DELETE FROM recordings WHERE work_id = %s", (old_work_id,))
-        await conn.execute("DELETE FROM works WHERE id = %s", (old_work_id,))
-        return True
-
-    await _recalculate_song_master(conn, old_work_id)
-    return False
+    try:
+        split = curation.split_file_off(work_id, body.file_id, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+    return SplitResponse(new_work_id=split.new_work_id, old_work_deleted=split.old_work_deleted)
 
 
 @router.patch("/files/{file_id}/work", response_model=ReassignResponse)
-async def reassign_file_work(
-    file_id: UUID, body: ReassignRequest, conn: DbConn, _token: Token
+def reassign_file_work(
+    _token: Token, file_id: UUID, body: ReassignRequest, repos: CurationRepos
 ) -> ReassignResponse:
     """Reassign a library file to a different work."""
-    current_work_id, recording_id = await _validate_reassign(conn, file_id, body.work_id)
-
-    if recording_id is not None:
-        await _repoint_recording(conn, file_id, recording_id, body.work_id)
-
-    await conn.execute(
-        "UPDATE library_files SET work_id = %s WHERE id = %s",
-        (body.work_id, file_id),
-    )
-    await _move_file_matches(conn, file_id, body.work_id)
-
-    await _recalculate_song_master(conn, body.work_id)
-
-    old_work_deleted = False
-    if current_work_id is not None:
-        old_work_deleted = await _cleanup_old_work(conn, current_work_id)
-
-    return ReassignResponse(old_work_id=current_work_id, old_work_deleted=old_work_deleted)
+    try:
+        moved = curation.reassign_file(file_id, body.work_id, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+    return ReassignResponse(old_work_id=moved.old_work_id, old_work_deleted=moved.old_work_deleted)

@@ -124,6 +124,14 @@ class Work:
     origin: CatalogSource = CatalogSource.LOCAL
 
 
+@dataclass(frozen=True)
+class RecordingVersion:
+    """A recording's id and version type."""
+
+    id: str
+    version_type: VersionType
+
+
 @dataclass
 class Recording:
     id: str  # MusicBrainz recording MBID used directly as PK (no separate mbid field)
