@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from backend.domain.enums import ArtistLinkOutcome, CatalogSource, VersionType
 from backend.domain.system import StorageUnavailableError
@@ -123,38 +122,6 @@ class Work:
     embedding: list[float] | None = None
     mbid: str | None = None
     origin: CatalogSource = CatalogSource.LOCAL
-
-
-@dataclass(frozen=True)
-class WorkFootprint:
-    """A work plus how much references it — the input to duplicate planning."""
-
-    id: str
-    title: str
-    artist_id: str
-    file_count: int = 0
-    match_count: int = 0
-
-
-@dataclass(frozen=True)
-class PartSplitPlan:
-    """Files on a local work whose title names a different part than the work's.
-
-    "Another Brick in the Wall, Part 1" on a "..., Part II" work: each file in
-    ``file_ids`` belongs on a work of its own part.
-    """
-
-    work_id: str
-    work_title: str
-    file_ids: tuple[UUID, ...]
-
-
-@dataclass(frozen=True)
-class WorkMergePlan:
-    """Fold ``source_ids`` into ``target_id``; all share an artist and title."""
-
-    target_id: str
-    source_ids: tuple[str, ...]
 
 
 @dataclass

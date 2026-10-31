@@ -1,4 +1,4 @@
-"""Integration: PgLibraryFileRepository folds a stale case-duplicate row into its keeper.
+"""Integration: PgLibraryFileRepository folds a stale row into the row naming its file.
 
 Every table with a foreign key to ``library_files`` must be re-pointed
 before the stale row is deleted, and a match the keeper already has for
@@ -113,20 +113,3 @@ def test_merge_into_moves_references_and_deletes_the_stale_row(
         ).fetchone()
         assert override is not None
         assert override["preferred_file_id"] == keeper.id
-
-
-def test_case_duplicate_groups_hold_only_paths_equal_ignoring_case(
-    migrated_db: str,
-    tmp_path: Path,
-) -> None:
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Seal", "seal")
-        work_id = repos.works.create_local("Kiss from a Rose", artist_id)
-        upper = _file(repos, str(tmp_path / "Keep The Faith" / "a.flac"), work_id)
-        lower = _file(repos, str(tmp_path / "Keep the Faith" / "a.flac"), work_id)
-        _file(repos, str(tmp_path / "Keep the Faith" / "b.flac"), work_id)
-
-        groups = repos.library_files.get_case_duplicate_groups()
-
-        assert [{f.id for f in g} for g in groups] == [{upper.id, lower.id}]

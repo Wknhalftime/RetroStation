@@ -447,19 +447,6 @@ class PgLibraryFileRepository(
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
-    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
-        rows = self._conn.execute(
-            """SELECT * FROM library_files
-               WHERE lower(file_path) IN (
-                   SELECT lower(file_path) FROM library_files
-                   GROUP BY 1 HAVING count(*) > 1)
-               ORDER BY lower(file_path), file_path"""
-        ).fetchall()
-        groups: dict[str, list[LibraryFile]] = {}
-        for row in rows:
-            groups.setdefault(row["file_path"].lower(), []).append(self._row_to_model(row))
-        return list(groups.values())
-
     def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         source, target = str(source_id), str(target_id)
         # matches has UNIQUE (identity_id, library_file_id).

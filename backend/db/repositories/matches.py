@@ -7,7 +7,7 @@ import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.enums import MatchTier, TargetType
-from backend.domain.matching import Match, MatchingStorageError, MatchOffFileWork
+from backend.domain.matching import Match, MatchingStorageError
 from backend.repositories.matches import MatchRepository
 
 
@@ -78,24 +78,6 @@ class PgMatchRepository(MatchRepository):
             "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
             (work_id, str(file_id)),
         )
-
-    def list_off_file_work(self) -> list[MatchOffFileWork]:
-        rows = self._conn.execute(
-            """SELECT DISTINCT m.library_file_id, m.work_id AS match_work_id,
-                      f.work_id AS file_work_id
-               FROM matches m
-               JOIN library_files f ON f.id = m.library_file_id
-               WHERE m.work_id IS DISTINCT FROM f.work_id
-               ORDER BY m.library_file_id, m.work_id"""
-        ).fetchall()
-        return [
-            MatchOffFileWork(
-                library_file_id=r["library_file_id"],
-                match_work_id=r["match_work_id"],
-                file_work_id=r["file_work_id"],
-            )
-            for r in rows
-        ]
 
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))

@@ -19,9 +19,7 @@ from psycopg.rows import dict_row
 
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.library import LibraryFile
 from backend.services.repository_factory import RepositoryFactory
-from backend.services.work_move_service import WorkMoveRepos, realign_match_works
 from backend.tasks.library_scan_tasks import _run_scan
 from tests.fixtures.audio_builders import tag_flac, write_flac
 
@@ -88,45 +86,3 @@ def test_grouping_moves_a_match_made_before_the_file_had_a_work(
     assert grouped is not None and grouped.work_id is not None
     assert match is not None
     assert match["work_id"] == grouped.work_id
-
-
-def test_realigning_moves_each_match_to_its_files_work_and_settles_the_work_left(
-    migrated_db: str, tmp_path: Path
-) -> None:
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Prince", "prince")
-        home = repos.works.create_local("Kiss", artist_id)
-        left = repos.works.create_local("Kiss (Album Version)", artist_id)
-        file = repos.library_files.upsert(
-            LibraryFile(
-                id=uuid4(), file_path=str(tmp_path / "kiss.flac"), format="flac", work_id=home
-            )
-        )
-        for work_id in (None, left):
-            conn.execute(
-                """INSERT INTO matches (identity_id, library_file_id, target_type, work_id,
-                                        confidence_score, match_tier)
-                   VALUES (%s, %s, 'library_file', %s, 1.0, 'manual')""",
-                (_identity(repos), file.id, work_id),
-            )
-
-        realigned = realign_match_works(
-            WorkMoveRepos(
-                files=repos.library_files,
-                works=repos.works,
-                song_masters=repos.song_masters,
-                matches=repos.matches,
-            )
-        )
-
-        works = conn.execute(
-            "SELECT work_id FROM matches WHERE library_file_id = %s", (file.id,)
-        ).fetchall()
-        assert sorted((d.match_work_id or "", d.file_work_id) for d in realigned) == sorted(
-            [("", home), (left, home)]
-        )
-        assert [r["work_id"] for r in works] == [home, home]
-        assert repos.matches.list_off_file_work() == []
-        assert repos.works.get_by_id(left) is None
-        assert repos.works.get_by_id(home) is not None

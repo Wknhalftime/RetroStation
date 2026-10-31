@@ -142,19 +142,6 @@ class LibraryFolder:
 
 
 @dataclass(frozen=True)
-class CaseDuplicateRepair:
-    """Rows naming one file in different case, left by case-only renames.
-
-    The keeper is the row spelled as the file is on disk; each stale row's
-    references move to it and the stale row is deleted.
-    """
-
-    keeper_id: UUID
-    keeper_path: str
-    stale_ids: tuple[UUID, ...]
-
-
-@dataclass(frozen=True)
 class MissingFileMove:
     """A MISSING row and the PRESENT row holding the same track (its successor).
 

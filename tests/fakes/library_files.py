@@ -267,12 +267,6 @@ class FakeLibraryFileRepository(LibraryFileRepository, LibraryFileEnrichmentRepo
             key=lambda f: f.file_path,
         )
 
-    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
-        groups: dict[str, list[LibraryFile]] = {}
-        for f in sorted(self._data.values(), key=lambda f: f.file_path):
-            groups.setdefault(f.file_path.lower(), []).append(f)
-        return [g for g in groups.values() if len(g) > 1]
-
     def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         # The fake holds no matches or masters; only the row itself goes.
         self._data.pop(source_id, None)

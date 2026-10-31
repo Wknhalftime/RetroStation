@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.matching import Match, MatchOffFileWork
+from backend.domain.matching import Match
 
 
 class MatchRepository(ABC):
@@ -29,9 +29,4 @@ class MatchRepository(ABC):
         ``matches.work_id`` mirrors ``library_files.work_id`` for the matched
         file, so it follows the file whenever the file changes work.
         """
-        ...
-
-    @abstractmethod
-    def list_off_file_work(self) -> list[MatchOffFileWork]:
-        """Each file whose matches carry another work than the file's, once per such work."""
         ...
