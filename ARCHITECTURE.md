@@ -263,14 +263,14 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 
 | Name or pattern | Replacement | Phase | PR | Ruling | Allowed files |
 |---|---|---|---|---|---|
-| `work_dedup_service` `dedupe_works` `plan_duplicate_merges` `merge_work_group` | none: works merge through the Library's merge route, and from 3b through one merge service (C58) | 0c | #TBD | AUD-R047 | none |
-| `part_split_service` `split_part_works` `plan_part_splits` `split_misplaced_parts` `PartSplitRepos` `PartSplitPlan` | none: grouping compares part numbers (`title_part_number`) | 0c | #TBD | AUD-R048 | none |
-| `case_duplicate_service` `repair_case_duplicates` `plan_case_duplicate_repairs` `apply_case_duplicate_repair` `CaseDuplicateRepair` | none: the scan recognises a case-only rename | 0c | #TBD | AUD-R049 | none |
-| `settle_misplaced_masters` `repair_misplaced_masters` | none: every move settles the work a file leaves (`move_file_to_work`) | 0c | #TBD | AUD-R050 | none |
-| `realign_match_works` `repair_match_works` | none: moves and grouping take a file's matches along (`matches.move_to_work`) | 0c | #TBD | AUD-R051 | none |
-| `works\.merge_into\b` `work_repo\.merge_into\b` `WorkRepository\.merge_into\b` `def merge_into\(self, target_id\b` | the Library's merge route; from 3b, one merge service (C58). `library_files.merge_into` stays | 0c | #TBD | AUD-R052 | none |
-| `_merge_recordings\b` | none: went with the works merge | 0c | #TBD | AUD-R053 | none |
-| `list_local_footprints` `WorkFootprint` | none | 0c | #TBD | AUD-R054 | none |
-| `get_case_duplicate_groups` | none | 0c | #TBD | AUD-R055 | none |
-| `list_work_ids_with_master_off_work` | none | 0c | #TBD | AUD-R056 | none |
-| `list_off_file_work` `MatchOffFileWork` | none | 0c | #TBD | AUD-R057 | none |
+| `work_dedup_service` `dedupe_works` `plan_duplicate_merges` `merge_work_group` | none: works merge through the Library's merge route, and from 3b through one merge service (C58) | 0c | #212 | AUD-R047 | none |
+| `part_split_service` `split_part_works` `plan_part_splits` `split_misplaced_parts` `PartSplitRepos` `PartSplitPlan` | none: grouping compares part numbers (`title_part_number`) | 0c | #212 | AUD-R048 | none |
+| `case_duplicate_service` `repair_case_duplicates` `plan_case_duplicate_repairs` `apply_case_duplicate_repair` `CaseDuplicateRepair` | none: the scan recognises a case-only rename | 0c | #212 | AUD-R049 | none |
+| `settle_misplaced_masters` `repair_misplaced_masters` | none: every move settles the work a file leaves (`move_file_to_work`) | 0c | #212 | AUD-R050 | none |
+| `realign_match_works` `repair_match_works` | none: moves and grouping take a file's matches along (`matches.move_to_work`) | 0c | #212 | AUD-R051 | none |
+| `works\.merge_into\b` `work_repo\.merge_into\b` `WorkRepository\.merge_into\b` `def merge_into\(self, target_id\b` | the Library's merge route; from 3b, one merge service (C58). `library_files.merge_into` stays | 0c | #212 | AUD-R052 | none |
+| `_merge_recordings\b` | none: went with the works merge | 0c | #212 | AUD-R053 | none |
+| `list_local_footprints` `WorkFootprint` | none | 0c | #212 | AUD-R054 | none |
+| `get_case_duplicate_groups` | none | 0c | #212 | AUD-R055 | none |
+| `list_work_ids_with_master_off_work` | none | 0c | #212 | AUD-R056 | none |
+| `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |
