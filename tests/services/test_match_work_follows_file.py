@@ -1,8 +1,7 @@
 """Fast (fake-repo) twins of tests/integration/test_match_work_follows_grouping.py.
 
 A match carries its file's work: grouping that gives a file its first work
-moves the file's matches too, and the repair realigns matches left on another
-work (or none) and settles the work they left. The Postgres file is the authority.
+moves the file's matches too. The Postgres file is the authority.
 """
 
 from __future__ import annotations
@@ -12,12 +11,8 @@ from uuid import UUID, uuid4
 from backend.domain.catalog import Work
 from backend.domain.enums import CatalogSource, MatchTier
 from backend.domain.library import LibraryFile
-from backend.domain.matching import Match, MatchOffFileWork
-from backend.services.work_move_service import (
-    WorkMoveRepos,
-    place_ungrouped_file,
-    realign_match_works,
-)
+from backend.domain.matching import Match
+from backend.services.work_move_service import WorkMoveRepos, place_ungrouped_file
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
@@ -33,7 +28,6 @@ def _repos() -> WorkMoveRepos:
     )
     works.set_library_file_repo(files)
     masters.set_library_file_repo(files)
-    matches.set_library_file_repo(files)
     return WorkMoveRepos(files=files, works=works, song_masters=masters, matches=matches)
 
 
@@ -74,22 +68,3 @@ def test_placing_an_ungrouped_file_moves_its_matches_to_the_work() -> None:
     assert match.identity_id is not None
     moved = repos.matches.get_by_identity(match.identity_id)
     assert moved is not None and moved.work_id == work
-
-
-def test_realigning_moves_matches_to_the_files_work_and_settles_the_work_left() -> None:
-    repos = _repos()
-    home, left = _work(repos, "home"), _work(repos, "left")
-    file = _file(repos, home)
-    _match(repos, file.id, None)
-    _match(repos, file.id, left)
-    _match(repos, file.id, home)
-
-    realigned = realign_match_works(repos)
-
-    assert sorted(realigned, key=lambda d: d.match_work_id or "") == [
-        MatchOffFileWork(file.id, None, home),
-        MatchOffFileWork(file.id, left, home),
-    ]
-    assert repos.matches.list_off_file_work() == []
-    assert repos.works.get_by_id(left) is None
-    assert repos.works.get_by_id(home) is not None

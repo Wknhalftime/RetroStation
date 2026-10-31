@@ -144,11 +144,6 @@ class LibraryFileRepository(ABC):
         ...
 
     @abstractmethod
-    def get_case_duplicate_groups(self) -> list[list[LibraryFile]]:
-        """Groups of two or more rows whose paths are equal when case is ignored."""
-        ...
-
-    @abstractmethod
     def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         """Move every reference to *source_id* onto *target_id*, then delete it.
 

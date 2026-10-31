@@ -4,8 +4,9 @@
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
-feat/liner-cues (comment audit: `audit/comment-audit.md`). Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R046 ACTIVE). If the code and this page disagree, fix one of
+feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" was added 2026-10-31
+with the artist model's phase 0c. Rulings cited here are in
+`audit/rulings.jsonl` (AUD-R015..R057 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -246,3 +247,30 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected.
+
+## Retired (C70, AUD-R045)
+
+A retired name stays dead. The PR that retires one deletes every reader, writer, field, fake,
+test and live mention, records a ruling ("retired in phase N, do not recreate") in
+`audit/rulings.jsonl`, and adds a row here. `tests/test_retired_names.py` fails, naming the
+ruling, when a row's pattern appears in `backend/`, `frontend/src/`, `scripts/` or `tests/`, on
+this page outside the table, or in `.claude/CLAUDE.md` and `.claude/rules/` (local runs only:
+`.claude/` is gitignored, so CI never sees them). It skips migrations,
+`backend/db/rollback_*.sql`, a row's allowed files (exact paths) and the check itself, which
+names 0c's retirements to prove the table holds them. `docs/` is never read: an
+old plan keeps its text and gains a "Retired" note at the top. Each entry is a Python regular
+expression in backticks (write `\|` for a pipe); use a pattern where a bare name would collide.
+
+| Name or pattern | Replacement | Phase | PR | Ruling | Allowed files |
+|---|---|---|---|---|---|
+| `work_dedup_service` `dedupe_works` `plan_duplicate_merges` `merge_work_group` | none: works merge through the Library's merge route, and from 3b through one merge service (C58) | 0c | #212 | AUD-R047 | none |
+| `part_split_service` `split_part_works` `plan_part_splits` `split_misplaced_parts` `PartSplitRepos` `PartSplitPlan` | none: grouping compares part numbers (`title_part_number`) | 0c | #212 | AUD-R048 | none |
+| `case_duplicate_service` `repair_case_duplicates` `plan_case_duplicate_repairs` `apply_case_duplicate_repair` `CaseDuplicateRepair` | none: the scan recognises a case-only rename | 0c | #212 | AUD-R049 | none |
+| `settle_misplaced_masters` `repair_misplaced_masters` | none: every move settles the work a file leaves (`move_file_to_work`) | 0c | #212 | AUD-R050 | none |
+| `realign_match_works` `repair_match_works` | none: moves and grouping take a file's matches along (`matches.move_to_work`) | 0c | #212 | AUD-R051 | none |
+| `works\.merge_into\b` `work_repo\.merge_into\b` `WorkRepository\.merge_into\b` `def merge_into\(self, target_id\b` | the Library's merge route; from 3b, one merge service (C58). `library_files.merge_into` stays | 0c | #212 | AUD-R052 | none |
+| `_merge_recordings\b` | none: went with the works merge | 0c | #212 | AUD-R053 | none |
+| `list_local_footprints` `WorkFootprint` | none | 0c | #212 | AUD-R054 | none |
+| `get_case_duplicate_groups` | none | 0c | #212 | AUD-R055 | none |
+| `list_work_ids_with_master_off_work` | none | 0c | #212 | AUD-R056 | none |
+| `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |

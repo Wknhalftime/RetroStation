@@ -8,7 +8,6 @@ from uuid import UUID
 import structlog
 
 from backend.domain.library import LibraryFile
-from backend.domain.matching import MatchOffFileWork
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.song_masters import SongMasterRepository
@@ -91,33 +90,3 @@ def _settle_work(work_id: str, repos: WorkMoveRepos) -> bool:
         return True
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     return False
-
-
-def settle_misplaced_masters(repos: WorkMoveRepos) -> list[str]:
-    """Settle every work whose song master points at a file on another work; their ids.
-
-    Repairs what moves made before the work a file left was settled (#110)
-    left behind: each such work is settled as :func:`move_file_to_work`
-    settles the work a file leaves.
-    """
-    work_ids = repos.song_masters.list_work_ids_with_master_off_work()
-    for work_id in work_ids:
-        deleted = _settle_work(work_id, repos)
-        logger.info("misplaced_master_settled", work_id=work_id, work_deleted=deleted)
-    return work_ids
-
-
-def realign_match_works(repos: WorkMoveRepos) -> list[MatchOffFileWork]:
-    """Move every file's matches to the file's work, then settle each work they left.
-
-    Repairs matches that a move or grouping before this was fixed left on
-    another work, or on none. A work they left is settled as the work a file
-    leaves (see :func:`_settle_work`). Returns what was realigned.
-    """
-    off_work = repos.matches.list_off_file_work()
-    for drift in off_work:
-        repos.matches.move_to_work(drift.library_file_id, drift.file_work_id)
-    for work_id in sorted({d.match_work_id for d in off_work if d.match_work_id is not None}):
-        deleted = _settle_work(work_id, repos)
-        logger.info("match_work_left_settled", work_id=work_id, work_deleted=deleted)
-    return off_work

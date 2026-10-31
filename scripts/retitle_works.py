@@ -12,8 +12,8 @@ Run: uv run python scripts/retitle_works.py                 # dry run: report on
      uv run python scripts/retitle_works.py --apply         # write the new titles
 
 Targets ``DATABASE_URL`` if set, else the app's configured database.
-After applying, run scripts/dedupe_works.py: a corrected title may now
-match an existing work with the same normalized title.
+A corrected title may now match an existing work with the same normalized
+title; merge the two from the Library's work page.
 """
 
 from __future__ import annotations
