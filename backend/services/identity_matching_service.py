@@ -121,7 +121,7 @@ class _ArtistMemo:
 
     The artist's match row, its catalog artist and its files by MBID and by name do not
     change from one of its songs to the next. match_identities_for_playlist walks a stage's
-    songs artist by artist (_grouped_by_artist) and the memo keeps only the current artist's
+    songs artist by artist (group_by_artist) and the memo keeps only the current artist's
     reads, so a stage holds one artist's files at a time. Each stage builds its own
     strategies, so the next stage reads afresh.
     """
@@ -138,7 +138,7 @@ class _ArtistMemo:
         return cast(_T, self._reads[name])
 
 
-def _grouped_by_artist(
+def group_by_artist(
     identities: list[BroadcastTrackIdentity],
 ) -> list[BroadcastTrackIdentity]:
     """The songs with each artist's together, artists in order of first appearance."""
@@ -165,7 +165,7 @@ def _exclusions_for(
     return exclusions_by_identity.get(identity.id, NO_EXCLUSIONS)
 
 
-def _load_exclusions(
+def load_exclusions(
     identities: list[BroadcastTrackIdentity], library_file_repo: LibraryFileRepository
 ) -> dict[UUID, CandidateExclusions]:
     """One batch lookup for every pending song's rejections, by the files' CURRENT works.
@@ -746,6 +746,98 @@ class IdentityMatchingRepos:
     recording_search_reach: RecordingSearchReachRepository | None = None
 
 
+@dataclass(frozen=True)
+class IdentityEngineInputs:
+    """What the identity engine is built from (phase 0b, S6).
+
+    match_identities_for_playlist builds its engine from one of these, and so does the
+    gate's matching dry run (scripts/dry_run_matching.py), so a dry run decides what the
+    task would. ``recording_search`` is one per run (AUD-R028, D16); ``exclusions_by_identity``
+    comes from load_exclusions over the run's songs.
+    """
+
+    repos: IdentityMatchingRepos
+    mb_client: MusicBrainzClientProtocol
+    strong_match_threshold: int
+    recording_search: RecordingSearch
+    exclusions_by_identity: ExclusionsByIdentity
+
+
+def build_identity_engine(inputs: IdentityEngineInputs) -> IdentityMatchingEngine:
+    """Mapping rules → MBID fast path (with its MusicBrainz recording search) → fuzzy fallback.
+
+    Reads the rules once, when it is built.
+    """
+    repos = inputs.repos
+    exclusions_by_identity = inputs.exclusions_by_identity
+    return IdentityMatchingEngine(
+        [
+            IdentityMappingRuleStrategy(
+                repos.rules_repo.list_ordered(),
+                repos.library_file_repo,
+                exclusions_by_identity=exclusions_by_identity,
+            ),
+            ResolvedArtistMbidStrategy(
+                repos.library_file_repo,
+                repos.match_repo,
+                inputs.mb_client,
+                repos.catalog_repo,
+                inputs.strong_match_threshold,
+                exclusions_by_identity=exclusions_by_identity,
+                recording_search=inputs.recording_search,
+                recording_search_reach=repos.recording_search_reach,
+            ),
+            BroadcastToLocalStrategy(
+                repos.library_file_repo,
+                inputs.strong_match_threshold,
+                exclusions_by_identity=exclusions_by_identity,
+            ),
+        ]
+    )
+
+
+def resolve_one_line(
+    identity: BroadcastTrackIdentity,
+    artist: BroadcastArtist | None,
+    engine: IdentityMatchingEngine,
+) -> IdentityMatchResult:
+    """The decision for one song: the engine's, or one of the three the run makes itself.
+
+    - No artist row (an orphan): NEEDS_REVIEW / ORPHANED_IDENTITY, so it surfaces in review
+      tooling and stops getting reprocessed on every matching run.
+    - Step B could not reach MusicBrainz (AUD-R028, D16): _MB_DEFERRAL, the song deferred
+      whole; the rest of the playlist carries on.
+    - The engine exhausted all strategies: AUTO_REJECTED / NO_CANDIDATES. Should not happen
+      given the strategies' defensive exhaustiveness; no candidate means AUTO_REJECTED
+      (AUD-R022 D6), never stuck PENDING.
+
+    None of the three has a file. A permanent MusicBrainz error propagates.
+    """
+    if artist is None:
+        return IdentityMatchResult(
+            status=MatchStatus.NEEDS_REVIEW,
+            tier=MatchTier.UNCLASSIFIED,
+            confidence_score=0.0,
+            library_file_id=None,
+            reason_code=ReasonCode.ORPHANED_IDENTITY,
+            reason_detail=(f"No broadcast_artist row for id {identity.broadcast_artist_id}"),
+        )
+    try:
+        result = engine.resolve(identity, artist)
+    except MusicBrainzUnavailableError:
+        return _MB_DEFERRAL
+    if result is None:
+        return IdentityMatchResult(
+            status=MatchStatus.AUTO_REJECTED,
+            tier=MatchTier.UNCLASSIFIED,
+            confidence_score=0.0,
+            library_file_id=None,
+            reason_code=ReasonCode.NO_CANDIDATES,
+            reason_detail=("All matching strategies exhausted — no result produced"),
+        )
+    return result
+
+
 def match_identities_for_playlist(
     playlist_id: UUID,
     repos: IdentityMatchingRepos,
@@ -772,37 +864,20 @@ def match_identities_for_playlist(
         logger.info("no_pending_identities", playlist_id=str(playlist_id))
         return []
 
-    rules = repos.rules_repo.list_ordered()
-
     # Resolve artists up-front to avoid N+1 queries inside the loop.
     artist_ids = [identity.broadcast_artist_id for identity in pending]
     artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
 
-    exclusions_by_identity = _load_exclusions(pending, repos.library_file_repo)
     # One per run: the MusicBrainz cut-off counts this playlist's songs only (AUD-R028, D16).
     recording_search = RecordingSearch(mb_client)
-
-    engine = IdentityMatchingEngine(
-        [
-            IdentityMappingRuleStrategy(
-                rules, repos.library_file_repo, exclusions_by_identity=exclusions_by_identity
-            ),
-            ResolvedArtistMbidStrategy(
-                repos.library_file_repo,
-                repos.match_repo,
-                mb_client,
-                repos.catalog_repo,
-                strong_match_threshold,
-                exclusions_by_identity=exclusions_by_identity,
-                recording_search=recording_search,
-                recording_search_reach=repos.recording_search_reach,
-            ),
-            BroadcastToLocalStrategy(
-                repos.library_file_repo,
-                strong_match_threshold,
-                exclusions_by_identity=exclusions_by_identity,
-            ),
-        ]
+    engine = build_identity_engine(
+        IdentityEngineInputs(
+            repos=repos,
+            mb_client=mb_client,
+            strong_match_threshold=strong_match_threshold,
+            recording_search=recording_search,
+            exclusions_by_identity=load_exclusions(pending, repos.library_file_repo),
+        )
     )
 
     auto_matched = 0
@@ -813,54 +888,18 @@ def match_identities_for_playlist(
     work_ids: list[str] = []
 
     # Each artist's songs together, so the strategies read each artist once (_ArtistMemo).
-    for identity in ticking(_grouped_by_artist(pending), progress):
+    for identity in ticking(group_by_artist(pending), progress):
         artist = artists_by_id.get(identity.broadcast_artist_id)
         if artist is None:
-            # Persist a terminal NEEDS_REVIEW so the orphan surfaces in review
-            # tooling and stops getting reprocessed on every matching run.
             logger.warning(
                 "orphaned_identity_marked_for_review",
                 identity_id=str(identity.id),
                 missing_artist_id=str(identity.broadcast_artist_id),
             )
-            if repos.track_identity_repo.update_match_status_if_pending(
-                identity.id,
-                MatchStatus.NEEDS_REVIEW,
-                MatchTier.UNCLASSIFIED,
-                reason_code=ReasonCode.ORPHANED_IDENTITY,
-                reason_detail=(f"No broadcast_artist row for id {identity.broadcast_artist_id}"),
-            ):
-                # A new result replaces the old suggestion (spec 2026-10-05 §4.2).
-                repos.match_repo.delete_for_identity(identity.id)
-                needs_review += 1
-            else:
-                decided_meanwhile += 1
-            continue
-
-        try:
-            result = engine.resolve(identity, artist)
-        except MusicBrainzUnavailableError:
-            # Step B could not reach MusicBrainz (AUD-R028, D16). The song is deferred whole
-            # through the guarded write below, which also deletes its old suggestion; the
-            # rest of the playlist carries on.
-            result = _MB_DEFERRAL
-
-        if result is None:
-            # Engine exhausted all strategies. Should not happen given the
-            # strategies' defensive exhaustiveness. No candidate means AUTO_REJECTED
-            # (AUD-R022 D6), never stuck PENDING.
-            if repos.track_identity_repo.update_match_status_if_pending(
-                identity.id,
-                MatchStatus.AUTO_REJECTED,
-                MatchTier.UNCLASSIFIED,
-                reason_code=ReasonCode.NO_CANDIDATES,
-                reason_detail=("All matching strategies exhausted — no result produced"),
-            ):
-                repos.match_repo.delete_for_identity(identity.id)
-                auto_rejected += 1
-            else:
-                decided_meanwhile += 1
-            continue
+        # An orphan, a MusicBrainz deferral and an exhausted engine all come back as results
+        # with no file, written through the guarded write below, which also deletes the
+        # song's old suggestion (spec 2026-10-05 §4.2).
+        result = resolve_one_line(identity, artist, engine)
 
         if not repos.track_identity_repo.update_match_status_if_pending(
             identity.id,

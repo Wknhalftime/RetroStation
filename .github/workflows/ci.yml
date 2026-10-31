@@ -56,7 +56,9 @@ jobs:
 
   test:
     name: Test (pytest + branch coverage)
-    runs-on: ubuntu-latest
+    # 24.04: its archive ships the PostgreSQL 16 client tools the gate's clone tests need for
+    # the pg16 service (ubuntu-latest, 26.04, ships only newer ones).
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -80,6 +82,14 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --all-extras
+      # The gate's clone tests dump and restore the pg16 service: they need the 16 client
+      # tools, which scripts/gate.py picks from /usr/lib/postgresql/16/bin (a newer pg_dump
+      # writes settings a 16 server refuses on restore). The 24.04 image may already hold them.
+      - name: PostgreSQL 16 client tools
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo apt-get update && sudo apt-get install -y postgresql-client-16
+          fi
       - run: uv run pytest --cov=backend --cov-branch --cov-fail-under=80
 
   frontend:

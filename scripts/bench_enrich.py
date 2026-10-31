@@ -272,13 +272,26 @@ def _pg_bin(explicit: str | None, tool: str) -> str:
     raise SystemExit(f"{tool} not found; pass --pg-bin DIR")
 
 
-def clone_database(source_dsn: str, admin_dsn: str, dbname: str, pg_bin: str | None) -> str:
-    """Drop and recreate *dbname*, then stream a pg_dump of *source_dsn* into it."""
+def clone_database(
+    source_dsn: str,
+    admin_dsn: str,
+    dbname: str,
+    pg_bin: str | None,
+    *,
+    tablespace: str | None = None,
+    dump_options: tuple[str, ...] = (),
+) -> str:
+    """Drop and recreate *dbname* (in *tablespace* when given), then stream a pg_dump of
+    *source_dsn* into it. *dump_options* are extra pg_dump arguments (the gate's
+    ``--lock-wait-timeout``)."""
     require_bench_name(dbname)
     ident = pg_sql.Identifier(dbname)
+    create = pg_sql.SQL("CREATE DATABASE {}").format(ident)
+    if tablespace is not None:
+        create = pg_sql.SQL("{} TABLESPACE {}").format(create, pg_sql.Identifier(tablespace))
     with psycopg.connect(admin_dsn, autocommit=True) as admin:
         admin.execute(pg_sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(ident))
-        admin.execute(pg_sql.SQL("CREATE DATABASE {}").format(ident))
+        admin.execute(create)
     target_dsn = _with_dbname(admin_dsn, dbname)
 
     dump = subprocess.Popen(
@@ -287,6 +300,7 @@ def clone_database(source_dsn: str, admin_dsn: str, dbname: str, pg_bin: str | N
             "--format=custom",
             "--no-owner",
             "--no-privileges",
+            *dump_options,
             f"--dbname={source_dsn}",
         ],
         stdout=subprocess.PIPE,

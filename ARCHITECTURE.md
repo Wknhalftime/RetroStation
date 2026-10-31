@@ -185,6 +185,19 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
     `identity_matching_task`. Every re-check with playlists to queue is one matching run: its
     stages carry the run id and report to one `matching` progress row (AUD-R030)
   - streaming no-cue report → `stream_cue_request_task`
+  - the gate (`uv run poe gate --base <worktree>`, phase 0b; never the dev stack):
+    `gate.py clone` copies the dev DB into the branch's `retrostation_bench_gate_<branch>_<hash>`;
+    from the base tree, `migrate` and the four recorders (`airplay_snapshot.py`,
+    `golden_responses.py`, `dry_run_matching.py --stage artist` and `--stage identity`);
+    then `migrate`, each `run-task` (`call_local`, every hand-off stubbed, so nothing
+    reaches a queue) and each apply script, and the four again, from the branch; then the
+    four compares. Tools never
+    touch the dev DB: `pg_dump` in `clone` is its only reader. Every tool refuses a database
+    without "bench" and sets `STREAM_ENABLED=false` and its own Huey file
+    (`PYTEST_XDIST_WORKER=gate`) before it loads backend code
+    (`tests/scripts/test_gate.py::test_never_opens_another_dsn`). The recorders only read
+    (READ ONLY transactions; the dry runs answer MusicBrainz from its cache alone), and
+    `staging.py` runs the branch's API (port 8020) and worker (no periodic tasks) on a copy
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.
