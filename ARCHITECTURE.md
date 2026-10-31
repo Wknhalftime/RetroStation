@@ -231,5 +231,5 @@ baseline with `uv run poe events-baseline` and says why.
 2. **A rule exists only if a check enforces it.** An unenforced rule gets deleted, not kept as
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
-   treated as rejected. AUD-R032 to AUD-R046 are reserved for the artist model, which reaches
-   master in one merge, so the next ruling on master is AUD-R047.
+   treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R100.
