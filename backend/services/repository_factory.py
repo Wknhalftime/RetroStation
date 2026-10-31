@@ -35,12 +35,14 @@ from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.streaming.station_years import StationYearRepos
+from backend.services.work_curation_service import WorkCurationRepos
 
 
 @dataclass
@@ -71,7 +73,8 @@ class LibraryRepos:
 class CatalogRepos:
     """Catalog-domain repositories (artists, works, recordings, masters).
 
-    ``play_file_resolution`` reads curation's view of which file plays for a play (D17).
+    ``play_file_resolution`` reads curation's view of which file plays for a play (D17);
+    ``work_curation`` holds the works writes' own statements (phase 0c, C75).
     """
 
     artists: PgArtistRepository
@@ -81,6 +84,7 @@ class CatalogRepos:
     matches: PgMatchRepository
     song_masters: PgSongMasterRepository
     play_file_resolution: PgPlayFileResolutionRepository
+    work_curation: PgWorkCurationRepository
 
 
 @dataclass
@@ -145,6 +149,7 @@ class RepositoryFactory:
             matches=PgMatchRepository(conn),
             song_masters=PgSongMasterRepository(conn),
             play_file_resolution=PgPlayFileResolutionRepository(conn),
+            work_curation=PgWorkCurationRepository(conn),
         )
         self.system = SystemRepos(
             mapping_rules=PgMappingRuleRepository(conn),
@@ -175,6 +180,7 @@ class RepositoryFactory:
         self.matches = self.catalog.matches
         self.song_masters = self.catalog.song_masters
         self.play_file_resolution = self.catalog.play_file_resolution
+        self.work_curation = self.catalog.work_curation
         self.library_files = self.library.files
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -235,4 +241,19 @@ def reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
         works=repos.works,
         song_masters=repos.song_masters,
         format_overrides=repos.format_overrides,
+    )
+
+
+def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
+    """The port bundle the works writes (merge, split, reassign, format overrides, the
+    master delete) run through, on *repos*' connection (phase 0c, C75)."""
+    return WorkCurationRepos(
+        curation=repos.work_curation,
+        works=repos.works,
+        files=repos.library_files,
+        recordings=repos.recordings,
+        song_masters=repos.song_masters,
+        overrides=repos.format_overrides,
+        matches=repos.matches,
+        artists=repos.artists,
     )

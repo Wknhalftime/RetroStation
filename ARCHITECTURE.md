@@ -4,8 +4,8 @@
 "Tune-in cues" section was added 2026-10-17 with feat/cue-edits-data and extended with
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
-feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" was added 2026-10-31
-with the artist model's phase 0c. Rulings cited here are in
+feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
+writes" were added 2026-10-31 with the artist model's phase 0c. Rulings cited here are in
 `audit/rulings.jsonl` (AUD-R015..R057 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -45,12 +45,39 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - `domain.library` never references streaming (D20). **Enforced.**
 
 **Known gaps** (true today, not rules to copy):
-- Routers run SQL directly: 122 `.execute()` calls in 10 router files. `routers/matching.py` is
-  1,081 lines and `routers/library/works.py` is 1,101.
+- Routers run SQL directly: 57 `.execute()` lines in 10 router files (phase 0c moved the works
+  router's writes out, below). `routers/matching.py` is 1,109 lines.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
 - New code should not add to any of these.
+
+## Library works writes: one sync service (phase 0c, C75)
+
+- The works router's write routes (merge, split, reassign, format override create and delete,
+  Set and Remove master) are plain `def` routes on `SyncRepos`: one sync connection and one
+  transaction per request, committed when the route succeeds and rolled back when it raises.
+  Set master calls `master_choice_service`; every other write calls
+  `services/work_curation_service.py`, which commits nothing of its own.
+- The service writes through `WorkCurationRepos`: the existing works, library file, recording,
+  song master, format override, match and artist repositories wherever one already runs the
+  statement, and `WorkCurationRepository` (`repositories/work_curation.py`, adapter
+  `db/repositories/work_curation.py`) for the statements none of them has, moved from the
+  router unchanged. Its fake
+  (`tests/fakes/work_curation.py`) works on the other fakes' rows, and
+  `tests/repositories/test_work_curation_contract.py` runs the same cases on the fake and on
+  PostgreSQL.
+- Behaviour is the router's, oddities included: a merge drops a source's hand-picked master,
+  and the master recalculation replaces a manual pick that is no longer a present file of the
+  work (phase 3b changes both). Each refusal is a `WorkCurationError` whose message is the
+  route's detail.
+- The router's read route (the work detail) keeps its SQL on the async connection until 3b
+  rebuilds the Library pages (AUD-R010 noted).
+- The checks are `tests/test_works_router_writes_have_no_sql.py` (no write route reaches an
+  `.execute` or a psycopg or `backend.db` name),
+  `tests/routers/test_works_write_routes_are_sync.py`,
+  `tests/routers/test_works_write_refusals.py` and
+  `tests/services/test_work_curation_service.py`.
 
 ## Derived counts kept by triggers
 

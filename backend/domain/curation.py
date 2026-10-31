@@ -32,6 +32,94 @@ class MasterFileMissingError(MasterChoiceError):
     """The file is no longer on disk, so it cannot be a master."""
 
 
+class WorkCurationError(CurationError):
+    """A works write (merge, split, reassign, format override, master delete) was refused.
+
+    Each message is the detail the works routes answered with before phase 0c moved the
+    writes into ``work_curation_service``.
+    """
+
+
+class CurationWorkNotFoundError(WorkCurationError):
+    """The work the write names does not exist."""
+
+
+class CurationFileNotFoundError(WorkCurationError):
+    """The file the write names does not exist."""
+
+
+class CurationFileNotOnWorkError(WorkCurationError):
+    """The file is not on the work the write names."""
+
+
+class CurationFileMissingError(WorkCurationError):
+    """The file is no longer on disk."""
+
+
+class FileAlreadyOnWorkError(WorkCurationError):
+    """The file is already on the work it would be reassigned to."""
+
+
+class MergeTargetInSourcesError(WorkCurationError):
+    """A merge names its target among its sources."""
+
+
+class FormatOverrideExistsError(WorkCurationError):
+    """The work already has an override for that format."""
+
+
+class FormatOverrideNotFoundError(WorkCurationError):
+    """The work has no override with that id."""
+
+
+class FormatOverrideNotStoredError(CurationError):
+    """An override just stored cannot be read back (not a refusal: the request fails)."""
+
+
+class SongMasterNotFoundError(WorkCurationError):
+    """The work has no song master."""
+
+
+@dataclass(frozen=True)
+class MergeResult:
+    merged_file_count: int
+    deleted_work_count: int
+    dropped_override_count: int
+
+
+@dataclass(frozen=True)
+class SplitResult:
+    new_work_id: str
+    old_work_deleted: bool
+
+
+@dataclass(frozen=True)
+class ReassignResult:
+    old_work_id: str | None
+    old_work_deleted: bool
+
+
+@dataclass(frozen=True)
+class NewFormatOverride:
+    """A format override to create on a work."""
+
+    format_name: str
+    preferred_file_id: UUID
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class MasterCandidate:
+    """A present file of a work, with what the automatic master pick scores."""
+
+    id: UUID
+    release_status: str | None
+    release_type: str | None
+    format: str | None
+    bitrate: int | None
+    duration_ms: int | None
+
+
 @dataclass
 class SongMaster:
     id: UUID
