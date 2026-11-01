@@ -335,4 +335,4 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `get_case_duplicate_groups` | none | 0c | #212 | AUD-R055 | none |
 | `list_work_ids_with_master_off_work` | none | 0c | #212 | AUD-R056 | none |
 | `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |
-| `artist_has_match` | `LogNameLinkService.is_linked`: a log-name link in any state keeps a local artist | 1a | #TBD | AUD-R058 | none |
+| `artist_has_match` | `LogNameLinkService.is_linked`: a log-name link in any state keeps a local artist | 1a | #214 | AUD-R058 | none |
