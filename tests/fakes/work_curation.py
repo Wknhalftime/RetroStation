@@ -109,12 +109,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
             del self._works[work_id]
         return len(deleted)
 
-    def artist_has_match(self, artist_id: str) -> bool:
-        return any(
-            m.target_type == TargetType.ARTIST and m.target_id == artist_id
-            for m in self._matches.values()
-        )
-
     def delete_artist(self, artist_id: str) -> None:
         self._artists.pop(artist_id, None)
 

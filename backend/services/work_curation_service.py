@@ -35,11 +35,13 @@ from backend.domain.enums import CatalogSource, FileStatus, SelectionMethod, Ver
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.work_curation import WorkCurationRepository
 from backend.repositories.works import WorkRepository
+from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.master_selection_service import score_file_row
 
 _NOTHING_MERGED = MergeResult(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
@@ -57,6 +59,7 @@ class WorkCurationRepos:
     overrides: FormatOverrideRepository
     matches: MatchRepository
     artists: ArtistCatalogRepository
+    links: LogNameLinkRepository
 
 
 def _work(work_id: str, works: WorkRepository) -> Work:
@@ -145,14 +148,16 @@ def _consolidate_recordings(
 
 
 def _delete_unused_local_artists(artist_ids: set[str], repos: WorkCurationRepos) -> None:
-    """Delete each local artist left with no work and no artist match."""
+    """Delete each local artist left with no work and no log-name link in any state
+    (AUD-R035, which changes AUD-R004; phase 1a S11)."""
+    links = LogNameLinkService(repos.links, repos.artists)
     for artist_id in artist_ids:
         artist = repos.artists.get_by_id(artist_id)
         if artist is None or artist.origin != CatalogSource.LOCAL:
             continue
         if repos.works.get_by_artist(artist_id):
             continue
-        if not repos.curation.artist_has_match(artist_id):
+        if not links.is_linked(artist_id):
             repos.curation.delete_artist(artist_id)
 
 

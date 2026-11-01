@@ -8,6 +8,7 @@ from backend.config import get_settings
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
@@ -91,6 +92,7 @@ def artist_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                     artist_repo=PgArtistRepository(conn),
                     match_repo=PgMatchRepository(conn),
                     rules_repo=PgMappingRuleRepository(conn),
+                    link_repo=PgLogNameLinkRepository(conn),
                 )
                 thresholds = ArtistMatchThresholds(
                     strong_match_threshold=settings.strong_match_threshold,

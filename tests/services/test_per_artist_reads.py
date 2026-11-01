@@ -1,9 +1,10 @@
 """A matching stage reads each artist's lookups once, not once per song (profile 2026-10-18).
 
-match_identities_for_playlist used to repeat four reads for every song: the artist's match
-row, its catalog artist, its files by artist MBID and its files by name. On the bench (22k
-songs, 6.2k artists) that was 444k file rows. Now they are read once per artist in a stage,
-and a file's scoring titles are worked out once per title, not once per song x file.
+match_identities_for_playlist used to repeat four reads for every song: the artist's link
+(its match row before phase 1a), its catalog artist, its files by artist MBID and its files by
+name. On the bench (22k songs, 6.2k artists) that was 444k file rows. Now they are read once per
+artist in a stage, and a file's scoring titles are worked out once per title, not once per
+song x file.
 """
 
 from __future__ import annotations
@@ -15,9 +16,9 @@ import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import Match
+from backend.domain.matching import LogNameLink
 from backend.services import title_scoring
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
@@ -32,9 +33,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 _METALLICA_MBID = "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"
 
@@ -56,14 +59,14 @@ class _CountingFiles(FakeLibraryFileRepository):
         return super().get_by_normalized_artist_name(normalized_name, limit)
 
 
-class _CountingMatches(FakeMatchRepository):
+class _CountingLinks(FakeLogNameLinkRepository):
     def __init__(self) -> None:
         super().__init__()
-        self.by_artist: Counter[UUID] = Counter()
+        self.by_name: Counter[UUID] = Counter()
 
-    def get_by_artist(self, artist_id: UUID) -> Match | None:
-        self.by_artist[artist_id] += 1
-        return super().get_by_artist(artist_id)
+    def list_by_name(self, broadcast_artist_id: UUID) -> list[LogNameLink]:
+        self.by_name[broadcast_artist_id] += 1
+        return super().list_by_name(broadcast_artist_id)
 
 
 class _CountingCatalog(FakeArtistRepository):
@@ -83,21 +86,17 @@ class _Stage:
         self.playlist_id = uuid4()
         self.identities = FakeBroadcastTrackIdentityRepository()
         self.artists = FakeBroadcastArtistRepository()
-        self.matches = _CountingMatches()
+        self.matches = FakeMatchRepository()
+        self.links = _CountingLinks()
         self.files = _CountingFiles()
         self.catalog = _CountingCatalog()
         self.metallica = self._artist("Metallica", MatchStatus.AUTO_MATCHED)
         self.abba = self._artist("ABBA", MatchStatus.PENDING)
-        self.matches.create(
-            Match(
-                id=uuid4(),
-                artist_id=self.metallica.id,
-                target_id=_METALLICA_MBID,
-                target_type=TargetType.ARTIST,
-                confidence_score=100.0,
-                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            )
-        )
+        self.metallica_artist = seed_link(
+            self.links, self.catalog, self.metallica.id, _METALLICA_MBID
+        ).artist_id
+        self.links.by_name.clear()
+        self.catalog.by_id.clear()  # the seed's own lookups
 
     def _artist(self, name: str, status: MatchStatus) -> BroadcastArtist:
         artist = BroadcastArtist(
@@ -149,6 +148,7 @@ class _Stage:
                 library_file_repo=self.files,
                 rules_repo=FakeMappingRuleRepository(),
                 catalog_repo=self.catalog,
+                link_repo=self.links,
             ),
             mb_client=FakeMbClient(),
         )
@@ -181,8 +181,8 @@ def test_each_artists_reads_happen_once_however_many_of_its_songs_the_stage_has(
 
     assert stage.files.by_mbid == Counter({_METALLICA_MBID: 1})
     assert stage.files.by_name == Counter({"metallica": 1, "abba": 1})
-    assert stage.matches.by_artist == Counter({stage.metallica.id: 1})
-    assert stage.catalog.by_id == Counter({_METALLICA_MBID: 1})
+    assert stage.links.by_name == Counter({stage.metallica.id: 1})
+    assert stage.catalog.by_id == Counter({stage.metallica_artist: 1})
     assert [stage.matched_file(s) for s in songs] == [
         sandman.id,
         waterloo.id,

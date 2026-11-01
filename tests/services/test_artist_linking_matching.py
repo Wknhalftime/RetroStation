@@ -25,10 +25,8 @@ from backend.domain.enums import (
     EnrichmentStatus,
     MatchStatus,
     MatchTier,
-    TargetType,
 )
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import Match
 from backend.services.artist_matching_service import NormalizationStrategy
 from backend.services.identity_matching_service import (
     IdentityMatchResult,
@@ -41,8 +39,9 @@ from backend.services.normalization import (
 )
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
-from tests.fakes.matches import FakeMatchRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 QUEEN = "00000000-0000-4000-8000-000000000001"
@@ -154,7 +153,7 @@ def _file(title: str, tag: str | None) -> LibraryFile:
 def _song_match(
     *, linked: bool, files: list[LibraryFile]
 ) -> tuple[IdentityMatchResult | None, FakeMbClient]:
-    """One auto-matched broadcast artist whose match row targets the LOCAL catalog id."""
+    """One auto-matched broadcast artist linked to the LOCAL catalog artist."""
     catalog = FakeArtistRepository()
     local = catalog.upsert(
         _catalog(
@@ -165,17 +164,8 @@ def _song_match(
         )
     )
     artist = _broadcast("SOUNDGARDEN", MatchStatus.AUTO_MATCHED)
-    matches = FakeMatchRepository()
-    matches.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            target_id=local.id,
-            target_type=TargetType.ARTIST,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-        )
-    )
+    links = FakeLogNameLinkRepository()
+    seed_link(links, catalog, artist.id, local.id)
     library = FakeLibraryFileRepository()
     for library_file in files:
         library.upsert(library_file)
@@ -189,7 +179,7 @@ def _song_match(
     )
     mb = FakeMbClient()
     strategy = ResolvedArtistMbidStrategy(
-        library_file_repo=library, match_repo=matches, mb_client=mb, catalog_repo=catalog
+        library_file_repo=library, link_repo=links, mb_client=mb, catalog_repo=catalog
     )
     return strategy.apply(song, artist), mb
 

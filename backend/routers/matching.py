@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Annotated, Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,10 +11,25 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
 
 from backend.config import get_settings
-from backend.dependencies import get_current_token, get_db_connection, get_mb_client
-from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
-from backend.domain.matching import RecheckNotQueuedError
+from backend.dependencies import (
+    get_artist_resolution_repos,
+    get_current_token,
+    get_db_connection,
+    get_mb_client,
+)
+from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.domain.matching import (
+    LogNameNotFoundError,
+    LogNameNotUnmatchableError,
+    RecheckNotQueuedError,
+)
 from backend.domain.system import StorageUnavailableError
+from backend.services.artist_resolution_service import (
+    ArtistResolutionRepos,
+    match_by_hand,
+    reject_by_hand,
+    unmatch,
+)
 from backend.services.identity_resolution_service import (
     IdentityNotFoundError,
     LibraryFileNotFoundError,
@@ -41,26 +56,11 @@ router = APIRouter()
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
 MbClient = Annotated[MusicBrainzClientProtocol, Depends(get_mb_client)]
+# The artist Resolve and Unmatch write on the request's one sync connection (C75).
+ResolutionRepos = Annotated[ArtistResolutionRepos, Depends(get_artist_resolution_repos)]
 
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
-
-# Statuses that remain when cascading a MANUAL_REJECTED artist
-_PROTECTED_STATUSES: list[str] = [
-    MatchStatus.MANUAL_MATCHED.value,
-    MatchStatus.MANUAL_REJECTED.value,
-]
-
-# Source statuses eligible for /unmatch. Pending and needs_review are not
-# "unmatchable" — they have nothing to revert. Manual children are NOT
-# protected on the artist cascade path (intentional: unmatching an artist
-# wipes the slate for every child regardless of status).
-_UNMATCHABLE_STATUSES: list[str] = [
-    MatchStatus.AUTO_MATCHED.value,
-    MatchStatus.MANUAL_MATCHED.value,
-    MatchStatus.AUTO_REJECTED.value,
-    MatchStatus.MANUAL_REJECTED.value,
-]
 
 
 _USER_UNMATCHED: str = ReasonCode.USER_UNMATCHED.value
@@ -583,25 +583,27 @@ async def get_matching_queue(
     "/artists/{artist_id}/resolve",
     response_model=ResolveResult,
 )
-async def resolve_artist(
+def resolve_artist(
+    _token: Token,
     artist_id: UUID,
     body: ArtistResolution,
-    conn: DbConn,
-    _token: Token,
+    resolution: ResolutionRepos,
 ) -> ResolveResult:
     """Manually resolve an artist as matched or rejected.
+
+    A sync route on the request's one connection (C75): the status, the cascade to the
+    artist's songs and the manual link commit together.
 
     Args:
         artist_id: UUID of the broadcast artist (log entry) to resolve.
         body: Resolution decision.  For ``MANUAL_MATCHED``, ``target_artist_id``
             must be provided.  It accepts **either** a MusicBrainz MBID *or* a
-            local catalog UUID (``artists.id``).  The auto-matcher writes both
-            forms to ``matches.target_id`` — MBIDs for artists resolved via
-            MusicBrainz, local UUIDs for local-only canonicals with no MBID
-            (see ``artist_matching_service.py`` exact-pass logic).  Manual
-            resolution from the Resolution Center library-search flow sends the
-            same dual form: ``artist.mbid ?? artist.id`` (trim-aware).
-        conn: Async database connection.
+            local catalog UUID (``artists.id``), the form the Resolution Center's
+            library-search flow sends (``artist.mbid ?? artist.id``, trim-aware); an
+            MBID no catalog artist holds gets a stub artist (phase 1a S9). Its format is
+            not checked.
+        resolution: The decision's repositories on the request's one connection, and its
+            commit, made before song matching is queued.
         _token: Bearer token (auth check only).
 
     Returns:
@@ -611,6 +613,7 @@ async def resolve_artist(
         HTTPException: 404 if the artist does not exist.
         HTTPException: 422 if match_status is invalid or target_artist_id is
             missing for MANUAL_MATCHED.
+        HTTPException: 503 if the database connection is lost.
     """
     # Validate match_status
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
@@ -621,153 +624,49 @@ async def resolve_artist(
             ),
         )
 
-    if body.match_status == MatchStatus.MANUAL_MATCHED and not body.target_artist_id:
+    target = body.target_artist_id
+    if body.match_status == MatchStatus.MANUAL_MATCHED and not target:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="target_artist_id is required for MANUAL_MATCHED",
         )
 
-    # Fetch artist
-    artist_cur = await conn.execute(
-        "SELECT id FROM broadcast_artists WHERE id = %s",
-        (artist_id,),
-    )
-    if await artist_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Artist {artist_id} not found",
-        )
-
     new_status = MatchStatus(body.match_status)
-
-    if new_status == MatchStatus.MANUAL_MATCHED:
-        # Update status
-        await conn.execute(
-            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
-            (new_status.value, artist_id),
-        )
-        # Create match row: artist_id → target MBID, confidence=1.0, tier=MANUAL
-        match_id = uuid4()
-        await conn.execute(
-            """
-            INSERT INTO matches
-                (id, artist_id, target_id, target_type, confidence_score, match_tier)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (artist_id, target_id) DO UPDATE SET
-                target_type      = EXCLUDED.target_type,
-                confidence_score = EXCLUDED.confidence_score,
-                match_tier       = EXCLUDED.match_tier
-            """,
-            (
-                match_id,
-                artist_id,
-                body.target_artist_id,
-                TargetType.ARTIST.value,
-                1.0,
-                MatchTier.MANUAL.value,
-            ),
-        )
-
-        # Cascade: reset review-relevant children so the matcher re-runs them
-        # against the corrected artist target. Without this, NEEDS_REVIEW
-        # children (now visible in the queue via the broadened CTE above)
-        # remain stuck — `get_pending_for_playlist` filters strictly to
-        # PENDING, so a worker re-run alone wouldn't reprocess them. AUTO_*,
-        # MANUAL_*, and *_REJECTED children stay untouched (same philosophy as
-        # _PROTECTED_STATUSES on the MANUAL_REJECTED branch below).
-        await conn.execute(
-            """
-            UPDATE track_identities
-               SET match_status = %s,
-                   match_tier   = NULL,
-                   reason_code  = NULL,
-                   reason_detail = NULL
-             WHERE broadcast_artist_id = %s
-               AND match_status = ANY(%s)
-            """,
-            (
-                MatchStatus.PENDING.value,
-                artist_id,
-                _QUEUE_STATUSES,
-            ),
-        )
-        # Drop stale identity-keyed match rows for ALL children currently
-        # PENDING — covers both previously-PENDING children (clearing earlier
-        # matcher attempts) and the just-reset NEEDS_REVIEW children. The
-        # matcher re-creates fresh ones on the next run.
-        await conn.execute(
-            """
-            DELETE FROM matches
-             WHERE identity_id IN (
-                 SELECT id FROM track_identities
-                  WHERE broadcast_artist_id = %s
-                    AND match_status = %s
-             )
-            """,
-            (artist_id, MatchStatus.PENDING.value),
-        )
-        # Find every playlist that ever played one of this artist's
-        # identities, and enqueue identity matching once per playlist.
-        # Non-blocking Huey enqueue (mirrors the end of artist_matching_task).
-        playlist_cur = await conn.execute(
-            """
-            SELECT DISTINCT pe.playlist_id
-              FROM play_events pe
-              JOIN track_identities ti ON ti.id = pe.identity_id
-             WHERE ti.broadcast_artist_id = %s
-            """,
-            (artist_id,),
-        )
-        playlist_rows = await playlist_cur.fetchall()
-        # Commit BEFORE enqueueing. The Huey worker is a separate process
-        # with its own DB connection; if the request transaction hasn't
-        # committed yet, the worker sees the pre-cascade state (children
-        # still NEEDS_REVIEW, stale matches rows present) and skips them
-        # entirely (get_pending_for_playlist filters strictly to
-        # match_status='pending'). get_db_connection's post-yield commit
-        # becomes a no-op after this. Mirrors the commit-before-enqueue
-        # ordering in artist_matching_task.
-        await conn.commit()
-        # Enqueue is fire-and-forget across a transaction boundary the
-        # request handler has already crossed. The cascade DB work is
-        # committed and durable; failing the response would tell the user
-        # their manual link failed when it actually succeeded. If the Huey
-        # backend is unavailable, the worker's next regular run (or a
-        # manual /matching/run) will pick up the now-PENDING children. The
-        # broad except is justified at this top-level handler boundary
-        # because no specific exception type is
-        # reliably knowable across Huey backends (SQLite today, possibly
-        # Redis later).
-        for row in playlist_rows:
-            try:
-                identity_matching_task(str(row["playlist_id"]))
-            except Exception as exc:  # noqa: BLE001 — top-level boundary; see comment above
-                logger.warning(
-                    "identity_matching_enqueue_failed",
-                    artist_id=str(artist_id),
-                    playlist_id=str(row["playlist_id"]),
-                    error=repr(exc),
-                )
-    else:
-        # MANUAL_REJECTED: update artist, cascade child identities
-        await conn.execute(
-            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
-            (new_status.value, artist_id),
-        )
-        # Cascade all child identities that are NOT already manually resolved
-        await conn.execute(
-            """
-            UPDATE track_identities
-            SET match_status = %s
-            WHERE broadcast_artist_id = %s
-              AND match_status != ALL(%s)
-            """,
-            (
-                MatchStatus.AUTO_REJECTED.value,
-                artist_id,
-                list(_PROTECTED_STATUSES),
-            ),
-        )
+    try:
+        if new_status == MatchStatus.MANUAL_MATCHED and target:
+            playlist_ids = match_by_hand(artist_id, target, resolution)
+        else:
+            reject_by_hand(artist_id, resolution)
+            playlist_ids = []
+        if playlist_ids:
+            # Commit BEFORE enqueueing. The Huey worker is a separate process with its own DB
+            # connection; if the request transaction hasn't committed yet, the worker sees the
+            # pre-cascade state (songs still NEEDS_REVIEW, stale matches rows present) and
+            # skips them (get_pending_for_playlist filters strictly to match_status='pending').
+            # The dependency's own commit after the route is then a no-op. Mirrors the
+            # commit-before-enqueue ordering in artist_matching_task.
+            resolution.commit()
+    except LogNameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+    # Enqueue is fire-and-forget across a transaction boundary the request has already
+    # crossed. The cascade is committed and durable; failing the response would tell the
+    # user their manual link failed when it actually succeeded. If the Huey backend is
+    # unavailable, the worker's next regular run (or a manual /matching/run) picks up the
+    # now-PENDING songs. The broad except is justified at this top-level handler boundary
+    # because no specific exception type is reliably knowable across Huey backends (SQLite
+    # today, possibly Redis later).
+    for playlist_id in playlist_ids:
+        try:
+            identity_matching_task(str(playlist_id))
+        except Exception as exc:  # noqa: BLE001 — top-level boundary; see comment above
+            logger.warning(
+                "identity_matching_enqueue_failed",
+                artist_id=str(artist_id),
+                playlist_id=str(playlist_id),
+                error=repr(exc),
+            )
 
     return ResolveResult(id=artist_id, match_status=new_status.value)
 
@@ -928,87 +827,42 @@ async def resolve_identity(
     "/artists/{artist_id}/unmatch",
     response_model=ResolveResult,
 )
-async def unmatch_artist(
-    artist_id: UUID,
-    conn: DbConn,
+def unmatch_artist(
     _token: Token,
+    artist_id: UUID,
+    resolution: ResolutionRepos,
 ) -> ResolveResult:
     """Revert a finalized artist match back to NEEDS_REVIEW.
 
     Cascades to ALL child identities regardless of status — every child is
-    set to NEEDS_REVIEW with reason_code=USER_UNMATCHED, and every match row
-    keyed to either the artist or any of its children is deleted. This is
+    set to NEEDS_REVIEW with reason_code=USER_UNMATCHED and its match rows are deleted —
+    and every link of the artist, in every state, is removed (phase 1a S10). This is
     intentionally more aggressive than ``resolve_artist``'s
     MANUAL_REJECTED cascade (which protects manual children); unmatching an
     artist is the curator saying "throw the whole tree out and start over."
+    A sync route on the request's one connection (C75).
 
     Raises:
         HTTPException: 404 if the artist does not exist.
-        HTTPException: 409 if the artist's current ``match_status`` is not
-            in :data:`_UNMATCHABLE_STATUSES` (i.e. PENDING / NEEDS_REVIEW).
+        HTTPException: 409 if the artist's current ``match_status`` is
+            PENDING or NEEDS_REVIEW.
+        HTTPException: 503 if the database connection is lost.
     """
-    needs_review = MatchStatus.NEEDS_REVIEW.value
-    user_unmatched = ReasonCode.USER_UNMATCHED.value
-
-    # Atomic gate: a single UPDATE...WHERE id AND match_status closes the
-    # SELECT-then-UPDATE TOCTOU window where a concurrent /resolve could
-    # transition the row between our read and our write. RETURNING tells us
-    # whether the gate matched; on no-match we issue a separate SELECT solely
-    # to distinguish 404 (row gone) from 409 (row exists, wrong state).
-    artist_cur = await conn.execute(
-        """
-        UPDATE broadcast_artists
-           SET match_status  = %s,
-               reason_code   = %s,
-               reason_detail = NULL
-         WHERE id = %s
-           AND match_status = ANY(%s)
-        RETURNING id
-        """,
-        (needs_review, user_unmatched, artist_id, _UNMATCHABLE_STATUSES),
-    )
-    if await artist_cur.fetchone() is None:
-        existing = await conn.execute(
-            "SELECT match_status FROM broadcast_artists WHERE id = %s",
-            (artist_id,),
-        )
-        existing_row = await existing.fetchone()
-        if existing_row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Artist {artist_id} not found",
-            )
+    try:
+        unmatch(artist_id, resolution)
+    except LogNameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+    except LogNameNotUnmatchableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Artist {artist_id} is in {existing_row['match_status']!r}; "
-                "only finalized matches can be unmatched"
+                f"Artist {artist_id} is in {exc.status!r}; only finalized matches can be unmatched"
             ),
-        )
-    await conn.execute(
-        """
-        UPDATE track_identities
-           SET match_status  = %s,
-               match_tier    = NULL,
-               reason_code   = %s,
-               reason_detail = NULL
-         WHERE broadcast_artist_id = %s
-        """,
-        (needs_review, user_unmatched, artist_id),
-    )
-    await conn.execute(
-        """
-        DELETE FROM matches
-         WHERE artist_id = %s
-            OR identity_id IN (
-                SELECT id FROM track_identities
-                 WHERE broadcast_artist_id = %s
-            )
-        """,
-        (artist_id, artist_id),
-    )
+        ) from exc
 
-    return ResolveResult(id=artist_id, match_status=needs_review)
+    return ResolveResult(id=artist_id, match_status=MatchStatus.NEEDS_REVIEW.value)
 
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,8 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import Match
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -19,9 +18,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,9 +33,10 @@ def _setup_artist_with_match(
     artist_name: str,
     canonical_mbid: str,
     broadcast_artist_repo: FakeBroadcastArtistRepository,
-    match_repo: FakeMatchRepository,
+    links: FakeLogNameLinkRepository,
+    catalog: FakeArtistRepository,
 ) -> BroadcastArtist:
-    """Create a BroadcastArtist with AUTO_MATCHED status and a Match pointing to canonical MBID."""
+    """Create a BroadcastArtist with AUTO_MATCHED status and a link to the canonical MBID."""
     broadcast_artist = BroadcastArtist(
         id=uuid4(),
         original_name=artist_name,
@@ -43,15 +45,7 @@ def _setup_artist_with_match(
     )
     broadcast_artist_repo.upsert(broadcast_artist)
 
-    artist_match = Match(
-        id=uuid4(),
-        artist_id=broadcast_artist.id,
-        target_id=canonical_mbid,
-        target_type=TargetType.ARTIST,
-        confidence_score=100.0,
-        match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-    )
-    match_repo.create(artist_match)
+    seed_link(links, catalog, broadcast_artist.id, canonical_mbid)
     return broadcast_artist
 
 
@@ -94,6 +88,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
     match_repo = FakeMatchRepository()
     library_file_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
 
     artist_name = "Metallica"
     canonical_mbid = "mbid-metallica"
@@ -104,7 +99,7 @@ def test_tier2_mbid_graph_exact_match() -> None:
     track_title = "enter sandman"
 
     broadcast_artist = _setup_artist_with_match(
-        artist_name, canonical_mbid, broadcast_artist_repo, match_repo
+        artist_name, canonical_mbid, broadcast_artist_repo, links, catalog
     )
 
     identity = _make_identity(
@@ -143,7 +138,8 @@ def test_tier2_mbid_graph_exact_match() -> None:
             match_repo=match_repo,
             library_file_repo=library_file_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=FakeMbClient(),
     )
@@ -177,13 +173,14 @@ def test_no_library_files_is_auto_rejected() -> None:
     match_repo = FakeMatchRepository()
     library_file_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
 
     artist_name = "Ozzy Osbourne"
     canonical_mbid = "mbid-ozzy"
     track_title = "Crazy Train"
 
     broadcast_artist = _setup_artist_with_match(
-        artist_name, canonical_mbid, broadcast_artist_repo, match_repo
+        artist_name, canonical_mbid, broadcast_artist_repo, links, catalog
     )
 
     identity = _make_identity(
@@ -204,7 +201,8 @@ def test_no_library_files_is_auto_rejected() -> None:
             match_repo=match_repo,
             library_file_repo=library_file_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=FakeMbClient(),
     )

@@ -25,8 +25,8 @@ import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
-from backend.domain.matching import MappingRule
+from backend.domain.enums import LogNameLinkState, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.matching import LogNameLink, MappingRule
 from backend.services.artist_matching_service import (
     ArtistMatchingRepos,
     ArtistMatchThresholds,
@@ -37,9 +37,16 @@ from backend.services.normalization import normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import first_link
+
+
+def _target(link: LogNameLink | None) -> str | None:
+    """What a matches artist row's target_id was: the linked artist's MBID, else its id."""
+    return None if link is None else (link.mbid or link.artist_id)
 
 
 def _pending_artist(
@@ -92,6 +99,7 @@ def test_match_artists_rule_hit_creates_match_with_manual_tier() -> None:
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     rules_repo = FakeMappingRuleRepository()
 
     artist = _pending_artist("AC/DC", broadcast_artist_repo, playlist_id)
@@ -112,6 +120,7 @@ def test_match_artists_rule_hit_creates_match_with_manual_tier() -> None:
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=FakeArtistRepository(),
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=rules_repo,
         ),
         mb_client=FakeMbClient(),
@@ -120,12 +129,12 @@ def test_match_artists_rule_hit_creates_match_with_manual_tier() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = match_repo.get_by_artist(artist.id)
+    created = first_link(links, artist.id)
     assert created is not None
-    assert created.target_id == "mbid-acdc"
-    assert created.target_type == TargetType.ARTIST
-    assert created.confidence_score == 100.0
-    assert created.match_tier == MatchTier.MANUAL
+    assert _target(created) == "mbid-acdc"
+    assert created.state == LogNameLinkState.ACTIVE
+    assert created.strength == 100
+    assert created.evidence["tier"] == MatchTier.MANUAL.value
 
 
 def test_match_artists_exact_match_creates_match_with_normalization_tier() -> None:
@@ -135,6 +144,7 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     # mbid must be populated: NormalizationStrategy filters out mbid=None
     # canonicals since Match.target_id is consumed as an MBID downstream.
@@ -155,6 +165,7 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=FakeMbClient(),
@@ -163,11 +174,11 @@ def test_match_artists_exact_match_creates_match_with_normalization_tier() -> No
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = match_repo.get_by_artist(artist.id)
+    created = first_link(links, artist.id)
     assert created is not None
-    assert created.target_id == "mbid-metallica"
-    assert created.match_tier == MatchTier.NORMALIZATION
-    assert created.confidence_score == 100.0
+    assert _target(created) == "mbid-metallica"
+    assert created.evidence["tier"] == MatchTier.NORMALIZATION.value
+    assert created.strength == 100
 
 
 def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
@@ -187,6 +198,7 @@ def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     # Local artist with no MBID (created from library file scan)
     artist_repo.upsert(
@@ -206,6 +218,7 @@ def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=FakeMbClient(),
@@ -216,11 +229,11 @@ def test_match_artists_exact_match_local_only_artist_is_auto_matched() -> None:
     # Must be AUTO_MATCHED — not DEFERRED_RETRY or NEEDS_REVIEW
     assert stored.match_status == MatchStatus.AUTO_MATCHED
     # Match row uses the local catalog UUID as target_id
-    created = match_repo.get_by_artist(broadcast_artist.id)
+    created = first_link(links, broadcast_artist.id)
     assert created is not None
-    assert created.target_id == "local-uuid-van-halen"
-    assert created.match_tier == MatchTier.NORMALIZATION
-    assert created.confidence_score == 100.0
+    assert _target(created) == "local-uuid-van-halen"
+    assert created.evidence["tier"] == MatchTier.NORMALIZATION.value
+    assert created.strength == 100
 
 
 def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> None:
@@ -230,6 +243,7 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     # MBID-bearing artist takes priority
     artist_repo.upsert(
@@ -258,6 +272,7 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=FakeMbClient(),
@@ -266,10 +281,10 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
     stored = broadcast_artist_repo.get_by_id(broadcast_artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = match_repo.get_by_artist(broadcast_artist.id)
+    created = first_link(links, broadcast_artist.id)
     assert created is not None
-    assert created.target_id == "mbid-van-halen"
-    assert created.match_tier == MatchTier.NORMALIZATION
+    assert _target(created) == "mbid-van-halen"
+    assert created.evidence["tier"] == MatchTier.NORMALIZATION.value
 
 
 def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
@@ -284,6 +299,7 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     artist_repo.upsert(
         Artist(
@@ -302,6 +318,7 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=FakeMbClient(),
@@ -314,7 +331,7 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
     # No Match row on NEEDS_REVIEW (service only writes Match on AUTO_MATCHED).
-    assert match_repo.get_by_artist(artist.id) is None
+    assert first_link(links, artist.id) is None
     # NEW behavior: reason is persisted.
     assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
     assert stored.reason_detail is not None
@@ -357,6 +374,7 @@ def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     truncated = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars, alphanum end
     artist = _pending_artist(truncated, broadcast_artist_repo, playlist_id)
@@ -380,6 +398,7 @@ def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=mb_client,
@@ -389,10 +408,10 @@ def test_match_artists_mb_hit_upserts_and_creates_match() -> None:
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
     assert artist_repo.get_by_id("mbid-ozzy") is not None
-    created = match_repo.get_by_artist(artist.id)
+    created = first_link(links, artist.id)
     assert created is not None
-    assert created.target_id == "mbid-ozzy"
-    assert created.match_tier == MatchTier.MUSICBRAINZ_API
+    assert _target(created) == "mbid-ozzy"
+    assert created.evidence["tier"] == MatchTier.MUSICBRAINZ_API.value
 
 
 def test_match_artists_auto_rejected_cascades_to_identity_bulk_reject() -> None:
@@ -591,6 +610,7 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
 
     # Use 30-char names so the Phase-2 truncation gate routes them to the MB tier.
     name_a = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars
@@ -621,6 +641,7 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=FakeMappingRuleRepository(),
         ),
         mb_client=mb,
@@ -630,9 +651,9 @@ def test_match_artists_coalesced_same_result_as_uncoalesced() -> None:
         stored = broadcast_artist_repo.get_by_id(a.id)
         assert stored is not None
         assert stored.match_status == MatchStatus.AUTO_MATCHED
-        created = match_repo.get_by_artist(a.id)
+        created = first_link(links, a.id)
         assert created is not None
-        assert created.target_id == expected
+        assert _target(created) == expected
 
     # Exactly 2 live search_artist calls — one per distinct .lower() bucket,
     # all in the pre-pass. The per-row loop in the strategy short-circuits
@@ -958,6 +979,7 @@ def test_orchestration_truncated_unresolved_calls_mb() -> None:
     track_identity_repo = FakeBroadcastTrackIdentityRepository()
     artist_repo = FakeArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     rules_repo = FakeMappingRuleRepository()
 
     truncated = "A Very Long Truncated Artist"  # 28 chars; within tolerance of 30
@@ -983,6 +1005,7 @@ def test_orchestration_truncated_unresolved_calls_mb() -> None:
             track_identity_repo=track_identity_repo,
             artist_repo=artist_repo,
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=rules_repo,
         ),
         mb_client=mb_client,
@@ -991,9 +1014,9 @@ def test_orchestration_truncated_unresolved_calls_mb() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = match_repo.get_by_artist(artist.id)
+    created = first_link(links, artist.id)
     assert created is not None
-    assert created.target_id == "mb-1"
+    assert _target(created) == "mb-1"
     assert len(artist_repo.musicbrainz_upserts) == 1
 
 
@@ -1239,6 +1262,7 @@ def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> No
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     rules_repo = FakeMappingRuleRepository()
 
     # Truncated (len >= 28, alnum end) so Phase 2 reaches MusicBrainzApiStrategy;
@@ -1264,6 +1288,7 @@ def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> No
             track_identity_repo=FakeBroadcastTrackIdentityRepository(),
             artist_repo=FakeArtistRepository(),
             match_repo=match_repo,
+            link_repo=links,
             rules_repo=rules_repo,
         ),
         mb_client=mb_client,
@@ -1272,10 +1297,10 @@ def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> No
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = match_repo.get_by_artist(artist.id)
+    created = first_link(links, artist.id)
     assert created is not None
-    assert created.target_id == "mb-80"
-    assert created.confidence_score == 80.0
+    assert _target(created) == "mb-80"
+    assert created.strength == 80
 
 
 def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:

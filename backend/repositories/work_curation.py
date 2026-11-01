@@ -67,11 +67,6 @@ class WorkCurationRepository(ABC):
         ...
 
     @abstractmethod
-    def artist_has_match(self, artist_id: str) -> bool:
-        """Whether an artist match targets the catalog artist (``target_id`` has no FK)."""
-        ...
-
-    @abstractmethod
     def delete_artist(self, artist_id: str) -> None:
         """Delete a catalog artist."""
         ...

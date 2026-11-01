@@ -23,7 +23,7 @@ import pytest
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import MappingRule
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -37,9 +37,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 
 def _pending_identity(
@@ -115,7 +117,8 @@ def _register_pending_for_playlist(
 
 def _setup_resolved_artist(
     artist_repo: FakeBroadcastArtistRepository,
-    match_repo: FakeMatchRepository,
+    links: FakeLogNameLinkRepository,
+    catalog: FakeArtistRepository,
     canonical_mbid: str,
 ) -> BroadcastArtist:
     artist = BroadcastArtist(
@@ -125,16 +128,7 @@ def _setup_resolved_artist(
         match_status=MatchStatus.AUTO_MATCHED,
     )
     artist_repo.upsert(artist)
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            target_id=canonical_mbid,
-            target_type=TargetType.ARTIST,
-            confidence_score=100.0,
-            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-        )
-    )
+    seed_link(links, catalog, artist.id, canonical_mbid)
     return artist
 
 
@@ -293,12 +287,13 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-metallica"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/metallica/enter_sandman.flac",
@@ -328,7 +323,8 @@ def test_match_identities_tier1_mbid_fast_path_collects_work_id() -> None:
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -360,12 +356,13 @@ def test_match_identities_persists_work_id_when_lib_file_has_work_id() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-metallica"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/metallica/enter_sandman.flac",
@@ -392,7 +389,8 @@ def test_match_identities_persists_work_id_when_lib_file_has_work_id() -> None:
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -416,12 +414,13 @@ def test_match_identities_persists_null_work_id_when_only_recording_id_set() -> 
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-metallica"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/metallica/enter_sandman.flac",
@@ -448,7 +447,8 @@ def test_match_identities_persists_null_work_id_when_only_recording_id_set() -> 
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -465,12 +465,13 @@ def test_match_identities_persists_null_work_id_when_neither_present() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-metallica"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/metallica/enter_sandman.flac",
@@ -497,7 +498,8 @@ def test_match_identities_persists_null_work_id_when_neither_present() -> None:
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -524,12 +526,13 @@ def test_match_identities_tier1_case_mismatched_track_title_auto_matches() -> No
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-soil"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/soil/halo.flac",
@@ -555,7 +558,8 @@ def test_match_identities_tier1_case_mismatched_track_title_auto_matches() -> No
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -578,12 +582,13 @@ def test_match_identities_legacy_null_normalized_title_falls_back() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-soil"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     lib_file = _lib_file(
         "/music/soil/halo.flac",
@@ -610,7 +615,8 @@ def test_match_identities_legacy_null_normalized_title_falls_back() -> None:
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -630,12 +636,13 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-metallica"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     # Score 71.43 for "enter sandman" vs "Sandman Returns" — above mid-band
     # (>64) but below strong_match_threshold (<80) → LOW_CONFIDENCE / NEEDS_REVIEW.
@@ -662,7 +669,8 @@ def test_match_identities_needs_review_persists_reason_code() -> None:
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -690,12 +698,13 @@ def test_match_identities_default_strong_threshold_boundary_auto_matches() -> No
     artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     mb_client = FakeMbClient()
 
     canonical_mbid = "mbid-boundary"
-    artist = _setup_resolved_artist(artist_repo, match_repo, canonical_mbid)
+    artist = _setup_resolved_artist(artist_repo, links, catalog, canonical_mbid)
 
     # Scores ~80.6452 against "Boundary Case Song Title Example" via
     # title_scoring's token_sort_ratio pipeline — deliberately just above the
@@ -729,7 +738,8 @@ def test_match_identities_default_strong_threshold_boundary_auto_matches() -> No
             match_repo=match_repo,
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=catalog,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )

@@ -129,13 +129,6 @@ class PgWorkCurationRepository(WorkCurationRepository):
         ).fetchall()
         return len(rows)
 
-    def artist_has_match(self, artist_id: str) -> bool:
-        row = self._conn.execute(
-            "SELECT id FROM matches WHERE target_type = %s AND target_id = %s LIMIT 1",
-            (TargetType.ARTIST.value, artist_id),
-        ).fetchone()
-        return row is not None
-
     def delete_artist(self, artist_id: str) -> None:
         self._conn.execute("DELETE FROM artists WHERE id = %s", (artist_id,))
 

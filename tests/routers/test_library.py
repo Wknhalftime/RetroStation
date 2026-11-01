@@ -22,6 +22,7 @@ from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import EnrichmentStatus, SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
+from tests.matching_seed import seed_pg_link
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -1219,25 +1220,18 @@ def _seed_match_for_file(
     return str(match_id)
 
 
-def _seed_match_for_artist(conn: psycopg.Connection, artist_id: str) -> str:
-    """Insert an artist-tier matches row whose target is ``artist_id``.
-
-    This is the shape ArtistMatchingService writes for a local-only canonical
-    (mbid None): ``target_id`` is the local artists.id, and it has no FK.
-    """
+def _seed_link_to_artist(conn: psycopg.Connection, artist_id: str) -> str:
+    """A log name's link to ``artist_id``, the reference that keeps a local artist from
+    phase 1a (AUD-R035; it was an artist-tier matches row whose target_id had no FK)."""
     suffix = uuid4().hex[:8]
     ba_id = uuid4()
     conn.execute(
         "INSERT INTO broadcast_artists (id, original_name, normalized_name) VALUES (%s, %s, %s)",
         (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
     )
-    match_id = uuid4()
-    conn.execute(
-        "INSERT INTO matches (id, artist_id, target_id, target_type) VALUES (%s, %s, %s, 'artist')",
-        (match_id, ba_id, artist_id),
-    )
+    link = seed_pg_link(conn, ba_id, artist_id)
     conn.commit()
-    return str(match_id)
+    return str(link.id)
 
 
 def _artist_exists(conn: psycopg.Connection, artist_id: str) -> bool:
@@ -1321,9 +1315,9 @@ class TestMergeWorks:
         assert row["target_id"] == "w-match-target"
         assert row["target_type"] == "work"
 
-    def test_merge_keeps_local_source_artist_referenced_by_a_match(self, client, db_conn) -> None:
-        """AUD-001 / AUD-R004: an emptied LOCAL source artist that an artist
-        match still targets is kept, and the match is left pointing at it."""
+    def test_merge_keeps_local_source_artist_referenced_by_a_link(self, client, db_conn) -> None:
+        """AUD-001 / AUD-R004, changed by AUD-R035: an emptied LOCAL source artist that a
+        log-name link points at is kept, and the link is left pointing at it."""
         _seed_canonical_chain(
             db_conn,
             artist_mbid="a-ref-target",
@@ -1338,7 +1332,7 @@ class TestMergeWorks:
             recording_mbid="r-ref-source",
             file_path="/m/ref_s.flac",
         )
-        match_id = _seed_match_for_artist(db_conn, "a-ref-source")
+        link_id = _seed_link_to_artist(db_conn, "a-ref-source")
 
         resp = client.post(
             "/api/v1/library/works/w-ref-target/merge",
@@ -1347,12 +1341,14 @@ class TestMergeWorks:
 
         assert resp.status_code == 200
         assert _artist_exists(db_conn, "a-ref-source") is True
-        row = db_conn.execute("SELECT target_id FROM matches WHERE id = %s", (match_id,)).fetchone()
+        row = db_conn.execute(
+            "SELECT artist_id FROM log_name_links WHERE id = %s", (link_id,)
+        ).fetchone()
         assert row is not None
-        assert row["target_id"] == "a-ref-source"
+        assert row["artist_id"] == "a-ref-source"
 
     def test_merge_deletes_unreferenced_local_source_artist(self, client, db_conn) -> None:
-        """An emptied LOCAL source artist with no match targeting it is deleted."""
+        """An emptied LOCAL source artist no log-name link points at is deleted."""
         _seed_canonical_chain(
             db_conn,
             artist_mbid="a-unref-target",

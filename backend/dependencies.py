@@ -23,12 +23,14 @@ from backend.domain.system import StorageUnavailableError
 from backend.playout.peaks import PeakSettings, read_peaks
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
+from backend.services.artist_resolution_service import ArtistResolutionRepos
 from backend.services.audio_tags import probe_clip
 from backend.services.master_choice_service import MasterChoiceRepos
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import (
     RepositoryFactory,
+    artist_resolution_repos,
     reconciliation_repos,
     work_curation_repos,
 )
@@ -166,6 +168,12 @@ SyncRepos = Annotated[RepositoryFactory, Depends(get_sync_repos, scope="function
 def get_reconciliation_repos(repos: SyncRepos) -> ReconciliationRepos:
     """The fold repositories for one request, on the request's connection."""
     return reconciliation_repos(repos)
+
+
+def get_artist_resolution_repos(repos: SyncRepos) -> ArtistResolutionRepos:
+    """The artist Resolve and Unmatch repositories, on the request's connection (phase 1a,
+    C75)."""
+    return artist_resolution_repos(repos)
 
 
 def get_work_curation_repos(repos: SyncRepos) -> WorkCurationRepos:

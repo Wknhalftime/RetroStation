@@ -103,6 +103,30 @@ class ArtistLinkOutcome(StrEnum):
     NO_EVIDENCE = "no_evidence"  # no well-formed artist-MBID tag on a present file
 
 
+class LogNameLinkState(StrEnum):
+    """Where a log name's link to an artist stands (C30, AUD-R035)."""
+
+    ACTIVE = "active"  # the name is linked to the artist
+    SUGGESTED = "suggested"  # a candidate the curator has not decided
+    REJECTED = "rejected"  # unlinked or replaced, and remembered so it is never re-added (C19)
+
+
+class LogNameLinkOrigin(StrEnum):
+    """Who wrote a log name's link (C30, AUD-R035)."""
+
+    AUTOMATIC = "automatic"  # the artist matcher
+    MANUAL = "manual"  # the curator, in the Resolution Center
+    ONE_TIME_PASS = "one_time_pass"  # the add-only pass of phase 4 (M19, M23)
+    LEGACY = "legacy"  # copied from an artist row of matches by migration 0044
+
+
+class CreditRole(StrEnum):
+    """A credited artist's role (C44): a main performer, or one the credit features."""
+
+    MAIN = "main"
+    FEATURED = "featured"
+
+
 class TaskType(StrEnum):
     SCAN = "scan"
     LIBRARY_ENRICHMENT = "library_enrichment"

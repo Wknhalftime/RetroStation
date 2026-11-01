@@ -59,8 +59,34 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         row = self._conn.execute("SELECT * FROM artists WHERE id = %s", (artist_id,)).fetchone()
         return self._row_to_model(row) if row else None
 
+    def get_by_mbid(self, mbid: str) -> Artist | None:
+        row = self._conn.execute("SELECT * FROM artists WHERE mbid = %s", (mbid,)).fetchone()
+        return self._row_to_model(row) if row else None
+
+    def create_stub(self, mbid: str) -> Artist:
+        # ON CONFLICT: two writers resolving one unknown MBID at once (two Resolve presses, or
+        # Resolve during a matching run) both end on the one stub, as ON CONFLICT let both
+        # matches rows succeed before 1a.
+        row = self._conn.execute(
+            """INSERT INTO artists
+                   (id, name, sort_name, normalized_name, mbid, origin, needs_enhancement)
+               VALUES (gen_random_uuid()::text, %(mbid)s, %(mbid)s, NULL, %(mbid)s,
+                       'musicbrainz', TRUE)
+               ON CONFLICT (mbid) DO NOTHING
+               RETURNING *""",
+            {"mbid": mbid},
+        ).fetchone()
+        if row is None:
+            row = self._conn.execute("SELECT * FROM artists WHERE mbid = %s", (mbid,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"Stub artist not created: {mbid}")
+        return self._row_to_model(row)
+
     def list_all(self) -> list[Artist]:
-        rows = self._conn.execute("SELECT * FROM artists ORDER BY name").fetchall()
+        # An unnamed stub (phase 1a S15) is no matching candidate: its name is its MBID.
+        rows = self._conn.execute(
+            "SELECT * FROM artists WHERE name IS DISTINCT FROM mbid ORDER BY name"
+        ).fetchall()
         return [self._row_to_model(r) for r in rows]
 
     def list_unenhanced(self) -> list[Artist]:

@@ -27,9 +27,8 @@ import httpx
 import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import Match
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -44,10 +43,12 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recording_search_reach import FakeRecordingSearchReach
+from tests.matching_seed import seed_link
 
 Scores = dict[UUID, float]
 Outcome = tuple[
@@ -99,8 +100,8 @@ class _Mb(FakeMbClient):
 
 
 class _World:
-    """One playlist. Every artist is auto_matched to the MBID ``mbid-<name>`` (not in the
-    catalog, so used as is): its songs go through Steps A, B and C."""
+    """One playlist. Every artist is auto_matched, linked to a stub of the MBID
+    ``mbid-<name>`` (no catalog artist holds it): its songs go through Steps A, B and C."""
 
     def __init__(self, scores: Scores) -> None:
         self.scores = scores
@@ -108,6 +109,8 @@ class _World:
         self.artists = FakeBroadcastArtistRepository()
         self.songs = FakeBroadcastTrackIdentityRepository()
         self.matches = FakeMatchRepository()
+        self.links = FakeLogNameLinkRepository()
+        self.catalog = FakeArtistRepository()
         self.files = FakeLibraryFileRepository()
         self.reach = FakeRecordingSearchReach(self.files)
         self.recording_searches: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -127,16 +130,7 @@ class _World:
             match_status=MatchStatus.AUTO_MATCHED,
         )
         self.artists.upsert(artist)
-        self.matches.create(
-            Match(
-                id=uuid4(),
-                artist_id=artist.id,
-                target_id=self.mbid(name),
-                target_type=TargetType.ARTIST,
-                confidence_score=100.0,
-                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            )
-        )
+        seed_link(self.links, self.catalog, artist.id, self.mbid(name))
         self._by_name[name] = artist
         return artist
 
@@ -211,7 +205,8 @@ class _World:
             match_repo=self.matches,
             library_file_repo=self.files,
             rules_repo=FakeMappingRuleRepository(),
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=self.catalog,
+            link_repo=self.links,
             **({"recording_search_reach": self.reach} if with_reach else {}),
         )
         match_identities_for_playlist(self.playlist_id, repos, mb)

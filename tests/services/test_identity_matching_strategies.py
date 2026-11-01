@@ -21,7 +21,7 @@ from backend.domain.enums import (
     TargetType,
 )
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import MappingRule
 from backend.services.identity_matching_service import (
     BroadcastToLocalStrategy,
     IdentityMappingRuleStrategy,
@@ -30,8 +30,9 @@ from backend.services.identity_matching_service import (
 from backend.services.normalization import normalize_title
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
-from tests.fakes.matches import FakeMatchRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,24 +175,11 @@ def test_tier0_skips_non_library_file_target_type() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _seed_artist_match(match_repo: FakeMatchRepository, artist_id: UUID, mbid: str) -> None:
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist_id,
-            confidence_score=100.0,
-            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            target_id=mbid,
-            target_type=TargetType.ARTIST,
-        )
-    )
-
-
 def test_tier1_gates_on_pending_artist_returns_none() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     mb = FakeMbClient()
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
 
     artist = _artist(status=MatchStatus.PENDING)
     identity = _identity(artist.id)
@@ -200,10 +188,10 @@ def test_tier1_gates_on_pending_artist_returns_none() -> None:
 
 def test_tier1_step_a_high_confidence_skips_mb() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     mb = FakeMbClient()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
     # Title matches identity exactly so score = 100 — exercises the
     # unconditional MB_AUTO_LINK_SCORE gate, independent of competitor
     # presence. Previous casing mismatch ("Enter Sandman" vs "enter
@@ -219,7 +207,7 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
         )
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -232,9 +220,9 @@ def test_tier1_step_a_high_confidence_skips_mb() -> None:
 def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
     """A weak Step A result (not auto-matched) → Step B MB recording search fires."""
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
     # Local file with a weak title match (about 30: under the 56 song floor, D6)
     lib_repo.upsert(
         _lib_file(
@@ -257,7 +245,7 @@ def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -269,9 +257,9 @@ def test_tier1_step_b_fires_on_mid_confidence_local() -> None:
 
 def test_tier1_no_local_files_falls_through_to_mb() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
     # No file with matching artist_mbid for Step A,
     # but MB search resolves to a real file by recording_mbid.
     hit = _lib_file(
@@ -285,7 +273,7 @@ def test_tier1_no_local_files_falls_through_to_mb() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -304,9 +292,9 @@ def test_tier1_step_b_tie_keeps_step_a_result() -> None:
     when a local tag carries a foreign recording_mbid).
     """
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
 
     # Step A candidate — shared partial-match title scores below
     # MB_AUTO_LINK_SCORE (95), forcing Step B escalation.
@@ -331,7 +319,7 @@ def test_tier1_step_b_tie_keeps_step_a_result() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -347,9 +335,9 @@ def test_tier1_step_b_strictly_better_score_wins() -> None:
     a too-aggressive interpretation of the change-2 tie rule.
     """
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
 
     # Step A: weak partial match (not auto-matched), forces Step B.
     step_a = _lib_file(
@@ -371,7 +359,7 @@ def test_tier1_step_b_strictly_better_score_wins() -> None:
         recording_searches={("mbid-m", "enter sandman"): [{"id": "rec-abc"}]},
     )
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -383,12 +371,12 @@ def test_tier1_step_b_strictly_better_score_wins() -> None:
 
 def test_tier1_mb_inconclusive_returns_no_local_files_reason() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist()
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
     mb = FakeMbClient()  # no recording_searches => empty list
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     identity = _identity(artist.id, title="enter sandman")
     result = strategy.apply(identity, artist)
 
@@ -400,10 +388,10 @@ def test_tier1_mb_inconclusive_returns_no_local_files_reason() -> None:
 
 def test_tier1_missing_match_record_returns_missing_match_record_reason() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()  # no artist match seeded
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()  # no link seeded
     mb = FakeMbClient()
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     artist = _artist(status=MatchStatus.AUTO_MATCHED)
     identity = _identity(artist.id)
     result = strategy.apply(identity, artist)
@@ -433,23 +421,14 @@ def test_tier1_local_only_target_id_no_mbid_skips_mb_uses_name_search() -> None:
     )
 
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     artist = _artist(name="van halen")
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-            target_id=local_artist_uuid,
-            target_type=TargetType.ARTIST,
-        )
-    )
+    seed_link(links, catalog_repo, artist.id, local_artist_uuid)
     hit = _lib_file("/music/vh/jump.flac", track_title="jump", artist_name="van halen")
     lib_repo.upsert(hit)
     mb = FakeMbClient()  # must NOT be called
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, catalog_repo)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog_repo)
     result = strategy.apply(_identity(artist.id, title="jump"), artist)
 
     assert result is not None
@@ -481,18 +460,9 @@ def test_tier1_local_uuid_with_real_mbid_uses_mbid_for_steps_a_b() -> None:
     )
 
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     artist = _artist(name="van halen")
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-            target_id=local_artist_uuid,  # still the local UUID from initial match
-            target_type=TargetType.ARTIST,
-        )
-    )
+    seed_link(links, catalog_repo, artist.id, local_artist_uuid)  # still the local id
     # Library file linked via the real MBID (Step A path).
     hit = _lib_file(
         "/music/vh/jump.flac",
@@ -503,7 +473,7 @@ def test_tier1_local_uuid_with_real_mbid_uses_mbid_for_steps_a_b() -> None:
     lib_repo.upsert(hit)
     mb = FakeMbClient()
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, catalog_repo)
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog_repo)
     result = strategy.apply(_identity(artist.id, title="jump"), artist)
 
     assert result is not None
@@ -533,23 +503,14 @@ def test_tier1_step_c_passes_normalized_name_not_original() -> None:
     )
 
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     artist = BroadcastArtist(
         id=uuid4(),
         original_name="Van Halen",
         normalized_name="van halen",
         match_status=MatchStatus.AUTO_MATCHED,
     )
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-            target_id=local_artist_uuid,
-            target_type=TargetType.ARTIST,
-        )
-    )
+    seed_link(links, catalog_repo, artist.id, local_artist_uuid)
     hit = _lib_file(
         "/music/vh/jump.flac",
         track_title="jump",
@@ -560,7 +521,7 @@ def test_tier1_step_c_passes_normalized_name_not_original() -> None:
 
     strategy = ResolvedArtistMbidStrategy(
         lib_repo,
-        match_repo,
+        links,
         FakeMbClient(),
         catalog_repo,
     )
@@ -593,18 +554,9 @@ def test_tier1_step_c_never_proposes_cross_artist_file() -> None:
     )
 
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     artist = _artist(name="jimi hendrix")
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-            target_id=local_artist_uuid,
-            target_type=TargetType.ARTIST,
-        )
-    )
+    seed_link(links, catalog_repo, artist.id, local_artist_uuid)
     # Wrong-artist seed — must never be proposed.
     lib_repo.upsert(
         _lib_file(
@@ -625,7 +577,7 @@ def test_tier1_step_c_never_proposes_cross_artist_file() -> None:
 
     strategy = ResolvedArtistMbidStrategy(
         lib_repo,
-        match_repo,
+        links,
         FakeMbClient(),
         catalog_repo,
     )
@@ -656,18 +608,9 @@ def test_tier1_step_c_no_same_artist_files_returns_no_local_files() -> None:
     )
 
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     artist = _artist(name="jimi hendrix")
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-            target_id=local_artist_uuid,
-            target_type=TargetType.ARTIST,
-        )
-    )
+    seed_link(links, catalog_repo, artist.id, local_artist_uuid)
     lib_repo.upsert(
         _lib_file(
             "/music/u2/star_spangled_banner.flac",
@@ -679,7 +622,7 @@ def test_tier1_step_c_no_same_artist_files_returns_no_local_files() -> None:
 
     strategy = ResolvedArtistMbidStrategy(
         lib_repo,
-        match_repo,
+        links,
         FakeMbClient(),
         catalog_repo,
     )
@@ -703,9 +646,9 @@ def test_tier1_step_b_filters_cross_artist_tagged_recording() -> None:
     NO_LOCAL_FILES result.
     """
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist(name="metallica")
-    _seed_artist_match(match_repo, artist.id, "mbid-m")
+    seed_link(links, catalog, artist.id, "mbid-m")
     # File mistagged with a Metallica recording_mbid but artist is U2.
     lib_repo.upsert(
         _lib_file(
@@ -722,9 +665,9 @@ def test_tier1_step_b_filters_cross_artist_tagged_recording() -> None:
 
     strategy = ResolvedArtistMbidStrategy(
         lib_repo,
-        match_repo,
+        links,
         mb,
-        FakeArtistRepository(),
+        catalog,
     )
     result = strategy.apply(
         _identity(artist.id, title="enter sandman"),
@@ -948,10 +891,10 @@ def test_f_slash_credit_does_not_sink_an_exact_title() -> None:
     """KSTZ logged "Smooth f/Rob Thomas"; the library has it as
     "Smooth (Feat. Rob Thomas)". Scored 48% before the credit was stripped."""
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     mb = FakeMbClient()
     artist = _artist("santana")
-    _seed_artist_match(match_repo, artist.id, "mbid-santana")
+    seed_link(links, catalog, artist.id, "mbid-santana")
     smooth = _lib_file(
         "/s/smooth.flac",
         track_title="Smooth (Feat. Rob Thomas)",
@@ -960,7 +903,7 @@ def test_f_slash_credit_does_not_sink_an_exact_title() -> None:
     )
     lib_repo.upsert(smooth)
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     result = strategy.apply(_logged_identity(artist.id, "Smooth f/Rob Thomas"), artist)
 
     assert result is not None
@@ -1012,9 +955,9 @@ def test_w_slash_that_is_part_of_the_title_keeps_its_score() -> None:
 
 def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
     lib_repo = FakeLibraryFileRepository()
-    match_repo = FakeMatchRepository()
+    links, catalog = FakeLogNameLinkRepository(), FakeArtistRepository()
     artist = _artist("santana")
-    _seed_artist_match(match_repo, artist.id, "mbid-santana")
+    seed_link(links, catalog, artist.id, "mbid-santana")
     hit = _lib_file(
         "/s/smooth.flac",
         track_title="Smooth",
@@ -1024,7 +967,7 @@ def test_mb_recording_search_is_sent_the_title_without_the_credit() -> None:
     lib_repo.upsert(hit)
     mb = FakeMbClient(recording_searches={("mbid-santana", "smooth"): [{"id": "rec-smooth"}]})
 
-    strategy = ResolvedArtistMbidStrategy(lib_repo, match_repo, mb, FakeArtistRepository())
+    strategy = ResolvedArtistMbidStrategy(lib_repo, links, mb, catalog)
     result = strategy.apply(_logged_identity(artist.id, "Smooth f/Rob Thomas"), artist)
 
     assert mb.calls == ["search_recording:mbid-santana:smooth"]

@@ -5,8 +5,9 @@
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
-writes" were added 2026-10-31 with the artist model's phase 0c. Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R057 ACTIVE). If the code and this page disagree, fix one of
+writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
+with its phase 1a. Rulings cited here are in `audit/rulings.jsonl`
+(AUD-R015..R058 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -45,8 +46,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - `domain.library` never references streaming (D20). **Enforced.**
 
 **Known gaps** (true today, not rules to copy):
-- Routers run SQL directly: 57 `.execute()` lines in 10 router files (phase 0c moved the works
-  router's writes out, below). `routers/matching.py` is 1,109 lines.
+- Routers run SQL directly: 45 `.execute()` lines in 10 router files (phase 0c moved the works
+  router's writes out, and phase 1a the artist Resolve and Unmatch, below).
+  `routers/matching.py` is 960 lines.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
@@ -78,6 +80,43 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `tests/routers/test_works_write_routes_are_sync.py`,
   `tests/routers/test_works_write_refusals.py` and
   `tests/services/test_work_curation_service.py`.
+
+## Log-name links: one table, one writer (phase 1a, C30)
+
+- A log name's link to a catalog artist is a row of `log_name_links` (migration 0044, AUD-R035):
+  one per (name, artist) in every state (`active`, `suggested`, `rejected`, so a rejected pair
+  stays remembered), with its origin, a strength (0 to 100), versioned evidence and the credit
+  columns 4.2 fills. Both keys are foreign keys with no cascade; `mbid` is the artist's MBID
+  copied alongside and never read for matching.
+- `LogNameLinkService` (`services/log_name_link_service.py`) is the only caller of the port
+  `LogNameLinkRepository`, whose adapter is the only writer of the table; the rules for links
+  live in the service, never in the port or its fake (`tests/fakes/log_name_links.py`). It
+  writes in the caller's transaction. A match target (an MBID or an `artists.id`) names the
+  artist with that id, else the one holding that MBID, else a new stub of that MBID: name and
+  sort name the MBID, no normalized name, `needs_enhancement` set. An unnamed stub is left out
+  of `GET /library/artists`, its search and `list_all()` (`name IS DISTINCT FROM mbid`).
+- Writers: the artist matcher (`_persist_artist_result`: the catalog artist first, then the
+  link, origin automatic; never over a manual or rejected pair), Resolve (a manual link; the
+  name's other links stay) and Unmatch (every link of the name goes). Resolve and Unmatch are
+  sync routes on `SyncRepos` (C75) calling `services/artist_resolution_service.py`, whose
+  statements are `ArtistResolutionRepository`'s (moved from the router unchanged), so status,
+  cascade and link commit together.
+- Readers: Tier 1 of song matching (the first active link, manual first, then strength, then
+  the oldest; the MBID is the linked artist's current one), the re-check wave's linked names
+  (`normalized_names_linked_since`), and the works merge, which keeps a local artist a link in
+  any state points at (AUD-R035, which changes AUD-R004).
+- The artist rows of `matches` were copied once (0044) and stay, unread and unwritten, until
+  phase 1c drops them with `matches.artist_id` and `get_by_artist` (M35).
+  `scripts/check_log_name_links_copy.py --dsn` checks the copy on the gate's copy.
+- Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
+  artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
+  work for it under the stub (named by enrichment, phase 1a PR 2). The dev database had none
+  of either at the copy (2026-11-01 gate copy).
+- The checks are `tests/test_log_name_links_single_writer.py`,
+  `tests/test_no_artist_rows_in_matches.py`, `tests/services/test_tier1_link_read.py`,
+  `tests/services/test_artist_link_writes.py`, `tests/routers/test_resolve_writes_link.py`,
+  `tests/repositories/test_log_name_links_contract.py` and the migration's
+  `tests/integration/test_log_name_links_*_pg.py`.
 
 ## Derived counts kept by triggers
 
@@ -187,9 +226,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
-| `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert | MB enrichment |
+| `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a) | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
-| `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names (AUD-R026, in part superseded by AUD-R036) |
+| `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names, the artist's own and its active log-name links' (AUD-R026, in part superseded by AUD-R036) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`), or for a station liner's hash (LR4) | cue upserts | cue analysis (liners first) |
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration `0039_stream_cues_audio_silent` deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports; the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
@@ -301,3 +340,4 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `get_case_duplicate_groups` | none | 0c | #212 | AUD-R055 | none |
 | `list_work_ids_with_master_off_work` | none | 0c | #212 | AUD-R056 | none |
 | `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |
+| `artist_has_match` | `LogNameLinkService.is_linked`: a log-name link in any state keeps a local artist | 1a | #214 | AUD-R058 | none |
