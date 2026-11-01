@@ -20,6 +20,7 @@ __all__ = [
     "format_deferred_retry",
     "format_low_confidence",
     "format_mb_unavailable",
+    "format_title_scores_disagree",
 ]
 
 
@@ -54,3 +55,11 @@ def format_mb_unavailable() -> str:
     # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16). Every re-check rewinds
     # a deferred song, whatever its artist.
     return "MusicBrainz unavailable — deferred for retry at the next re-check"
+
+
+def format_title_scores_disagree(today_score: float, v11_score: float) -> str:
+    # Trial mode (AUD-R100): the card shows V11.1's pick unless V11.1 hides the song.
+    return (
+        f"Title scorers disagree — today's {_round_half_up(today_score)}%, "
+        f"V11.1 {_round_half_up(v11_score)}%"
+    )
