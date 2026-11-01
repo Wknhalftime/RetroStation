@@ -14,6 +14,7 @@ from backend.domain.streaming import (
     ItemRef,
     Landing,
     NoBroadcastError,
+    PlayableFile,
     ScheduleItem,
     StaleScheduleError,
     StreamTiming,
@@ -101,18 +102,58 @@ def _items_from(
         on, first = on + timedelta(days=1), 0
 
 
+def _items_before(load_day: DayLoader, ref: ItemRef) -> Iterator[tuple[ItemRef, ScheduleItem]]:
+    """Items before ``ref``, nearest first, over its day and the day before."""
+    for on, end in ((ref.day, ref.index), (ref.day - timedelta(days=1), None)):
+        items = load_day(on)
+        for index in range((len(items) if end is None else end) - 1, -1, -1):
+            yield ItemRef(on, index), items[index]
+
+
+def _same_file(prior: PlayableFile | None, file: PlayableFile | None) -> bool:
+    """Whether ``file`` is ``prior``, the file that just aired. The radio never airs a file
+    twice in a row: a second play matched to it (two songs on one track) is skipped."""
+    return prior is not None and file is not None and prior.file_id == file.file_id
+
+
 def _next_playable(
     load_day: DayLoader, after: ItemRef, days: int, timing: StreamTiming
 ) -> ItemRef | None:
-    """The first playable item after ``after`` within ``days`` following days."""
+    """The first item after ``after`` within ``days`` following days that airs: it is
+    playable and not a repeat of ``after``'s file."""
+    item_after = _item_at(load_day, after)
+    prior = item_after.file if item_after.is_playable(timing) else None
     for ref, item in _items_from(load_day, ItemRef(after.day, after.index + 1), days):
-        if item.is_playable(timing):
+        if item.is_playable(timing) and not _same_file(prior, item.file):
             return ref
     return None
 
 
+def _run_start(load_day: DayLoader, anchor: Landing, timing: StreamTiming) -> Landing:
+    """``anchor`` moved back to the first play of its file's run.
+
+    A play of the file that just aired never airs, so a clock inside it is still inside the
+    file that began with the first play: the offset counts from there.
+    """
+    ref, offset_ms = anchor.ref, anchor.offset_ms
+    item = _item_at(load_day, ref)
+    while item.is_playable(timing):
+        before = next(
+            ((r, i) for r, i in _items_before(load_day, ref) if i.is_playable(timing)), None
+        )
+        if before is None or not _same_file(before[1].file, item.file):
+            break
+        offset_ms += to_ms(item.logged_at - before[1].logged_at)
+        ref, item = before
+    return Landing(ref, offset_ms)
+
+
 def _land_from_anchor(load_day: DayLoader, anchor: Landing, timing: StreamTiming) -> Landing | None:
-    """Inside the anchor song if enough of it is left, else the top of the next song (D15)."""
+    """Inside the anchor song if enough of it is left, else the top of the next song (D15).
+
+    An anchor on a repeat of the file before it counts as that file's first play.
+    """
+    anchor = _run_start(load_day, anchor, timing)
     file = _item_at(load_day, anchor.ref).file
     if (
         file is not None
@@ -129,16 +170,19 @@ def walk_forward(load_day: DayLoader, start: Landing, timing: StreamTiming) -> L
 
     The "radio kept playing" rule used by resume (D11). Unplayable items take no time. A
     landing needs the minimum span left in the song (``tail_fits``), otherwise the next
-    playable item starts from the top.
+    playable item starts from the top. A play of the file that just aired takes no time.
     """
     _item_at(load_day, start.ref)
     remaining = start.offset_ms
+    prior: PlayableFile | None = None
     for ref, item in _items_from(load_day, start.ref, timing.max_days_ahead):
-        if item.file is None or not item.file.is_playable(timing):
+        file = item.file
+        if file is None or not file.is_playable(timing) or _same_file(prior, file):
             continue
-        span = item.file.span_ms()
+        prior = file
+        span = file.span_ms()
         if remaining < span:
-            if item.file.tail_fits(remaining, timing):
+            if file.tail_fits(remaining, timing):
                 return Landing(ref, remaining)
             remaining = 0
             continue

@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend.config import Settings  # noqa: E402
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository  # noqa: E402
 from backend.domain.enums import VersionType  # noqa: E402
+from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository  # noqa: E402
 from backend.services.library_enrichment_service import recording_version_type  # noqa: E402
 from backend.services.mb_client import MusicBrainzApiClient  # noqa: E402
 
@@ -45,9 +46,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def open_mb_client(
+    cache_repo: MusicBrainzCacheRepository, settings: Settings
+) -> MusicBrainzApiClient:
+    """The client the app's tasks use: its cache entries last the app's lifetime.
+
+    Without ``ttl_days`` the client falls back to its 30-day default, and the
+    searches this script caches would expire long before the app's own.
+    """
+    return MusicBrainzApiClient(cache_repo, ttl_days=settings.mb_cache_ttl_days)
+
+
 def main() -> None:
     args = build_parser().parse_args()
-    dsn = os.environ.get("DATABASE_URL") or Settings().database_url
+    settings = Settings()
+    dsn = os.environ.get("DATABASE_URL") or settings.database_url
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         applied = conn.execute(
@@ -71,7 +84,7 @@ def main() -> None:
         print(f"MusicBrainz recordings not marked live: {len(rows)}")
 
         live: list[dict[str, str]] = []
-        with MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn)) as client:
+        with open_mb_client(PgMusicBrainzCacheRepository(conn), settings) as client:
             for start in range(0, len(rows), _CHUNK):
                 chunk = rows[start : start + _CHUNK]
                 found = client.search_recordings_by_mbids([r["id"] for r in chunk])
