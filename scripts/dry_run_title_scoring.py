@@ -1,13 +1,14 @@
 """Dry run of song title-scoring trial mode (AUD-R100): what it would change, written nowhere.
 
 Before trial mode ships, Lance reads which songs it moves. Through a read-only connection, this
-resolves every song not decided by hand with today's strategy chain and in trial mode, and every
+resolves every song not matched by hand with today's strategy chain and in trial mode, and every
 song Lance matched by hand as if it were pending, using the same strategies as the song-matching
-task (build_song_engines). It writes three CSV reports into --out:
+task (build_song_engines). A song rejected by hand is undecided: every re-check re-scores it
+without its rejected files (AUD-R029), and so does this. It writes three CSV reports into --out:
 
 - frozen_check.csv: the product's V11.1 against the frozen v11.py, for every title pair this run
   scored (with --frozen, once FROZEN.sha256 checks out; without it, the header only);
-- changed_songs.csv: every song not decided by hand whose trial outcome or file differs from
+- changed_songs.csv: every song not matched by hand whose trial outcome or file differs from
   today's, and whether a re-check would apply it (existing auto-matches are not rewound);
 - accepted_songs.csv: where each hand-matched song lands, today and in trial mode.
 
@@ -66,16 +67,13 @@ from backend.services.identity_matching_service import (  # noqa: E402
 )
 from backend.services.title_scoring import v11_title_score  # noqa: E402
 
-# Every song but the ones rejected by hand: those are decided, as hand-matched ones are, and
-# hand-matched songs are scored for accepted_songs.csv.
+# Every song: hand-matched ones are scored for accepted_songs.csv, the rest for changed_songs.csv.
 _SONGS_SQL = """
     SELECT id, broadcast_artist_id, original_title, normalized_title, normalized_signature,
            match_status, rejected_file_ids
       FROM track_identities
-     WHERE match_status <> 'manual_rejected'
      ORDER BY broadcast_artist_id, id
 """
-_COUNT_REJECTED_SQL = "SELECT count(*) AS n FROM track_identities WHERE match_status = %s"
 _CHOSEN_FILES_SQL = """
     SELECT m.identity_id, m.library_file_id
       FROM matches m JOIN track_identities ti ON ti.id = m.identity_id
@@ -87,7 +85,12 @@ _FILE_TITLES_SQL = """
 """
 # A re-check rewinds these, so a change to them takes effect then (AUD-R029); an auto-match is
 # never rewound (Lance, 2026-11-01: no rewind).
-_RESCORED = {MatchStatus.PENDING, MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED}
+_RESCORED = {
+    MatchStatus.PENDING,
+    MatchStatus.NEEDS_REVIEW,
+    MatchStatus.AUTO_REJECTED,
+    MatchStatus.MANUAL_REJECTED,
+}
 _SAME_SCORE = 0.001
 
 FROZEN_COLUMNS = ["log_title", "file_title", "v11_score", "frozen_score", "differs"]
@@ -303,8 +306,16 @@ def load_frozen_v11(frozen: Path) -> Callable[[str, str], float]:
         digest, name = line.split(" *", 1)
         if hashlib.sha256((frozen / name).read_bytes()).hexdigest() != digest:
             raise SystemExit(f"{name} changed since it was frozen: the frozen check is void")
+    # Nothing may be written into the frozen folder, __pycache__ included, and its modules
+    # (variants, patterns, ...) must not shadow later imports.
+    writes_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     sys.path.insert(0, str(frozen))
-    module = importlib.import_module("v11")
+    try:
+        module = importlib.import_module("v11")
+    finally:
+        sys.path.remove(str(frozen))
+        sys.dont_write_bytecode = writes_bytecode
     return lambda log_title, file_title: float(module.v11(log_title, file_title, None))
 
 
@@ -368,9 +379,6 @@ def main(argv: list[str] | None = None) -> int:
             recording_search_reach=skip_step_b,
         )
         results, timings = resolve_all(songs, artists, repos, v11)
-        rejected_row = conn.execute(
-            _COUNT_REJECTED_SQL, (MatchStatus.MANUAL_REJECTED.value,)
-        ).fetchone()
         chosen: dict[UUID, set[UUID]] = {}
         for row in conn.execute(_CHOSEN_FILES_SQL).fetchall():
             chosen.setdefault(row["identity_id"], set()).add(row["library_file_id"])
@@ -406,9 +414,10 @@ def main(argv: list[str] | None = None) -> int:
         f"MusicBrainz not called: Step B skipped for {len(skip_step_b.skipped):,} artists "
         "that have a file only it could add"
     )
+    rejected = sum(1 for r in undecided if r.song.match_status == MatchStatus.MANUAL_REJECTED)
     print(
-        f"songs: {len(undecided):,} not decided by hand, {len(by_hand):,} matched by hand "
-        f"({rejected_row['n'] if rejected_row else 0:,} rejected by hand not scored)"
+        f"songs: {len(undecided):,} not matched by hand ({rejected:,} of them rejected by hand, "
+        f"re-scored without their rejected files), {len(by_hand):,} matched by hand"
     )
     print(
         f"changed_songs.csv: {len(moved):,} songs differ in trial mode "

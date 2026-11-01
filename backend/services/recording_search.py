@@ -44,7 +44,8 @@ class RecordingSearch:
 
     With ``remember_answers`` (trial mode, AUD-R100) a search repeated in the run returns the
     first one's answer without calling the client, so both of a song's scoring chains use one
-    MusicBrainz search. A failure is not remembered.
+    MusicBrainz search. A remembered answer is a successful search, as the client's cache hit
+    it stands in for would be, so it resets the count too. A failure is not remembered.
     """
 
     def __init__(
@@ -77,6 +78,7 @@ class RecordingSearch:
         if self.cut_off:
             raise MusicBrainzUnavailableError("MusicBrainz cut-off reached in this run")
         if self._answers is not None and (artist_mbid, title) in self._answers:
+            self._failures = 0
             return self._answers[(artist_mbid, title)]
         try:
             recordings = self._client.search_recording(artist_mbid=artist_mbid, title=title)
