@@ -6,7 +6,8 @@ feat/cue-editor-api, the editor API; the "Station liners" section was added 2026
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
-with its phase 1a. Rulings cited here are in `audit/rulings.jsonl` (AUD-R015..R058 ACTIVE). If the code and this page disagree, fix one of
+with its phase 1a. Rulings cited here are in `audit/rulings.jsonl`
+(AUD-R015..R058 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -107,6 +108,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The artist rows of `matches` were copied once (0044) and stay, unread and unwritten, until
   phase 1c drops them with `matches.artist_id` and `get_by_artist` (M35).
   `scripts/check_log_name_links_copy.py --dsn` checks the copy on the gate's copy.
+- Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
+  artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
+  work for it under the stub (named by enrichment, phase 1a PR 2). The dev database had none
+  of either at the copy (2026-11-01 gate copy).
 - The checks are `tests/test_log_name_links_single_writer.py`,
   `tests/test_no_artist_rows_in_matches.py`, `tests/services/test_tier1_link_read.py`,
   `tests/services/test_artist_link_writes.py`, `tests/routers/test_resolve_writes_link.py`,

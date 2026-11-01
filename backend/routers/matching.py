@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from backend.config import get_settings
 from backend.dependencies import (
-    SyncRepos,
     get_artist_resolution_repos,
     get_current_token,
     get_db_connection,
@@ -588,7 +587,6 @@ def resolve_artist(
     _token: Token,
     artist_id: UUID,
     body: ArtistResolution,
-    repos: SyncRepos,
     resolution: ResolutionRepos,
 ) -> ResolveResult:
     """Manually resolve an artist as matched or rejected.
@@ -604,8 +602,8 @@ def resolve_artist(
             library-search flow sends (``artist.mbid ?? artist.id``, trim-aware); an
             MBID no catalog artist holds gets a stub artist (phase 1a S9). Its format is
             not checked.
-        repos: The request's repositories, committed before song matching is queued.
-        resolution: The decision's repositories, on the same connection.
+        resolution: The decision's repositories on the request's one connection, and its
+            commit, made before song matching is queued.
         _token: Bearer token (auth check only).
 
     Returns:
@@ -615,6 +613,7 @@ def resolve_artist(
         HTTPException: 404 if the artist does not exist.
         HTTPException: 422 if match_status is invalid or target_artist_id is
             missing for MANUAL_MATCHED.
+        HTTPException: 503 if the database connection is lost.
     """
     # Validate match_status
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
@@ -625,7 +624,8 @@ def resolve_artist(
             ),
         )
 
-    if body.match_status == MatchStatus.MANUAL_MATCHED and not body.target_artist_id:
+    target = body.target_artist_id
+    if body.match_status == MatchStatus.MANUAL_MATCHED and not target:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="target_artist_id is required for MANUAL_MATCHED",
@@ -633,23 +633,23 @@ def resolve_artist(
 
     new_status = MatchStatus(body.match_status)
     try:
-        if new_status == MatchStatus.MANUAL_MATCHED:
-            assert body.target_artist_id is not None  # noqa: S101 - the 422 guard above
-            playlist_ids = match_by_hand(artist_id, body.target_artist_id, resolution)
+        if new_status == MatchStatus.MANUAL_MATCHED and target:
+            playlist_ids = match_by_hand(artist_id, target, resolution)
         else:
             reject_by_hand(artist_id, resolution)
             playlist_ids = []
+        if playlist_ids:
+            # Commit BEFORE enqueueing. The Huey worker is a separate process with its own DB
+            # connection; if the request transaction hasn't committed yet, the worker sees the
+            # pre-cascade state (songs still NEEDS_REVIEW, stale matches rows present) and
+            # skips them (get_pending_for_playlist filters strictly to match_status='pending').
+            # The dependency's own commit after the route is then a no-op. Mirrors the
+            # commit-before-enqueue ordering in artist_matching_task.
+            resolution.commit()
     except LogNameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-    if playlist_ids:
-        # Commit BEFORE enqueueing. The Huey worker is a separate process with its own DB
-        # connection; if the request transaction hasn't committed yet, the worker sees the
-        # pre-cascade state (songs still NEEDS_REVIEW, stale matches rows present) and skips
-        # them (get_pending_for_playlist filters strictly to match_status='pending'). The
-        # dependency's own commit after the route is then a no-op. Mirrors the
-        # commit-before-enqueue ordering in artist_matching_task.
-        repos.commit()
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     # Enqueue is fire-and-forget across a transaction boundary the request has already
     # crossed. The cascade is committed and durable; failing the response would tell the
     # user their manual link failed when it actually succeeded. If the Huey backend is
@@ -846,11 +846,14 @@ def unmatch_artist(
         HTTPException: 404 if the artist does not exist.
         HTTPException: 409 if the artist's current ``match_status`` is
             PENDING or NEEDS_REVIEW.
+        HTTPException: 503 if the database connection is lost.
     """
     try:
         unmatch(artist_id, resolution)
     except LogNameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     except LogNameNotUnmatchableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -39,7 +39,7 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
-from backend.db.sync_conn import connect_sync
+from backend.db.sync_conn import commit_or_unavailable, connect_sync
 from backend.services.artist_resolution_service import ArtistResolutionRepos
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
@@ -207,6 +207,11 @@ class RepositoryFactory:
         (e.g. the sign-off's old clip file is deleted only after this commit lands, PG3/I1)."""
         self._conn.commit()
 
+    def commit_or_unavailable(self) -> None:
+        """Commit the request's connection now; a connection lost before or during the commit
+        is the domain's ``StorageUnavailableError`` (503 at a route)."""
+        commit_or_unavailable(self._conn)
+
     def m3u_repos(self) -> M3uRepos:
         """The repositories both M3U exports read."""
         return M3uRepos(
@@ -274,5 +279,8 @@ def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
     """The port bundle the artist Resolve and Unmatch write through, on *repos*' connection
     (phase 1a, C75)."""
     return ArtistResolutionRepos(
-        resolution=repos.broadcast.resolution, links=repos.log_name_links, catalog=repos.artists
+        resolution=repos.broadcast.resolution,
+        links=repos.log_name_links,
+        catalog=repos.artists,
+        commit=repos.commit_or_unavailable,
     )

@@ -64,14 +64,20 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         return self._row_to_model(row) if row else None
 
     def create_stub(self, mbid: str) -> Artist:
+        # ON CONFLICT: two writers resolving one unknown MBID at once (two Resolve presses, or
+        # Resolve during a matching run) both end on the one stub, as ON CONFLICT let both
+        # matches rows succeed before 1a.
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name, mbid, origin, needs_enhancement)
                VALUES (gen_random_uuid()::text, %(mbid)s, %(mbid)s, NULL, %(mbid)s,
                        'musicbrainz', TRUE)
+               ON CONFLICT (mbid) DO NOTHING
                RETURNING *""",
             {"mbid": mbid},
         ).fetchone()
+        if row is None:
+            row = self._conn.execute("SELECT * FROM artists WHERE mbid = %s", (mbid,)).fetchone()
         if row is None:
             raise RuntimeError(f"Stub artist not created: {mbid}")
         return self._row_to_model(row)

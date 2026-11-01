@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import gate_common
 import psycopg
 from psycopg.rows import dict_row
 
@@ -91,10 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dsn", required=True, help="the gate's copy (a bench database)")
     args = parser.parse_args(argv)
-    name = str(psycopg.conninfo.conninfo_to_dict(args.dsn).get("dbname", ""))
-    if "bench" not in name:
-        print(f"refusing to read non-bench database {name!r}", file=sys.stderr)
-        return 2
+    gate_common.require_bench(args.dsn)
     with psycopg.connect(args.dsn) as conn:
         conn.read_only = True
         try:

@@ -8,6 +8,7 @@ together or not at all. Nothing here commits or queues work.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -21,11 +22,14 @@ from backend.services.log_name_link_service import LogNameLinkService
 
 @dataclass(frozen=True)
 class ArtistResolutionRepos:
-    """The repositories a log-name decision writes through, on one connection."""
+    """The repositories a log-name decision writes through, on one connection, and that
+    connection's commit: the route commits before it queues song matching, and a lost
+    connection is ``StorageUnavailableError``."""
 
     resolution: ArtistResolutionRepository
     links: LogNameLinkRepository
     catalog: ArtistCatalogRepository
+    commit: Callable[[], None]
 
     def link_service(self) -> LogNameLinkService:
         return LogNameLinkService(self.links, self.catalog)

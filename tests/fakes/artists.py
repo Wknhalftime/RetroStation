@@ -24,6 +24,8 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         return next((a for a in self._data.values() if a.mbid == mbid), None)
 
     def create_stub(self, mbid: str) -> Artist:
+        if (held := self.get_by_mbid(mbid)) is not None:
+            return held
         stub = Artist(
             id=str(uuid4()),
             name=mbid,

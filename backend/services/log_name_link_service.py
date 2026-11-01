@@ -9,6 +9,7 @@ transaction and commits nothing (C75).
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from uuid import UUID
 
 from backend.domain.catalog import Artist
@@ -31,7 +32,7 @@ def _strength(score: float) -> int:
     return max(0, min(100, math.floor(score + 0.5)))
 
 
-def _tier1_order(link: LogNameLink) -> tuple[bool, int, object, str]:
+def _tier1_order(link: LogNameLink) -> tuple[bool, int, datetime, str]:
     """Manual first, then strength (high to low), then the oldest (SPEC 1a S7)."""
     return (link.origin != LogNameLinkOrigin.MANUAL, -link.strength, link.created_at, str(link.id))
 
@@ -65,6 +66,10 @@ class LogNameLinkService:
             held.state == LogNameLinkState.REJECTED or held.origin == LogNameLinkOrigin.MANUAL
         ):
             return
+        evidence = _evidence(tier, score)
+        if held is not None and "legacy" in held.evidence:
+            # Keep the copied row (C50): phase 1c's demotion reads it.
+            evidence["legacy"] = held.evidence["legacy"]
         self._links.upsert_link(
             LogNameLink(
                 broadcast_artist_id=broadcast_artist_id,
@@ -73,7 +78,7 @@ class LogNameLinkService:
                 state=LogNameLinkState.ACTIVE,
                 origin=LogNameLinkOrigin.AUTOMATIC,
                 strength=_strength(score),
-                evidence=_evidence(tier, score),
+                evidence=evidence,
             )
         )
 

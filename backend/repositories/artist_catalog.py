@@ -19,7 +19,8 @@ class ArtistCatalogRepository(ABC):
     def create_stub(self, mbid: str) -> Artist:
         """A stub artist for an MBID no artist holds (phase 1a, S3): a new id, the MBID as its
         name and sort name, no normalized name, origin musicbrainz, needing enhancement.
-        Enrichment names it later."""
+        Enrichment names it later. When another writer has meanwhile stored an artist with
+        the MBID, that artist comes back instead."""
         ...
 
     @abstractmethod

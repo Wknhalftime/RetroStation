@@ -5,6 +5,8 @@ The only module that writes the table (``tests/test_log_name_links_single_writer
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
@@ -94,13 +96,27 @@ class PgLogNameLinkRepository(LogNameLinkRepository):
             "created_at": link.created_at,
         }
         try:
-            with self._conn.transaction():
+            with self._savepoint():
                 row = self._conn.execute(_UPSERT_SQL, params).fetchone()
         except psycopg.errors.ForeignKeyViolation as missing:
             raise LogNameLinkTargetMissingError(str(missing)) from missing
         if row is None:
             raise RuntimeError("log_name_links upsert returned no row")
         return _link_from_row(row)
+
+    @contextmanager
+    def _savepoint(self) -> Iterator[None]:
+        """A savepoint in the caller's transaction, so a refused write leaves the transaction
+        usable. Never ``conn.transaction()``: on an idle connection that is BEGIN ... COMMIT,
+        which would commit the link apart from the caller's other writes (C75)."""
+        self._conn.execute("SAVEPOINT log_name_link_write")
+        try:
+            yield
+        except BaseException:
+            if not self._conn.closed:
+                self._conn.execute("ROLLBACK TO SAVEPOINT log_name_link_write")
+            raise
+        self._conn.execute("RELEASE SAVEPOINT log_name_link_write")
 
     def set_link_state(
         self, broadcast_artist_id: UUID, artist_id: str, state: LogNameLinkState
