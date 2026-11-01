@@ -219,6 +219,20 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The checks are `tests/services/streaming/test_liner_playout.py` (rig `liner_rig.py`),
   `test_liner_read_bounds.py` and `test_liner_walked_position.py` (rig `liner_reads_rig.py`).
 
+## One file, one airing: the radio never repeats a file back to back
+
+- A track that holds two songs (Boston's "Foreplay/Long Time") can be matched to two
+  consecutive plays. The radio airs the file once and skips the second play; the log, the
+  matches and the reports are untouched.
+- A play that does not air (no file, silent, too short) does not separate the two; a different
+  song does. A liner never separates them either: the walk picks the next song before the
+  liner cadence is checked.
+- The rule lives in `domain/tune_in.py` (`_same_file`) and nowhere else. `next_item`, the
+  resume walk and the clock tune-in all go through it, so a reconnect lands where an unbroken
+  listener would be. A clock inside a skipped play lands inside the file's first play, counted
+  from when that play was logged. The M3U exports do not apply the rule.
+- The check is `tests/domain/test_tune_in_repeat_file.py`.
+
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
@@ -322,7 +336,8 @@ baseline with `uv run poe events-baseline` and says why.
 2. **A rule exists only if a check enforces it.** An unenforced rule gets deleted, not kept as
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
-   treated as rejected.
+   treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R100.
 
 ## Retired (C70, AUD-R045)
 
