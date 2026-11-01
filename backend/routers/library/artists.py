@@ -11,6 +11,8 @@ from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 
 router = APIRouter()
 
+_NAMED = "a.name IS DISTINCT FROM a.mbid"
+
 
 def _artist_search_fragments(
     search: str,
@@ -31,11 +33,16 @@ def _artist_search_fragments(
     (migration 0022) makes this efficient.  ``similarity()`` is used only in
     ORDER BY for ranking — not in WHERE — so the index is exercised for
     filtering via the ``%%`` arm.
+
+    An unnamed stub (phase 1a S15: its name is still its MBID) is never listed. ``IS
+    DISTINCT FROM``, because a local artist's ``mbid`` is NULL.
     """
     if not search:
-        return "", "ORDER BY a.sort_name, a.id", (), ()
+        return f"WHERE {_NAMED}", "ORDER BY a.sort_name, a.id", (), ()
 
-    where = "WHERE LOWER(a.name) %% LOWER(%s) OR LOWER(a.name) LIKE LOWER(%s) || '%%'"
+    where = (
+        f"WHERE {_NAMED} AND (LOWER(a.name) %% LOWER(%s) OR LOWER(a.name) LIKE LOWER(%s) || '%%')"
+    )
     order = "ORDER BY similarity(LOWER(a.name), LOWER(%s)) DESC, a.sort_name, a.id"
     return where, order, (search, search), (search,)
 

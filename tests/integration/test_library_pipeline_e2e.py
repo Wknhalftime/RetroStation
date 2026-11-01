@@ -24,6 +24,7 @@ from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepos
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.recordings import PgRecordingRepository
@@ -115,6 +116,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
                 artist_repo=PgArtistRepository(conn),
                 match_repo=PgMatchRepository(conn),
                 rules_repo=rules_repo,
+                link_repo=PgLogNameLinkRepository(conn),
             ),
             mb_client=fake_mb,
         )
@@ -127,12 +129,14 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         assert len(metallica_rows) >= 1, "Metallica log_artist not found"
         metallica_log_id = metallica_rows[0]["id"]
 
-        artist_match_row = conn.execute(
-            "SELECT target_id FROM matches WHERE artist_id = %s",
+        # From phase 1a the matcher's link is a log_name_links row (to a stub of the rule's MBID).
+        artist_link_row = conn.execute(
+            "SELECT artist_id, mbid FROM log_name_links WHERE broadcast_artist_id = %s",
             (metallica_log_id,),
         ).fetchone()
-        assert artist_match_row is not None, "No match found for Metallica"
-        assert artist_match_row["target_id"] == "mbid-metallica-lib"
+        assert artist_link_row is not None, "No link found for Metallica"
+        assert artist_link_row["mbid"] == "mbid-metallica-lib"
+        linked_artist_id = artist_link_row["artist_id"]
 
         # --- Step 3: Find a Metallica identity from the fixture ---
         # Query for an identity belonging to Metallica to get the title
@@ -151,28 +155,15 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         # persist a work_id that exists in works(). Seed a real Work (which
         # itself FKs to artists.id), link the Recording to it, and set
         # lib_file.work_id so the persisted match row's work_id is satisfied.
-        # The artist_matching rule above resolved Metallica's broadcast row
-        # to "mbid-metallica-lib" but did NOT create that artist in the
-        # canonical artists table — seed it here. Set mbid = id so that
-        # ResolvedArtistMbidStrategy reads catalog_artist.mbid back as the
-        # real MBID and proceeds to the library lookup; leaving mbid NULL
-        # would short-circuit identity matching to NEEDS_REVIEW.
-        conn.execute(
-            "INSERT INTO artists (id, name, sort_name, mbid, origin) "
-            "VALUES (%s, %s, %s, %s, %s) "
-            "ON CONFLICT (id) DO NOTHING",
-            (
-                "mbid-metallica-lib",
-                "Metallica",
-                "Metallica",
-                "mbid-metallica-lib",
-                "musicbrainz",
-            ),
-        )
+        # The artist_matching rule above linked Metallica's broadcast row to
+        # "mbid-metallica-lib", which no catalog artist held, so the link
+        # points at a stub artist of that MBID (phase 1a S6).
+        # ResolvedArtistMbidStrategy reads the stub's mbid back as the real
+        # MBID and proceeds to the library lookup. The work goes on the stub.
         work_mbid = "mbid-work-" + uuid4().hex[:8]
         conn.execute(
             "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-            (work_mbid, target_title, "mbid-metallica-lib"),
+            (work_mbid, target_title, linked_artist_id),
         )
         recording_mbid = "mbid-rec-" + uuid4().hex[:8]
         recording = Recording(
@@ -214,6 +205,7 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
                 library_file_repo=PgLibraryFileRepository(conn),
                 rules_repo=PgMappingRuleRepository(conn),
                 catalog_repo=PgArtistRepository(conn),
+                link_repo=PgLogNameLinkRepository(conn),
             ),
             mb_client=fake_mb,
         )

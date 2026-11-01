@@ -32,6 +32,7 @@ from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepos
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.domain.broadcast import (
@@ -56,6 +57,7 @@ from backend.services.normalization import (
     normalize_title,
 )
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_pg_link
 
 Conn = psycopg.Connection[Any]
 
@@ -66,7 +68,7 @@ _ROLLBACK = _DB / f"rollback_{_VERSION}.sql"
 
 ARTIST = "Van Halen"
 NORM = normalize_artist(ARTIST)
-MBID = "mbid-van-halen"  # not in the catalog, so Tier 1 uses it as the artist MBID
+MBID = "mbid-van-halen"  # not in the catalog: a link to it gets a stub of this MBID
 D14_TEXT = "auto-matched by the old mid-band, back for review (D14)"
 UNDECIDED_OR_DECIDED = [
     MatchStatus.PENDING,
@@ -98,7 +100,7 @@ def _artist(conn: Conn, status: MatchStatus = MatchStatus.AUTO_MATCHED) -> Broad
 
 
 def _artist_row(conn: Conn, artist: BroadcastArtist, score: float = 100.0) -> Match:
-    """The artist's own match row (Tier 1 reads its target as the artist MBID)."""
+    """The artist's old match row, which 1a leaves alone (1c drops it)."""
     return PgMatchRepository(conn).create(
         Match(
             id=uuid4(),
@@ -452,6 +454,7 @@ def _match_playlist(conn: Conn, playlist: BroadcastPlaylist) -> None:
             library_file_repo=PgLibraryFileRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
             catalog_repo=PgArtistRepository(conn),
+            link_repo=PgLogNameLinkRepository(conn),
         ),
         mb_client=FakeMbClient(),
     )
@@ -466,7 +469,7 @@ def test_rerun_matching_rescores_the_demoted_songs_under_the_new_rules(migrated_
     with _connect(migrated_db) as conn:
         playlist = _playlist(conn)
         artist = _artist(conn)
-        _artist_row(conn, artist)
+        seed_pg_link(conn, artist.id, MBID)
         persons = _file(conn, "Missing Persons")
         teacher = _file(conn, "Hot for Teacher")
         _file(conn, "Totally Unrelated Words Here")

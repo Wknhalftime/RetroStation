@@ -65,8 +65,9 @@ UPDATE artists
  WHERE id = %s AND mbid IS NULL
 """
 
-# The catalog name, plus the broadcast names matched to it: a manual match can carry a
-# broadcast name that differs (dev DB: 5 of 598 matched rows on tag-linkable artists).
+# The catalog name, plus the log names actively linked to it: a manual link can carry a
+# log name that differs (dev DB: 5 of 598 matched rows on tag-linkable artists). Links reach
+# the artist through their foreign key (phase 1a S8).
 _LINKED_NAMES_SQL = """
 SELECT a.normalized_name AS name
   FROM artists a
@@ -76,9 +77,8 @@ SELECT a.normalized_name AS name
 UNION
 SELECT ba.normalized_name AS name
   FROM artists a
-  JOIN matches m
-    ON m.target_type = 'artist' AND (m.target_id = a.id OR m.target_id = a.mbid)
-  JOIN broadcast_artists ba ON ba.id = m.artist_id
+  JOIN log_name_links l ON l.artist_id = a.id AND l.state = 'active'
+  JOIN broadcast_artists ba ON ba.id = l.broadcast_artist_id
  WHERE a.mb_lookup_outcome = 'linked'
    AND a.mb_lookup_at > %(when)s
 """

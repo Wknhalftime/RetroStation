@@ -50,6 +50,7 @@ from backend.db.repositories.broadcast_track_identities import (  # noqa: E402
     PgBroadcastTrackIdentityRepository,
 )
 from backend.db.repositories.library_files import PgLibraryFileRepository  # noqa: E402
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository  # noqa: E402
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository  # noqa: E402
 from backend.db.repositories.matches import PgMatchRepository  # noqa: E402
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository  # noqa: E402
@@ -165,6 +166,7 @@ def _artist_repos(conn: Conn) -> ArtistMatchingRepos:
         artist_repo=PgArtistRepository(conn),
         match_repo=PgMatchRepository(conn),
         rules_repo=PgMappingRuleRepository(conn),
+        link_repo=PgLogNameLinkRepository(conn),
     )
 
 
@@ -260,6 +262,7 @@ def _identity_repos(conn: Conn) -> IdentityMatchingRepos:
         rules_repo=PgMappingRuleRepository(conn),
         catalog_repo=PgArtistRepository(conn),
         recording_search_reach=library_files,
+        link_repo=PgLogNameLinkRepository(conn),
     )
 
 

@@ -28,6 +28,7 @@ from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepos
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.domain.broadcast import (
@@ -37,7 +38,7 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
 from backend.services import matching_reasons as reasons
@@ -53,6 +54,7 @@ from backend.services.normalization import (
 )
 from backend.services.title_scoring import broadcast_title_variants
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_pg_link
 from tests.services.test_mb_outage_songs import _http_error, _Mb
 
 Conn = psycopg.Connection[Any]
@@ -73,7 +75,7 @@ def _artist(
     *,
     mbid: str | None = None,
 ) -> BroadcastArtist:
-    """A broadcast artist; with ``mbid``, an artist match row targeting it (Tier 1)."""
+    """A broadcast artist; with ``mbid``, a link to the artist of that MBID (Tier 1)."""
     repo = PgBroadcastArtistRepository(conn)
     artist = repo.upsert(
         BroadcastArtist(
@@ -85,16 +87,7 @@ def _artist(
     )
     repo.update_match_status(artist.id, status, reason, None if reason is None else "stale")
     if mbid is not None:
-        PgMatchRepository(conn).create(
-            Match(
-                id=uuid4(),
-                artist_id=artist.id,
-                target_id=mbid,
-                target_type=TargetType.ARTIST,
-                confidence_score=100.0,
-                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            )
-        )
+        seed_pg_link(conn, artist.id, mbid)
     return artist
 
 
@@ -205,6 +198,7 @@ def _match(conn: Conn, playlist: BroadcastPlaylist, mb: FakeMbClient) -> None:
             library_file_repo=PgLibraryFileRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
             catalog_repo=PgArtistRepository(conn),
+            link_repo=PgLogNameLinkRepository(conn),
         ),
         mb_client=mb,
     )

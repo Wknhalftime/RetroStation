@@ -37,7 +37,7 @@ import pytest
 from structlog.testing import capture_logs
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
 from backend.services import matching_constants as mc
@@ -60,9 +60,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 Scores = dict[UUID, float]
 _URL = "https://musicbrainz.org/ws/2/recording/"
@@ -174,9 +176,9 @@ class _Songs(FakeBroadcastTrackIdentityRepository):
 class _Rig:
     """One playlist; each song has its own artist.
 
-    A Tier 1 song's artist is auto_matched with an artist match row whose target is its MBID
-    (not in the catalog, so it is used as is): Steps A, B and C. A Tier 2 song's artist is
-    pending: Tier 2 never calls MusicBrainz.
+    A Tier 1 song's artist is auto_matched with a link to the artist of its MBID (a stub, as
+    no catalog artist holds it): Steps A, B and C. A Tier 2 song's artist is pending: Tier 2
+    never calls MusicBrainz.
     """
 
     def __init__(self, scores: Scores) -> None:
@@ -185,6 +187,8 @@ class _Rig:
         self.artists = FakeBroadcastArtistRepository()
         self.songs = _Songs()
         self.matches = _Matches()
+        self.links = FakeLogNameLinkRepository()
+        self.catalog = FakeArtistRepository()
         self.files = FakeLibraryFileRepository()
         self._artist_of: dict[UUID, BroadcastArtist] = {}
 
@@ -204,16 +208,7 @@ class _Rig:
         )
         self.artists.upsert(artist)
         if not tier2:
-            self.matches.create(
-                Match(
-                    id=uuid4(),
-                    artist_id=artist.id,
-                    target_id=self._mbid(artist),
-                    target_type=TargetType.ARTIST,
-                    confidence_score=100.0,
-                    match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-                )
-            )
+            seed_link(self.links, self.catalog, artist.id, self._mbid(artist))
         norm = normalize_title(title)
         song = self.songs.upsert(
             BroadcastTrackIdentity(
@@ -279,7 +274,8 @@ class _Rig:
                 match_repo=self.matches,
                 library_file_repo=self.files,
                 rules_repo=FakeMappingRuleRepository(),
-                catalog_repo=FakeArtistRepository(),
+                catalog_repo=self.catalog,
+                link_repo=self.links,
             ),
             mb_client=mb,
         )

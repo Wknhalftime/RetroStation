@@ -32,7 +32,6 @@ from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRe
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
-from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.domain.broadcast import (
@@ -46,14 +45,13 @@ from backend.domain.catalog import ArtistLinkCandidate, InvalidLinkDecisionError
 from backend.domain.enums import (
     ArtistLinkOutcome,
     CatalogSource,
+    LogNameLinkOrigin,
     MatchStatus,
     MatchTier,
     ReasonCode,
-    TargetType,
     TaskStatus,
     TaskType,
 )
-from backend.domain.matching import Match
 from backend.domain.system import TaskProgress
 from backend.services.artist_linking_service import link_artist
 from backend.services.normalization import (
@@ -63,6 +61,7 @@ from backend.services.normalization import (
 )
 from backend.services.repository_factory import RepositoryFactory
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_pg_link
 
 Conn = psycopg.Connection[Any]
 
@@ -152,16 +151,7 @@ def _broadcast(conn: Conn, name: str, status: MatchStatus) -> BroadcastArtist:
 
 
 def _artist_match(conn: Conn, broadcast: BroadcastArtist, target_id: str) -> None:
-    PgMatchRepository(conn).create(
-        Match(
-            id=uuid4(),
-            artist_id=broadcast.id,
-            target_id=target_id,
-            target_type=TargetType.ARTIST,
-            confidence_score=100.0,
-            match_tier=MatchTier.NORMALIZATION,
-        )
-    )
+    seed_pg_link(conn, broadcast.id, target_id, origin=LogNameLinkOrigin.AUTOMATIC)
 
 
 # --- Schema ----------------------------------------------------------------------------------
@@ -282,7 +272,8 @@ def test_link_gives_the_artist_its_mbid_in_place(migrated_db: str) -> None:
         row = _row(conn, artist_id)
         work = conn.execute("SELECT artist_id FROM works WHERE id = %s", (work_id,)).fetchone()
         targets = conn.execute(
-            "SELECT target_id FROM matches WHERE artist_id = %s", (broadcast.id,)
+            "SELECT artist_id AS target_id FROM log_name_links WHERE broadcast_artist_id = %s",
+            (broadcast.id,),
         ).fetchall()
 
     assert written is True

@@ -9,7 +9,7 @@ Requirements:
 - G1 (contract): `update_match_status_if_pending` writes only when the row is still PENDING and
   returns whether it wrote. A row in any other status is left exactly as it was.
 - G2 (artists): when the worker's write is refused, nothing that follows from its own result
-  happens: no match row, no catalog upsert, no DEFERRED_RETRY cascade to the artist's songs.
+  happens: no link, no catalog upsert, no DEFERRED_RETRY cascade to the artist's songs.
   Other artists in the same run are written as usual.
 - G3 (identities): the same for all three identity write sites (normal result, orphaned
   identity, exhausted engine). No match row, and no work_id returned for master recalculation.
@@ -55,9 +55,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import first_link
 
 # ---------------------------------------------------------------------------
 # Race-simulating fakes
@@ -282,6 +284,7 @@ def _artist_repos(
     catalog: FakeArtistRepository | None = None,
     matches: FakeMatchRepository | None = None,
     identities: FakeBroadcastTrackIdentityRepository | None = None,
+    links: FakeLogNameLinkRepository | None = None,
 ) -> ArtistMatchingRepos:
     return ArtistMatchingRepos(
         broadcast_artist_repo=broadcast_artists,
@@ -289,6 +292,7 @@ def _artist_repos(
         artist_repo=catalog or FakeArtistRepository(),
         match_repo=matches or FakeMatchRepository(),
         rules_repo=FakeMappingRuleRepository(),
+        link_repo=links or FakeLogNameLinkRepository(),
     )
 
 
@@ -303,27 +307,27 @@ def _metallica_catalog() -> FakeArtistRepository:
 def test_artist_decided_mid_run_keeps_the_decision_and_gets_no_auto_match() -> None:
     playlist_id = uuid4()
     broadcast_artists = _ArtistsDecidedAfterRead()
-    matches = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     decided = _pending_artist(broadcast_artists, "METALLICA", playlist_id)
     broadcast_artists.decide_after_read[decided.id] = MatchStatus.MANUAL_REJECTED
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        repos=_artist_repos(broadcast_artists, catalog=_metallica_catalog(), matches=matches),
+        repos=_artist_repos(broadcast_artists, catalog=_metallica_catalog(), links=links),
         mb_client=FakeMbClient(),
     )
 
     stored = broadcast_artists.get_by_id(decided.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.MANUAL_REJECTED
-    assert matches.get_by_artist(decided.id) is None
+    assert first_link(links, decided.id) is None
 
 
 def test_artist_decided_mid_run_gets_no_musicbrainz_catalog_upsert() -> None:
     playlist_id = uuid4()
     broadcast_artists = _ArtistsDecidedAfterRead()
     catalog = FakeArtistRepository()
-    matches = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     truncated = "OZZY OSBOURNE THE METAL LEGEND"  # 30 chars: routed to the MB tier
     decided = _pending_artist(broadcast_artists, truncated, playlist_id)
     broadcast_artists.decide_after_read[decided.id] = MatchStatus.MANUAL_MATCHED
@@ -342,14 +346,14 @@ def test_artist_decided_mid_run_gets_no_musicbrainz_catalog_upsert() -> None:
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        repos=_artist_repos(broadcast_artists, catalog=catalog, matches=matches),
+        repos=_artist_repos(broadcast_artists, catalog=catalog, links=links),
         mb_client=mb_client,
     )
 
     stored = broadcast_artists.get_by_id(decided.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.MANUAL_MATCHED
-    assert matches.get_by_artist(decided.id) is None
+    assert first_link(links, decided.id) is None
     assert catalog.get_by_id("mbid-ozzy") is None
 
 
@@ -401,23 +405,23 @@ def test_only_the_decided_artist_is_left_out_of_the_deferred_cascade() -> None:
 def test_artist_not_decided_mid_run_is_written_as_usual() -> None:
     playlist_id = uuid4()
     broadcast_artists = _ArtistsDecidedAfterRead()
-    matches = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     decided = _pending_artist(broadcast_artists, "UNKNOWN BAND XYZ", playlist_id)
     untouched = _pending_artist(broadcast_artists, "METALLICA", playlist_id)
     broadcast_artists.decide_after_read[decided.id] = MatchStatus.MANUAL_REJECTED
 
     match_artists_for_playlist(
         playlist_id=playlist_id,
-        repos=_artist_repos(broadcast_artists, catalog=_metallica_catalog(), matches=matches),
+        repos=_artist_repos(broadcast_artists, catalog=_metallica_catalog(), links=links),
         mb_client=FakeMbClient(),
     )
 
     stored = broadcast_artists.get_by_id(untouched.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = matches.get_by_artist(untouched.id)
+    created = first_link(links, untouched.id)
     assert created is not None
-    assert created.target_id == "mbid-metallica"
+    assert created.mbid == "mbid-metallica"
 
 
 # ---------------------------------------------------------------------------

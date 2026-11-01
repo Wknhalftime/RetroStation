@@ -34,9 +34,9 @@ from syrupy.assertion import SnapshotAssertion
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import CatalogSource, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import CatalogSource, MatchStatus, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import (
     ArtistMatchingRepos,
     match_artists_for_playlist,
@@ -55,9 +55,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import first_link, seed_link
 
 
 def _uid(n: int) -> UUID:
@@ -131,6 +133,7 @@ def test_match_artists_for_playlist_full_scenario_snapshot(snapshot: SnapshotAss
     broadcast_artist_repo = FakeBroadcastArtistRepository()
     identity_repo = FakeBroadcastTrackIdentityRepository()
     match_repo = FakeMatchRepository()
+    links = FakeLogNameLinkRepository()
     rules_repo = FakeMappingRuleRepository()
 
     truncated_auto_name = _truncated_name("Zephyr Junction Broadcast ")
@@ -230,6 +233,7 @@ def test_match_artists_for_playlist_full_scenario_snapshot(snapshot: SnapshotAss
             artist_repo=artist_repo,
             match_repo=match_repo,
             rules_repo=rules_repo,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )
@@ -237,19 +241,22 @@ def test_match_artists_for_playlist_full_scenario_snapshot(snapshot: SnapshotAss
     def _artist_state(artist_id: UUID) -> dict[str, object]:
         stored = broadcast_artist_repo.get_by_id(artist_id)
         assert stored is not None
-        match = match_repo.get_by_artist(artist_id)
+        # From phase 1a the matcher writes a link, not a matches row. The snapshot keeps the
+        # row's fields: the target is the linked artist's MBID, else its id (as the target was),
+        # and the score and tier are the link's v0 evidence.
+        link = first_link(links, artist_id)
         return {
             "match_status": stored.match_status.value,
             "reason_code": stored.reason_code.value if stored.reason_code else None,
             "reason_detail": stored.reason_detail,
             "match": (
                 {
-                    "target_id": match.target_id,
-                    "target_type": match.target_type.value if match.target_type else None,
-                    "confidence_score": match.confidence_score,
-                    "match_tier": match.match_tier.value,
+                    "target_id": link.mbid or link.artist_id,
+                    "target_type": TargetType.ARTIST.value,
+                    "confidence_score": link.evidence["score"],
+                    "match_tier": link.evidence["tier"],
                 }
-                if match is not None
+                if link is not None
                 else None
             ),
         }
@@ -296,6 +303,7 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
     lib_repo = FakeLibraryFileRepository()
     rules_repo = FakeMappingRuleRepository()
     catalog_repo = FakeArtistRepository()
+    links = FakeLogNameLinkRepository()
 
     def _register_artist(
         idx: int, name: str, status: MatchStatus = MatchStatus.AUTO_MATCHED
@@ -310,16 +318,7 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
         return artist
 
     def _resolve(artist: BroadcastArtist, target_id: str) -> None:
-        match_repo.create(
-            Match(
-                id=_uid(90000 + artist.id.int),
-                artist_id=artist.id,
-                target_id=target_id,
-                target_type=TargetType.ARTIST,
-                confidence_score=100.0,
-                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            )
-        )
+        seed_link(links, catalog_repo, artist.id, target_id)
 
     # -- Tier 0: mapping rule -------------------------------------------------
     rule_artist = _register_artist(1, "Rule Artist Band", status=MatchStatus.PENDING)
@@ -512,6 +511,7 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
             library_file_repo=lib_repo,
             rules_repo=rules_repo,
             catalog_repo=catalog_repo,
+            link_repo=links,
         ),
         mb_client=mb_client,
     )

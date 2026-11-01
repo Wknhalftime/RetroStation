@@ -20,8 +20,23 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
     def get_by_id(self, artist_id: str) -> Artist | None:
         return self._data.get(artist_id)
 
+    def get_by_mbid(self, mbid: str) -> Artist | None:
+        return next((a for a in self._data.values() if a.mbid == mbid), None)
+
+    def create_stub(self, mbid: str) -> Artist:
+        stub = Artist(
+            id=str(uuid4()),
+            name=mbid,
+            sort_name=mbid,
+            mbid=mbid,
+            origin=CatalogSource.MUSICBRAINZ,
+            needs_enhancement=True,
+        )
+        self._data[stub.id] = stub
+        return stub
+
     def list_all(self) -> list[Artist]:
-        return list(self._data.values())
+        return [a for a in self._data.values() if a.name != a.mbid]
 
     def list_unenhanced(self) -> list[Artist]:
         return [
@@ -72,9 +87,12 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         for artist in self._data.values():
             if artist.mbid == mbid:
                 return artist.id
-        # Check by normalized_name (promote local)
+        # Check by normalized_name (promote local). As PgArtistRepository: a name another MBID
+        # holds is left alone, and that artist's id comes back.
         for artist in self._data.values():
             if artist.normalized_name == normalized_name:
+                if artist.mbid is not None and artist.mbid != mbid:
+                    return artist.id
                 artist.mbid = mbid
                 artist.origin = CatalogSource.MUSICBRAINZ
                 artist.name = name

@@ -8,6 +8,7 @@ import psycopg
 from psycopg.rows import DictRow
 
 from backend.db.repositories.artist_linking import PgArtistLinkingRepository
+from backend.db.repositories.artist_resolution import PgArtistResolutionRepository
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
@@ -19,6 +20,7 @@ from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.missing_files import PgMissingFileListingRepository
@@ -38,6 +40,7 @@ from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import connect_sync
+from backend.services.artist_resolution_service import ArtistResolutionRepos
 from backend.services.identity_resolution_service import RecalcRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
@@ -47,7 +50,8 @@ from backend.services.work_curation_service import WorkCurationRepos
 
 @dataclass
 class BroadcastRepos:
-    """Broadcast-domain repositories; ``liners`` is each station's liner library (LR3)."""
+    """Broadcast-domain repositories; ``liners`` is each station's liner library (LR3);
+    ``resolution`` holds what the artist Resolve and Unmatch write (phase 1a, C75)."""
 
     stations: PgBroadcastStationRepository
     playlists: PgBroadcastPlaylistRepository
@@ -56,6 +60,7 @@ class BroadcastRepos:
     events: PgBroadcastPlayEventRepository
     days: PgBroadcastDayRepository
     liners: PgStationLinerRepository
+    resolution: PgArtistResolutionRepository
 
 
 @dataclass
@@ -74,7 +79,8 @@ class CatalogRepos:
     """Catalog-domain repositories (artists, works, recordings, masters).
 
     ``play_file_resolution`` reads curation's view of which file plays for a play (D17);
-    ``work_curation`` holds the works writes' own statements (phase 0c, C75).
+    ``work_curation`` holds the works writes' own statements (phase 0c, C75);
+    ``log_name_links`` is the log names' links to artists (phase 1a, C30).
     """
 
     artists: PgArtistRepository
@@ -85,6 +91,7 @@ class CatalogRepos:
     song_masters: PgSongMasterRepository
     play_file_resolution: PgPlayFileResolutionRepository
     work_curation: PgWorkCurationRepository
+    log_name_links: PgLogNameLinkRepository
 
 
 @dataclass
@@ -133,6 +140,7 @@ class RepositoryFactory:
             events=PgBroadcastPlayEventRepository(conn),
             days=PgBroadcastDayRepository(conn),
             liners=PgStationLinerRepository(conn),
+            resolution=PgArtistResolutionRepository(conn),
         )
         self.library = LibraryRepos(
             files=PgLibraryFileRepository(conn),
@@ -150,6 +158,7 @@ class RepositoryFactory:
             song_masters=PgSongMasterRepository(conn),
             play_file_resolution=PgPlayFileResolutionRepository(conn),
             work_curation=PgWorkCurationRepository(conn),
+            log_name_links=PgLogNameLinkRepository(conn),
         )
         self.system = SystemRepos(
             mapping_rules=PgMappingRuleRepository(conn),
@@ -181,6 +190,7 @@ class RepositoryFactory:
         self.song_masters = self.catalog.song_masters
         self.play_file_resolution = self.catalog.play_file_resolution
         self.work_curation = self.catalog.work_curation
+        self.log_name_links = self.catalog.log_name_links
         self.library_files = self.library.files
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -256,4 +266,13 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         overrides=repos.format_overrides,
         matches=repos.matches,
         artists=repos.artists,
+        links=repos.log_name_links,
+    )
+
+
+def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
+    """The port bundle the artist Resolve and Unmatch write through, on *repos*' connection
+    (phase 1a, C75)."""
+    return ArtistResolutionRepos(
+        resolution=repos.broadcast.resolution, links=repos.log_name_links, catalog=repos.artists
     )

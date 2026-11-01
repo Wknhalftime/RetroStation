@@ -13,6 +13,7 @@ from backend.domain.library import LibraryFile
 from backend.domain.matching import (
     NO_EXCLUSIONS,
     CandidateExclusions,
+    LogNameLink,
     MappingRule,
     Match,
     MusicBrainzUnavailableError,
@@ -21,9 +22,11 @@ from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.library_files import LibraryFileRepository
+from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recording_search_reach import RecordingSearchReachRepository
+from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.matching_constants import (
     MB_AUTO_LINK_SCORE,
     MB_SCORE_GAP,
@@ -384,14 +387,25 @@ class IdentityMappingRuleStrategy:
         return None
 
 
+def _missing_link(detail: str) -> IdentityMatchResult:
+    """A resolved log name Tier 1 cannot use: a data fault the curator should see."""
+    return IdentityMatchResult(
+        status=MatchStatus.NEEDS_REVIEW,
+        tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
+        confidence_score=0.0,
+        library_file_id=None,
+        reason_code=ReasonCode.MISSING_MATCH_RECORD,
+        reason_detail=detail,
+    )
+
+
 class ResolvedArtistMbidStrategy:
     """Tier 1 — fused MBID fast path.
 
-    Match.target_id may be a real MusicBrainz MBID (most strategies) or a
-    local catalog UUID (NormalizationStrategy exact-match on local-only
-    canonicals). The strategy resolves the authoritative real_mbid first by
-    looking up target_id in the catalog; if found, it reads .mbid from the
-    catalog artist rather than trusting the UUID value.
+    The artist comes from the log name's link, read from the link service (phase 1a S7): its
+    first active link, manual first, then the strongest, then the oldest. The MBID is the
+    linked catalog artist's current ``mbid``, read through the link's foreign key, never the
+    MBID copied onto the link; a local-only artist has none.
 
     Step A: local library lookup by real_mbid (no API call).
     Step B: MB recording search (1 API call) — fires only when real_mbid is
@@ -413,7 +427,7 @@ class ResolvedArtistMbidStrategy:
     def __init__(
         self,
         library_file_repo: LibraryFileRepository,
-        match_repo: MatchRepository,
+        link_repo: LogNameLinkRepository | None,
         mb_client: MusicBrainzClientProtocol,
         catalog_repo: ArtistCatalogRepository,
         strong_match_threshold: int = 80,
@@ -423,7 +437,8 @@ class ResolvedArtistMbidStrategy:
         recording_search_reach: RecordingSearchReachRepository | None = None,
     ) -> None:
         self._library_file_repo = library_file_repo
-        self._match_repo = match_repo
+        # None: no links, so every resolved name is a data fault (MISSING_MATCH_RECORD).
+        self._links = None if link_repo is None else LogNameLinkService(link_repo, catalog_repo)
         # Step B's search. match_identities_for_playlist passes one per run, so the
         # MusicBrainz cut-off counts across the run's songs (AUD-R028, D16).
         self._recording_search = recording_search or RecordingSearch(mb_client)
@@ -446,47 +461,23 @@ class ResolvedArtistMbidStrategy:
         }:
             return None
 
-        artist_match = self._memo.read(
-            artist, "match", lambda: self._match_repo.get_by_artist(artist.id)
-        )
-        if artist_match is None:
-            return IdentityMatchResult(
-                status=MatchStatus.NEEDS_REVIEW,
-                tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
-                confidence_score=0.0,
-                library_file_id=None,
-                reason_code=ReasonCode.MISSING_MATCH_RECORD,
-                reason_detail=("Artist is resolved but no match record found — data inconsistency"),
+        link = self._memo.read(artist, "link", lambda: self._tier1_link(artist.id))
+        if link is None:
+            # No active link. The detail keeps its pre-1a wording, which the locked snapshot pins.
+            return _missing_link(
+                "Artist is resolved but no match record found — data inconsistency"
             )
-
-        mbid = (artist_match.target_id or "").strip()
-        if not mbid:
-            # Guard against None AND empty/whitespace-only target_id — data
-            # inconsistency could yield "" which `is None` misses, and an
-            # empty MBID would poison both the local lookup and MB query.
-            return IdentityMatchResult(
-                status=MatchStatus.NEEDS_REVIEW,
-                tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
-                confidence_score=0.0,
-                library_file_id=None,
-                reason_code=ReasonCode.MISSING_MATCH_RECORD,
-                reason_detail="Artist match row has no valid target_id",
-            )
-
-        # Resolve target_id → real MusicBrainz MBID.
-        # target_id may be a local catalog UUID (NormalizationStrategy exact-
-        # match on local-only canonicals) or a real MBID (all other strategies).
-        # Look up by catalog primary key first:
-        #   • Found     → target_id is a local UUID; read catalog_artist.mbid.
-        #                 This uses the authoritative field rather than trusting
-        #                 the UUID value, and naturally handles artists that gain
-        #                 an MB link after the initial match.
-        #   • Not found → target_id is already the MBID; use it directly.
         exclusions = _exclusions_for(self._exclusions_by_identity, identity)
+        linked_id = link.artist_id
         catalog_artist = self._memo.read(
-            artist, f"catalog:{mbid}", lambda: self._catalog_repo.get_by_id(mbid)
+            artist, f"catalog:{linked_id}", lambda: self._catalog_repo.get_by_id(linked_id)
         )
-        real_mbid: str | None = catalog_artist.mbid if catalog_artist is not None else mbid
+        if catalog_artist is None:
+            return _missing_link("Artist link points at no catalog artist")
+        real_mbid = catalog_artist.mbid
+        if real_mbid is not None and not real_mbid.strip():
+            # A blank MBID would poison both the local lookup and the MusicBrainz query.
+            return _missing_link("Artist match row has no valid target_id")
 
         # Steps A and B, keyed on the artist MBID. Skipped for a true local-only artist
         # (real_mbid is None).
@@ -532,6 +523,9 @@ class ResolvedArtistMbidStrategy:
             reason_code=ReasonCode.NO_LOCAL_FILES,
             reason_detail=("Artist MBID confirmed but no matching local recording found"),
         )
+
+    def _tier1_link(self, broadcast_artist_id: UUID) -> LogNameLink | None:
+        return None if self._links is None else self._links.tier1_link(broadcast_artist_id)
 
     def _artist_mbid_steps(
         self,
@@ -744,6 +738,9 @@ class IdentityMatchingRepos:
     catalog_repo: ArtistCatalogRepository
     # Step B's pre-check (AUD-R031). None: every song that reaches Step B searches.
     recording_search_reach: RecordingSearchReachRepository | None = None
+    # Tier 1's link reader (phase 1a S7). None: no links, so a resolved name is a data fault;
+    # the tasks always pass it (tests/services/test_matching_repos_wiring.py).
+    link_repo: LogNameLinkRepository | None = None
 
 
 @dataclass(frozen=True)
@@ -779,7 +776,7 @@ def build_identity_engine(inputs: IdentityEngineInputs) -> IdentityMatchingEngin
             ),
             ResolvedArtistMbidStrategy(
                 repos.library_file_repo,
-                repos.match_repo,
+                repos.link_repo,
                 inputs.mb_client,
                 repos.catalog_repo,
                 inputs.strong_match_threshold,

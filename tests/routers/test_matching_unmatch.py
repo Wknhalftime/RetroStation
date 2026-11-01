@@ -5,7 +5,8 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 
-from backend.domain.enums import MatchStatus
+from backend.domain.enums import LogNameLinkOrigin, MatchStatus
+from tests.matching_seed import seed_pg_link
 from tests.routers.test_matching import (
     _insert_artist,
     _insert_identity,
@@ -20,17 +21,9 @@ from tests.routers.test_matching import (
 def _insert_artist_match(
     conn: psycopg.Connection, artist_id: UUID, target_id: str = "artist-mbid-xxx"
 ) -> UUID:
-    match_id = uuid4()
-    conn.execute(
-        """
-        INSERT INTO matches
-            (id, artist_id, target_id, target_type, confidence_score, match_tier)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (match_id, artist_id, target_id, "artist", 1.0, "manual"),
-    )
+    link = seed_pg_link(conn, artist_id, target_id, origin=LogNameLinkOrigin.MANUAL)
     conn.commit()
-    return match_id
+    return link.id
 
 
 def _insert_identity_match(
@@ -173,10 +166,10 @@ class TestUnmatchArtist:
         assert identity_row["match_tier"] is None
         assert identity_row["reason_code"] == "USER_UNMATCHED"
 
-        artist_match = db_conn.execute(
-            "SELECT id FROM matches WHERE artist_id = %s", (artist.id,)
+        artist_link = db_conn.execute(
+            "SELECT id FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
         ).fetchone()
-        assert artist_match is None
+        assert artist_link is None
 
     def test_artist_unmatch_cascades_all_children_regardless_of_status(self, client, db_conn):
         """Distinct from resolve_artist's MANUAL_REJECTED cascade — unmatch wipes
@@ -248,10 +241,10 @@ class TestUnmatchArtist:
         resp = client.post(f"/api/v1/matching/artists/{artist.id}/unmatch")
         assert resp.status_code == 200
 
-        artist_match = db_conn.execute(
-            "SELECT id FROM matches WHERE artist_id = %s", (artist.id,)
+        artist_link = db_conn.execute(
+            "SELECT id FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
         ).fetchone()
-        assert artist_match is None
+        assert artist_link is None
 
         identity_match = db_conn.execute(
             "SELECT id FROM matches WHERE identity_id = %s", (identity.id,)

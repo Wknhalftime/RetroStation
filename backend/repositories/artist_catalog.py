@@ -11,8 +11,21 @@ class ArtistCatalogRepository(ABC):
     def get_by_id(self, artist_id: str) -> Artist | None: ...
 
     @abstractmethod
+    def get_by_mbid(self, mbid: str) -> Artist | None:
+        """The artist holding this MBID, if any."""
+        ...
+
+    @abstractmethod
+    def create_stub(self, mbid: str) -> Artist:
+        """A stub artist for an MBID no artist holds (phase 1a, S3): a new id, the MBID as its
+        name and sort name, no normalized name, origin musicbrainz, needing enhancement.
+        Enrichment names it later."""
+        ...
+
+    @abstractmethod
     def list_all(self) -> list[Artist]:
-        """Return all artists for fuzzy-matching in artist_matching_service."""
+        """Return all artists for fuzzy-matching in artist_matching_service, without the
+        unnamed stubs (a name still equal to the MBID, phase 1a S15)."""
         ...
 
     @abstractmethod

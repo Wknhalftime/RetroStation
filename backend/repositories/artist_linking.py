@@ -45,5 +45,5 @@ class ArtistLinkingRepository(ABC):
     def normalized_names_linked_since(self, when: datetime) -> set[str]:
         """The targeted re-check's second source of names (AUD-R026): for every artist linked
         after ``when``, its own normalized name and the normalized names of the broadcast
-        artists whose artist match targets it."""
+        artists actively linked to it (``log_name_links``, from phase 1a)."""
         ...

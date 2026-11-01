@@ -420,15 +420,15 @@ class TestResolveArtist:
         assert row is not None
         assert row["match_status"] == "manual_matched"
 
-        # Verify match row created
-        match_row = db_conn.execute(
-            "SELECT * FROM matches WHERE artist_id = %s", (artist.id,)
+        # Verify the link row created
+        link_row = db_conn.execute(
+            "SELECT * FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
         ).fetchone()
-        assert match_row is not None
-        assert match_row["target_id"] == target_mbid
-        assert match_row["target_type"] == "artist"
-        assert match_row["confidence_score"] == 1.0
-        assert match_row["match_tier"] == "manual"
+        assert link_row is not None
+        assert link_row["mbid"] == target_mbid
+        assert link_row["state"] == "active"
+        assert link_row["strength"] == 100
+        assert link_row["origin"] == "manual"
 
     def test_manual_reject_cascades(self, client, db_conn):
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
@@ -609,15 +609,15 @@ class TestResolveArtist:
         ).fetchall()
         assert identity_match_rows == []
 
-        # (4) The artist-keyed match row from the upsert is present.
-        artist_match = db_conn.execute(
-            "SELECT target_id, target_type, match_tier FROM matches WHERE artist_id = %s",
+        # (4) The name's manual link from the upsert is present.
+        artist_link = db_conn.execute(
+            "SELECT mbid, state, origin FROM log_name_links WHERE broadcast_artist_id = %s",
             (artist.id,),
         ).fetchone()
-        assert artist_match is not None
-        assert artist_match["target_id"] == "6e650a01-6489-4dc8-85e1-8ec809dd72a2"
-        assert artist_match["target_type"] == "artist"
-        assert artist_match["match_tier"] == "manual"
+        assert artist_link is not None
+        assert artist_link["mbid"] == "6e650a01-6489-4dc8-85e1-8ec809dd72a2"
+        assert artist_link["state"] == "active"
+        assert artist_link["origin"] == "manual"
 
     def test_manual_match_commits_before_enqueue(self, client, db_conn, migrated_db, monkeypatch):
         """The cascade must commit BEFORE enqueueing identity_matching_task.
@@ -833,7 +833,9 @@ class TestResolveArtist:
         artist_matching_service.py.  Manual resolution from the library-search
         slide-over sends the same form (mbid?.trim() ? mbid : id), so the
         endpoint must store whatever text value is supplied without validation
-        of its shape.
+        of its shape. This one names no catalog artist, so from phase 1a it becomes
+        a stub artist's MBID; resolving to a real catalog id links that artist
+        (test_resolve_writes_link.py).
         """
         _, _, artist, _, _ = _seed_review_chain(db_conn)
         local_catalog_id = str(uuid4())  # UUID string, not an MBID
@@ -845,14 +847,14 @@ class TestResolveArtist:
         assert resp.status_code == 200
         assert resp.json()["match_status"] == "manual_matched"
 
-        match_row = db_conn.execute(
-            "SELECT target_id, match_tier, confidence_score FROM matches WHERE artist_id = %s",
+        link_row = db_conn.execute(
+            "SELECT mbid, origin, strength FROM log_name_links WHERE broadcast_artist_id = %s",
             (artist.id,),
         ).fetchone()
-        assert match_row is not None
-        assert match_row["target_id"] == local_catalog_id
-        assert match_row["match_tier"] == "manual"
-        assert match_row["confidence_score"] == 1.0
+        assert link_row is not None
+        assert link_row["mbid"] == local_catalog_id
+        assert link_row["origin"] == "manual"
+        assert link_row["strength"] == 100
 
 
 # ---------------------------------------------------------------------------

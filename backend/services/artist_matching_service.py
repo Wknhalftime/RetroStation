@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx
 import structlog
@@ -11,12 +11,14 @@ from rapidfuzz import fuzz
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import MappingRule
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
+from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
+from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.matching_constants import (
     MB_AUTO_LINK_SCORE,
     MB_MIN_CANDIDATE_SCORE,
@@ -553,7 +555,7 @@ def _persist_artist_result(
     result: ArtistMatchResult,
     broadcast_artist_repo: BroadcastArtistRepository,
     artist_repo: ArtistCatalogRepository,
-    match_repo: MatchRepository,
+    links: LogNameLinkService | None,
 ) -> bool:
     """Apply a single result to repositories. Owned by orchestration so
     strategies stay read-only (Invariant 1).
@@ -561,7 +563,12 @@ def _persist_artist_result(
     Returns whether the result was written. The status write is guarded on the
     PENDING status this run read (AUD-R018): if the user decided the artist in
     the meantime, their decision wins and nothing that follows from this
-    result (match row, catalog upsert) is written either.
+    result (catalog upsert, link) is written either.
+
+    An automatic match upserts the catalog artist first, when the MB tier found one, then links
+    the artist the result's target names through the link service (phase 1a S6): the upsert can
+    return another MBID's artist that holds the name, so the link goes by the target, to a stub
+    when no catalog artist holds it. ``links`` None writes no link.
     """
     written = broadcast_artist_repo.update_match_status_if_pending(
         broadcast_artist.id,
@@ -574,16 +581,6 @@ def _persist_artist_result(
         return False
     if result.status != MatchStatus.AUTO_MATCHED:
         return True
-    match_repo.create(
-        Match(
-            id=uuid4(),
-            artist_id=broadcast_artist.id,
-            target_id=result.target_id,
-            target_type=TargetType.ARTIST,
-            confidence_score=result.confidence_score,
-            match_tier=result.tier,
-        )
-    )
     # Catalog upsert moved out of MusicBrainzApiStrategy (SRP). Only the MB
     # tier populates mb_candidate, so this fires only on MB hits.
     if result.mb_candidate is not None:
@@ -593,6 +590,10 @@ def _persist_artist_result(
             sort_name=result.mb_candidate.get("sort-name", result.mb_candidate["name"]),
             normalized_name=normalize_artist(result.mb_candidate["name"]),
             disambiguation=result.mb_candidate.get("disambiguation"),
+        )
+    if links is not None:
+        links.link_automatically(
+            broadcast_artist.id, result.target_id, result.tier, result.confidence_score
         )
     return True
 
@@ -610,8 +611,13 @@ class ArtistMatchingRepos:
     broadcast_artist_repo: BroadcastArtistRepository
     track_identity_repo: BroadcastTrackIdentityRepository
     artist_repo: ArtistCatalogRepository
+    # Unused since phase 1a moved the matcher's writes to log_name_links (S6); the locked
+    # tests that build this dataclass still pass it.
     match_repo: MatchRepository
     rules_repo: MappingRuleRepository
+    # The matcher's link writer (phase 1a S6). None: no links are written; the tasks always
+    # pass it (tests/services/test_matching_repos_wiring.py).
+    link_repo: LogNameLinkRepository | None = None
 
 
 @dataclass(frozen=True)
@@ -736,13 +742,18 @@ def match_artists_for_playlist(
         )
 
         written_ids: set[UUID] = set()
+        links = (
+            None
+            if repos.link_repo is None
+            else LogNameLinkService(repos.link_repo, repos.artist_repo)
+        )
         for broadcast_artist in ticking(pending, progress):
             if _persist_artist_result(
                 broadcast_artist,
                 resolved[broadcast_artist.id],
                 repos.broadcast_artist_repo,
                 repos.artist_repo,
-                repos.match_repo,
+                links,
             ):
                 written_ids.add(broadcast_artist.id)
 

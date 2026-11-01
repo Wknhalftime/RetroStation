@@ -321,21 +321,6 @@ def test_matches_follow_and_works_and_artists_go(ports: Ports) -> None:
     assert ports.works.get_by_id(source) is None
 
     solo = ports.artists.upsert_local_artist("Solo", "Solo")
-    named = ports.artists.upsert_local_artist("Named", "Named")
-    ports.add_match(
-        Match(
-            id=uuid4(),
-            confidence_score=1.0,
-            match_tier=MatchTier.MANUAL,
-            artist_id=uuid4(),
-            target_id=named,
-            target_type=TargetType.ARTIST,
-        )
-    )
-    assert (ports.curation.artist_has_match(solo), ports.curation.artist_has_match(named)) == (
-        False,
-        True,
-    )
     ports.curation.delete_artist(solo)
     assert ports.artists.get_by_id(solo) is None
 

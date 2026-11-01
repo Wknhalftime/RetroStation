@@ -21,7 +21,7 @@ import pytest
 
 from backend.config import Settings
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
 from backend.services import matching_constants as mc
@@ -43,9 +43,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 ARTIST = "Metallica"
 NORM = normalize_artist(ARTIST)
@@ -234,8 +236,8 @@ class _Files(FakeLibraryFileRepository):
 class _Rig:
     """One playlist, one Metallica artist and one song.
 
-    resolved=True gives an AUTO_MATCHED artist whose artist match row targets ``artist_target``
-    (None: no row at all), so the song goes through Tier 1; otherwise Tier 2.
+    resolved=True gives an AUTO_MATCHED artist linked to the artist ``artist_target`` names
+    (None: no link at all), so the song goes through Tier 1; otherwise Tier 2.
     """
 
     def __init__(
@@ -246,6 +248,8 @@ class _Rig:
         self.artists = FakeBroadcastArtistRepository()
         self.songs = _Songs()
         self.matches = _Matches()
+        self.links = FakeLogNameLinkRepository()
+        self.catalog = FakeArtistRepository()
         self.files = _Files()
         self.artist = BroadcastArtist(
             id=uuid4(),
@@ -255,16 +259,7 @@ class _Rig:
         )
         self.artists.upsert(self.artist)
         if resolved and artist_target is not None:
-            self.matches.create(
-                Match(
-                    id=uuid4(),
-                    artist_id=self.artist.id,
-                    target_id=artist_target,
-                    target_type=TargetType.ARTIST,
-                    confidence_score=100.0,
-                    match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-                )
-            )
+            seed_link(self.links, self.catalog, self.artist.id, artist_target)
 
     def file(
         self,
@@ -319,7 +314,8 @@ class _Rig:
                 match_repo=self.matches,
                 library_file_repo=self.files,
                 rules_repo=FakeMappingRuleRepository(),
-                catalog_repo=FakeArtistRepository(),
+                catalog_repo=self.catalog,
+                link_repo=self.links,
             ),
             mb_client=mb or FakeMbClient(),
         )
