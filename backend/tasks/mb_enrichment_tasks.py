@@ -17,12 +17,14 @@ from backend.config import Settings, get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
-from backend.domain.catalog import Artist, Recording, Work
+from backend.domain.catalog import Artist, MusicBrainzId, Recording, Work
 from backend.domain.enums import LogCategory, RecheckScope, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
+from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
+from backend.services.normalization import normalize_artist
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
@@ -56,7 +58,9 @@ class ArtistEnhanceOutcome(StrEnum):
     FAILED = "failed"
 
 
-_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset({"disambiguation", "sort_name", "mbid"})
+_ALLOWED_ARTIST_UPDATE_COLS: frozenset[str] = frozenset(
+    {"disambiguation", "sort_name", "mbid", "name", "normalized_name"}
+)
 
 
 class _UnexpectedArtistUpdateColumnError(Exception):
@@ -117,6 +121,12 @@ def _enhance_artist(
     fills missing disambiguation / sort_name; a `None` result (404 from the
     MB API or a cached 404 in `mbid_map`) maps to FAILED.
 
+    A stub (phase 1a S3: its name is still its MBID) is also named here (S4):
+    a malformed MBID is recorded first, never looked up (E3,
+    `_is_malformed_stub`); then it takes MusicBrainz's name, and the
+    normalized name unless another artist holds it (E1, `_stub_names`). An
+    answer with no name is recorded too, so the stub is not picked again.
+
     `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
     MBID, so the caller can coalesce one live lookup per distinct MBID
     across the queue. A value of `None` in the map represents a cached 404
@@ -136,6 +146,13 @@ def _enhance_artist(
         )
         return ArtistEnhanceOutcome.FAILED
 
+    if _is_malformed_stub(artist):
+        repos.artists.mark_enhancement_failed(
+            artist.id,
+            f"malformed MBID: {artist.mbid!r}",
+        )
+        return ArtistEnhanceOutcome.FAILED
+
     if mbid_map is not None and artist.mbid in mbid_map:
         data = mbid_map[artist.mbid]
     else:
@@ -149,6 +166,15 @@ def _enhance_artist(
         return ArtistEnhanceOutcome.FAILED
 
     field_updates: dict[str, str] = {}
+    if artist.name == artist.mbid:
+        name = (data.get("name") or "").strip()
+        if not name:
+            repos.artists.mark_enhancement_failed(
+                artist.id,
+                f"MB lookup gave no name for stub mbid={artist.mbid}",
+            )
+            return ArtistEnhanceOutcome.FAILED
+        field_updates.update(_stub_names(artist, name, repos.artists))
     if not artist.disambiguation and data.get("disambiguation"):
         field_updates["disambiguation"] = data["disambiguation"]
     if artist.sort_name in ("", artist.name) and data.get("sort-name"):
@@ -171,6 +197,37 @@ def _enhance_artist(
 
     repos.artists.mark_enhanced(artist.id)
     return ArtistEnhanceOutcome.ENHANCED
+
+
+def _is_malformed_stub(artist: Artist) -> bool:
+    """A stub (its name is still its MBID, phase 1a S3) whose MBID is no MBID: Resolve checks
+    no format (S9). It is recorded, never sent to MusicBrainz (E3), which would answer a 400
+    that is retried as transient on every run. Every other artist's MBID came from MusicBrainz."""
+    return (
+        artist.mbid is not None
+        and artist.name == artist.mbid
+        and MusicBrainzId.parse(artist.mbid) is None
+    )
+
+
+def _stub_names(artist: Artist, name: str, artists: ArtistCatalogRepository) -> dict[str, str]:
+    """A stub's name from MusicBrainz, and its normalized name unless another artist already
+    holds that (phase 1a E1): asked first, since `idx_artists_norm_name` is unique on every row
+    until 2a, whose C41 settles the clash. The stub is named either way."""
+    normalized = normalize_artist(name)
+    if not normalized:
+        return {"name": name}
+    holder = artists.get_by_normalized_name(normalized)
+    if holder is not None:
+        logger.warning(
+            "mb_stub_normalized_name_held",
+            artist_id=artist.id,
+            mbid=artist.mbid,
+            normalized_name=normalized,
+            holder_id=holder.id,
+        )
+        return {"name": name}
+    return {"name": name, "normalized_name": normalized}
 
 
 def _heartbeat_with_slow_warning(
@@ -498,12 +555,16 @@ def _run_artist_phase(
             hits_start = mb_client.cache_hits
             rows_queued = len(pending_artists)
             distinct_mbids = {a.mbid for a in pending_artists if a.mbid is not None}
+            # A malformed stub MBID is never sent (E3); _enhance_artist records it.
+            lookups = {
+                a.mbid for a in pending_artists if a.mbid is not None and not _is_malformed_stub(a)
+            }
 
             def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
                 _emit_pre_pass_heartbeat(ctx, "artists", current, total, mbid)
 
             mbid_map = coalesce_artist_lookups(
-                distinct_mbids,
+                lookups,
                 mb_client,
                 on_progress=_artist_heartbeat,
             )
