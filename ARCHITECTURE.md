@@ -95,6 +95,15 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   artist with that id, else the one holding that MBID, else a new stub of that MBID: name and
   sort name the MBID, no normalized name, `needs_enhancement` set. An unnamed stub is left out
   of `GET /library/artists`, its search and `list_all()` (`name IS DISTINCT FROM mbid`).
+- Enrichment names a stub (`_enhance_artist`, phase 1a PR 2, AUD-R059): its MBID is checked
+  first (a malformed one, which Resolve lets through, is recorded in `enhancement_error` and
+  never sent to MusicBrainz, not even by the lookup pre-pass), then it takes
+  MusicBrainz's name, sort name and disambiguation, and the normalized name unless another
+  artist already holds it (asked first; it stays NULL until 2a's C41). An answer with no name
+  is recorded the same way. An artist that is no stub keeps its name.
+  `scripts/name_stubs.py --dsn` names, on a gate copy, every artist whose name is still its MBID
+  and has no recorded error (0044's stubs and any made since), one transaction each, with every
+  hand-off stubbed.
 - Writers: the artist matcher (`_persist_artist_result`: the catalog artist first, then the
   link, origin automatic; never over a manual or rejected pair), Resolve (a manual link; the
   name's other links stay) and Unmatch (every link of the name goes). Resolve and Unmatch are
@@ -110,13 +119,14 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `scripts/check_log_name_links_copy.py --dsn` checks the copy on the gate's copy.
 - Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
   artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
-  work for it under the stub (named by enrichment, phase 1a PR 2). The dev database had none
-  of either at the copy (2026-11-01 gate copy).
+  work for it under the stub. The dev database had none of either at the copy (2026-11-01
+  gate copy).
 - The checks are `tests/test_log_name_links_single_writer.py`,
   `tests/test_no_artist_rows_in_matches.py`, `tests/services/test_tier1_link_read.py`,
   `tests/services/test_artist_link_writes.py`, `tests/routers/test_resolve_writes_link.py`,
-  `tests/repositories/test_log_name_links_contract.py` and the migration's
-  `tests/integration/test_log_name_links_*_pg.py`.
+  `tests/repositories/test_log_name_links_contract.py`, the migration's
+  `tests/integration/test_log_name_links_*_pg.py` and the naming's
+  `tests/tasks/test_enrichment_names_stubs.py` and `tests/tasks/test_enrichment_stub_checks.py`.
 
 ## Derived counts kept by triggers
 
