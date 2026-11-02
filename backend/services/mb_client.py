@@ -73,6 +73,9 @@ class MusicBrainzClientProtocol(Protocol):
     def search_artists_by_mbids(
         self, mbids: Sequence[str], *, on_progress: Progress | None = None
     ) -> dict[str, MbArtist]: ...
+    def lookup_recordings(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbRecording | None]: ...
 
 
 def _slim_recording(recording: MbRecording) -> MbRecording:
@@ -393,6 +396,27 @@ class MusicBrainzApiClient:
             for index, mbid in enumerate(asked, start=1):
                 on_progress(index, len(asked), mbid)
         return found
+
+    def lookup_recordings(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbRecording | None]:
+        """Look up each distinct recording by MBID, one request each (via the cache).
+
+        Unlike ``search_artists_by_mbids`` (found-only), a 404 is stored as ``None`` so
+        the caller knows it was asked; only a transient failure omits the key, and the
+        caller then retries it live. ``on_progress(i, total, mbid)`` fires once per
+        MBID, after its lookup, whatever the outcome.
+        """
+        distinct = list(dict.fromkeys(mbids))
+        result: dict[str, MbRecording | None] = {}
+        for index, mbid in enumerate(distinct, start=1):
+            try:
+                result[mbid] = self.lookup_recording(mbid)
+            except httpx.HTTPError as exc:
+                logger.warning("mb_lookup_recordings_omitted", mbid=mbid, error=str(exc))
+            if on_progress is not None:
+                on_progress(index, len(distinct), mbid)
+        return result
 
     def _search_by_mbids[T](
         self, entity: _SearchableEntity[T], mbids: Sequence[str]

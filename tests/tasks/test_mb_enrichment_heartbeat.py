@@ -1,21 +1,16 @@
-"""Heartbeat tests for ``coalesce_*_lookups`` and ``_emit_pre_pass_heartbeat``.
+"""Heartbeat tests for the batch lookups' ``on_progress`` and ``_emit_pre_pass_heartbeat``.
 
 These tests pin the behavior described in the WS-empty-during-mb_enrichment
 fix plan ("Public contract" + "Tests to add" sections). Two layers of test:
 
-1. Helper-level (`coalesce_*_lookups` with a capturing `on_progress` callable
-   that records calls). Verifies the cardinality / ordering / coverage
-   invariants without involving `_PhaseContext` or repositories.
+1. Client-level (``search_artists_by_mbids`` / ``lookup_recordings`` on a fake
+   client with a capturing `on_progress` callable that records calls). Verifies
+   the once-per-MBID / ordering / coverage invariants without involving
+   `_PhaseContext` or repositories.
 
 2. Production-callback-level (`_emit_pre_pass_heartbeat` driving a
    `FakeTaskProgressRepository`). Verifies the overlay shape, the
    `-prepass` phase suffix, and the swallow-on-psycopg-error semantics.
-
-Tests marked ``# regression-lock`` deliberately pin the current 2-heartbeats-
-per-MBID implementation. If a future change intentionally moves to a
-different cadence shape (e.g. 1 + in-retry tick), DELETE-AND-REPLACE those
-tests; the loose-bound and order-invariant tests above them will continue to
-protect the public contract.
 """
 
 from __future__ import annotations
@@ -33,14 +28,12 @@ from backend.repositories.task_progress import TaskProgressRepository
 from backend.tasks.mb_enrichment_tasks import (
     _emit_pre_pass_heartbeat,
     _PhaseContext,
-    coalesce_artist_lookups,
-    coalesce_recording_lookups,
 )
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.task_progress import FakeTaskProgressRepository
 
 # ---------------------------------------------------------------------------
-# Helper-level tests — `coalesce_*_lookups` with a capturing callback
+# Client-level tests — the batch lookups with a capturing callback
 # ---------------------------------------------------------------------------
 
 
@@ -58,10 +51,6 @@ def _all_success_artists(mbids: list[str]) -> FakeMbClient:
     return FakeMbClient(artists={m: {"id": m, "name": f"name-{m}"} for m in mbids})
 
 
-def _all_failure_artists(mbids: list[str]) -> FakeMbClient:
-    return FakeMbClient(error_mbids=set(mbids))
-
-
 def _all_success_recordings(mbids: list[str]) -> FakeMbClient:
     return FakeMbClient(recordings={m: {"id": m, "title": f"t-{m}"} for m in mbids})
 
@@ -70,79 +59,57 @@ def _all_failure_recordings(mbids: list[str]) -> FakeMbClient:
     return FakeMbClient(error_mbids=set(mbids))
 
 
-# ---- Cardinality invariants (loose bounds) --------------------------------
+# ---- Cardinality invariants -----------------------------------------------
 
 
-def test_artist_heartbeat_cardinality_success_path() -> None:
-    """At least M, at most 5*M heartbeats when all lookups succeed.
-
-    The exact count is pinned in the regression-lock test below; this one
-    survives a future cadence-shape change.
-    """
+def test_artist_heartbeat_once_per_mbid_success_path() -> None:
     mbids = [f"mbid-a-{i:04x}" for i in range(50)]
     cb = _CaptureCallback()
-    coalesce_artist_lookups(set(mbids), _all_success_artists(mbids), on_progress=cb)
-    assert len(mbids) <= len(cb.calls) <= 5 * len(mbids)
+    _all_success_artists(mbids).search_artists_by_mbids(sorted(mbids), on_progress=cb)
+    assert len(cb.calls) == len(set(mbids))
+    assert {total for _, total, _ in cb.calls} == {len(set(mbids))}
 
 
-def test_artist_heartbeat_cardinality_failure_path() -> None:
+def test_recording_heartbeat_once_per_mbid_success_path() -> None:
+    mbids = [f"mbid-r-{i:04x}" for i in range(50)]
+    cb = _CaptureCallback()
+    _all_success_recordings(mbids).lookup_recordings(sorted(mbids), on_progress=cb)
+    assert len(cb.calls) == len(set(mbids))
+    assert {total for _, total, _ in cb.calls} == {len(set(mbids))}
+
+
+def test_recording_heartbeat_once_per_mbid_failure_path() -> None:
     """Heartbeats still fire when every lookup raises httpx.HTTPError.
 
-    The `finally` branch in coalesce must contribute regardless of HTTP
-    outcome. Without that, a streak of failing MBIDs would re-create the
-    >10-min heartbeat gap that was the original WS-empty bug.
+    A streak of failing MBIDs must not re-create the >10-min heartbeat gap
+    that was the original WS-empty bug.
     """
-    mbids = [f"mbid-a-{i:04x}" for i in range(50)]
-    cb = _CaptureCallback()
-    coalesce_artist_lookups(set(mbids), _all_failure_artists(mbids), on_progress=cb)
-    assert len(mbids) <= len(cb.calls) <= 5 * len(mbids)
-
-
-def test_recording_heartbeat_cardinality_success_path() -> None:
     mbids = [f"mbid-r-{i:04x}" for i in range(50)]
     cb = _CaptureCallback()
-    coalesce_recording_lookups(set(mbids), _all_success_recordings(mbids), on_progress=cb)
-    assert len(mbids) <= len(cb.calls) <= 5 * len(mbids)
-
-
-def test_recording_heartbeat_cardinality_failure_path() -> None:
-    mbids = [f"mbid-r-{i:04x}" for i in range(50)]
-    cb = _CaptureCallback()
-    coalesce_recording_lookups(set(mbids), _all_failure_recordings(mbids), on_progress=cb)
-    assert len(mbids) <= len(cb.calls) <= 5 * len(mbids)
+    _all_failure_recordings(mbids).lookup_recordings(sorted(mbids), on_progress=cb)
+    assert len(cb.calls) == len(set(mbids))
 
 
 # ---- Order invariant ------------------------------------------------------
 
 
-def test_artist_heartbeat_order_invariant_under_mixed_outcomes() -> None:
-    """First-occurrence order of MBIDs in heartbeat sequence is sorted ASC.
-
-    Mixed success/failure input. Tolerates any per-MBID heartbeat count
-    (1, 2, or in-retry future) as long as the unique-MBID sequence is
-    deterministic. This is the non-regression-lock counterpart to the
-    `test_artist_heartbeat_order_pairs_consecutively` lock below.
-    """
-    mbids = ["mbid-z", "mbid-a", "mbid-m", "mbid-c"]
+def test_artist_heartbeat_order_follows_input_order() -> None:
+    """Heartbeats come in input order, numbered 1..N, one per distinct MBID."""
+    mbids = ["mbid-a", "mbid-c", "mbid-m", "mbid-z"]
     client = FakeMbClient(
         artists={
             "mbid-a": {"id": "mbid-a", "name": "n"},
             "mbid-m": {"id": "mbid-m", "name": "n"},
         },
-        error_mbids={"mbid-z", "mbid-c"},
     )
     cb = _CaptureCallback()
-    coalesce_artist_lookups(mbids, client, on_progress=cb)
+    client.search_artists_by_mbids(mbids, on_progress=cb)
 
-    seen: list[str] = []
-    for _, _, m in cb.calls:
-        if m not in seen:
-            seen.append(m)
-    assert seen == sorted(set(mbids))
+    assert cb.calls == [(i, 4, m) for i, m in enumerate(mbids, start=1)]
 
 
-def test_recording_heartbeat_order_invariant_under_mixed_outcomes() -> None:
-    mbids = ["mbid-z", "mbid-a", "mbid-m", "mbid-c"]
+def test_recording_heartbeat_order_follows_input_order_under_mixed_outcomes() -> None:
+    mbids = ["mbid-a", "mbid-c", "mbid-m", "mbid-z"]
     client = FakeMbClient(
         recordings={
             "mbid-a": {"id": "mbid-a", "title": "t"},
@@ -151,32 +118,29 @@ def test_recording_heartbeat_order_invariant_under_mixed_outcomes() -> None:
         error_mbids={"mbid-z", "mbid-c"},
     )
     cb = _CaptureCallback()
-    coalesce_recording_lookups(mbids, client, on_progress=cb)
-    seen: list[str] = []
-    for _, _, m in cb.calls:
-        if m not in seen:
-            seen.append(m)
-    assert seen == sorted(set(mbids))
+    client.lookup_recordings(mbids, on_progress=cb)
+
+    assert cb.calls == [(i, 4, m) for i, m in enumerate(mbids, start=1)]
 
 
 # ---- Per-MBID coverage ----------------------------------------------------
 
 
 def test_artist_heartbeat_covers_every_mbid() -> None:
-    """No MBID is silently skipped — catches a misplaced `continue` regression."""
+    """No MBID is silently skipped, and none is reported twice."""
     mbids = [f"mbid-a-{i}" for i in range(20)]
     cb = _CaptureCallback()
-    coalesce_artist_lookups(set(mbids), _all_success_artists(mbids), on_progress=cb)
-    distinct_seen = {m for _, _, m in cb.calls}
-    assert distinct_seen == set(mbids)
+    _all_success_artists(mbids).search_artists_by_mbids(sorted(mbids), on_progress=cb)
+    seen = [m for _, _, m in cb.calls]
+    assert sorted(seen) == sorted(mbids)
 
 
 def test_recording_heartbeat_covers_every_mbid() -> None:
     mbids = [f"mbid-r-{i}" for i in range(20)]
     cb = _CaptureCallback()
-    coalesce_recording_lookups(set(mbids), _all_success_recordings(mbids), on_progress=cb)
-    distinct_seen = {m for _, _, m in cb.calls}
-    assert distinct_seen == set(mbids)
+    _all_success_recordings(mbids).lookup_recordings(sorted(mbids), on_progress=cb)
+    seen = [m for _, _, m in cb.calls]
+    assert sorted(seen) == sorted(mbids)
 
 
 # ---- Duplicate input handling --------------------------------------------
@@ -184,68 +148,23 @@ def test_recording_heartbeat_covers_every_mbid() -> None:
 
 def test_recording_prepass_total_is_distinct_count_not_input_count() -> None:
     """The `total` argument to `on_progress` reflects DISTINCT MBIDs, not the
-    raw input length. `_run_recordings_phase` passes `(r.id for r in ...)`
-    which contains duplicates when multiple recording rows share an MBID;
-    callers must not see `prepass_total = |input|`. (`_run_artist_phase`
-    pre-dedups via a set comprehension, so artists never exhibit this — but
-    the helper-level invariant is the same.)
+    raw input length, so callers never see `prepass_total = |input|`.
     """
     inputs = ["mbid-A", "mbid-A", "mbid-B", "mbid-A", "mbid-C"]
     cb = _CaptureCallback()
-    coalesce_recording_lookups(
-        inputs,
-        _all_success_recordings(["mbid-A", "mbid-B", "mbid-C"]),
-        on_progress=cb,
+    _all_success_recordings(["mbid-A", "mbid-B", "mbid-C"]).lookup_recordings(
+        inputs, on_progress=cb
     )
     totals = {t for _, t, _ in cb.calls}
     assert totals == {3}, "prepass_total must equal |distinct|, not |input|"
 
 
-# ---- Regression locks (current 2x/MBID implementation) -------------------
+# ---- Callback raise = propagate (no swallow at the client) ---------------
 
 
-def test_artist_heartbeat_exact_2x_count() -> None:
-    """# regression-lock — pins the current start+finally implementation.
-
-    If a future change intentionally moves to 1 heartbeat per MBID (e.g.
-    adding an in-retry tick that replaces the start one), DELETE-AND-REPLACE
-    this test rather than relaxing it. The cardinality and order invariants
-    above will continue to protect the public contract.
-    """
-    mbids = [f"mbid-a-{i:04x}" for i in range(20)]
-    cb = _CaptureCallback()
-    coalesce_artist_lookups(set(mbids), _all_success_artists(mbids), on_progress=cb)
-    assert len(cb.calls) == 2 * len(mbids)
-
-
-def test_recording_heartbeat_exact_2x_count() -> None:
-    """# regression-lock — see test_artist_heartbeat_exact_2x_count."""
-    mbids = [f"mbid-r-{i:04x}" for i in range(20)]
-    cb = _CaptureCallback()
-    coalesce_recording_lookups(set(mbids), _all_success_recordings(mbids), on_progress=cb)
-    assert len(cb.calls) == 2 * len(mbids)
-
-
-def test_artist_heartbeat_order_pairs_consecutively() -> None:
-    """# regression-lock — same MBID appears twice in a row (start, then end).
-
-    If a future cadence change drops or splits the pair, DELETE-AND-REPLACE
-    rather than relaxing.
-    """
-    mbids = [f"mbid-a-{i:04x}" for i in range(10)]
-    cb = _CaptureCallback()
-    coalesce_artist_lookups(set(mbids), _all_success_artists(mbids), on_progress=cb)
-    sequence = [m for _, _, m in cb.calls]
-    expected = [m for m in sorted(set(mbids)) for _ in (0, 1)]
-    assert sequence == expected
-
-
-# ---- Callback raise = propagate (no swallow at coalesce layer) -----------
-
-
-def test_coalesce_propagates_callback_exceptions() -> None:
-    """`on_progress` callbacks MUST NOT raise. If one does, coalesce does not
-    swallow — the public contract treats a raising callback as a logic bug
+def test_client_propagates_callback_exceptions() -> None:
+    """`on_progress` callbacks MUST NOT raise. If one does, the client does not
+    swallow it: the public contract treats a raising callback as a logic bug
     worth surfacing, not an observability hiccup to ignore.
     `_emit_pre_pass_heartbeat` is the production callback; it satisfies the
     no-raise contract by catching `psycopg.Error` internally.
@@ -256,10 +175,8 @@ def test_coalesce_propagates_callback_exceptions() -> None:
             raise RuntimeError("logic bug in callback")
 
     with pytest.raises(RuntimeError, match="logic bug in callback"):
-        coalesce_artist_lookups(
-            {"mbid-a"},
-            _all_success_artists(["mbid-a"]),
-            on_progress=RaisingCallback(),
+        _all_success_artists(["mbid-a"]).search_artists_by_mbids(
+            ["mbid-a"], on_progress=RaisingCallback()
         )
 
 

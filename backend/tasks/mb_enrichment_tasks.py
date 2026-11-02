@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -26,15 +25,19 @@ from backend.services.library_enrichment_service import (
     apply_recording_lookup,
     needs_recording_lookup,
 )
-from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
+from backend.services.mb_client import (
+    MusicBrainzApiClient,
+    MusicBrainzClientProtocol,
+    Progress,
+)
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
 
-# Threshold for the slow-iteration warning emitted from inside the coalesce
-# helpers. If the wall-clock gap between consecutive heartbeats exceeds this,
+# Threshold for the slow-iteration warning emitted from inside the batch
+# lookups. If the wall-clock gap between consecutive heartbeats exceeds this,
 # we log a structured warning so post-hoc analysis can spot drift toward the
 # 10-minute WS stale threshold (`STALE_THRESHOLD_MINUTES` in `backend/websocket.py`). Independent
 # of the cadence math; this is a guardrail, not a contract.
@@ -106,7 +109,7 @@ def _enhance_artist(
     conn: psycopg.Connection[Any],
     repos: RepositoryFactory,
     *,
-    mbid_map: dict[str, MbArtist | None] | None = None,
+    mbid_map: dict[str, MbArtist] | None = None,
 ) -> ArtistEnhanceOutcome:
     """Fill in missing artist fields from a MusicBrainz artist lookup.
 
@@ -122,10 +125,9 @@ def _enhance_artist(
     fills missing disambiguation / sort_name; a `None` result (404 from the
     MB API or a cached 404 in `mbid_map`) maps to FAILED.
 
-    `mbid_map` is the pre-fetched batch of `lookup_artist` results keyed by
-    MBID, so the caller can coalesce one live lookup per distinct MBID
-    across the queue. A value of `None` in the map represents a cached 404
-    and is respected without re-querying.
+    `mbid_map` is the pre-fetched batch from `search_artists_by_mbids`, keyed
+    by MBID and found-only: an MBID absent from it (merged, deleted, or a
+    failed batch) falls through to a live `lookup_artist`, which follows merges.
 
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
@@ -141,6 +143,7 @@ def _enhance_artist(
         )
         return ArtistEnhanceOutcome.FAILED
 
+    data: MbArtist | None
     if mbid_map is not None and artist.mbid in mbid_map:
         data = mbid_map[artist.mbid]
     else:
@@ -179,7 +182,7 @@ def _enhance_artist(
 
 
 def _heartbeat_with_slow_warning(
-    on_progress: Callable[[int, int, str], None] | None,
+    on_progress: Progress | None,
     last_heartbeat_at: float,
     current: int,
     total: int,
@@ -211,124 +214,6 @@ def _heartbeat_with_slow_warning(
         )
     on_progress(current, total, mbid)
     return time.monotonic()
-
-
-def coalesce_artist_lookups(
-    mbids: Iterable[str],
-    client: MusicBrainzClientProtocol,
-    *,
-    on_progress: Callable[[int, int, str], None] | None = None,
-) -> dict[str, MbArtist | None]:
-    """Call lookup_artist exactly once per distinct MBID.
-
-    Returns {mbid: MbArtist | None}. The `sorted(set(mbids))` conversion is
-    the dedup mechanism — a plain dict comprehension over a list does NOT
-    deduplicate calls (it only deduplicates the output dict's keys, after
-    each duplicate has already triggered a full lookup). The explicit
-    `set()` is therefore required for the coalescing contract, even when
-    callers pass an iterable that happens to already be a set. The `sorted`
-    wrapper makes iteration order deterministic so heartbeat assertions and
-    the WS pre-pass stream are reproducible.
-    The underlying lookup is cache-read-through — warm entries produce 0 live
-    calls.
-
-    Transient httpx failures are swallowed per-MBID: the failing MBID is
-    OMITTED from the result map instead of raised. That lets the per-item
-    loop in `mb_enrichment_task` fall through to its own `lookup_artist`
-    call (inside the retriable-error try/except), so one flaky MB request
-    during the pre-pass fails only that artist instead of aborting the whole
-    task. `httpx.HTTPStatusError(404)` is NOT raised by `lookup_artist`
-    (returns None), so genuine 404s still land in the map as `None`.
-
-    `on_progress(current, total, mbid)` is invoked **at the start of each
-    iteration AND in the iteration's `finally` block** — twice per MBID,
-    regardless of HTTP outcome. Halves the worst-case heartbeat gap during
-    sustained 429/5xx retries (see plan: "Heartbeat placement"). Callbacks
-    MUST NOT raise; if one does, the helper does not swallow it.
-    """
-    distinct = sorted(set(mbids))
-    total = len(distinct)
-    result: dict[str, MbArtist | None] = {}
-    last_heartbeat_at = 0.0
-    for i, mbid in enumerate(distinct, start=1):
-        last_heartbeat_at = _heartbeat_with_slow_warning(
-            on_progress,
-            last_heartbeat_at,
-            i,
-            total,
-            mbid,
-            phase_label="artists",
-        )
-        try:
-            result[mbid] = client.lookup_artist(mbid)
-        except httpx.HTTPError as exc:
-            logger.warning(
-                "mb_coalesce_lookup_failed",
-                mbid=mbid,
-                error=str(exc),
-            )
-        finally:
-            last_heartbeat_at = _heartbeat_with_slow_warning(
-                on_progress,
-                last_heartbeat_at,
-                i,
-                total,
-                mbid,
-                phase_label="artists",
-            )
-    return result
-
-
-def coalesce_recording_lookups(
-    mbids: Iterable[str],
-    client: MusicBrainzClientProtocol,
-    *,
-    on_progress: Callable[[int, int, str], None] | None = None,
-) -> dict[str, MbRecording | None]:
-    """Call lookup_recording exactly once per distinct MBID.
-
-    Sentinel convention (mirrors coalesce_artist_lookups):
-      - httpx.HTTPError -> OMIT the MBID. The per-item loop falls through
-        to a live lookup_recording inside its own retriable try/except.
-      - 404 (lookup_recording returns None) -> store `{mbid: None}`. The
-        per-item loop treats this as authoritative "not found" and must
-        NOT re-query. Distinct from key-absent.
-      - success -> payload in the map.
-
-    `on_progress` and `sorted(set(mbids))` semantics match
-    `coalesce_artist_lookups` — see that docstring.
-    """
-    distinct = sorted(set(mbids))
-    total = len(distinct)
-    result: dict[str, MbRecording | None] = {}
-    last_heartbeat_at = 0.0
-    for i, mbid in enumerate(distinct, start=1):
-        last_heartbeat_at = _heartbeat_with_slow_warning(
-            on_progress,
-            last_heartbeat_at,
-            i,
-            total,
-            mbid,
-            phase_label="recordings",
-        )
-        try:
-            result[mbid] = client.lookup_recording(mbid)
-        except httpx.HTTPError as exc:
-            logger.warning(
-                "mb_coalesce_recording_lookup_failed",
-                mbid=mbid,
-                error=str(exc),
-            )
-        finally:
-            last_heartbeat_at = _heartbeat_with_slow_warning(
-                on_progress,
-                last_heartbeat_at,
-                i,
-                total,
-                mbid,
-                phase_label="recordings",
-            )
-    return result
 
 
 @dataclass
@@ -374,8 +259,8 @@ def _emit_pre_pass_heartbeat(
     ``progress_tracking`` row, without incrementing ``ctx.processed``.
 
     Parameter order ``(current, total, mbid)`` matches the
-    ``on_progress: Callable[[int, int, str], None]`` callback convention in
-    `coalesce_*_lookups`, so phase-helper closures don't have to permute
+    ``Progress`` callback convention of the batch lookups in
+    `MusicBrainzClientProtocol`, so phase-helper closures don't have to permute
     arguments — they pass them through positionally after the fixed
     ``ctx, phase`` prefix.
 
@@ -507,10 +392,8 @@ def _run_artist_phase(
             def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
                 _emit_pre_pass_heartbeat(ctx, "artists", current, total, mbid)
 
-            mbid_map = coalesce_artist_lookups(
-                distinct_mbids,
-                mb_client,
-                on_progress=_artist_heartbeat,
+            mbid_map = mb_client.search_artists_by_mbids(
+                sorted(distinct_mbids), on_progress=_artist_heartbeat
             )
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
@@ -695,10 +578,8 @@ def _run_recordings_phase(
             to_look_up = {
                 r.id for r in pending_recordings if needs_recording_lookup(r, musicbrainz_work_ids)
             }
-            recording_map = coalesce_recording_lookups(
-                to_look_up,
-                mb_client,
-                on_progress=_recording_heartbeat,
+            recording_map = mb_client.lookup_recordings(
+                sorted(to_look_up), on_progress=_recording_heartbeat
             )
             enrichment_repos = EnrichmentRepos(
                 files=repos.library_files,
