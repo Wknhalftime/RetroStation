@@ -24,6 +24,27 @@
         'normalized_name': 'zephyr junction broadcast zep',
         'sort_name': 'Zephyr Junction Broadcast Zep',
       }),
+      dict({
+        'disambiguation': None,
+        'mbid': 'mb-ambig-a',
+        'name': 'Wandering Prairie Skyline Wan',
+        'normalized_name': 'wandering prairie skyline wan',
+        'sort_name': 'Wandering Prairie Skyline Wan',
+      }),
+      dict({
+        'disambiguation': None,
+        'mbid': 'mb-ambig-b',
+        'name': 'Wandering Prairie Skyline Wan',
+        'normalized_name': 'wandering prairie skyline wan',
+        'sort_name': 'Wandering Prairie Skyline Wan',
+      }),
+      dict({
+        'disambiguation': None,
+        'mbid': 'mb-lowconf',
+        'name': 'Copper Harbor Station Feed Co',
+        'normalized_name': 'copper harbor station feed co',
+        'sort_name': 'Copper Harbor Station Feed Co',
+      }),
     ]),
     'norm_exact_local_artist': dict({
       'match': dict({
@@ -71,8 +92,8 @@
     'truncated_ambiguous_artist': dict({
       'match': None,
       'match_status': 'needs_review',
-      'reason_code': 'AMBIGUOUS_GAP',
-      'reason_detail': 'Top candidates within 7 points (gap < 10 required)',
+      'reason_code': 'LINK_SUGGESTED',
+      'reason_detail': '2 suggested artists, best 85%',
     }),
     'truncated_auto_artist': dict({
       'match': dict({
@@ -88,8 +109,8 @@
     'truncated_lowconf_artist': dict({
       'match': None,
       'match_status': 'needs_review',
-      'reason_code': 'LOW_CONFIDENCE',
-      'reason_detail': 'Score 62% — below confidence threshold',
+      'reason_code': 'LINK_SUGGESTED',
+      'reason_detail': '1 suggested artist, best 62%',
     }),
   })
 # ---

@@ -25,6 +25,7 @@ from backend.domain.enums import (
     EnrichmentStatus,
     MatchStatus,
     MatchTier,
+    ReasonCode,
 )
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.artist_matching_service import NormalizationStrategy
@@ -89,13 +90,19 @@ def test_linked_by_lookup_is_true_only_for_the_linkers_links() -> None:
 
 
 def test_an_artist_with_an_mbid_from_enrichment_is_in_the_fuzzy_pass() -> None:
-    # Today's behaviour, kept: 88.9 with a 68.9-point lead over Queen auto-matches.
+    # Case is in the fuzzy pass: 88.9 with a 68.9-point lead over Queen. That lead
+    # auto-matched until artist model phase 1c; from 1c it is a suggestion (C35, AUD-R038).
     strategy = NormalizationStrategy([_catalog("Queen", QUEEN), _catalog("Case", CASE)])
 
     result = strategy.apply(_broadcast("CHASE"))
 
     assert result is not None
-    assert (result.status, result.target_id) == (MatchStatus.AUTO_MATCHED, CASE)
+    assert (result.status, result.reason_code, result.target_id) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+        CASE,
+    )
+    assert [s.target_id for s in result.suggestions] == [CASE]  # Queen scores 20
 
 
 def test_a_linked_artist_does_not_join_the_fuzzy_pass() -> None:
