@@ -549,7 +549,9 @@ def test_header_records_the_excluded_directories(graph: Any) -> None:
         "frontend",
         "htmlcov",
         "node_modules",
+        "results",
         "tests",
+        "var",
     ]
 
 
