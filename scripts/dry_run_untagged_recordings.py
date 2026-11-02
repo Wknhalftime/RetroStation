@@ -184,7 +184,7 @@ def _count_no_artist_mbid(conn: psycopg.Connection[Any]) -> int:
            LEFT JOIN works w ON w.id = lf.work_id
            LEFT JOIN artists a ON a.id = w.artist_id
            WHERE lf.recording_mbid IS NULL AND lf.release_mbid IS NULL
-             AND lf.enrichment_status IN ('pending', 'skipped')
+             AND lf.enrichment_status = 'pending'
              AND lf.file_status = 'present'
              AND a.mbid IS NULL"""
     ).fetchone()

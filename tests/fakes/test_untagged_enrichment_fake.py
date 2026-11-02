@@ -44,17 +44,18 @@ def test_lists_untagged_present_files_whose_artist_has_an_mbid() -> None:
     linked_work = works.create_local("Right Here, Right Now", linked)
     unlinked_work = works.create_local("Right Here, Right Now", unlinked)
 
+    second = files.upsert(_file("/b.flac", linked_work))
     wanted = files.upsert(_file("/a.flac", linked_work))
-    skipped = files.upsert(_file("/b.flac", linked_work, status=EnrichmentStatus.SKIPPED))
     files.upsert(_file("/c.flac", linked_work, recording_mbid="some-mbid"))
     files.upsert(_file("/d.flac", unlinked_work))
     files.upsert(_file("/e.flac", linked_work, status=EnrichmentStatus.ENRICHED))
     files.upsert(_file("/f.flac", linked_work, file_status=FileStatus.MISSING))
     files.upsert(_file("/g.flac", None))
+    files.upsert(_file("/h.flac", linked_work, status=EnrichmentStatus.FAILED))
 
     listed = FakeUntaggedEnrichment(files, works, artists).list_untagged_with_linked_artist()
 
     assert [(c.file.id, c.artist_mbid) for c in listed] == [
         (wanted.id, _MBID),
-        (skipped.id, _MBID),
+        (second.id, _MBID),
     ]

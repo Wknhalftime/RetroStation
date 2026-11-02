@@ -71,8 +71,9 @@ def test_lists_untagged_present_files_whose_artist_has_an_mbid(migrated_db: str)
         unlinked_work = repos.works.create_local("Right Here, Right Now", unlinked)
         files = repos.library_files
 
-        b = files.upsert(_file("/m/b.flac", linked_work, status=EnrichmentStatus.SKIPPED))
+        b = files.upsert(_file("/m/b.flac", linked_work))
         a = files.upsert(_file("/m/a.flac", linked_work))
+        files.upsert(_file("/m/i.flac", linked_work, status=EnrichmentStatus.FAILED))
         files.upsert(_file("/m/c.flac", linked_work, recording_mbid=_REC))
         files.upsert(_file("/m/d.flac", linked_work, release_mbid="some-release"))
         files.upsert(_file("/m/e.flac", unlinked_work))
@@ -161,10 +162,10 @@ def test_confident_pick_links_the_recording_and_moves_the_file_to_its_work(
         assert moved_to is not None and moved_to.mbid == _WORK, "moved onto the MusicBrainz work"
         stored_unsure = repos.library_files.get_by_id(unsure.id)
         assert stored_unsure is not None
-        assert stored_unsure.enrichment_status is EnrichmentStatus.SKIPPED
+        assert stored_unsure.enrichment_status is EnrichmentStatus.PENDING
         assert stored_unsure.recording_id is None
         assert stored_unsure.work_id == linked_work
-        # The skipped file is a candidate again on the next run; the linked one is not.
+        # The undecided file is a candidate again on the next run; the linked one is not.
         assert [c.file.id for c in repos.library_files.list_untagged_with_linked_artist()] == [
             unsure.id
         ]

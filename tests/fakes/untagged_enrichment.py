@@ -7,13 +7,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.works import FakeWorkRepository
 
-_CANDIDATE_STATUSES = (EnrichmentStatus.PENDING, EnrichmentStatus.SKIPPED)
-
 
 def _is_untagged_candidate(f: LibraryFile) -> bool:
     return (
         f.file_status == FileStatus.PRESENT
-        and f.enrichment_status in _CANDIDATE_STATUSES
+        and f.enrichment_status == EnrichmentStatus.PENDING
         and f.audio.recording_mbid is None
         and f.audio.release_mbid is None
     )

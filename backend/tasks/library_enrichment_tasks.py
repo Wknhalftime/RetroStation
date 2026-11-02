@@ -71,7 +71,7 @@ def library_enrichment_task() -> dict[str, int]:
     Pass 3: by recording_mbid for files with no release_mbid.
     Pass 4: files with no MBID in their tags whose work's artist has one:
             one recording search per distinct (artist, title), a confident
-            pick then goes through pass 3's lookup; the rest stay skipped
+            pick then goes through pass 3's lookup; the rest stay pending
             (``untagged_recording_service``).
     """
     settings = get_settings()

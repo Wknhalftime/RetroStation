@@ -3,7 +3,7 @@
 A confident pick hands the recording MBID to the same step the per-recording
 pass uses (``enrich_files_by_recording``), so the file gets its recording,
 work, duration and live flag the normal way. An ambiguous or empty search
-marks the file skipped and lists it; nothing is guessed.
+leaves the file pending and lists it; nothing is guessed.
 """
 
 from __future__ import annotations
@@ -162,7 +162,7 @@ def test_files_of_one_pair_can_pick_different_recordings_by_length() -> None:
     assert world.stored(edit).recording_id == _REC_2
 
 
-def test_ambiguous_and_empty_files_are_skipped_and_listed_without_a_lookup() -> None:
+def test_ambiguous_and_empty_files_stay_pending_and_are_listed_without_a_lookup() -> None:
     world = _World()
     ambiguous = world.file("Right Here, Right Now", duration_ms=183_000)
     empty = world.file("International Bright Young Thing")
@@ -183,7 +183,7 @@ def test_ambiguous_and_empty_files_are_skipped_and_listed_without_a_lookup() -> 
     ]
     for lf in (ambiguous, empty):
         stored = world.stored(lf)
-        assert stored.enrichment_status is EnrichmentStatus.SKIPPED
+        assert stored.enrichment_status is EnrichmentStatus.PENDING, "untouched"
         assert stored.recording_id is None
         assert stored.work_id == world.local_work
     assert not [c for c in client.calls if c.startswith("lookup_recording")]

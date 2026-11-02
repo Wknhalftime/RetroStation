@@ -9,7 +9,7 @@ per-recording path (:func:`library_enrichment_service.enrich_files_by_recording`
 so the file gets its recording, work, duration and live flag the normal way.
 
 The confidence rule is :func:`pick_recording`. A file it cannot decide stays
-skipped and is listed, never guessed: a wrong link would move the file onto
+pending and is listed, never guessed: a wrong link would move the file onto
 another song's work, and an automated decision that could be wrong must widen
 the human review window, not decide silently (AUD-R100/R101).
 """
@@ -21,7 +21,7 @@ from enum import StrEnum
 
 import structlog
 
-from backend.domain.enums import EnrichmentStatus, VersionType
+from backend.domain.enums import VersionType
 from backend.domain.library import LibraryFile, UntaggedCandidate
 from backend.services.library_enrichment_service import (
     EnrichmentRepos,
@@ -172,7 +172,7 @@ def untagged_pairs(candidates: list[UntaggedCandidate]) -> list[UntaggedPair]:
 
 @dataclass(frozen=True)
 class SkippedFile:
-    """A file the pass left skipped, for review: why, and which hits were in the running."""
+    """A file the pass left pending, for review: why, and which hits were in the running."""
 
     file_path: str
     outcome: PickOutcome
@@ -195,8 +195,8 @@ def enrich_untagged_pair(
     The client reads ``mb_cache`` before MusicBrainz, so a pair already searched (by this
     pass, or by song matching when the title has no punctuation) costs no call. Files
     picking the same recording share its lookup. A file the
-    rule cannot decide is marked SKIPPED (a candidate again next run, which the cache then
-    answers) and returned for review.
+    rule cannot decide is left as it is, pending (a candidate again next run, which the
+    cache then answers without a call), and returned for review.
     """
     hits = mb_client.search_recording(artist_mbid=pair.artist_mbid, title=pair.title)
     by_recording: dict[str, list[LibraryFile]] = {}
@@ -204,10 +204,9 @@ def enrich_untagged_pair(
     for library_file in pair.files:
         pick = pick_recording(library_file, pair.artist_mbid, hits)
         if pick.recording_mbid is None:
-            repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.SKIPPED)
             skipped.append(SkippedFile(library_file.file_path, pick.outcome, pick.candidate_mbids))
             logger.debug(
-                "untagged_file_skipped",
+                "untagged_file_undecided",
                 file_path=library_file.file_path,
                 outcome=pick.outcome.value,
                 candidates=len(pick.candidate_mbids),

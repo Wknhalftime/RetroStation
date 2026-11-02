@@ -315,13 +315,13 @@ class PgLibraryFileRepository(
                FROM library_files lf
                JOIN works w ON w.id = lf.work_id
                JOIN artists a ON a.id = w.artist_id
-               WHERE lf.enrichment_status IN (%s, %s)
+               WHERE lf.enrichment_status = %s
                  AND lf.file_status = 'present'
                  AND lf.recording_mbid IS NULL
                  AND lf.release_mbid IS NULL
                  AND a.mbid IS NOT NULL
                ORDER BY lf.file_path""",
-            (EnrichmentStatus.PENDING.value, EnrichmentStatus.SKIPPED.value),
+            (EnrichmentStatus.PENDING.value,),
         ).fetchall()
         return [
             UntaggedCandidate(file=self._row_to_model(r), artist_mbid=r["linked_artist_mbid"])
