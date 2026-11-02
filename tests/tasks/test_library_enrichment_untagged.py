@@ -98,9 +98,9 @@ def test_untagged_pairs_are_searched_once_each_after_the_mbid_passes(
 
     pairs = [call.args[0] for call in mock_pass.call_args_list]
     assert [(p.artist_mbid, p.title, len(p.files)) for p in pairs] == [
-        (_ARTIST, "right here right now", 2),
-        (_ARTIST, "international bright young thing", 1),
-        (_OTHER_ARTIST, "right here right now", 1),
+        (_ARTIST, "Right Here, Right Now", 2),
+        (_ARTIST, "International Bright Young Thing", 1),
+        (_OTHER_ARTIST, "Right Here, Right Now", 1),
     ]
     assert result == {"enriched": 2, "failed": 1}
 
@@ -112,7 +112,7 @@ def test_untagged_pairs_are_searched_once_each_after_the_mbid_passes(
     assert calls[0].progress_data["total"] == 3, "the pairs count toward the run's total"
     running = [c for c in calls if c.status == TaskStatus.RUNNING]
     assert running[-1].progress_data["processed"] == 3
-    assert running[1].progress_data["current_item"] == f"untagged:{_ARTIST}:right here right now"
+    assert running[1].progress_data["current_item"] == f"untagged:{_ARTIST}:Right Here, Right Now"
 
 
 @patch("backend.tasks.mb_enrichment_tasks.mb_enrichment_task", MagicMock())

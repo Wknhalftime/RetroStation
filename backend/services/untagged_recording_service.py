@@ -60,12 +60,19 @@ class RecordingPick:
     candidate_mbids: tuple[str, ...]
 
 
-def search_title(track_title: str) -> str:
-    """The title the search is made with: the tag's title without its version suffix
-    ("[Album Version]", "(Radio Edit)"), normalized as song matching normalizes a
-    broadcast title, so both share one cache entry per (artist, title)."""
+def query_title(track_title: str) -> str:
+    """The title sent to MusicBrainz: the tag's title without its version suffix ("[Album
+    Version]", "(Radio Edit)"), otherwise as written. Punctuation stays: the 2026-11-02
+    sample searched the normalized form and "He Thinks He'll Keep Her" found nothing as
+    "he thinks hell keep her" (24 of 144 searches came back empty, most of them so)."""
     base, _ = extract_version_info(track_title)
-    return normalize_title(base)
+    return " ".join(base.split())
+
+
+def search_title(track_title: str) -> str:
+    """The title files are grouped and compared by: :func:`query_title`, normalized as song
+    matching normalizes a broadcast title (so a plain title shares its cache entry)."""
+    return normalize_title(query_title(track_title))
 
 
 def _credited_to(hit: MbRecording, artist_mbid: str) -> bool:
@@ -132,25 +139,34 @@ def pick_recording(
 
 @dataclass(frozen=True)
 class UntaggedPair:
-    """The files one search answers for: one artist, one search title."""
+    """The files one search answers for: one artist, one title.
+
+    ``title`` is what is sent (:func:`query_title`, the first file's), ``normalized_title``
+    what the files were grouped by (:func:`search_title`).
+    """
 
     artist_mbid: str
     title: str
+    normalized_title: str
     files: tuple[LibraryFile, ...]
 
 
 def untagged_pairs(candidates: list[UntaggedCandidate]) -> list[UntaggedPair]:
-    """Group the candidates by (artist MBID, search title), in first-seen order, so the pass
-    makes one search per pair. A file with no title to search is left out (untouched)."""
-    groups: dict[tuple[str, str], list[LibraryFile]] = {}
+    """Group the candidates by (artist MBID, normalized title), in first-seen order, so the
+    pass makes one search per pair. A file with no title to search is left out (untouched)."""
+    groups: dict[tuple[str, str], tuple[str, list[LibraryFile]]] = {}
     for candidate in candidates:
-        title = search_title(candidate.file.audio.track_title or "")
-        if not title:
+        track_title = candidate.file.audio.track_title or ""
+        normalized = search_title(track_title)
+        if not normalized:
             continue
-        groups.setdefault((candidate.artist_mbid, title), []).append(candidate.file)
+        key = (candidate.artist_mbid, normalized)
+        if key not in groups:
+            groups[key] = (query_title(track_title), [])
+        groups[key][1].append(candidate.file)
     return [
-        UntaggedPair(artist_mbid=artist_mbid, title=title, files=tuple(files))
-        for (artist_mbid, title), files in groups.items()
+        UntaggedPair(artist_mbid=artist_mbid, title=title, normalized_title=norm, files=tuple(fs))
+        for (artist_mbid, norm), (title, fs) in groups.items()
     ]
 
 
@@ -176,8 +192,9 @@ def enrich_untagged_pair(
 ) -> PairOutcome:
     """One search for the pair, then the per-recording path for every confident file.
 
-    The client reads ``mb_cache`` before MusicBrainz, so a pair song matching already
-    searched costs no call. Files picking the same recording share its lookup. A file the
+    The client reads ``mb_cache`` before MusicBrainz, so a pair already searched (by this
+    pass, or by song matching when the title has no punctuation) costs no call. Files
+    picking the same recording share its lookup. A file the
     rule cannot decide is marked SKIPPED (a candidate again next run, which the cache then
     answers) and returned for review.
     """

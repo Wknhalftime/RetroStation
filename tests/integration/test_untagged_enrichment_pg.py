@@ -107,7 +107,7 @@ def test_confident_pick_links_the_recording_and_moves_the_file_to_its_work(
         )
         client = FakeMbClient(
             recording_searches={
-                (_ARTIST, "right here right now"): [
+                (_ARTIST, "Right Here, Right Now"): [
                     {
                         "id": _REC,
                         "title": "Right Here, Right Now",
@@ -115,7 +115,7 @@ def test_confident_pick_links_the_recording_and_moves_the_file_to_its_work(
                         "artist-credit": _CREDIT,
                     },
                 ],
-                (_ARTIST, "international bright young thing"): [
+                (_ARTIST, "International Bright Young Thing"): [
                     {
                         "id": _REC_2,
                         "title": "International Bright Young Thing",

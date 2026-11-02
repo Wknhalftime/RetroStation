@@ -18,6 +18,7 @@ from backend.services.untagged_recording_service import (
     DURATION_TOLERANCE_MS,
     PickOutcome,
     pick_recording,
+    query_title,
     search_title,
 )
 
@@ -59,6 +60,11 @@ def test_search_title_is_the_normalized_title_without_its_version_suffix() -> No
     assert search_title("Right Here, Right Now [Album Version]") == "right here right now"
     assert search_title("Crash Into Me [Edit]") == "crash into me"
     assert search_title("Hourglass (live)") == "hourglass"
+
+
+def test_query_title_keeps_the_title_as_written_without_its_version_suffix() -> None:
+    assert query_title("He Thinks He'll Keep Her [Radio Edit]") == "He Thinks He'll Keep Her"
+    assert query_title("Right Here,  Right Now") == "Right Here, Right Now"
 
 
 def test_one_hit_with_the_title_and_the_length_is_confident() -> None:

@@ -110,8 +110,8 @@ def test_pairs_coalesce_files_by_artist_and_search_title() -> None:
     pairs = untagged_pairs([world.candidate(a), world.candidate(b), world.candidate(c)])
 
     assert [(p.artist_mbid, p.title, len(p.files)) for p in pairs] == [
-        (_ARTIST, "right here right now", 2),
-        (_ARTIST, "international bright young thing", 1),
+        (_ARTIST, "Right Here, Right Now", 2),
+        (_ARTIST, "International Bright Young Thing", 1),
     ]
 
 
@@ -120,7 +120,7 @@ def test_confident_files_are_enriched_through_the_recording_lookup() -> None:
     a = world.file("Right Here, Right Now [Album Version]")
     b = world.file("Right Here, Right Now")
     client = FakeMbClient(
-        recording_searches={(_ARTIST, "right here right now"): [_hit(_REC, 183_400)]},
+        recording_searches={(_ARTIST, "Right Here, Right Now"): [_hit(_REC, 183_400)]},
         recordings={_REC: _lookup(_REC)},
     )
     (pair,) = untagged_pairs([world.candidate(a), world.candidate(b)])
@@ -129,7 +129,7 @@ def test_confident_files_are_enriched_through_the_recording_lookup() -> None:
 
     assert outcome.enriched == 2 and outcome.skipped == ()
     assert client.calls == [
-        f"search_recording:{_ARTIST}:right here right now",
+        f"search_recording:{_ARTIST}:Right Here, Right Now",
         f"lookup_recording:{_REC}",
     ], "one search for the pair, one lookup for the recording"
     for lf in (a, b):
@@ -149,7 +149,7 @@ def test_files_of_one_pair_can_pick_different_recordings_by_length() -> None:
     edit = world.file("Right Here, Right Now [Edit]", duration_ms=160_000)
     client = FakeMbClient(
         recording_searches={
-            (_ARTIST, "right here right now"): [_hit(_REC, 183_200), _hit(_REC_2, 160_900)]
+            (_ARTIST, "Right Here, Right Now"): [_hit(_REC, 183_200), _hit(_REC_2, 160_900)]
         },
         recordings={_REC: _lookup(_REC), _REC_2: _lookup(_REC_2)},
     )
@@ -168,7 +168,7 @@ def test_ambiguous_and_empty_files_are_skipped_and_listed_without_a_lookup() -> 
     empty = world.file("International Bright Young Thing")
     client = FakeMbClient(
         recording_searches={
-            (_ARTIST, "right here right now"): [_hit(_REC, 183_000), _hit(_REC_2, 184_000)]
+            (_ARTIST, "Right Here, Right Now"): [_hit(_REC, 183_000), _hit(_REC_2, 184_000)]
         },
         recordings={_REC: _lookup(_REC), _REC_2: _lookup(_REC_2)},
     )
@@ -193,7 +193,7 @@ def test_a_failed_lookup_fails_the_files_as_the_recording_pass_does() -> None:
     world = _World()
     lf = world.file("Right Here, Right Now")
     client = FakeMbClient(
-        recording_searches={(_ARTIST, "right here right now"): [_hit(_REC, 183_000)]},
+        recording_searches={(_ARTIST, "Right Here, Right Now"): [_hit(_REC, 183_000)]},
     )
     (pair,) = untagged_pairs([world.candidate(lf)])
 
