@@ -507,3 +507,30 @@ describe("MatcherBrowser — the real count after a confirmed Reject", () => {
   });
 });
 
+// Phase 1b (SPEC S6): a confirmation belongs to the artist it was opened for.
+describe("MatcherBrowser — a confirmation never carries over to another artist", () => {
+  it("closes the confirmation when another artist is selected", async () => {
+    const alpha = makeArtist("00000000-0000-0000-0000-00000000000a", "Alpha");
+    const beta = { ...makeArtist("00000000-0000-0000-0000-00000000000b", "Beta"), match_status: "auto_matched" };
+    mockedApiFetch.mockImplementation(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/api/v1/matching/queue")) return { items: [alpha, beta], total: 2 };
+      if (u.includes("/cascade-preview")) {
+        return { off_air: { lines: 1, plays: 2 }, kept: { manual: 0, same_name: 0 } };
+      }
+      return {};
+    });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await screen.findByText(/Artists \(2\)/);
+    const sidebar = screen.getByText(/Artists \(2\)/).closest("aside") as HTMLElement;
+    fireEvent.click(within(sidebar).getByRole("button", { name: /Alpha/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Reject Artist/i }));
+    await screen.findByRole("alertdialog");
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /Beta/i }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: /^Confirm/i })).toBeNull();
+  });
+});
+

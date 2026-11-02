@@ -455,7 +455,10 @@ export function MatcherBrowser() {
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {selectedArtist ? (
               <>
+                {/* Keyed by artist: a confirmation open for one artist never carries over
+                    to the next one selected (phase 1b, S6). */}
                 <ArtistPanel
+                  key={selectedArtist.id}
                   artist={selectedArtist}
                   onSearchMusicBrainz={() => handleOpenArtistSearch("mb-artist")}
                   onSearchLibrary={() => handleOpenArtistSearch("artist")}

@@ -61,9 +61,10 @@ export type CascadeAction = "reject" | "unmatch";
 
 // What the action would take off air and keep on air (S5), fetched when the confirmation
 // opens; never cached, so each confirmation counts the songs as they are then. null: closed.
+// Outside the ["matching"] keys, so a mutation's invalidation does not fetch it again.
 export function useCascadePreview(artistId: string, action: CascadeAction | null) {
   return useQuery<CascadeCounts>({
-    queryKey: ["matching", "cascade-preview", artistId, action],
+    queryKey: ["cascade-preview", artistId, action],
     queryFn: async () =>
       CascadeCountsSchema.parse(
         await apiFetch<unknown>(

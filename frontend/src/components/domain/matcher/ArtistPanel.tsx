@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MatchStatusBadge } from "@/components/ui/Badge";
 import {
   type CascadeAction,
@@ -68,6 +68,11 @@ export function ArtistPanel({
   // The whole-name action awaiting confirmation; null when no confirmation is open.
   const [confirming, setConfirming] = useState<CascadeAction | null>(null);
   const preview = useCascadePreview(artist.id, confirming);
+  // Focus Cancel when the confirmation opens, so Enter never confirms by accident.
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming !== null) cancelRef.current?.focus();
+  }, [confirming]);
 
   // The queue's broadened CTE now surfaces AUTO_MATCHED / MANUAL_MATCHED
   // parents that have at least one review-relevant child. For those rows the
@@ -258,6 +263,7 @@ export function ArtistPanel({
               </button>
             )}
             <button
+              ref={cancelRef}
               onClick={closeConfirmation}
               disabled={isPending}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"

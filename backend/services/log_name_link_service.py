@@ -110,15 +110,18 @@ class LogNameLinkService:
 
     def rejected_artist(self, broadcast_artist_id: UUID, target: str) -> Artist | None:
         """The catalog artist *target* names, when the log name's link to it is rejected; None
-        otherwise (SPEC 1b S4). Makes no stub: an artist with no catalog row has no link."""
-        artist = self._catalog.get_by_id(target) or self._catalog.get_by_mbid(target)
-        if artist is None:
-            return None
-        rejected = any(
-            link.artist_id == artist.id and link.state == LogNameLinkState.REJECTED
+        otherwise (SPEC 1b S4). Makes no stub: an artist with no catalog row has no link.
+        Reads the name's links first: most names have no rejected link, and then the catalog
+        is not read."""
+        rejected = {
+            link.artist_id
             for link in self._links.list_by_name(broadcast_artist_id)
-        )
-        return artist if rejected else None
+            if link.state == LogNameLinkState.REJECTED
+        }
+        if not rejected:
+            return None
+        artist = self._catalog.get_by_id(target) or self._catalog.get_by_mbid(target)
+        return artist if artist is not None and artist.id in rejected else None
 
     def unlink_all(self, broadcast_artist_id: UUID) -> None:
         """Remove every link of the log name, in every state (SPEC 1a S10).

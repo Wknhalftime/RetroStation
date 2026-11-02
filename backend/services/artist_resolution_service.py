@@ -70,7 +70,8 @@ def _locked_plan(
     broadcast_artist_id: UUID, action: CascadeAction, repos: ArtistResolutionRepos
 ) -> CascadePlan:
     """The plan on the name's lines as they are now, held until the transaction ends, so a
-    matcher's guarded write waits for the action instead of being overwritten (AUD-R018)."""
+    matcher's guarded write waits for the action instead of being overwritten (AUD-R018).
+    Called after the name's own write, in the matcher's order (name, then lines)."""
     return plan_cascade(action, repos.cascade.lines_of(broadcast_artist_id, lock=True))
 
 
@@ -95,8 +96,10 @@ def reject_by_hand(broadcast_artist_id: UUID, repos: ArtistResolutionRepos) -> C
         LogNameNotFoundError: no log name has this id.
     """
     _require(broadcast_artist_id, repos)
-    plan = _locked_plan(broadcast_artist_id, CascadeAction.REJECT, repos)
+    # The name's row first, then its lines: the artist matcher's order, so the two never
+    # wait on each other (a deadlock would fail one of them).
     repos.resolution.set_status(broadcast_artist_id, MatchStatus.MANUAL_REJECTED)
+    plan = _locked_plan(broadcast_artist_id, CascadeAction.REJECT, repos)
     repos.cascade.reject_lines(
         [line.identity_id for line in plan.changed if line.status != MatchStatus.AUTO_REJECTED]
     )
