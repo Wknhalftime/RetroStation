@@ -741,9 +741,9 @@ class TestResolveArtist:
         mock.assert_called_once_with(str(playlist.id))
 
     def test_manual_match_does_not_touch_resolved_children(self, client, db_conn, monkeypatch):
-        """MANUAL_MATCHED cascade must leave AUTO_MATCHED, MANUAL_MATCHED,
-        AUTO_REJECTED, and MANUAL_REJECTED children alone. Mirrors the
-        existing test_manual_reject_does_not_cascade_protected invariant."""
+        """MANUAL_MATCHED cascade must leave AUTO_MATCHED and MANUAL_MATCHED children
+        alone. AUTO_REJECTED and MANUAL_REJECTED children are rewound, so a song the
+        matcher rejected for lack of a match is scored against the new target."""
         artist = _insert_artist(
             db_conn,
             original_name="Saliva",
@@ -801,12 +801,12 @@ class TestResolveArtist:
         )
         assert resp.status_code == 200
 
-        # Resolved children must keep their original status.
+        # Matched children keep their status; rejected ones go back to pending.
         for child, expected in [
             (auto_matched_child, "auto_matched"),
             (manual_matched_child, "manual_matched"),
-            (auto_rejected_child, "auto_rejected"),
-            (manual_rejected_child, "manual_rejected"),
+            (auto_rejected_child, "pending"),
+            (manual_rejected_child, "pending"),
         ]:
             row = db_conn.execute(
                 "SELECT match_status FROM track_identities WHERE id = %s",
@@ -824,6 +824,44 @@ class TestResolveArtist:
         ).fetchone()
         assert review_row is not None
         assert review_row["match_status"] == "pending"
+
+    def test_manual_link_rewinds_low_confidence_songs(self, client, db_conn, monkeypatch):
+        """Linking an artist that is already manual_matched re-scores the songs the matcher
+        rejected for low confidence, so they can find files the new target brings in."""
+        artist = _insert_artist(
+            db_conn,
+            original_name="HALL & OATES",
+            match_status=MatchStatus.MANUAL_MATCHED,
+        )
+        rejected_child = _insert_identity(
+            db_conn,
+            artist,
+            original_title="One On One",
+            match_status=MatchStatus.AUTO_REJECTED,
+        )
+        station = _insert_station(db_conn)
+        playlist = _insert_playlist(db_conn, station)
+        _insert_event(db_conn, playlist, rejected_child)
+
+        mock = MagicMock()
+        monkeypatch.setattr("backend.routers.matching.identity_matching_task", mock)
+
+        resp = client.post(
+            f"/api/v1/matching/artists/{artist.id}/resolve",
+            json={
+                "match_status": "manual_matched",
+                "target_artist_id": "6e650a01-6489-4dc8-85e1-8ec809dd72a2",
+            },
+        )
+        assert resp.status_code == 200
+
+        mock.assert_called_once_with(str(playlist.id))
+        row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s",
+            (rejected_child.id,),
+        ).fetchone()
+        assert row is not None
+        assert row["match_status"] == "pending"
 
     def test_manual_match_accepts_local_catalog_uuid(self, client, db_conn):
         """target_artist_id accepts a local catalog UUID, not just an MBID.

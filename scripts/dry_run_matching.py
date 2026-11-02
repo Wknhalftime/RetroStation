@@ -80,6 +80,7 @@ from backend.services.identity_matching_service import (  # noqa: E402
 from backend.services.log_name_link_service import LogNameLinkService  # noqa: E402
 from backend.services.mb_client import MusicBrainzApiClient  # noqa: E402
 from backend.services.recording_search import RecordingSearch  # noqa: E402
+from backend.services.title_scoring import v11_title_score  # noqa: E402
 
 TOOL = "dry_run_matching"
 FORMAT_VERSION = 1
@@ -296,8 +297,11 @@ def identity_stage(conn: Conn, client: MusicBrainzApiClient, hook: Hook) -> dict
         repos=repos,
         mb_client=client,
         strong_match_threshold=get_settings().strong_match_threshold,
-        recording_search=RecordingSearch(client, cutoff=sys.maxsize),
+        # Both chains share one search, which remembers its answers, as in the task.
+        recording_search=RecordingSearch(client, cutoff=sys.maxsize, remember_answers=True),
         exclusions_by_identity=load_exclusions(lines, repos.library_file_repo),
+        # The task runs trial mode (AUD-R100), so the dry run does too.
+        trial_title_score=v11_title_score,
     )
     engine = build_identity_engine(inputs)
     hook("engine", conn)

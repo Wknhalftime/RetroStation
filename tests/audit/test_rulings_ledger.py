@@ -2,7 +2,8 @@
 
 S5: every line parses; its id is unique; its keys come in the template's order
 (``docs/templates/ruling.md``); every ``AUD-R`` id it names in ``refs`` or ``supersedes`` exists
-(``AUD-###`` audit findings are not checked). From AUD-R032 on, a ruling ends with its check:
+(``AUD-###`` audit findings are not checked). From AUD-R032 to AUD-R099, the artist model's, a
+ruling ends with its check:
 the test files that enforce it, each tagged with the phase that adds it, then the phases still
 to land::
 
@@ -33,6 +34,9 @@ ARCHITECTURE = ROOT / "ARCHITECTURE.md"
 
 KEYS = ["id", "status", "date", "refs", "ruling", "rationale", "supersedes"]
 FIRST_PHASED_CHECK = 32
+# AUD-R032 to AUD-R099 are reserved for the artist model (ARCHITECTURE.md rule 3); master's
+# rulings, from AUD-R100, come in with master merges and have no phase.
+LAST_PHASED_CHECK = 99
 
 _RULING_ID = re.compile(r"AUD-R\d{3}")
 _CHECK = re.compile(r"Check: (?P<files>[^;]+)(?:; check pending: (?P<pending>[\w., ]+))?\.")
@@ -117,7 +121,8 @@ def test_ledger_is_well_formed() -> None:
     problems = {
         e["id"]: check_problems(e["ruling"], _exists)
         for e in entries
-        if (n := ruling_number(e["id"])) is not None and n >= FIRST_PHASED_CHECK
+        if (n := ruling_number(e["id"])) is not None
+        and FIRST_PHASED_CHECK <= n <= LAST_PHASED_CHECK
     }
     assert {ruling_id: p for ruling_id, p in problems.items() if p} == {}
 

@@ -51,8 +51,8 @@ def match_by_hand(
     broadcast_artist_id: UUID, target: str, repos: ArtistResolutionRepos
 ) -> list[UUID]:
     """Link the log name to the artist *target* names (an MBID or an ``artists.id``; an
-    unknown MBID gets a stub) and mark it manually matched; its songs in review go back to
-    the matcher with their stale matches deleted. Returns the playlists that played the name,
+    unknown MBID gets a stub) and mark it manually matched; its undecided songs go back to
+    the matcher with their stale matches deleted (#222). Returns the playlists that played the name,
     for the caller to queue song matching once this transaction has committed.
 
     Raises:
