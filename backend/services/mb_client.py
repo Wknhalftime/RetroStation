@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -94,6 +95,23 @@ def _slim_recording(recording: MbRecording) -> MbRecording:
         {"id": release["id"]} for release in recording.get("releases", []) if release.get("id")
     ]
     return cast(MbRecording, slim)
+
+
+@dataclass(frozen=True)
+class _SearchableEntity[T]:
+    """What differs between entity types in a search-by-MBIDs batch."""
+
+    path: str  # URL segment and payload key stem, e.g. "recording"
+    id_field: str  # Lucene field holding the MBID, e.g. "rid"
+    key_prefix: str  # cache key prefix, e.g. "recording-by-mbid"
+    entity_type: str  # cache row entity_type, e.g. "recording-search"
+    slim: Callable[[T], T]
+    negative_cache: bool  # True: cache {_NOT_IN_INDEX: True} for IDs the index lacks
+
+
+_RECORDINGS = _SearchableEntity[MbRecording](
+    "recording", "rid", "recording-by-mbid", "recording-search", _slim_recording, True
+)
 
 
 class MusicBrainzApiClient:
@@ -320,65 +338,74 @@ class MusicBrainzApiClient:
         Search results carry artist credits, length and releases, but no
         work relations.
         """
-        wanted: list[str] = []
-        for mbid in dict.fromkeys(mbids):
-            if MusicBrainzId.parse(mbid) is None:
-                logger.warning("malformed_recording_mbid_skipped", recording_mbid=mbid)
-                continue
-            wanted.append(mbid)
+        return self._search_by_mbids(_RECORDINGS, mbids)
 
-        found: dict[str, MbRecording] = {}
+    def _search_by_mbids[T](
+        self, entity: _SearchableEntity[T], mbids: Sequence[str]
+    ) -> dict[str, T]:
+        """Search one entity type by MBID, ``_SEARCH_BATCH_SIZE`` per request, via the cache."""
+        wanted = [m for m in map(MusicBrainzId.parse, dict.fromkeys(mbids)) if m is not None]
+        for raw in dict.fromkeys(mbids):
+            if MusicBrainzId.parse(raw) is None:
+                logger.warning("malformed_mbid_skipped", entity=entity.path, mbid=raw)
+
+        found: dict[str, T] = {}
         misses: list[str] = []
-        cached = self._cache.get_many([f"recording-by-mbid:{m}" for m in wanted])
+        cached = self._cache.get_many([f"{entity.key_prefix}:{m.value}" for m in wanted])
         for mbid in wanted:
-            entry = cached.get(f"recording-by-mbid:{mbid}")
+            entry = cached.get(f"{entity.key_prefix}:{mbid.value}")
             if entry is None:
-                misses.append(mbid)
+                misses.append(mbid.value)
                 continue
             self.cache_hits += 1
             # A negative entry means the search index has no such MBID
             # (merged or deleted); keep it out of the result without asking.
             if entry.response_data.get(_NOT_IN_INDEX):
                 continue
-            found[mbid] = cast(MbRecording, entry.response_data)
+            found[mbid.value] = cast(T, entry.response_data)
 
         for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
             batch = misses[start : start + _SEARCH_BATCH_SIZE]
             self.live_fetches += 1
             response = self._fetch(
-                f"{_MUSICBRAINZ_API}/recording/",
+                f"{_MUSICBRAINZ_API}/{entity.path}/",
                 {
-                    "query": "rid:(" + " OR ".join(batch) + ")",
+                    "query": f"{entity.id_field}:(" + " OR ".join(batch) + ")",
                     "fmt": "json",
                     "limit": str(_SEARCH_BATCH_SIZE),
                 },
             )
             payload: dict[str, object] = response.json()
-            recordings = cast(list[MbRecording], payload.get("recordings", []))
+            hits = cast(list[dict[str, Any]], payload.get(f"{entity.path}s", []))
             asked = set(batch)
-            for recording in recordings:
-                rec_id = recording.get("id")
-                if rec_id and rec_id in asked:
-                    found[rec_id] = _slim_recording(recording)
-            # One write per batch: the hits, plus a negative entry for every
-            # MBID the index did not know so it is not asked again.
+            for hit in hits:
+                hit_id = hit.get("id")
+                if hit_id and hit_id in asked:
+                    found[hit_id] = entity.slim(cast(T, hit))
+            # One write per batch: the hits, plus (where the entity asks for it)
+            # a negative entry for every MBID the index did not know so it is
+            # not asked again.
             self._cache.set_many(
                 [
                     self._cache_entry(
-                        cache_key=f"recording-by-mbid:{mbid}",
-                        entity_type="recording-search",
+                        cache_key=f"{entity.key_prefix}:{mbid}",
+                        entity_type=entity.entity_type,
                         entity_mbid=mbid,
                         response_data=(
-                            dict(found[mbid]) if mbid in found else {_NOT_IN_INDEX: True}
+                            dict(cast(dict[str, Any], found[mbid]))
+                            if mbid in found
+                            else {_NOT_IN_INDEX: True}
                         ),
                     )
                     for mbid in batch
+                    if mbid in found or entity.negative_cache
                 ]
             )
             logger.info(
-                "mb_api_search_recordings_by_mbids",
+                "mb_api_search_by_mbids",
+                entity=entity.path,
                 asked=len(batch),
-                found=len(recordings),
+                found=len(hits),
             )
         return found
 
