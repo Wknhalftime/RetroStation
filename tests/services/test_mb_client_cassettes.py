@@ -46,16 +46,12 @@ def vcr_config() -> dict[str, object]:
     return {"decode_compressed_response": True}
 
 
-@pytest.fixture(autouse=True)
-def _skip_rate_limit_on_replay(record_mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replays never touch MusicBrainz, so the 1.1s per-call throttle is dead time."""
-    if record_mode == "none":
-        monkeypatch.setattr("backend.services.mb_client._rate_limit", lambda: None)
-
-
 @pytest.fixture
-def client() -> Iterator[MusicBrainzApiClient]:
-    with MusicBrainzApiClient(FakeMusicBrainzCacheRepository()) as mb_client:
+def client(record_mode: str) -> Iterator[MusicBrainzApiClient]:
+    # Replays never touch MusicBrainz, so the 1.1s pacing is dead time; recording
+    # keeps the real clock so it still honours the limit.
+    wait_turn = (lambda: None) if record_mode == "none" else None
+    with MusicBrainzApiClient(FakeMusicBrainzCacheRepository(), wait_turn=wait_turn) as mb_client:
         yield mb_client
 
 

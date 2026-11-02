@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import threading
-import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -14,34 +12,22 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from backend.domain.catalog import MusicBrainzId
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
+from backend.services import mb_clock
 from backend.services.mb_types import MbArtist, MbArtistResult, MbRecording, MbRelease
 
 logger = structlog.get_logger()
 
+# Blocks until it is this client's turn to call MusicBrainz (test seam, like ``transport``).
+type WaitTurn = Callable[[], None]
+
 # --- Module-level constants ---
 _MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
 _USER_AGENT = "RetroStation/0.1.0 (https://github.com/retrostation)"
-_RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
 # MusicBrainz caps search results at 100 per request.
 _SEARCH_BATCH_SIZE = 100
 # Marker stored for an MBID the search index does not know, so it is not asked again.
 _NOT_IN_INDEX = "not_in_index"
-
-# --- Module-level mutable state (rate-limiting) ---
-_rate_lock: threading.Lock = threading.Lock()
-_last_request_time: float = 0.0
-
-
-def _rate_limit() -> None:
-    """Enforce 1.1s between MusicBrainz API calls (thread-safe)."""
-    global _last_request_time
-    with _rate_lock:
-        elapsed = time.monotonic() - _last_request_time
-        if elapsed < _RATE_LIMIT_SECONDS:
-            time.sleep(_RATE_LIMIT_SECONDS - elapsed)
-        _last_request_time = time.monotonic()
-
 
 # Lucene special characters that must be escaped inside a query term.
 # See https://musicbrainz.org/doc/MusicBrainz_API/Search#Lucene_Search_Syntax.
@@ -133,6 +119,10 @@ class MusicBrainzApiClient:
       across threads is supported.
     - ``httpx.Client`` is documented as safe to share across threads.
 
+    Request pacing is machine-wide, not per process: every client waits its turn on
+    the shared clock in ``mb_clock``, so the API and the worker together stay within
+    MusicBrainz's rate limit.
+
     If a future change swaps either backing resource for a driver that enforces
     a creator-thread check or relies on thread-local state (stdlib ``sqlite3``
     with ``check_same_thread=True``, some ODBC drivers, etc.), the call sites
@@ -147,9 +137,12 @@ class MusicBrainzApiClient:
         cache_repo: MusicBrainzCacheRepository,
         ttl_days: int = _CACHE_TTL_DAYS,
         transport: httpx.BaseTransport | None = None,
+        wait_turn: WaitTurn | None = None,
     ) -> None:
         self._cache = cache_repo
         self._ttl_days = ttl_days
+        # ``wait_turn`` is a test seam; production paces on the machine-wide clock.
+        self._wait_turn = wait_turn if wait_turn is not None else mb_clock.wait_turn
         # ``transport`` is a test seam (httpx.MockTransport); production leaves
         # it None so the client's own settings, redirects included, apply.
         self._http = httpx.Client(
@@ -235,7 +228,7 @@ class MusicBrainzApiClient:
         # HTTP call, the post-call info logs never fire. Emitting here makes
         # the in-flight request visible in a DEBUG trail without spamming INFO.
         logger.debug("mb_api_fetch_start", url=url, params=params)
-        _rate_limit()
+        self._wait_turn()
         response = self._http.get(url, params=params)
         response.raise_for_status()
         return response

@@ -15,7 +15,6 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-import backend.services.mb_client as mb_mod
 from backend.services.mb_client import MusicBrainzApiClient
 from tests.fakes.musicbrainz_cache import FakeMusicBrainzCacheRepository
 
@@ -43,11 +42,6 @@ class _SearchServer:
         return httpx.Response(200, json={"count": len(found), "recordings": found})
 
 
-@pytest.fixture(autouse=True)
-def _no_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mb_mod, "_rate_limit", lambda: None)
-
-
 @pytest.fixture
 def cache() -> FakeMusicBrainzCacheRepository:
     return FakeMusicBrainzCacheRepository()
@@ -60,7 +54,7 @@ def make_client(
     clients: list[MusicBrainzApiClient] = []
 
     def factory(server: _SearchServer, **kwargs: Any) -> MusicBrainzApiClient:
-        client = MusicBrainzApiClient(cache, **kwargs)
+        client = MusicBrainzApiClient(cache, wait_turn=lambda: None, **kwargs)
         client._http = httpx.Client(transport=httpx.MockTransport(server.handler))
         clients.append(client)
         return client
@@ -228,7 +222,7 @@ def test_cache_keeps_only_the_fields_enrichment_reads(
             },
         )
 
-    client = MusicBrainzApiClient(cache)
+    client = MusicBrainzApiClient(cache, wait_turn=lambda: None)
     client._http = httpx.Client(transport=httpx.MockTransport(handler))
     found = client.search_recordings_by_mbids([mbid])
 

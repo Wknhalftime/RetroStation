@@ -85,6 +85,7 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     ``phase`` is ``"library"`` or ``"both"``; the follow-on task's internals
     are only wrapped for ``"both"``.
     """
+    import backend.services.mb_clock as mb_clock_mod
     from backend.db.repositories import artists as pg_artists
     from backend.db.repositories import library_files as pg_files
     from backend.db.repositories import musicbrainz_cache as pg_cache
@@ -120,7 +121,7 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     patch(client, "lookup_release", "mb.lookup_release", "phase.enrich_by_release")
     patch(client, "lookup_recording", "mb.lookup_recording", "phase.enrich_by_recording")
     patch(client, "_fetch", "mb.fetch", "mb.lookup_*")
-    patch(mbc, "_rate_limit", "mb.rate_limit_wait", "mb.fetch")
+    patch(mb_clock_mod, "wait_turn", "mb.rate_limit_wait", "mb.fetch")
     patch(pg_cache.PgMusicBrainzCacheRepository, "get", "db.mb_cache.get", "mb.lookup_*")
     patch(
         pg_cache.PgMusicBrainzCacheRepository,

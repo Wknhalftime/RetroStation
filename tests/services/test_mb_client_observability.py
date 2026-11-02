@@ -61,10 +61,7 @@ def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPat
         return _StubResponse({"id": "mbid-A", "name": "Alice"})
 
     # Bypass the tenacity retry + rate limiter by patching the low-level http get
-    # and the sleep. Patch _rate_limit to a no-op so the test stays fast.
-    import backend.services.mb_client as mb_mod
-
-    monkeypatch.setattr(mb_mod, "_rate_limit", lambda: None)
+    # and the sleep. The clients below get a no-op wait_turn so the tests stay fast.
 
     class _FakeHttp:
         def get(self, url: str, params: dict[str, str]) -> _StubResponse:
@@ -78,7 +75,7 @@ def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(_StubResponse, "raise_for_status", fake_raise_for_status, raising=False)
 
-    with capture_logs() as captured, MusicBrainzApiClient(cache) as client:
+    with capture_logs() as captured, MusicBrainzApiClient(cache, wait_turn=lambda: None) as client:
         client._http = _FakeHttp()  # type: ignore[assignment]
         client.lookup_artist("mbid-A")
 
@@ -99,7 +96,7 @@ def test_mb_cache_set_fires_on_each_write(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(MusicBrainzApiClient, "_fetch", fake_fetch)
 
-    with capture_logs() as captured, MusicBrainzApiClient(cache) as client:
+    with capture_logs() as captured, MusicBrainzApiClient(cache, wait_turn=lambda: None) as client:
         client.lookup_artist("mbid-A")
 
     set_events = _mb_events(captured, "mb_cache_set")
@@ -120,7 +117,7 @@ def test_mb_cache_set_not_emitted_on_cache_hit(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(MusicBrainzApiClient, "_fetch", fake_fetch)
 
-    with capture_logs() as captured, MusicBrainzApiClient(cache) as client:
+    with capture_logs() as captured, MusicBrainzApiClient(cache, wait_turn=lambda: None) as client:
         client.lookup_artist("mbid-A")  # cold: writes cache
         client.lookup_artist("mbid-A")  # warm: must NOT write again
 

@@ -16,7 +16,6 @@ from types import ModuleType
 import httpx
 import pytest
 
-import backend.services.mb_client as mb_mod
 from backend.config import Settings
 from tests.fakes.musicbrainz_cache import FakeMusicBrainzCacheRepository
 
@@ -38,15 +37,14 @@ def _one_live_hit(request: httpx.Request) -> httpx.Response:
 
 def test_cached_searches_last_the_configured_lifetime(
     backfill: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mb_mod, "_rate_limit", lambda: None)
     cache = FakeMusicBrainzCacheRepository()
     # Neither the client's 30-day default nor the app's 3650, so the lifetime
     # can only have come from the settings.
     settings = Settings(mb_cache_ttl_days=1234)
 
     with backfill.open_mb_client(cache, settings) as client:
+        client._wait_turn = lambda: None
         client._http.close()
         client._http = httpx.Client(transport=httpx.MockTransport(_one_live_hit))
         client.search_recordings_by_mbids([_MBID])
