@@ -46,6 +46,67 @@ function makeArtist(overrides: Partial<QueueArtist> = {}): QueueArtist {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1b (SPEC S6, E2, E3, E6): Reject and Unmatch ask first, with the off-air preview
+// ---------------------------------------------------------------------------
+
+const ARTIST_URL = "/api/v1/matching/artists/00000000-0000-0000-0000-000000000001";
+const PREVIEW = { off_air: { lines: 3, plays: 120 }, kept: { manual: 2, same_name: 5 } };
+const ZERO = { off_air: { lines: 0, plays: 0 }, kept: { manual: 0, same_name: 0 } };
+
+/** The action's answer: its own counts, which differ from PREVIEW (E2). */
+function done(matchStatus: string) {
+  return {
+    id: "00000000-0000-0000-0000-000000000001",
+    match_status: matchStatus,
+    cascade: { off_air: { lines: 4, plays: 130 }, kept: { manual: 2, same_name: 5 } },
+  };
+}
+
+/** Answer the preview GET and the action POSTs; any other call fails the test. */
+function routeApi({
+  preview,
+  action = () => Promise.resolve(done("manual_rejected")),
+}: {
+  preview: () => Promise<unknown>;
+  action?: () => Promise<unknown>;
+}) {
+  mockedApiFetch.mockImplementation(((url: string) => {
+    if (url.includes("/cascade-preview")) return preview();
+    if (url.endsWith("/resolve") || url.endsWith("/unmatch")) return action();
+    return Promise.reject(new Error(`unexpected call ${url}`));
+  }) as typeof apiFetch);
+}
+
+function actionCalls(): unknown[][] {
+  return mockedApiFetch.mock.calls.filter(([url]) => !String(url).includes("/cascade-preview"));
+}
+
+function previewUrls(): string[] {
+  return mockedApiFetch.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes("/cascade-preview"));
+}
+
+const ACTIONS = [
+  {
+    action: "reject",
+    status: "needs_review",
+    answer: "manual_rejected",
+    button: /Reject Artist/i,
+    url: `${ARTIST_URL}/resolve`,
+    body: JSON.stringify({ match_status: "manual_rejected", target_artist_id: null }),
+  },
+  {
+    action: "unmatch",
+    status: "manual_matched",
+    answer: "needs_review",
+    button: /Unmatch artist/i,
+    url: `${ARTIST_URL}/unmatch`,
+    body: undefined,
+  },
+] as const;
+
 describe("ArtistPanel reason badge", () => {
   it("renders reason_detail when present", () => {
     render(
@@ -187,26 +248,189 @@ describe("ArtistPanel Unmatch action", () => {
         wrapper: wrapperFor(makeClient()),
       });
       expect(screen.getByRole("button", { name: /Unmatch artist/i })).toBeDefined();
+      // M24 (phase 1b): Unmatch keeps manual and same-name songs, so it no longer says it
+      // unmatches all of them.
+      expect(screen.queryByText(/all songs/i)).toBeNull();
     }
   );
 
-  it("clicking Unmatch posts to the unmatch endpoint with the artist id", async () => {
-    mockedApiFetch.mockResolvedValue({
-      id: "00000000-0000-0000-0000-000000000001",
-      match_status: "needs_review",
+  it("Unmatch, once confirmed, posts to the unmatch endpoint with the artist id", async () => {
+    routeApi({
+      preview: () => Promise.resolve(PREVIEW),
+      action: () => Promise.resolve(done("needs_review")),
     });
     render(
       <ArtistPanel artist={makeArtist({ match_status: "manual_matched" })} />,
       { wrapper: wrapperFor(makeClient()) }
     );
-    const button = screen.getByRole("button", { name: /Unmatch artist/i });
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: /Unmatch artist/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Confirm/i }));
 
     await waitFor(() => {
       expect(mockedApiFetch).toHaveBeenCalledWith(
-        "/api/v1/matching/artists/00000000-0000-0000-0000-000000000001/unmatch",
+        `${ARTIST_URL}/unmatch`,
         expect.objectContaining({ method: "POST" })
       );
     });
+  });
+});
+
+describe.each(ACTIONS)("ArtistPanel $action asks first", (row) => {
+  const { action, status, answer, button, url, body } = row;
+  const answered = () => Promise.resolve(done(answer));
+
+  function renderPanel(onCascadeDone = vi.fn()) {
+    render(
+      <ArtistPanel artist={makeArtist({ match_status: status })} onCascadeDone={onCascadeDone} />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    return onCascadeDone;
+  }
+
+  it("confirms_with_off_air_count: the dialog shows what goes off air and what stays", async () => {
+    routeApi({ preview: () => Promise.resolve(PREVIEW), action: answered });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() => {
+      expect(dialog.textContent).toMatch(/3 songs \(120 plays\) go off air; 7 stay/);
+    });
+    expect(previewUrls()).toContain(`${ARTIST_URL}/cascade-preview?action=${action}`);
+    // Nothing is done until Confirm.
+    expect(actionCalls()).toEqual([]);
+  });
+
+  it("Confirm runs the action", async () => {
+    routeApi({ preview: () => Promise.resolve(PREVIEW), action: answered });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Confirm/i }));
+
+    await waitFor(() => {
+      expect(actionCalls()).toEqual([
+        [url, body === undefined ? { method: "POST" } : { method: "POST", body }],
+      ]);
+    });
+  });
+
+  it("Cancel does nothing and closes the dialog", async () => {
+    routeApi({ preview: () => Promise.resolve(PREVIEW), action: answered });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    await screen.findByRole("button", { name: /^Confirm/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(actionCalls()).toEqual([]);
+  });
+
+  it("shows a loading state and offers no Confirm until the preview arrives", async () => {
+    let arrive: (value: unknown) => void = () => {};
+    routeApi({ preview: () => new Promise((resolve) => (arrive = resolve)), action: answered });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/counting/i);
+    const confirm = screen.queryByRole("button", { name: /^Confirm/i });
+    expect(confirm === null || (confirm as HTMLButtonElement).disabled).toBe(true);
+
+    arrive(PREVIEW);
+    const ready = await screen.findByRole("button", { name: /^Confirm/i });
+    await waitFor(() => expect((ready as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("shows_preview_error: a failed preview shows the error and offers no Confirm", async () => {
+    routeApi({ preview: () => Promise.reject(new Error("API 500: boom")), action: answered });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() => expect(dialog.textContent).toMatch(/could not count/i));
+    expect(screen.queryByRole("button", { name: /^Confirm/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Cancel/i })).toBeDefined();
+    expect(actionCalls()).toEqual([]);
+  });
+
+  it("disables the buttons while the action runs, so a second press sends nothing (E3)", async () => {
+    routeApi({
+      preview: () => Promise.resolve(PREVIEW),
+      action: () => new Promise(() => {}), // never answers
+    });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    const confirm = await screen.findByRole("button", { name: /^Confirm/i });
+
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(true));
+    expect((screen.getByRole("button", { name: /Cancel/i }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    fireEvent.click(confirm);
+    expect(actionCalls()).toHaveLength(1);
+  });
+
+  it("reports the action's own count, not the preview's (E2)", async () => {
+    routeApi({ preview: () => Promise.resolve(PREVIEW), action: answered });
+    const onCascadeDone = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Confirm/i }));
+
+    await waitFor(() => expect(onCascadeDone).toHaveBeenCalledTimes(1));
+    const message = String(onCascadeDone.mock.calls[0][0]);
+    expect(message).toMatch(/4 songs \(130 plays\) went off air; 7 stayed/);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("a failed action keeps the dialog open with the error, and reports nothing", async () => {
+    routeApi({
+      preview: () => Promise.resolve(PREVIEW),
+      action: () => Promise.reject(new Error("API 409: already unmatched")),
+    });
+    const onCascadeDone = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Confirm/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() => expect(dialog.textContent).toMatch(/already unmatched/i));
+    const cancel = screen.getByRole("button", { name: /Cancel/i }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(false));
+    expect(onCascadeDone).not.toHaveBeenCalled();
+    fireEvent.click(cancel);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("E1: a name with nothing on air shows 0 / 0 and still runs the action", async () => {
+    routeApi({ preview: () => Promise.resolve(ZERO), action: answered });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(dialog.textContent).toMatch(/0 songs \(0 plays\) go off air; 0 stay/)
+    );
+    const confirm = screen.getByRole("button", { name: /^Confirm/i }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(actionCalls()).toHaveLength(1));
+  });
+});
+
+describe("ArtistPanel LINK_REJECTED reason", () => {
+  it("names the reason in words when there is no detail", () => {
+    render(<ArtistPanel artist={makeArtist({ reason_code: "LINK_REJECTED" })} />, {
+      wrapper: wrapperFor(makeClient()),
+    });
+    expect(screen.getByText(/an artist you rejected/i)).toBeDefined();
   });
 });

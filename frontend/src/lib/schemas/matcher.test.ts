@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CascadeCountsSchema,
   MbArtistResultSchema,
   ProposedMatchSchema,
   QueueArtistSchema,
   QueueIdentitySchema,
+  ResolveResultSchema,
 } from "./matcher";
 
 describe("QueueIdentitySchema", () => {
@@ -169,5 +171,36 @@ describe("MbArtistResultSchema", () => {
       score: 100,
     });
     expect(parsed.disambiguation).toBe("");
+  });
+});
+
+// Phase 1b (SPEC S5, E2): the off-air preview, and the counts Reject and Unmatch answer with.
+describe("CascadeCountsSchema", () => {
+  const counts = { off_air: { lines: 3, plays: 120 }, kept: { manual: 2, same_name: 5 } };
+
+  it("parses the preview", () => {
+    expect(CascadeCountsSchema.parse(counts)).toEqual(counts);
+  });
+
+  it("rejects a count that is not a whole number", () => {
+    expect(() =>
+      CascadeCountsSchema.parse({ ...counts, off_air: { lines: 1.5, plays: 0 } })
+    ).toThrow();
+  });
+});
+
+describe("ResolveResultSchema", () => {
+  const id = "00000000-0000-0000-0000-000000000001";
+
+  it("still parses an answer without counts", () => {
+    expect(ResolveResultSchema.parse({ id, match_status: "manual_matched" }).cascade).toBeUndefined();
+    expect(ResolveResultSchema.parse({ id, match_status: "manual_matched", cascade: null }).cascade).toBeNull();
+  });
+
+  it("parses the counts an artist Reject or Unmatch answers with", () => {
+    const cascade = { off_air: { lines: 4, plays: 130 }, kept: { manual: 2, same_name: 5 } };
+    expect(ResolveResultSchema.parse({ id, match_status: "needs_review", cascade }).cascade).toEqual(
+      cascade
+    );
   });
 });
