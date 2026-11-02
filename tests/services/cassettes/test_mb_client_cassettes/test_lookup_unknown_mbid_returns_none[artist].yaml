@@ -13,7 +13,7 @@ interactions:
       user-agent:
       - RetroStation/0.1.0 (https://github.com/retrostation)
     method: GET
-    uri: https://musicbrainz.org/ws/2/artist/d0c2a6b4-3f1e-4b8a-9c7d-2e5f6a1b3c4d?fmt=json&inc=aliases%2Btags
+    uri: https://musicbrainz.org/ws/2/artist/d0c2a6b4-3f1e-4b8a-9c7d-2e5f6a1b3c4d?fmt=json
   response:
     body:
       string: '{"error":"Not Found","help":"For usage, please see: https://musicbrainz.org/development/mmd"}'
@@ -27,7 +27,7 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Sat, 26 Sep 2026 16:27:23 GMT
+      - Mon, 02 Nov 2026 15:11:16 GMT
       etag:
       - '"74811b6ebfb55bc761c2a7cca11d88d6"'
       keep-alive:
@@ -39,11 +39,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '1216'
+      - '1472'
       x-ratelimit-reset:
-      - '1790440045'
+      - '1793632278'
       x-runtime:
-      - '0.019261'
+      - '0.019558'
     status:
       code: 404
       message: Not Found

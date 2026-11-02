@@ -30,6 +30,7 @@ from backend.services.mb_client import MusicBrainzApiClient
 from tests.fakes.musicbrainz_cache import FakeMusicBrainzCacheRepository
 
 METALLICA_MBID = "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"
+ACDC_MBID = "66c662b6-6e2f-4930-8610-912e24c63ed1"
 # "Enter Sandman" studio recording — carries a `performance` work relation.
 ENTER_SANDMAN_RECORDING_MBID = "3edac058-cf57-4175-8650-a74ca61652a4"
 # "Master of Puppets", 1986 US CD release (8 tracks).
@@ -189,19 +190,26 @@ def test_lookup_release_track_performance_relation_yields_work(
 # --- lookup_artist -----------------------------------------------------------
 
 
-def test_lookup_artist_includes_aliases_and_tags(client: MusicBrainzApiClient) -> None:
+def test_lookup_artist_returns_core_fields(client: MusicBrainzApiClient) -> None:
     artist = client.lookup_artist(METALLICA_MBID)
 
     assert artist is not None
+    assert artist["id"] == METALLICA_MBID
     assert artist["name"] == "Metallica"
     assert artist["sort-name"] == "Metallica"
-    assert artist["aliases"]
-    assert artist["tags"]
-    assert all(isinstance(tag["count"], int) for tag in artist["tags"])
-    # MbAliasEntry types `primary` as bool, but MusicBrainz sends null for
-    # non-primary aliases. Treat it as bool | None when reading.
-    assert {alias["primary"] for alias in artist["aliases"]} <= {True, False, None}
-    assert any(alias["primary"] is None for alias in artist["aliases"])
+    assert set(artist) <= {"id", "name", "sort-name", "disambiguation"}
+
+
+def test_search_artists_by_mbids_carries_sort_name_and_disambiguation(
+    client: MusicBrainzApiClient,
+) -> None:
+    found = client.search_artists_by_mbids([METALLICA_MBID, ACDC_MBID])
+
+    assert set(found) == {METALLICA_MBID, ACDC_MBID}
+    assert found[METALLICA_MBID]["sort-name"] == "Metallica"
+    assert found[ACDC_MBID]["name"] == "AC/DC"
+    assert found[ACDC_MBID]["sort-name"] == "AC/DC"
+    assert all(set(a) <= {"id", "name", "sort-name", "disambiguation"} for a in found.values())
 
 
 # --- not-found and invalid IDs -----------------------------------------------
