@@ -493,9 +493,10 @@ describe("ArtistPanel suggested links", () => {
       expect(screen.getByText(/now a suggestion/)).toBeDefined();
       expect(screen.getAllByText(/Close name in the library/)).toHaveLength(2);
       expect(screen.queryByText(/No candidates found automatically/i)).toBeNull();
-      // Keyed by artist id: two suggestions without an MBID are two rows, with no key clash.
+      // Keyed by artist id: two suggestions without an MBID are two rows, with no key
+      // warning of any kind (a clash, or a missing key).
       const keyWarnings = consoleError.mock.calls.filter((call) =>
-        String(call[0]).includes("same key")
+        call.some((part) => String(part).includes("key"))
       );
       expect(keyWarnings).toEqual([]);
     } finally {

@@ -208,7 +208,7 @@ def test_an_exact_name_with_one_artist_still_links() -> None:
             100.0,
             target,
         )
-        assert result.suggestions == ()
+        assert not result.suggestions
 
 
 def test_an_exact_name_with_one_mbid_artist_and_a_local_one_links_the_mbid_artist() -> None:
@@ -262,7 +262,7 @@ def test_a_fuzzy_score_of_95_or_more_still_links() -> None:
         96.3,
         stones.mbid,
     )
-    assert result.suggestions == ()
+    assert not result.suggestions
 
 
 @pytest.mark.parametrize(("log_name", "stub_name", "score"), E7)
@@ -318,11 +318,8 @@ def test_musicbrainz_95_or_more_still_links() -> None:
     result = _mb_answer(("mb-a", 97))
 
     assert result is not None
-    assert (result.status, result.target_id, result.suggestions) == (
-        MatchStatus.AUTO_MATCHED,
-        "mb-a",
-        (),
-    )
+    assert (result.status, result.target_id) == (MatchStatus.AUTO_MATCHED, "mb-a")
+    assert not result.suggestions
 
 
 @pytest.mark.parametrize(
@@ -453,15 +450,15 @@ def test_e7_names_end_in_review_with_their_stub_suggested() -> None:
         assert world.name_state(name.id) == SUGGESTED, name.original_name
         assert world.links_of(name.id) == {stub.id: ("suggested", "automatic", _strength(score))}
         [link] = world.links.list_by_name(name.id)
-        assert dict(link.evidence) == {
-            "version": 0,
-            "tier": MatchTier.NORMALIZATION.value,
-            "score": pytest.approx(score, abs=0.01),
-        }
+        assert (link.evidence["version"], link.evidence["tier"]) == (
+            0,
+            MatchTier.NORMALIZATION.value,
+        )
+        assert link.evidence["score"] == pytest.approx(score, abs=0.01)
         assert world.song_state(song) == PENDING_SONG
 
 
-def test_a_run_writes_at_most_three_suggestions_best_first() -> None:
+def test_a_run_writes_the_three_best_suggestions() -> None:
     world = _world()
     by_name = {name: world.add(name) for name, _ in BLUE_OYSTER}
     name, song = world.pending("BLUE OYSTER CULT")
@@ -561,8 +558,9 @@ def _reject(world: _World, name_id: UUID, artist: Artist) -> None:
 
 def test_refusals_do_not_cascade() -> None:
     """E3: a suggestion of a rejected pair is not written. ANTI-FLAG's only suggestion is the
-    pair the curator rejected: LINK_REJECTED. BLUE OYSTER CULT's best is rejected: the other
-    two are suggested. Neither name's songs change."""
+    pair the curator rejected: LINK_REJECTED. BLUE OYSTER CULT's best is rejected: the next
+    ones are suggested, at most three (whether the fourth moves up is the build's choice).
+    Neither name's songs change."""
     world = _world()
     for name in FILLERS:
         world.add(name)
@@ -578,11 +576,13 @@ def test_refusals_do_not_cascade() -> None:
     assert world.name_state(only.id) == (MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_REJECTED)
     assert world.links_of(only.id) == {artifas.id: ("rejected", "manual", 100)}
     assert world.name_state(some.id) == SUGGESTED
-    assert world.links_of(some.id) == {
-        by_name["Blue Oyster Club"].id: ("rejected", "manual", 100),
-        by_name["Blue Oyster"].id: ("suggested", "automatic", 81),
-        by_name["Bluesy Oysters"].id: ("suggested", "automatic", 73),
-    }
+    some_links = world.links_of(some.id)
+    assert some_links[by_name["Blue Oyster Club"].id] == ("rejected", "manual", 100)
+    assert some_links[by_name["Blue Oyster"].id] == ("suggested", "automatic", 81)
+    assert some_links[by_name["Bluesy Oysters"].id] == ("suggested", "automatic", 73)
+    suggested = [v for v in some_links.values() if v[0] == "suggested"]
+    assert len(suggested) <= 3
+    assert by_name["Blue Rodeo"].id not in some_links  # under 56
     for song in (only_song, some_song):
         assert world.song_state(song) == PENDING_SONG
 
@@ -608,3 +608,25 @@ def test_a_name_decided_meanwhile_gets_no_suggestion() -> None:
     assert world.name_state(name.id) == (MatchStatus.MANUAL_REJECTED, None)
     assert world.links_of(name.id) == {}
     assert world.song_state(song) == PENDING_SONG
+
+
+def test_a_name_decided_meanwhile_gets_no_musicbrainz_upsert() -> None:
+    """AUD-R018 for the new MusicBrainz suggestions: a cut-off name the curator decided while
+    the run matched gets no suggestion, and its hits are not upserted into the catalog."""
+
+    class DecidedWhileMatching(FakeBroadcastArtistRepository):
+        def get_pending_for_playlist(self, playlist_id: UUID) -> list[BroadcastArtist]:
+            read = super().get_pending_for_playlist(playlist_id)
+            for name in read:
+                self.update_match_status(name.id, MatchStatus.MANUAL_MATCHED)
+            return read
+
+    world = _world(DecidedWhileMatching())
+    name, _ = world.pending(TRUNCATED)
+
+    world.run(FakeMbClient(responses={TRUNCATED: _mb(("mb-a", 85), ("mb-b", 78))}))
+
+    assert world.name_state(name.id) == (MatchStatus.MANUAL_MATCHED, None)
+    assert world.links_of(name.id) == {}
+    assert world.catalog.musicbrainz_upserts == []
+    assert world.catalog.get_by_mbid("mb-a") is None

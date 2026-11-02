@@ -44,7 +44,6 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from psycopg.rows import dict_row
 
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
@@ -63,8 +62,6 @@ from tests.integration.demotion_seed import (
     roll_back,
     strength,
 )
-
-pytestmark = pytest.mark.integration
 
 HOUR = timedelta(hours=1)
 VARIOUS_ARTISTS = "89ad4ac3-39f7-470e-963a-56509c546377"
@@ -133,6 +130,7 @@ REMOVED = ("needs_review", "LINK_REMOVED")
 # --- S1 -------------------------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_demotion_rules(migrated_db: str) -> None:
     with before_the_demotion(migrated_db) as conn:
         art = {name: catalog_artist(conn, name, str(uuid4())) for name in ("Archies", "Architects")}
@@ -165,7 +163,10 @@ def test_demotion_rules(migrated_db: str) -> None:
         seed("mapping rule", tier="manual", score=100.0)
         seed("automatic", origin="automatic", score=60.0)
         seed("manual", "manual_matched", origin="manual")
-        seed("already rejected", score=60.0, state="rejected")
+        already = seed("already rejected", score=100.0)
+        kept["already rejected fuzzy"] = link(
+            conn, already, art["Archies"], score=60.0, state="rejected"
+        )
         # A name with an exact link and a fuzzy one: the fuzzy one is demoted, the name stays.
         mixed = seed("mixed", score=100.0)
         changed["mixed fuzzy"] = link(conn, mixed, art["Archies"], score=61.0)
@@ -195,7 +196,10 @@ def test_demotion_rules(migrated_db: str) -> None:
     assert links["exact local"] == {local: ("active", "legacy", 100)}
     assert links["automatic"] == {architects: ("active", "automatic", 60)}
     assert links["manual"] == {architects: ("active", "manual", 100)}
-    assert links["already rejected"] == {architects: ("rejected", "legacy", 60)}
+    assert links["already rejected"] == {
+        architects: ("active", "legacy", 100),
+        art["Archies"]: ("rejected", "legacy", 60),  # a rejected link stays as it is
+    }
     assert links["mixed"] == {
         architects: ("active", "legacy", 100),
         art["Archies"]: ("suggested", "legacy", 61),
@@ -218,7 +222,7 @@ def test_demotion_rules(migrated_db: str) -> None:
         "musicbrainz",
         "mapping rule",
         "automatic",
-        "already rejected",  # its links did not change, so neither does it
+        "already rejected",
         "mixed",
     ):
         assert states[key] == ("auto_matched", None, None), key
@@ -233,6 +237,7 @@ def test_demotion_rules(migrated_db: str) -> None:
     assert backed_up_names == {names[key] for key in changed_names}
 
 
+@pytest.mark.integration
 def test_manual_names_keep_status(migrated_db: str) -> None:
     """E1: Beth Hart 58, After the Burial 59 and John Mellencamp 94 hold a manual link and a
     fuzzy one. The fuzzy one becomes a suggestion; the name stays manual_matched."""
@@ -264,6 +269,7 @@ def test_manual_names_keep_status(migrated_db: str) -> None:
         assert name_id not in names_backed_up
 
 
+@pytest.mark.integration
 def test_lines_untouched(migrated_db: str) -> None:
     """E2: a demoted name's lines and their song matches are not touched, so they keep playing
     (AUD-R022 D2 holds); Tier 1 finds no link for the name until it is linked again."""
@@ -327,6 +333,7 @@ def test_lines_untouched(migrated_db: str) -> None:
 # --- S5 (its migration half) and S6 (the list's seed) ---------------------------------------------
 
 
+@pytest.mark.integration
 def test_placeholder_links_removed(migrated_db: str) -> None:
     """C7: every link to a MusicBrainz placeholder artist goes, in any state and of any origin,
     and every link of a listed name; a listed name keeps its status (the list hides it)."""
@@ -381,9 +388,11 @@ def test_placeholder_links_removed(migrated_db: str) -> None:
     assert len(backed_up) == 3 + 1 + 1 + 1 + 2
 
 
+@pytest.mark.integration
 def test_station_placeholders_are_seeded(migrated_db: str) -> None:
     """C7: the list holds the five station names, as exact cleaned (normalized) names."""
-    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+    with before_the_demotion(migrated_db) as conn:
+        migrate(conn)
         rows = conn.execute(
             "SELECT normalized_name, added_at, added_by FROM log_name_placeholders"
         ).fetchall()
@@ -393,6 +402,7 @@ def test_station_placeholders_are_seeded(migrated_db: str) -> None:
     assert all(row["added_at"] is not None for row in rows)
 
 
+@pytest.mark.integration
 def test_empty_install(migrated_db: str) -> None:
     """A fresh install: no links, so an empty demotion and an empty backup; the list is still
     seeded."""
@@ -437,6 +447,7 @@ def _demotion_world(conn: Conn) -> dict[str, UUID]:
     return names
 
 
+@pytest.mark.integration
 def test_rollback_restores(migrated_db: str) -> None:
     with before_the_demotion(migrated_db) as conn:
         _demotion_world(conn)
@@ -462,6 +473,7 @@ def test_rollback_restores(migrated_db: str) -> None:
     assert tables == (False, False)
 
 
+@pytest.mark.integration
 def test_rollback_keeps_what_moved_since(migrated_db: str) -> None:
     """The curator accepted a suggestion, and the matcher linked a removed pair again, after the
     migration: both keep their new state; everything else is restored."""
@@ -529,7 +541,8 @@ def _statements(sql: str) -> list[str]:
 def test_lock_timeout_set() -> None:
     """E5: the migration sets ``lock_timeout`` before it locks anything, and locks the tables it
     writes up front, ingest's tables in ingest's order (``ingestion_service``: playlists,
-    broadcast_artists, track_identities, play_events), so it never deadlocks with ingest."""
+    broadcast_artists, track_identities, play_events), and the names before their links,
+    as the matcher and Resolve write them, so it never deadlocks with either."""
     statements = _statements(MIGRATION.read_text(encoding="utf-8"))
     timeout = next(i for i, s in enumerate(statements) if s.startswith("SET LOCAL lock_timeout"))
     locks = [i for i, s in enumerate(statements) if s.upper().startswith("LOCK TABLE")]
@@ -546,19 +559,27 @@ def test_lock_timeout_set() -> None:
         for table in re.sub(r"(?i)^LOCK TABLE\s+|\s+IN\s+.*$", "", statements[i]).split(",")
     ]
     assert "broadcast_artists" in locked and "log_name_links" in locked
+    assert locked.index("broadcast_artists") < locked.index("log_name_links")
     ingest_tables = [t for t in locked if t in INGEST_ORDER]
     assert ingest_tables == sorted(ingest_tables, key=INGEST_ORDER.index)
 
 
+@pytest.mark.integration
 @pytest.mark.slow
 def test_a_lock_timeout_fails_the_migration(migrated_db: str) -> None:
-    """E5: while an ingest transaction writes log names, the migration gives up after its
-    ``lock_timeout`` with an error, so the deploy fails loudly instead of waiting."""
-    with before_the_demotion(migrated_db) as conn, psycopg.connect(migrated_db) as ingest:
-        conn.execute("SET LOCAL statement_timeout = '60s'")  # a missing lock_timeout fails
+    """E5: while an ingest transaction writes log names, the migration gives up after its own
+    ``lock_timeout`` with an error, so the deploy fails loudly instead of waiting. The test
+    database's default lock_timeout is turned off first, so only the migration's counts: without
+    it the wait would end at the statement timeout instead (QueryCanceled, not this error).
+    The ingest lock is taken before 0045 is rolled back for the test, so the rollback script (run
+    by hand with the app stopped) must take no lock on broadcast_artists above ROW EXCLUSIVE."""
+    with psycopg.connect(migrated_db) as ingest:
         ingest.execute("LOCK TABLE broadcast_artists IN ROW EXCLUSIVE MODE")
+        with before_the_demotion(migrated_db) as conn:
+            conn.execute("SET LOCAL lock_timeout = 0")
+            conn.execute("SET LOCAL statement_timeout = '20s'")
 
-        with pytest.raises(psycopg.errors.LockNotAvailable):
-            migrate(conn)
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                migrate(conn)
 
         ingest.rollback()

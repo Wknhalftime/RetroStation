@@ -9,7 +9,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 import { apiFetch } from "@/api/client";
-import { useMbArtistSearch } from "./matcher";
+import { useMatchingQueue, useMbArtistSearch } from "./matcher";
 
 function makeClient(): QueryClient {
   return new QueryClient({
@@ -112,5 +112,57 @@ describe("useMbArtistSearch", () => {
       expect(result.current.data).toBeDefined();
     });
     expect(result.current.data?.[0]?.disambiguation).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1c (SPEC S8): the queue's response is parsed by its zod schema
+// ---------------------------------------------------------------------------
+
+function queueWith(candidates: unknown[]) {
+  return {
+    items: [
+      {
+        id: "00000000-0000-0000-0000-000000000001",
+        original_name: "Blue Oyster Cult",
+        normalized_name: "blue oyster cult",
+        match_status: "needs_review",
+        reason_code: "LINK_SUGGESTED",
+        reason_detail: "1 suggested artist, best 88%",
+        triage_bucket: "blocked",
+        candidates,
+        identities: [],
+      },
+    ],
+    total: 1,
+    unlikely_total: 0,
+  };
+}
+
+describe("useMatchingQueue", () => {
+  it("parses the suggested links the queue sends as candidates", async () => {
+    mockedApiFetch.mockResolvedValue(
+      queueWith([
+        {
+          artist_id: "artist-club",
+          mbid: null,
+          name: "Blue Oyster Club",
+          disambiguation: null,
+          score: 88,
+          reason: "Close name in the library",
+        },
+      ])
+    );
+    const { result } = renderHook(() => useMatchingQueue(), { wrapper: wrapperFor(makeClient()) });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.items[0].candidates[0].artist_id).toBe("artist-club");
+  });
+
+  it("fails on a candidate without its artist id instead of passing it on", async () => {
+    mockedApiFetch.mockResolvedValue(queueWith([{ mbid: "abc-123", name: "Blue Oyster" }]));
+    const { result } = renderHook(() => useMatchingQueue(), { wrapper: wrapperFor(makeClient()) });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
   });
 });

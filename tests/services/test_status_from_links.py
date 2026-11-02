@@ -461,9 +461,10 @@ def _status_writes(function: object) -> list[str]:
 
 
 def test_status_writes_leave_the_matcher_and_the_resolution_service() -> None:
-    """Both reach the name's status only through the link service. Unmatch's decided-only
-    write (``unmatch_if_decided``) stays, as the 409's guard."""
-    assert _status_writes(artist_matching_service._persist_artist_result) == []
+    """Both reach the name's status only through the link service: the whole matcher module
+    (``_persist_artist_result`` and any helper it grows) and the whole resolution service.
+    Unmatch's decided-only write (``unmatch_if_decided``) stays, as the 409's guard."""
+    assert _status_writes(artist_matching_service) == []
     assert _status_writes(artist_resolution_service) == []
 
 

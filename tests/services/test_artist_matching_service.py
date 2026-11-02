@@ -287,9 +287,10 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
     assert created.evidence["tier"] == MatchTier.NORMALIZATION.value
 
 
-def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
-    """Updated reason-string baseline: a mid-confidence fuzzy hit now
-    persists ReasonCode.LOW_CONFIDENCE + a formatted detail string.
+def test_match_artists_fuzzy_mid_persists_a_suggestion_reason() -> None:
+    """Updated reason-string baseline: a mid-confidence fuzzy hit persists a reason and a
+    formatted detail string: LOW_CONFIDENCE until artist model phase 1c, LINK_SUGGESTED with
+    the hit suggested since (C35, SPEC S4).
 
     Previously (PR 2 baseline) this was pinned to `_reason_codes.get(...) is
     None` because the legacy fuzzy path never passed reason kwargs. PR 4
@@ -330,10 +331,14 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    # No Match row on NEEDS_REVIEW (service only writes Match on AUTO_MATCHED).
-    assert first_link(links, artist.id) is None
-    # NEW behavior: reason is persisted.
-    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    # No active link on NEEDS_REVIEW: from phase 1c (C35, SPEC S4) the lone 77.8 is a
+    # suggestion, and the reason says so (LOW_CONFIDENCE until 1c).
+    [suggested] = links.list_by_name(artist.id)
+    assert (suggested.artist_id, suggested.state) == (
+        "mbid-metallica",
+        LogNameLinkState.SUGGESTED,
+    )
+    assert stored.reason_code == ReasonCode.LINK_SUGGESTED
     assert stored.reason_detail is not None
     assert stored.reason_detail  # non-empty formatted string
 
@@ -1202,9 +1207,10 @@ def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
 
 def test_match_artists_default_strong_threshold_boundary_stays_needs_review() -> None:
     """A canonical scoring ~79.25 (gap >> MB_SCORE_GAP) against a distant
-    runner-up must stay NEEDS_REVIEW/LOW_CONFIDENCE at the real
-    strong_match_threshold default (80), and would wrongly AUTO_MATCH if the
-    default silently drifted to 79.
+    runner-up stayed NEEDS_REVIEW/LOW_CONFIDENCE at the real
+    strong_match_threshold default (80), and would have AUTO_MATCHED had the
+    default drifted to 79. From artist model phase 1c (C35, SPEC S4) the lead
+    rule only suggests, so it stays NEEDS_REVIEW with LINK_SUGGESTED either way.
     """
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
@@ -1248,7 +1254,7 @@ def test_match_artists_default_strong_threshold_boundary_stays_needs_review() ->
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_code == ReasonCode.LINK_SUGGESTED
 
 
 def test_match_artists_strong_lead_under_95_suggests() -> None:

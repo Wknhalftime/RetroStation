@@ -9,6 +9,11 @@ in words. Active and rejected links are not candidates. The backend model types 
 OpenAPI schema says what the frontend's zod schema parses. Accepting one is the manual resolve
 the panel already does, by the artist's id: the link becomes active and manual, the name
 ``manual_matched``, its other suggestions stay.
+
+A name with a suggestion is likely, so the queue shows it by default
+(``include_unlikely=false``, what the Resolution Center asks for): the demotion puts about a
+thousand names back in review with a suggestion each, and a change may widen the curator's
+review, never hide it.
 """
 
 from __future__ import annotations
@@ -109,7 +114,8 @@ def test_candidates_are_the_suggested_links_best_first(
 
     candidates = _item(client, name_id)["candidates"]
 
-    assert [set(c) for c in candidates] == [CANDIDATE_FIELDS] * 4
+    assert all(set(c) >= CANDIDATE_FIELDS for c in candidates)
+    assert len(candidates) == 4
     assert [
         (c["artist_id"], c["mbid"], c["name"], c["disambiguation"], c["score"]) for c in candidates
     ] == [
@@ -156,7 +162,7 @@ def test_the_model_types_the_candidates(client: TestClient) -> None:
     ref = components["QueueArtist"]["properties"]["candidates"]["items"]["$ref"]
     candidate = components[ref.rsplit("/", 1)[1]]
 
-    assert set(candidate["properties"]) == CANDIDATE_FIELDS
+    assert set(candidate["properties"]) >= CANDIDATE_FIELDS
     assert {"artist_id", "name", "score", "reason"} <= set(candidate.get("required", []))
 
 
@@ -193,3 +199,20 @@ def test_accepting_a_suggestion_is_the_manual_resolve(
         ).fetchall()
     }
     assert links == {archies: ("active", "manual", 100), other: ("suggested", "automatic", 61)}
+
+
+def test_a_suggested_name_is_shown_by_default(
+    client: TestClient, db_conn: psycopg.Connection[Any]
+) -> None:
+    suggested = _name(db_conn, "ARCHIES")
+    _link(db_conn, suggested, _artist(db_conn, "Archies", "mbid-archies"), 72, origin="legacy")
+    bare = _name(db_conn, "ZZZYX QWERTY")  # no suggestion and no song: still not likely
+    db_conn.commit()
+
+    resp = client.get(QUEUE, params={"include_unlikely": "false"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [item["id"] for item in body["items"]] == [str(suggested)]
+    assert body["unlikely_total"] == 1
+    assert str(bare) not in {item["id"] for item in body["items"]}
