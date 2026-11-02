@@ -18,6 +18,9 @@ MIN_PRESENTATION_SCORE: int = 50
 # auto-match) is auto_rejected; the router's song triage starts "needs_attention" here. Songs
 # have no mid-band (D12): MID_BAND_* and MIN_PRESENTATION_SCORE are artist matching's.
 SONG_MIN_PRESENTATION_SCORE: int = 56
+# V11.1's strong-match score in trial mode (AUD-R100), in place of strong_match_threshold: with
+# an MB_SCORE_GAP lead over a real competitor, V11.1 auto-matches a song from here.
+V11_STRONG_MATCH_SCORE: int = 85
 # Song name lookups (Tier 1 Step C, Tier 2): a bound, not a sample (D13). Dev DB max 177 files.
 SONG_NAME_LOOKUP_LIMIT: int = 1000
 # Song matching's MusicBrainz cut-off (AUD-R028, D16): after this many consecutive transient

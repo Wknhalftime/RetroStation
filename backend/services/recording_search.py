@@ -38,17 +38,29 @@ def is_transient_mb_failure(exc: httpx.HTTPError) -> bool:
 class RecordingSearch:
     """MusicBrainz recording search for one run of song matching (AUD-R028, D16).
 
-    match_identities_for_playlist builds one per run, so the failure count lives on this
+    build_song_engines builds one per run, so the failure count lives on this
     instance, never in module state: each playlist run starts at zero. A successful search,
     cached or live, resets it.
+
+    With ``remember_answers`` (trial mode, AUD-R100) a search repeated in the run returns the
+    first one's answer without calling the client, so both of a song's scoring chains use one
+    MusicBrainz search. A remembered answer is a successful search, as the client's cache hit
+    it stands in for would be, so it resets the count too. A failure is not remembered.
     """
 
     def __init__(
-        self, client: MusicBrainzClientProtocol, cutoff: int = SONG_MB_FAILURE_CUTOFF
+        self,
+        client: MusicBrainzClientProtocol,
+        cutoff: int = SONG_MB_FAILURE_CUTOFF,
+        *,
+        remember_answers: bool = False,
     ) -> None:
         self._client = client
         self._cutoff = cutoff
         self._failures = 0
+        self._answers: dict[tuple[str, str], list[MbRecording]] | None = (
+            {} if remember_answers else None
+        )
 
     @property
     def cut_off(self) -> bool:
@@ -65,6 +77,9 @@ class RecordingSearch:
         """
         if self.cut_off:
             raise MusicBrainzUnavailableError("MusicBrainz cut-off reached in this run")
+        if self._answers is not None and (artist_mbid, title) in self._answers:
+            self._failures = 0
+            return self._answers[(artist_mbid, title)]
         try:
             recordings = self._client.search_recording(artist_mbid=artist_mbid, title=title)
         except httpx.HTTPError as exc:
@@ -82,4 +97,6 @@ class RecordingSearch:
                 logger.warning("song_matching_mb_cut_off", consecutive_failures=self._failures)
             raise MusicBrainzUnavailableError(str(exc)) from exc
         self._failures = 0
+        if self._answers is not None:
+            self._answers[(artist_mbid, title)] = recordings
         return recordings

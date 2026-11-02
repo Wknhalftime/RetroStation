@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Protocol, TypeVar, cast
+from dataclasses import dataclass, replace
+from typing import Protocol, Self, TypeVar, cast
 from uuid import UUID, uuid4
 
 import structlog
@@ -29,21 +30,25 @@ from backend.services.matching_constants import (
     MB_SCORE_GAP,
     SONG_MIN_PRESENTATION_SCORE,
     SONG_NAME_LOOKUP_LIMIT,
+    V11_STRONG_MATCH_SCORE,
 )
 from backend.services.matching_progress import NO_PROGRESS, MatchingProgress, ticking
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_low_confidence,
     format_mb_unavailable,
+    format_title_scores_disagree,
 )
 from backend.services.matching_utils import rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.recording_search import RecordingSearch
 from backend.services.title_scoring import (
+    TitleScore,
     _candidate_scores,
     broadcast_title_core_variants,
     broadcast_title_variants,
     normalize_title_for_scoring,
+    v11_file_title,
 )
 
 logger = structlog.get_logger()
@@ -235,6 +240,7 @@ def _score_candidates(
     candidates: list[LibraryFile],
     tier: MatchTier,
     strong_match_threshold: int,
+    title_score: TitleScore | None = None,
 ) -> IdentityMatchResult:
     """Score candidates against the broadcast title; return best-match result.
 
@@ -261,6 +267,11 @@ def _score_candidates(
     persistence boundary in PgMatchRepository. Ties on score break by
     library_file id for determinism across runs. Caller must ensure
     candidates is non-empty.
+
+    With ``title_score`` (V11.1 in trial mode, AUD-R100) the candidates are scored by it, on
+    the raw broadcast title and the file's v11_file_title, and V11_STRONG_MATCH_SCORE stands in
+    for strong_match_threshold; today's full-form score and the file id still break ties, and
+    the rest of the policy is the same.
     """
     if not candidates:
         # `assert` is stripped under `python -O`; use a real guard so an
@@ -270,17 +281,22 @@ def _score_candidates(
     core_bcs = [
         normalize_title_for_scoring(t) for t in broadcast_title_core_variants(original_title)
     ]
+
+    def ranking(f: LibraryFile) -> tuple[float, float]:
+        best, exact = _candidate_scores(full_bcs, core_bcs, f, strong_match_threshold)
+        if title_score is not None:
+            best = title_score(original_title, v11_file_title(f))
+        return best, exact
+
     # Sort by best score DESC, then full-form score DESC, then library_file
     # id ASC so ties are resolved deterministically. Without the id
     # tie-breaker, input order (often non-deterministic from SQL) would
     # decide the match.
     ranked = sorted(
-        (
-            (*_candidate_scores(full_bcs, core_bcs, f, strong_match_threshold), f)
-            for f in candidates
-        ),
+        ((*ranking(f), f) for f in candidates),
         key=lambda x: (-x[0], -x[1], str(x[2].id)),
     )
+    strong = strong_match_threshold if title_score is None else V11_STRONG_MATCH_SCORE
     scored: list[tuple[float, LibraryFile]] = [(best, f) for best, _exact, f in ranked]
     top_score, best = scored[0]
     has_competitor = len(scored) > 1
@@ -296,7 +312,7 @@ def _score_candidates(
     # result is still trustworthy. Songs have no mid-band auto-match (D12):
     # 56-64 always goes to review, whatever the lead.
     auto_match = top_score >= MB_AUTO_LINK_SCORE or (
-        has_competitor and top_score >= strong_match_threshold and gap >= MB_SCORE_GAP
+        has_competitor and top_score >= strong and gap >= MB_SCORE_GAP
     )
     if auto_match:
         status, rc, rd = MatchStatus.AUTO_MATCHED, None, None
@@ -306,7 +322,7 @@ def _score_candidates(
         status = MatchStatus.AUTO_REJECTED
         rc = ReasonCode.LOW_CONFIDENCE
         rd = format_low_confidence(top_score)
-    elif has_competitor and top_score >= strong_match_threshold:
+    elif has_competitor and top_score >= strong:
         # AMBIGUOUS_GAP only applies when a real peer is close on score.
         # Lone candidates (synthetic gap=100) fall through to LOW_CONFIDENCE
         # so the "within 100 points" message never renders.
@@ -424,7 +440,7 @@ class ResolvedArtistMbidStrategy:
     ) -> None:
         self._library_file_repo = library_file_repo
         self._match_repo = match_repo
-        # Step B's search. match_identities_for_playlist passes one per run, so the
+        # Step B's search. build_song_engines passes one per run, so the
         # MusicBrainz cut-off counts across the run's songs (AUD-R028, D16).
         self._recording_search = recording_search or RecordingSearch(mb_client)
         # Step B's pre-check; None searches for every song that reaches Step B.
@@ -434,6 +450,18 @@ class ResolvedArtistMbidStrategy:
         self._strong_match_threshold = strong_match_threshold
         self._exclusions_by_identity = exclusions_by_identity or {}
         self._memo = _ArtistMemo()
+        # None: today's title scorer. A twin from scored_by holds V11.1 (trial mode).
+        self._title_score: TitleScore | None = None
+
+    def scored_by(self, title_score: TitleScore) -> Self:
+        """This strategy with every title scored by ``title_score`` (trial mode, AUD-R100).
+
+        The twin shares this one's reads: its artist memo, Step B's pre-check answers and its
+        RecordingSearch, so trial mode reads each artist once and searches once per song.
+        """
+        twin = copy.copy(self)
+        twin._title_score = title_score
+        return twin
 
     def apply(
         self,
@@ -514,6 +542,7 @@ class ResolvedArtistMbidStrategy:
                 name_candidates,
                 tier=MatchTier.LOCAL_FILE_FUZZY,
                 strong_match_threshold=self._strong_match_threshold,
+                title_score=self._title_score,
             )
             if name_candidates
             else None
@@ -559,6 +588,7 @@ class ResolvedArtistMbidStrategy:
             candidate_files,
             tier=MatchTier.MUSICBRAINZ_ID_EXACT,
             strong_match_threshold=self._strong_match_threshold,
+            title_score=self._title_score,
         )
         if local_result.status == MatchStatus.AUTO_MATCHED:
             return local_result
@@ -629,6 +659,7 @@ class ResolvedArtistMbidStrategy:
             filtered,
             tier=MatchTier.MUSICBRAINZ_ID_SEARCH,
             strong_match_threshold=self._strong_match_threshold,
+            title_score=self._title_score,
         )
 
     def _search_could_add_a_file(self, mbid: str, artist: BroadcastArtist) -> bool:
@@ -668,6 +699,17 @@ class BroadcastToLocalStrategy:
         self._strong_match_threshold = strong_match_threshold
         self._exclusions_by_identity = exclusions_by_identity or {}
         self._memo = _ArtistMemo()
+        # None: today's title scorer. A twin from scored_by holds V11.1 (trial mode).
+        self._title_score: TitleScore | None = None
+
+    def scored_by(self, title_score: TitleScore) -> Self:
+        """This strategy with every title scored by ``title_score`` (trial mode, AUD-R100).
+
+        The twin shares this one's artist memo, so trial mode reads each artist once.
+        """
+        twin = copy.copy(self)
+        twin._title_score = title_score
+        return twin
 
     def apply(
         self,
@@ -701,6 +743,7 @@ class BroadcastToLocalStrategy:
             candidate_files,
             tier=MatchTier.LOCAL_FILE_FUZZY,
             strong_match_threshold=self._strong_match_threshold,
+            title_score=self._title_score,
         )
 
 
@@ -726,6 +769,33 @@ class IdentityMatchingEngine:
         return None
 
 
+def trial_result(today: IdentityMatchResult, trial: IdentityMatchResult) -> IdentityMatchResult:
+    """The more cautious of a song's two results in trial mode (AUD-R100).
+
+    ``today`` is today's strategy chain's result, ``trial`` the same chain's with V11.1 scoring
+    the titles. The song auto-matches only when both auto-match the same file, and is hidden
+    (auto_rejected) only when both hide it; the result is then today's. Every other song goes
+    to review, showing V11.1's file, score and tier unless V11.1 hides it (then today's), with
+    TITLE_SCORES_DISAGREE when the two differ in status or file, else the shown one's reason.
+    A result no title score went into (a mapping rule, no candidate) is the same in both, so
+    it comes back unchanged.
+    """
+    if today.status == trial.status == MatchStatus.AUTO_REJECTED:
+        return today
+    agree = today.status == trial.status and today.library_file_id == trial.library_file_id
+    if agree and today.status == MatchStatus.AUTO_MATCHED:
+        return today
+    shown = today if trial.status == MatchStatus.AUTO_REJECTED else trial
+    if agree:
+        return replace(shown, status=MatchStatus.NEEDS_REVIEW)
+    return replace(
+        shown,
+        status=MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.TITLE_SCORES_DISAGREE,
+        reason_detail=format_title_scores_disagree(today.confidence_score, trial.confidence_score),
+    )
+
+
 @dataclass(frozen=True)
 class IdentityMatchingRepos:
     """The repositories match_identities_for_playlist reads from and writes through.
@@ -746,17 +816,103 @@ class IdentityMatchingRepos:
     recording_search_reach: RecordingSearchReachRepository | None = None
 
 
+@dataclass(frozen=True)
+class SongEngines:
+    """The strategy chains of one run of song matching (build_song_engines)."""
+
+    today: IdentityMatchingEngine
+    # Trial mode (AUD-R100): the same chain with V11.1 scoring the titles. None without it.
+    trial: IdentityMatchingEngine | None
+    # Step B's search, one per run: the MusicBrainz cut-off counts this run's songs only
+    # (AUD-R028, D16). In trial mode both chains share it, and it remembers its answers.
+    recording_search: RecordingSearch
+
+    def resolve(
+        self, identity: BroadcastTrackIdentity, artist: BroadcastArtist
+    ) -> IdentityMatchResult | None:
+        """Today's result for the song or, in trial mode, the trial_result of both chains.
+
+        Raises MusicBrainzUnavailableError when either chain's Step B cannot reach
+        MusicBrainz, so the song is deferred whole (AUD-R028), even when today's chain alone
+        would decide it.
+        """
+        today = self.today.resolve(identity, artist)
+        if self.trial is None or today is None:
+            return today
+        trial = self.trial.resolve(identity, artist)
+        return today if trial is None else trial_result(today, trial)
+
+
+def build_song_engines(
+    songs: list[BroadcastTrackIdentity],
+    repos: IdentityMatchingRepos,
+    mb_client: MusicBrainzClientProtocol,
+    strong_match_threshold: int = 80,
+    *,
+    trial_title_score: TitleScore | None = None,
+) -> SongEngines:
+    """The strategy chains for one run over ``songs``.
+
+    Strategy order: mapping rules → MBID fast path (with internal MB recording search) →
+    fuzzy fallback. With ``trial_title_score`` (V11.1, trial mode) the same chain again, its
+    titles scored by it; it shares the first chain's reads and search. The mapping rules and
+    the songs' rejections are read once, here.
+    """
+    rules = repos.rules_repo.list_ordered()
+    exclusions_by_identity = _load_exclusions(songs, repos.library_file_repo)
+    recording_search = RecordingSearch(mb_client, remember_answers=trial_title_score is not None)
+    mapping_rules = IdentityMappingRuleStrategy(
+        rules, repos.library_file_repo, exclusions_by_identity=exclusions_by_identity
+    )
+    mbid_path = ResolvedArtistMbidStrategy(
+        repos.library_file_repo,
+        repos.match_repo,
+        mb_client,
+        repos.catalog_repo,
+        strong_match_threshold,
+        exclusions_by_identity=exclusions_by_identity,
+        recording_search=recording_search,
+        recording_search_reach=repos.recording_search_reach,
+    )
+    fuzzy_fallback = BroadcastToLocalStrategy(
+        repos.library_file_repo,
+        strong_match_threshold,
+        exclusions_by_identity=exclusions_by_identity,
+    )
+    trial = (
+        IdentityMatchingEngine(
+            [
+                mapping_rules,
+                mbid_path.scored_by(trial_title_score),
+                fuzzy_fallback.scored_by(trial_title_score),
+            ]
+        )
+        if trial_title_score is not None
+        else None
+    )
+    return SongEngines(
+        today=IdentityMatchingEngine([mapping_rules, mbid_path, fuzzy_fallback]),
+        trial=trial,
+        recording_search=recording_search,
+    )
+
+
 def match_identities_for_playlist(
     playlist_id: UUID,
     repos: IdentityMatchingRepos,
     mb_client: MusicBrainzClientProtocol,
     strong_match_threshold: int = 80,
     progress: MatchingProgress = NO_PROGRESS,
+    *,
+    trial_title_score: TitleScore | None = None,
 ) -> list[str]:
     """Resolve pending identities for a playlist.
 
-    Strategy order: mapping rules → MBID fast path (with internal MB recording
-    search) → fuzzy fallback. Persistence lives here, not in strategies.
+    The strategies are build_song_engines'. Persistence lives here, not in strategies.
+
+    ``trial_title_score`` (V11.1) turns on trial mode (AUD-R100): every song is resolved by
+    the chain twice, once with each title scorer, and takes their trial_result. MusicBrainz is
+    then searched at most once per song, for both chains. None: today's scorer alone.
 
     Returns list of work_ids for newly AUTO_MATCHED identities so the caller
     can trigger downstream master-selection recalculation. This return
@@ -772,37 +928,12 @@ def match_identities_for_playlist(
         logger.info("no_pending_identities", playlist_id=str(playlist_id))
         return []
 
-    rules = repos.rules_repo.list_ordered()
-
     # Resolve artists up-front to avoid N+1 queries inside the loop.
     artist_ids = [identity.broadcast_artist_id for identity in pending]
     artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
 
-    exclusions_by_identity = _load_exclusions(pending, repos.library_file_repo)
-    # One per run: the MusicBrainz cut-off counts this playlist's songs only (AUD-R028, D16).
-    recording_search = RecordingSearch(mb_client)
-
-    engine = IdentityMatchingEngine(
-        [
-            IdentityMappingRuleStrategy(
-                rules, repos.library_file_repo, exclusions_by_identity=exclusions_by_identity
-            ),
-            ResolvedArtistMbidStrategy(
-                repos.library_file_repo,
-                repos.match_repo,
-                mb_client,
-                repos.catalog_repo,
-                strong_match_threshold,
-                exclusions_by_identity=exclusions_by_identity,
-                recording_search=recording_search,
-                recording_search_reach=repos.recording_search_reach,
-            ),
-            BroadcastToLocalStrategy(
-                repos.library_file_repo,
-                strong_match_threshold,
-                exclusions_by_identity=exclusions_by_identity,
-            ),
-        ]
+    engines = build_song_engines(
+        pending, repos, mb_client, strong_match_threshold, trial_title_score=trial_title_score
     )
 
     auto_matched = 0
@@ -838,7 +969,7 @@ def match_identities_for_playlist(
             continue
 
         try:
-            result = engine.resolve(identity, artist)
+            result = engines.resolve(identity, artist)
         except MusicBrainzUnavailableError:
             # Step B could not reach MusicBrainz (AUD-R028, D16). The song is deferred whole
             # through the guarded write below, which also deletes its old suggestion; the
@@ -914,7 +1045,7 @@ def match_identities_for_playlist(
         auto_rejected=auto_rejected,
         needs_review=needs_review,
         deferred=deferred,
-        mb_cut_off=recording_search.cut_off,
+        mb_cut_off=engines.recording_search.cut_off,
         decided_meanwhile=decided_meanwhile,
         work_ids_collected=len(work_ids),
     )

@@ -24,6 +24,7 @@ from backend.services.identity_matching_service import (
     match_identities_for_playlist,
 )
 from backend.services.mb_client import MusicBrainzApiClient
+from backend.services.title_scoring import v11_title_score
 from backend.tasks import _matching_run
 from backend.tasks._error_boundary import task_failure_telemetry
 from backend.tasks.huey_app import huey
@@ -41,6 +42,9 @@ def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
 
     ``run_id`` names the matching run this stage reports to (spec 2026-10-17): the stage
     finishes there once its song masters are recalculated. None for an upload's matching.
+
+    Every run is in title-scoring trial mode (AUD-R100): V11.1 scores beside today's scorer,
+    and each song takes the more cautious result. Ending the trial is Lance's decision.
     """
     settings = get_settings()
 
@@ -71,6 +75,7 @@ def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                     mb_client=mb_client,
                     strong_match_threshold=settings.strong_match_threshold,
                     progress=stage.progress,
+                    trial_title_score=v11_title_score,
                 )
             conn.commit()
 
