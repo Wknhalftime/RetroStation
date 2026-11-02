@@ -121,6 +121,15 @@ class LibraryFile:
     audio: AudioMetadata = field(default_factory=AudioMetadata)
 
 
+@dataclass(frozen=True)
+class UntaggedCandidate:
+    """A file with no MusicBrainz tags whose work's artist has an MBID: searchable by
+    (artist MBID, title) where the tag-driven enrichment passes cannot reach it."""
+
+    file: LibraryFile
+    artist_mbid: str
+
+
 @dataclass
 class LibraryQuarantine:
     id: UUID

@@ -19,6 +19,7 @@ from backend.services.library_enrichment_service import (
 )
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.untagged_recording_service import enrich_untagged_pair, untagged_pairs
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
@@ -68,11 +69,16 @@ def library_enrichment_task() -> dict[str, int]:
     Pass 2: by release_mbid, one lookup per release, for whatever pass 1
             left pending (merged MBIDs, recordings no longer on the release).
     Pass 3: by recording_mbid for files with no release_mbid.
+    Pass 4: files with no MBID in their tags whose work's artist has one:
+            one recording search per distinct (artist, title), a confident
+            pick then goes through pass 3's lookup; the rest stay skipped
+            (``untagged_recording_service``).
     """
     settings = get_settings()
 
     total_enriched = 0
     total_failed = 0
+    untagged_skipped = 0
     processed = 0
     total = 0
     task_id = ""
@@ -102,7 +108,9 @@ def library_enrichment_task() -> dict[str, int]:
             # total. Pass 2 is re-queried after pass 1 shrinks it.
             release_mbids = _pending_mbids(conn, _PENDING_RELEASES_SQL, "release_mbid")
             recording_mbids = _pending_mbids(conn, _PENDING_RECORDINGS_SQL, "recording_mbid")
-            total = len(chunks) + len(release_mbids) + len(recording_mbids)
+            # Pass 4's files carry no MBID, so passes 1-3 never change this set.
+            pairs = untagged_pairs(repos.library_files.list_untagged_with_linked_artist())
+            total = len(chunks) + len(release_mbids) + len(recording_mbids) + len(pairs)
 
             # Initial RUNNING row so the UI shows a bar even when total == 0.
             handle.report_running(
@@ -116,6 +124,9 @@ def library_enrichment_task() -> dict[str, int]:
                     "recording_count": len(recording_mbids),
                 }
             )
+            # The pairs count is not in the started details: the lifecycle snapshots
+            # pin those; the structured logs carry pass 4's own counts.
+            logger.info("untagged_pass_planned", pairs=len(pairs))
 
             enrichment_repos = EnrichmentRepos(
                 files=repos.library_files,
@@ -160,7 +171,7 @@ def library_enrichment_task() -> dict[str, int]:
                     )
 
                 release_mbids = _pending_mbids(conn, _PENDING_RELEASES_SQL, "release_mbid")
-                total = len(chunks) + len(release_mbids) + len(recording_mbids)
+                total = len(chunks) + len(release_mbids) + len(recording_mbids) + len(pairs)
 
                 for release_mbid in release_mbids:
                     try:
@@ -212,6 +223,32 @@ def library_enrichment_task() -> dict[str, int]:
                         }
                     )
 
+                for pair in pairs:
+                    try:
+                        pair_outcome = enrich_untagged_pair(pair, enrichment_repos, mb_client)
+                        total_enriched += pair_outcome.enriched
+                        untagged_skipped += len(pair_outcome.skipped)
+                        conn.commit()
+                    except _PER_ITEM_RETRIABLE_ERRORS as exc:
+                        # The pair's files stay as they were; the next run tries again.
+                        conn.rollback()
+                        total_failed += 1
+                        logger.warning(
+                            "enrich_untagged_pair_error",
+                            artist_mbid=pair.artist_mbid,
+                            title=pair.title,
+                            error=str(exc),
+                        )
+
+                    processed += 1
+                    handle.report_running(
+                        progress_data={
+                            "processed": processed,
+                            "total": total,
+                            "current_item": f"untagged:{pair.artist_mbid}:{pair.title}",
+                        }
+                    )
+
         # COMPLETED is staged after the library connection closes so the
         # final row reflects all committed work; task_run writes it (and the
         # completed SystemLog) once this `with` block exits normally.
@@ -229,6 +266,7 @@ def library_enrichment_task() -> dict[str, int]:
         "library_enrichment_task_complete",
         enriched=total_enriched,
         failed=total_failed,
+        untagged_skipped=untagged_skipped,
     )
 
     # Fire-and-forget: trigger MB enhancement pass. Guarded (AUD-R012
