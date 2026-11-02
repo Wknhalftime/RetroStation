@@ -387,15 +387,10 @@ class MusicBrainzApiClient:
         Found-only: an MBID the index does not know (merged, deleted) or a
         malformed one is absent from the result; callers fall back to
         ``lookup_artist``, which follows merges. ``on_progress(i, total, mbid)``
-        fires once per distinct well-formed MBID, in input order, after the
-        lookups have finished.
+        fires once per distinct well-formed MBID: first for every cache hit
+        (input order), then for each request's MBIDs as soon as that request has landed.
         """
-        asked = [m.value for m in _well_formed(_ARTISTS.path, mbids)]
-        found = self._search_by_mbids(_ARTISTS, asked)
-        if on_progress is not None:
-            for index, mbid in enumerate(asked, start=1):
-                on_progress(index, len(asked), mbid)
-        return found
+        return self._search_by_mbids(_ARTISTS, mbids, on_progress=on_progress)
 
     def lookup_recordings(
         self, mbids: Sequence[str], *, on_progress: Progress | None = None
@@ -419,12 +414,28 @@ class MusicBrainzApiClient:
         return result
 
     def _search_by_mbids[T](
-        self, entity: _SearchableEntity[T], mbids: Sequence[str]
+        self,
+        entity: _SearchableEntity[T],
+        mbids: Sequence[str],
+        *,
+        on_progress: Progress | None = None,
     ) -> dict[str, T]:
-        """Search one entity type by MBID, ``_SEARCH_BATCH_SIZE`` per request, via the cache."""
+        """Search one entity type by MBID, ``_SEARCH_BATCH_SIZE`` per request, via the cache.
+
+        ``on_progress(i, total, mbid)`` fires per distinct well-formed MBID: cache hits
+        first, then each request's MBIDs right after that request's cache write.
+        """
         wanted = _well_formed(entity.path, mbids)
         if not wanted:
             return {}
+        total = len(wanted)
+        done = 0
+
+        def advance(mbid: str) -> None:
+            nonlocal done
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total, mbid)
 
         found: dict[str, T] = {}
         misses: list[str] = []
@@ -437,9 +448,9 @@ class MusicBrainzApiClient:
             self.cache_hits += 1
             # A negative entry means the search index has no such MBID
             # (merged or deleted); keep it out of the result without asking.
-            if entry.response_data.get(_NOT_IN_INDEX):
-                continue
-            found[mbid.value] = cast(T, entry.response_data)
+            if not entry.response_data.get(_NOT_IN_INDEX):
+                found[mbid.value] = cast(T, entry.response_data)
+            advance(mbid.value)
 
         for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
             batch = misses[start : start + _SEARCH_BATCH_SIZE]
@@ -484,6 +495,8 @@ class MusicBrainzApiClient:
                 asked=len(batch),
                 found=len(hits),
             )
+            for mbid_value in batch:
+                advance(mbid_value)
         return found
 
     def lookup_release(self, mbid: str) -> MbRelease | None:

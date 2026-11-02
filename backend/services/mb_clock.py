@@ -10,6 +10,9 @@ Windows backend unlinks the lock file on release, which would erase the mtime.
 
 ``time.time()`` is used rather than a monotonic clock because the value is compared
 with ``st_mtime``, which is wall-clock time.
+
+The sleep is capped at one cadence, so a clock file stamped in the future (system clock
+stepped back, file restored) cannot hold the lock for long; ``touch`` then resets it.
 """
 
 from __future__ import annotations
@@ -28,5 +31,5 @@ def wait_turn(clock: Path = CLOCK_PATH, cadence_s: float = CADENCE_S) -> None:
     """Block until ``cadence_s`` has passed since the last call on this machine."""
     with FileLock(clock.with_suffix(".lock")):
         last = clock.stat().st_mtime if clock.exists() else 0.0
-        time.sleep(max(0.0, last + cadence_s - time.time()))
+        time.sleep(min(cadence_s, max(0.0, last + cadence_s - time.time())))
         clock.touch()

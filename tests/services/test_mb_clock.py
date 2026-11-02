@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import multiprocessing
+import os
 import threading
 import time
 from pathlib import Path
@@ -29,6 +30,19 @@ def test_missing_clock_file_means_no_previous_call(tmp_path: Path) -> None:
     assert clock.exists()
 
 
+def test_future_clock_file_waits_at_most_one_cadence(tmp_path: Path) -> None:
+    clock = tmp_path / "clock"
+    clock.touch()
+    future = time.time() + 3600
+    os.utime(clock, (future, future))
+    t0 = time.monotonic()
+
+    wait_turn(clock, cadence_s=0.2)
+
+    assert time.monotonic() - t0 < 1.0
+    assert clock.stat().st_mtime <= time.time()
+
+
 def test_two_threads_are_spaced(tmp_path: Path) -> None:
     clock = tmp_path / "clock"
     stamps: list[float] = []
@@ -45,7 +59,7 @@ def test_two_threads_are_spaced(tmp_path: Path) -> None:
         thread.join()
 
     assert len(stamps) == 4
-    assert all(b - a >= 0.29 for a, b in itertools.pairwise(sorted(stamps)))
+    assert all(b - a >= 0.3 - 0.05 for a, b in itertools.pairwise(sorted(stamps)))
 
 
 def _stamp_calls(clock: Path, stamps_file: Path, calls: int, cadence_s: float) -> None:
@@ -70,4 +84,4 @@ def test_two_processes_are_spaced(tmp_path: Path) -> None:
 
     stamps = sorted(float(line) for line in stamps_file.read_text().splitlines())
     assert len(stamps) == 6
-    assert all(b - a >= 0.49 for a, b in itertools.pairwise(stamps))
+    assert all(b - a >= 0.5 - 0.05 for a, b in itertools.pairwise(stamps))

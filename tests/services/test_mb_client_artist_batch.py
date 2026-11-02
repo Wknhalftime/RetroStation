@@ -181,3 +181,37 @@ def test_on_progress_once_per_mbid_in_input_order(make_client: Any) -> None:
 
     assert calls == [(1, 3, a), (2, 3, b), (3, 3, c)]
     assert len(server.requests) == 2
+
+
+def test_progress_fires_per_chunk_before_the_next_request(make_client: Any) -> None:
+    mbids = [_mbid(n) for n in range(101)]
+    fired: list[tuple[int, int, str]] = []
+    seen_at_request: list[int] = []
+    server = _SearchServer(mbids)
+    original = server.handler
+
+    def recording(request: httpx.Request) -> httpx.Response:
+        seen_at_request.append(len(fired))
+        return original(request)
+
+    server.handler = recording  # type: ignore[method-assign]
+    client = make_client(server)
+
+    client.search_artists_by_mbids(
+        mbids, on_progress=lambda i, total, mbid: fired.append((i, total, mbid))
+    )
+
+    assert seen_at_request == [0, 100]
+    assert fired == [(i, 101, m) for i, m in enumerate(mbids, start=1)]
+
+
+def test_progress_total_excludes_duplicate_and_malformed_ids(make_client: Any) -> None:
+    a, b = _mbid(1), _mbid(2)
+    client = make_client(_SearchServer([a, b]))
+    calls: list[tuple[int, int, str]] = []
+
+    client.search_artists_by_mbids(
+        [a, a, "not-an-mbid", b], on_progress=lambda i, total, mbid: calls.append((i, total, mbid))
+    )
+
+    assert calls == [(1, 2, a), (2, 2, b)]

@@ -121,8 +121,11 @@ def instrument(timers: Timers, phase: str) -> list[str]:
     patch(client, "lookup_release", "mb.lookup_release", "phase.enrich_by_release")
     patch(client, "lookup_recording", "mb.lookup_recording", "phase.enrich_by_recording")
     patch(client, "_fetch", "mb.fetch", "mb.lookup_*")
+    # The wait includes time spent behind other processes (the dev stack) on the machine-wide clock.
     patch(mb_clock_mod, "wait_turn", "mb.rate_limit_wait", "mb.fetch")
     patch(pg_cache.PgMusicBrainzCacheRepository, "get", "db.mb_cache.get", "mb.lookup_*")
+    # ``within`` takes one parent: artist-batch cache work is timed too, but is labelled
+    # under the recording search.
     patch(
         pg_cache.PgMusicBrainzCacheRepository,
         "get_many",
@@ -165,8 +168,8 @@ def instrument(timers: Timers, phase: str) -> list[str]:
         patch(met, "_run_artist_phase", "phase.mb_artists")
         patch(met, "_run_works_phase", "phase.mb_works")
         patch(met, "_run_recordings_phase", "phase.mb_recordings")
-        patch(met, "coalesce_artist_lookups", "mb.coalesce_artists", "phase.mb_artists")
-        patch(met, "coalesce_recording_lookups", "mb.coalesce_recordings", "phase.mb_recordings")
+        patch(client, "search_artists_by_mbids", "mb.search_artists_by_mbids", "phase.mb_artists")
+        patch(client, "lookup_recordings", "mb.lookup_recordings", "phase.mb_recordings")
         patch(met, "_enhance_artist", "mb.enhance_artist", "phase.mb_artists")
         patch(client, "lookup_artist", "mb.lookup_artist", "phase.mb_artists")
         patch(client, "search_artist", "mb.search_artist", "phase.mb_artists")
