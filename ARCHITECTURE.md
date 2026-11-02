@@ -137,7 +137,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `plan_cascade` (`domain/artist_cascade.py`). It keeps the manual lines (`manual_matched`,
   `manual_rejected`) and the lines matched to a same-name file (`auto_matched`, and the match
   `play_file_resolution` plays is to a file whose `normalized_artist_name` is the name's
-  `normalized_name`, AUD-R022 D9); every other line changes. A line is on air while it is
+  `normalized_name`, C16); every other line changes. A line is on air while it is
   `auto_matched` or `manual_matched`.
 - Reject: the name `manual_rejected`, its links `rejected`, the changed lines `auto_rejected`
   (status only, as before). Unmatch: the name `needs_review` / `USER_UNMATCHED`, its links
