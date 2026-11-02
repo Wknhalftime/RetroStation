@@ -5,8 +5,8 @@
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`). Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R031 ACTIVE). If the code and this page disagree, fix one of
-them in the same PR.
+`audit/rulings.jsonl` (AUD-R015..R031 and R100 ACTIVE). If the code and this page disagree, fix
+one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -246,4 +246,4 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R100.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R101.
