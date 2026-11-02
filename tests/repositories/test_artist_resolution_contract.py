@@ -209,6 +209,24 @@ def test_a_manual_match_reopens_the_songs_in_review_and_drops_their_matches(port
     assert _state(ports, elsewhere) == (MatchStatus.PENDING, None, None, None, True)
 
 
+def test_a_manual_match_reopens_the_rejected_songs_too(ports: Ports) -> None:
+    """Master's #222, merged in: a link re-scores the songs the matcher or the curator
+    rejected, with their matches dropped; a song matched by hand stays."""
+    name_id = _name(ports, MatchStatus.AUTO_MATCHED)
+    auto_rejected = _song(ports, name_id, MatchStatus.AUTO_REJECTED)
+    manual_rejected = _song(ports, name_id, MatchStatus.MANUAL_REJECTED)
+    by_hand = _song(ports, name_id, MatchStatus.MANUAL_MATCHED)
+    for song_id in (auto_rejected, manual_rejected, by_hand):
+        _suggest(ports, song_id)
+
+    ports.resolution.reopen_songs_in_review(name_id)
+    ports.resolution.delete_pending_song_matches(name_id)
+
+    assert _state(ports, auto_rejected) == (MatchStatus.PENDING, None, None, None, False)
+    assert _state(ports, manual_rejected) == (MatchStatus.PENDING, None, None, None, False)
+    assert _state(ports, by_hand) == (MatchStatus.MANUAL_MATCHED, *STALE, True)
+
+
 def test_the_playlists_playing_the_name(ports: Ports) -> None:
     name_id, other = _name(ports, MatchStatus.AUTO_MATCHED), _name(ports, MatchStatus.PENDING)
     first, second, third = (ports.new_playlist() for _ in range(3))

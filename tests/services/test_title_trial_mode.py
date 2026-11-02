@@ -28,7 +28,7 @@ import pytest
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import MappingRule, Match
+from backend.domain.matching import MappingRule
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -44,10 +44,12 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.fakes.recording_search_reach import FakeRecordingSearchReach
+from tests.matching_seed import seed_link
 
 ARTIST = "Blur"
 SONG = "Song 2"
@@ -90,6 +92,8 @@ class _World:
         self.matches = FakeMatchRepository()
         self.files = FakeLibraryFileRepository()
         self.rules = FakeMappingRuleRepository()
+        self.catalog = FakeArtistRepository()
+        self.links = FakeLogNameLinkRepository()
         self.recording_searches: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self.today: dict[UUID, float] = {}
         self.v11: dict[str, float] = {}
@@ -109,17 +113,9 @@ class _World:
         self.artists.upsert(self.artist)
 
     def link_artist(self) -> None:
-        """The artist's match row, which a resolved artist's songs need (Tier 1)."""
-        self.matches.create(
-            Match(
-                id=uuid4(),
-                artist_id=self.artist.id,
-                target_id=self.mbid,
-                target_type=TargetType.ARTIST,
-                confidence_score=100.0,
-                match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-            )
-        )
+        """The artist's link, which a resolved artist's songs need (Tier 1). Seeded as artist
+        model phase 1a seeds one (tests/matching_seed.py): to a stub holding ``mbid``."""
+        seed_link(self.links, self.catalog, self.artist.id, self.mbid)
 
     def song(self, title: str = SONG) -> BroadcastTrackIdentity:
         norm = normalize_title(title)
@@ -189,8 +185,9 @@ class _World:
             match_repo=self.matches,
             library_file_repo=self.files,
             rules_repo=self.rules,
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=self.catalog,
             recording_search_reach=FakeRecordingSearchReach(self.files),
+            link_repo=self.links,
         )
         score = v11_title_score if real_v11 else self.fake_v11
         if trial:

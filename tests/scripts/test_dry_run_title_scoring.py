@@ -29,6 +29,7 @@ from backend.services.normalization import (
     normalize_artist,
     normalize_title,
 )
+from tests.matching_seed import seed_pg_link
 
 pytestmark = pytest.mark.integration
 
@@ -55,12 +56,9 @@ def _seed(conn: psycopg.Connection[Any]) -> None:
            VALUES (%s, 'Robert Plant', %s, 'auto_matched')""",
         (artist_id, name),
     )
-    # An artist MBID that no file carries: Step A finds nothing and Step B has nothing to add.
-    conn.execute(
-        """INSERT INTO matches (artist_id, target_id, target_type, confidence_score, match_tier)
-           VALUES (%s, %s, 'artist', 100, 'musicbrainz_id_exact')""",
-        (artist_id, str(uuid4())),
-    )
+    # Linked to an artist whose MBID no file carries: Step A finds nothing and Step B has
+    # nothing to add. Seeded as artist model phase 1a seeds a link (tests/matching_seed.py).
+    seed_pg_link(conn, artist_id, str(uuid4()))
     files: dict[str, UUID] = {}
     for title in ("Big Love", "Ship Of Fools", "Heart Beat"):
         files[title] = uuid4()

@@ -13,12 +13,15 @@ from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus, ReasonCode
+from backend.domain.matching import SONG_UNDECIDED_STATUSES
 from backend.repositories.artist_resolution import ArtistResolutionRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.matches import FakeMatchRepository
 
-_QUEUE = {MatchStatus.NEEDS_REVIEW, MatchStatus.PENDING}
+# Songs a manual match sends back to the matcher: pending and the re-check's undecided set
+# (master's #222, merged in).
+_LINK_REWIND = {MatchStatus.PENDING, *SONG_UNDECIDED_STATUSES}
 _PROTECTED = {MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED}
 _UNMATCHABLE = {
     MatchStatus.AUTO_MATCHED,
@@ -65,7 +68,7 @@ class FakeArtistResolutionRepository(ArtistResolutionRepository):
     def reopen_songs_in_review(self, broadcast_artist_id: UUID) -> None:
         for song_id in self._song_ids(broadcast_artist_id):
             song = self._songs[song_id]
-            if song.match_status in _QUEUE:
+            if song.match_status in _LINK_REWIND:
                 self._songs[song_id] = replace(
                     song,
                     match_status=MatchStatus.PENDING,
