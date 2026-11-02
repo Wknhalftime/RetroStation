@@ -384,9 +384,9 @@ async def get_missing_matches_report(
 ) -> PaginatedMissingMatches:
     """Paginated report of unresolved track identities for a station.
 
-    An identity is included when either its own match_status OR its parent
-    artist's match_status is one of: pending, needs_review, auto_rejected,
-    manual_rejected.
+    An identity is included when its own match_status is one of: pending, needs_review,
+    auto_rejected, manual_rejected (C37, AUD-R038, phase 1b): a matched line under an
+    unresolved name still plays, so it is not missing.
 
     Rows are sorted alphabetically by artist name then track title.  Impact
     percentage is computed as (identity play-count / total play-count across
@@ -411,14 +411,10 @@ async def get_missing_matches_report(
         SELECT COUNT(*) AS total
         FROM station_identity_plays sip
         JOIN track_identities  ti ON ti.id = sip.identity_id
-        JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
         WHERE sip.station_id = %s
-          AND (
-              ti.match_status = ANY(%s)
-              OR ba.match_status = ANY(%s)
-          )
+          AND ti.match_status = ANY(%s)
         """,
-        (station_id, unresolved, unresolved),
+        (station_id, unresolved),
     )
     count_row = await count_cur.fetchone()
     total = int(count_row["total"]) if count_row else 0
@@ -439,10 +435,7 @@ async def get_missing_matches_report(
             JOIN track_identities  ti ON ti.id = sip.identity_id
             JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
             WHERE sip.station_id = %s
-              AND (
-                  ti.match_status = ANY(%s)
-                  OR ba.match_status = ANY(%s)
-              )
+              AND ti.match_status = ANY(%s)
         )
         SELECT
             identity_id,
@@ -458,7 +451,7 @@ async def get_missing_matches_report(
         ORDER BY artist_name, track_title
         LIMIT %s OFFSET %s
         """,
-        (station_id, unresolved, unresolved, limit, offset),
+        (station_id, unresolved, limit, offset),
     )
     rows = await items_cur.fetchall()
 

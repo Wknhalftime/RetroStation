@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg.rows import DictRow
 
+from backend.db.repositories.artist_cascade import PgArtistCascadeRepository
 from backend.db.repositories.artist_linking import PgArtistLinkingRepository
 from backend.db.repositories.artist_resolution import PgArtistResolutionRepository
 from backend.db.repositories.artists import PgArtistRepository
@@ -51,7 +52,8 @@ from backend.services.work_curation_service import WorkCurationRepos
 @dataclass
 class BroadcastRepos:
     """Broadcast-domain repositories; ``liners`` is each station's liner library (LR3);
-    ``resolution`` holds what the artist Resolve and Unmatch write (phase 1a, C75)."""
+    ``resolution`` holds what the artist Resolve and Unmatch write (phase 1a, C75), and
+    ``cascade`` their cascade on the name's lines (phase 1b)."""
 
     stations: PgBroadcastStationRepository
     playlists: PgBroadcastPlaylistRepository
@@ -61,6 +63,7 @@ class BroadcastRepos:
     days: PgBroadcastDayRepository
     liners: PgStationLinerRepository
     resolution: PgArtistResolutionRepository
+    cascade: PgArtistCascadeRepository
 
 
 @dataclass
@@ -141,6 +144,7 @@ class RepositoryFactory:
             days=PgBroadcastDayRepository(conn),
             liners=PgStationLinerRepository(conn),
             resolution=PgArtistResolutionRepository(conn),
+            cascade=PgArtistCascadeRepository(conn),
         )
         self.library = LibraryRepos(
             files=PgLibraryFileRepository(conn),
@@ -282,5 +286,6 @@ def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
         resolution=repos.broadcast.resolution,
         links=repos.log_name_links,
         catalog=repos.artists,
+        cascade=repos.broadcast.cascade,
         commit=repos.commit_or_unavailable,
     )

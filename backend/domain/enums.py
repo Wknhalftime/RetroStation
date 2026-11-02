@@ -202,6 +202,16 @@ class ReasonCode(StrEnum):
     # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16): the song is
     # deferred, and every re-check rewinds it. DEFERRED_RETRY stays the artist cascade's.
     MB_UNAVAILABLE = "MB_UNAVAILABLE"
+    # The artist matcher matched the log name to an artist whose link the curator rejected
+    # (phase 1b S4, C19): the match is not written, the name waits in review, no cascade.
+    LINK_REJECTED = "LINK_REJECTED"
+
+
+class CascadeAction(StrEnum):
+    """A whole-name decision that cascades to the name's lines (phase 1b, M24)."""
+
+    REJECT = "reject"
+    UNMATCH = "unmatch"
 
 
 class PurgeMissingPolicy(StrEnum):

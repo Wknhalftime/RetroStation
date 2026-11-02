@@ -111,9 +111,20 @@ export type IdentityResolution = z.infer<typeof IdentityResolutionSchema>;
 // Resolve Result
 // ---------------------------------------------------------------------------
 
+// What a whole-name Reject or Unmatch takes off air and keeps on air (phase 1b, S5): the
+// preview's body, and the counts the two actions answer with (E2).
+export const CascadeCountsSchema = z.object({
+  off_air: z.object({ lines: z.number().int(), plays: z.number().int() }),
+  kept: z.object({ manual: z.number().int(), same_name: z.number().int() }),
+});
+
+export type CascadeCounts = z.infer<typeof CascadeCountsSchema>;
+
 export const ResolveResultSchema = z.object({
   id: z.string().uuid(),
   match_status: z.string(),
+  // An artist Reject or Unmatch adds what it did; other answers have none.
+  cascade: CascadeCountsSchema.nullable().optional(),
 });
 
 export type ResolveResult = z.infer<typeof ResolveResultSchema>;

@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { useProgressStore } from "@/store/progressStore";
-import { MbArtistSearchResponseSchema } from "@/lib/schemas/matcher";
+import { CascadeCountsSchema, MbArtistSearchResponseSchema } from "@/lib/schemas/matcher";
 import type {
+  CascadeCounts,
   MatchingQueue,
   ArtistResolution,
   IdentityResolution,
@@ -55,6 +56,27 @@ export function useMatchingQueue(
   });
 }
 
+// A whole-name action that cascades to the name's songs (phase 1b, M24).
+export type CascadeAction = "reject" | "unmatch";
+
+// What the action would take off air and keep on air (S5), fetched when the confirmation
+// opens; never cached, so each confirmation counts the songs as they are then. null: closed.
+export function useCascadePreview(artistId: string, action: CascadeAction | null) {
+  return useQuery<CascadeCounts>({
+    queryKey: ["matching", "cascade-preview", artistId, action],
+    queryFn: async () =>
+      CascadeCountsSchema.parse(
+        await apiFetch<unknown>(
+          `/api/v1/matching/artists/${artistId}/cascade-preview?action=${action}`
+        )
+      ),
+    enabled: action !== null,
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
@@ -99,8 +121,9 @@ export function useResolveIdentity() {
 
 // Unmatch takes a matched song's match away: the song is parked as manual_rejected
 // (reason USER_UNMATCHED) with its file recorded as rejected, and the next matching
-// run re-checks it. Unmatching an artist cascades to ALL child identities regardless
-// of status, back to needs_review — see backend/routers/matching.py::unmatch_artist.
+// run re-checks it. Unmatching an artist puts its songs back in review except the manual
+// ones and those matched to a same-name file (phase 1b, M24), and answers with the counts
+// of what it did — see backend/routers/matching.py::unmatch_artist.
 
 interface UnmatchVariables {
   id: string;

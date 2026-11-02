@@ -10,6 +10,7 @@ from tests.matching_seed import seed_pg_link
 from tests.routers.test_matching import (
     _insert_artist,
     _insert_identity,
+    _insert_library_file,
     _seed_review_chain,
 )
 
@@ -166,14 +167,17 @@ class TestUnmatchArtist:
         assert identity_row["match_tier"] is None
         assert identity_row["reason_code"] == "USER_UNMATCHED"
 
+        # C19 (phase 1b): the name's link is remembered as rejected, not deleted.
         artist_link = db_conn.execute(
-            "SELECT id FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
+            "SELECT state FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
         ).fetchone()
-        assert artist_link is None
+        assert artist_link is not None
+        assert artist_link["state"] == "rejected"
 
-    def test_artist_unmatch_cascades_all_children_regardless_of_status(self, client, db_conn):
-        """Distinct from resolve_artist's MANUAL_REJECTED cascade — unmatch wipes
-        even MANUAL_MATCHED / MANUAL_REJECTED children.
+    def test_artist_unmatch_keeps_manual_children(self, client, db_conn):
+        """M24 (phase 1b, AUD-R037): unmatch keeps the MANUAL_MATCHED / MANUAL_REJECTED
+        children as they are, with their match rows, as resolve_artist's MANUAL_REJECTED
+        cascade does; every other child goes back to review.
         """
         _, _, artist, default_identity, _ = _seed_review_chain(db_conn)
         _set_artist_status(db_conn, artist.id, MatchStatus.MANUAL_MATCHED)
@@ -213,10 +217,22 @@ class TestUnmatchArtist:
         resp = client.post(f"/api/v1/matching/artists/{artist.id}/unmatch")
         assert resp.status_code == 200
 
+        for child_id, status in (
+            (manual_matched_child.id, "manual_matched"),
+            (manual_rejected_child.id, "manual_rejected"),
+        ):
+            row = db_conn.execute(
+                "SELECT match_status FROM track_identities WHERE id = %s", (child_id,)
+            ).fetchone()
+            assert row is not None, f"identity {child_id} missing"
+            assert row["match_status"] == status, f"manual child {child_id} was not kept"
+        kept_match = db_conn.execute(
+            "SELECT id FROM matches WHERE identity_id = %s", (manual_matched_child.id,)
+        ).fetchone()
+        assert kept_match is not None
+
         for child_id in (
             default_identity.id,
-            manual_matched_child.id,
-            manual_rejected_child.id,
             auto_matched_child.id,
             pending_child.id,
         ):
@@ -232,24 +248,48 @@ class TestUnmatchArtist:
             assert row["reason_code"] == "USER_UNMATCHED"
 
     def test_artist_unmatch_deletes_artist_and_child_matches(self, client, db_conn):
+        """M24 and C19 (phase 1b, AUD-R037): the name's link is rejected, not deleted; the
+        manual child's and the same-name child's matches stay; the other child's go."""
         _, _, artist, identity, _ = _seed_review_chain(db_conn)
         _set_artist_status(db_conn, artist.id, MatchStatus.AUTO_MATCHED)
         _set_identity_status(db_conn, identity.id, MatchStatus.AUTO_MATCHED)
         _insert_artist_match(db_conn, artist.id)
         _insert_identity_match(db_conn, identity.id)
+        manual_child = _insert_identity(
+            db_conn, artist, original_title="By Hand", match_status=MatchStatus.MANUAL_MATCHED
+        )
+        _insert_identity_match(db_conn, manual_child.id)
+        same_name_child = _insert_identity(
+            db_conn, artist, original_title="Same Name", match_status=MatchStatus.AUTO_MATCHED
+        )
+        # The file's artist is the log name's ("review artist"): a same-name file.
+        same_name_file = _insert_library_file(db_conn)
+        _insert_identity_match(db_conn, same_name_child.id, same_name_file.id)
 
         resp = client.post(f"/api/v1/matching/artists/{artist.id}/unmatch")
         assert resp.status_code == 200
 
         artist_link = db_conn.execute(
-            "SELECT id FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
+            "SELECT state FROM log_name_links WHERE broadcast_artist_id = %s", (artist.id,)
         ).fetchone()
-        assert artist_link is None
+        assert artist_link is not None
+        assert artist_link["state"] == "rejected"
 
         identity_match = db_conn.execute(
             "SELECT id FROM matches WHERE identity_id = %s", (identity.id,)
         ).fetchone()
         assert identity_match is None
+
+        for kept in (manual_child, same_name_child):
+            kept_match = db_conn.execute(
+                "SELECT id FROM matches WHERE identity_id = %s", (kept.id,)
+            ).fetchone()
+            assert kept_match is not None, f"{kept.original_title} lost its match"
+        same_name_row = db_conn.execute(
+            "SELECT match_status FROM track_identities WHERE id = %s", (same_name_child.id,)
+        ).fetchone()
+        assert same_name_row is not None
+        assert same_name_row["match_status"] == "auto_matched"
 
     @pytest.mark.parametrize(
         "blocked_status",

@@ -459,6 +459,7 @@ export function MatcherBrowser() {
                   artist={selectedArtist}
                   onSearchMusicBrainz={() => handleOpenArtistSearch("mb-artist")}
                   onSearchLibrary={() => handleOpenArtistSearch("artist")}
+                  onCascadeDone={(message) => setFeedback({ kind: "success", message })}
                 />
                 <TitlePanel artist={selectedArtist} onFileSearch={handleFileSearch} />
               </>

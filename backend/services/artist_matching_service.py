@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
 
@@ -32,6 +32,7 @@ from backend.services.matching_progress import NO_PROGRESS, MatchingProgress, ti
 from backend.services.matching_reasons import (
     format_ambiguous_gap,
     format_deferred_retry,
+    format_link_rejected,
     format_low_confidence,
 )
 from backend.services.matching_utils import is_likely_truncated, rule_matches
@@ -550,6 +551,30 @@ def _run_mb_or_deferred_phase(
     }
 
 
+def hold_back_rejected_link(
+    broadcast_artist: BroadcastArtist, result: ArtistMatchResult, links: LogNameLinkService | None
+) -> ArtistMatchResult:
+    """The result to write for *broadcast_artist* (SPEC 1b S4, C19).
+
+    An automatic match to an artist whose link the curator rejected is held back: the name goes
+    to review with LINK_REJECTED (no link, no catalog upsert, and no cascade, which only
+    AUTO_REJECTED and DEFERRED_RETRY start). Every other result is returned as it is. The
+    task and the gate's dry run both ask this, so a dry run decides what the task would.
+    """
+    if links is None or result.status != MatchStatus.AUTO_MATCHED:
+        return result
+    rejected = links.rejected_artist(broadcast_artist.id, result.target_id)
+    if rejected is None:
+        return result
+    return replace(
+        result,
+        status=MatchStatus.NEEDS_REVIEW,
+        reason_code=ReasonCode.LINK_REJECTED,
+        reason_detail=format_link_rejected(rejected.name),
+        mb_candidate=None,
+    )
+
+
 def _persist_artist_result(
     broadcast_artist: BroadcastArtist,
     result: ArtistMatchResult,
@@ -750,7 +775,7 @@ def match_artists_for_playlist(
         for broadcast_artist in ticking(pending, progress):
             if _persist_artist_result(
                 broadcast_artist,
-                resolved[broadcast_artist.id],
+                hold_back_rejected_link(broadcast_artist, resolved[broadcast_artist.id], links),
                 repos.broadcast_artist_repo,
                 repos.artist_repo,
                 links,

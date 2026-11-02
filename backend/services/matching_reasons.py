@@ -54,3 +54,9 @@ def format_mb_unavailable() -> str:
     # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16). Every re-check rewinds
     # a deferred song, whatever its artist.
     return "MusicBrainz unavailable — deferred for retry at the next re-check"
+
+
+def format_link_rejected(artist_name: str) -> str:
+    # The matcher's match is held back (phase 1b S4, C19): the curator rejected this link, so
+    # the name waits in review for them instead of being matched again.
+    return f"Matched {artist_name}, a link you rejected — waiting for your decision"
