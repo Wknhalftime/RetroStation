@@ -10,11 +10,16 @@ import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.enums import MatchStatus, ReasonCode
-from backend.domain.matching import MatchingStorageError
+from backend.domain.matching import SONG_UNDECIDED_STATUSES, MatchingStorageError
 from backend.repositories.artist_resolution import ArtistResolutionRepository
 
-# Songs in the review queue, which a manual match sends back to the matcher.
-_QUEUE_STATUSES = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
+# Songs a manual match sends back to the matcher: the re-check's undecided set (AUD-R022, R029)
+# plus pending (#222). A link changes what the matcher can score against, so a song it rejected
+# for lack of a match is worth scoring again; a song's rejected files stay excluded (AUD-R029).
+_LINK_REWIND_STATUSES = [
+    MatchStatus.PENDING.value,
+    *(status.value for status in SONG_UNDECIDED_STATUSES),
+]
 # Songs a manual reject of their artist leaves alone.
 _PROTECTED_STATUSES = [MatchStatus.MANUAL_MATCHED.value, MatchStatus.MANUAL_REJECTED.value]
 # Artist statuses Unmatch reverts; pending and needs_review have nothing to revert.
@@ -60,7 +65,7 @@ class PgArtistResolutionRepository(ArtistResolutionRepository):
              WHERE broadcast_artist_id = %s
                AND match_status = ANY(%s)
             """,
-            (MatchStatus.PENDING.value, broadcast_artist_id, _QUEUE_STATUSES),
+            (MatchStatus.PENDING.value, broadcast_artist_id, _LINK_REWIND_STATUSES),
         )
 
     def delete_pending_song_matches(self, broadcast_artist_id: UUID) -> None:

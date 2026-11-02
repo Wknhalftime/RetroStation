@@ -27,7 +27,8 @@ class ArtistResolutionRepository(ABC):
 
     @abstractmethod
     def reopen_songs_in_review(self, broadcast_artist_id: UUID) -> None:
-        """Put the name's pending and needs_review songs back to pending, tier and reason
+        """Put the name's pending and undecided songs (needs_review, auto_rejected,
+        manual_rejected: SONG_UNDECIDED_STATUSES, #222) back to pending, tier and reason
         cleared, so the next run re-matches them against the name's new link."""
         ...
 

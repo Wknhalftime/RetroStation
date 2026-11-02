@@ -136,6 +136,7 @@ def test_identity_matching_task_wires_repos_and_threshold(
         mb_client: object,
         strong_match_threshold: int,
         progress: MatchingProgress,
+        trial_title_score: object = None,  # trial mode's wiring: test_title_trial_wiring.py
     ) -> list[str]:
         captured["playlist_id"] = playlist_id
         captured["repos"] = repos

@@ -7,9 +7,8 @@ feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue edit
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
 with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b. Rulings cited
-here are in `audit/rulings.jsonl`
-(AUD-R015..R058 ACTIVE). If the code and this page disagree, fix one of
-them in the same PR.
+here are in `audit/rulings.jsonl` (AUD-R015..R059, R100 and R101 ACTIVE). If the code and this
+page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
 gitignored, so the repo cannot resolve them; `D1`..`D8` in `audit/eda/` are the event-graph
@@ -377,7 +376,7 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R100.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R102.
 
 ## Retired (C70, AUD-R045)
 

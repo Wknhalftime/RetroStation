@@ -202,6 +202,10 @@ class ReasonCode(StrEnum):
     # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16): the song is
     # deferred, and every re-check rewinds it. DEFERRED_RETRY stays the artist cascade's.
     MB_UNAVAILABLE = "MB_UNAVAILABLE"
+    # Trial mode (AUD-R100): today's title scorer and V11.1 differ in status or file. The song
+    # is in review, or hidden (auto_rejected) when V11.1 alone hides it (AUD-R101); a song
+    # both hide keeps today's reason.
+    TITLE_SCORES_DISAGREE = "TITLE_SCORES_DISAGREE"
     # The artist matcher matched the log name to an artist whose link the curator rejected
     # (phase 1b S4, C19): the match is not written, the name waits in review, no cascade.
     LINK_REJECTED = "LINK_REJECTED"
