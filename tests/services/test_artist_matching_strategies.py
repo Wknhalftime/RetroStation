@@ -115,13 +115,14 @@ def test_normalization_exact_hit_auto_matches() -> None:
     assert result.reason_code is None
 
 
-def test_normalization_high_score_with_gap_auto_matches() -> None:
+def test_normalization_high_score_with_gap_suggests() -> None:
     # Pick a fuzzy near-miss of "metallica"; should still score high AND
-    # the runner-up (totally unrelated) should be well below.
+    # the runner-up (totally unrelated) should be well below. Until artist model phase 1c
+    # this lead auto-matched; from 1c it is a suggestion (C35, SPEC S4).
     best = _canonical("metallic")
     other = _canonical("radiohead")
-    # Lower strong_match_threshold so ~94 score clears the AUTO_MATCHED bar via the
-    # "strong_match_threshold + gap" branch rather than the MB_AUTO_LINK_SCORE bypass.
+    # strong_match_threshold 80: the ~94 score sits in the old "strong_match_threshold + gap"
+    # branch, under the MB_AUTO_LINK_SCORE bypass.
     strategy = NormalizationStrategy(
         all_canonical=[best, other],
         strong_match_threshold=80,
@@ -130,11 +131,15 @@ def test_normalization_high_score_with_gap_auto_matches() -> None:
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
     assert result is not None
-    # High score + large gap → AUTO_MATCHED
-    assert result.status == MatchStatus.AUTO_MATCHED
+    # High score + large gap, under 95 → a suggestion of the best
+    assert (result.status, result.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
     assert result.tier == MatchTier.NORMALIZATION
     assert result.target_id == best.mbid
     assert result.confidence_score >= 90
+    assert [s.target_id for s in result.suggestions] == [best.mbid]
 
 
 def test_normalization_gap_insufficient_needs_review_ambiguous_gap() -> None:
@@ -229,10 +234,10 @@ def test_normalization_below_noise_floor_falls_through_to_next_strategy() -> Non
     assert result is None
 
 
-def test_normalization_score_90_with_gap_auto_matches_via_strong_match_threshold() -> None:
-    """Issue #3: a score of ~90-94 with sufficient gap must AUTO_MATCH via the
-    strong_match_threshold(80)+gap(10) band. Previously broken because both ctor params
-    were conflated to MB_AUTO_LINK_SCORE=95, so 90 < 95 forced NEEDS_REVIEW."""
+def test_normalization_score_90_with_gap_suggests() -> None:
+    """Issue #3 made a score of ~90-94 with sufficient gap AUTO_MATCH via the
+    strong_match_threshold(80)+gap(10) band. Artist model phase 1c (C35, SPEC S4) turns that
+    lead rule into a suggestion: only 95+ or an exact name with one artist links."""
     best = _canonical("metallic")  # fuzzy ~94 against "metallica"
     other = _canonical("radiohead")  # far away — gap is large
     # Rely on DEFAULT ctor (no kwargs) so we're testing the default separation
@@ -241,10 +246,12 @@ def test_normalization_score_90_with_gap_auto_matches_via_strong_match_threshold
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
     assert result is not None
-    assert result.status == MatchStatus.AUTO_MATCHED
+    assert (result.status, result.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
     assert result.target_id == best.mbid
-    # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95)
-    # — so the AUTO decision came through the strong_match_threshold+gap branch.
+    # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95).
     assert result.confidence_score < 95
 
 

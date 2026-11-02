@@ -46,6 +46,16 @@ function makeArtist(overrides: Partial<QueueArtist> = {}): QueueArtist {
   };
 }
 
+/** A suggested link as the queue sends it (phase 1c, S8). */
+const SOME_CANDIDATE = {
+  artist_id: "artist-1",
+  mbid: "mbid-1",
+  name: "Some Candidate",
+  disambiguation: null,
+  score: 70,
+  reason: "Close name in the library",
+};
+
 // ---------------------------------------------------------------------------
 // Phase 1b (SPEC S6, E2, E3, E6): Reject and Unmatch ask first, with the off-air preview
 // ---------------------------------------------------------------------------
@@ -192,7 +202,7 @@ describe("ArtistPanel Search Library button", () => {
     render(
       <ArtistPanel
         artist={makeArtist({
-          candidates: [{ mbid: "mbid-1", name: "Some Candidate", score: 70 }],
+          candidates: [SOME_CANDIDATE],
         })}
         onSearchLibrary={onSearchLibrary}
       />,
@@ -219,7 +229,7 @@ describe("ArtistPanel Search Library button", () => {
       <QueryClientProvider client={makeClient()}>
         <ArtistPanel
           artist={makeArtist({
-            candidates: [{ mbid: "mbid-1", name: "Some Candidate", score: 70 }],
+            candidates: [SOME_CANDIDATE],
           })}
         />
       </QueryClientProvider>
@@ -432,5 +442,86 @@ describe("ArtistPanel LINK_REJECTED reason", () => {
       wrapper: wrapperFor(makeClient()),
     });
     expect(screen.getByText(/an artist you rejected/i)).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1c (SPEC S8): the candidates are the name's suggested links
+// ---------------------------------------------------------------------------
+
+const SUGGESTIONS = [
+  {
+    artist_id: "artist-club",
+    mbid: "mbid-club",
+    name: "Blue Oyster Club",
+    disambiguation: "Long Island bar band",
+    score: 88,
+    reason: "Was linked automatically by a close name; now a suggestion",
+  },
+  // Two local artists of one name and no MBID: only their ids tell them apart.
+  {
+    artist_id: "artist-local-1",
+    mbid: null,
+    name: "Blue Oyster",
+    disambiguation: null,
+    score: 81,
+    reason: "Close name in the library",
+  },
+  {
+    artist_id: "artist-local-2",
+    mbid: null,
+    name: "Blue Oyster",
+    disambiguation: null,
+    score: 81,
+    reason: "Close name in the library",
+  },
+];
+
+describe("ArtistPanel suggested links", () => {
+  it("shows_suggested_links: each with its name, disambiguation, score and reason", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(<ArtistPanel artist={makeArtist({ candidates: SUGGESTIONS })} />, {
+        wrapper: wrapperFor(makeClient()),
+      });
+
+      expect(screen.getAllByRole("button", { name: /^Accept/i })).toHaveLength(3);
+      expect(screen.getByText("Blue Oyster Club")).toBeDefined();
+      expect(screen.getByText("Long Island bar band")).toBeDefined();
+      expect(screen.getAllByText("Blue Oyster")).toHaveLength(2);
+      expect(screen.getByText(/88%/)).toBeDefined();
+      expect(screen.getByText(/now a suggestion/)).toBeDefined();
+      expect(screen.getAllByText(/Close name in the library/)).toHaveLength(2);
+      expect(screen.queryByText(/No candidates found automatically/i)).toBeNull();
+      // Keyed by artist id: two suggestions without an MBID are two rows, with no key clash.
+      const keyWarnings = consoleError.mock.calls.filter((call) =>
+        String(call[0]).includes("same key")
+      );
+      expect(keyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("Accept is the manual resolve, to the suggestion's artist by its id", async () => {
+    mockedApiFetch.mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      match_status: "manual_matched",
+    });
+    render(<ArtistPanel artist={makeArtist({ candidates: SUGGESTIONS })} />, {
+      wrapper: wrapperFor(makeClient()),
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Accept/i })[2]);
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith(`${ARTIST_URL}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({
+          match_status: "manual_matched",
+          target_artist_id: "artist-local-2",
+        }),
+      });
+    });
   });
 });

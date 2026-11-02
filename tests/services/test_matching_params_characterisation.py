@@ -34,7 +34,7 @@ from syrupy.assertion import SnapshotAssertion
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import CatalogSource, MatchStatus, TargetType
+from backend.domain.enums import CatalogSource, LogNameLinkState, MatchStatus, TargetType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import MappingRule
 from backend.services.artist_matching_service import (
@@ -59,7 +59,7 @@ from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
-from tests.matching_seed import first_link, seed_link
+from tests.matching_seed import seed_link
 
 
 def _uid(n: int) -> UUID:
@@ -243,8 +243,16 @@ def test_match_artists_for_playlist_full_scenario_snapshot(snapshot: SnapshotAss
         assert stored is not None
         # From phase 1a the matcher writes a link, not a matches row. The snapshot keeps the
         # row's fields: the target is the linked artist's MBID, else its id (as the target was),
-        # and the score and tier are the link's v0 evidence.
-        link = first_link(links, artist_id)
+        # and the score and tier are the link's v0 evidence. A match is an active link; from
+        # phase 1c a suggestion (S4) is a link too, and no match.
+        link = next(
+            (
+                held
+                for held in links.list_by_name(artist_id)
+                if held.state == LogNameLinkState.ACTIVE
+            ),
+            None,
+        )
         return {
             "match_status": stored.match_status.value,
             "reason_code": stored.reason_code.value if stored.reason_code else None,

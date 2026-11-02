@@ -19,11 +19,14 @@ def test_canonical_values() -> None:
     assert mc.MID_BAND_LOWER == 55
     assert mc.MID_BAND_UPPER == 64
     assert mc.MID_BAND_GAP_THRESHOLD == 5
-    assert mc.MIN_PRESENTATION_SCORE == 50
+    assert mc.MIN_PRESENTATION_SCORE == 56  # artist model phase 1c (C35): the songs' floor
     assert mc.QUICK_REVIEW_MIN_SCORE == 65
 
 
-def test_mid_band_is_within_noise_floor_and_strong_match_threshold() -> None:
-    assert mc.MIN_PRESENTATION_SCORE <= mc.MID_BAND_LOWER
+def test_the_artist_floor_is_the_song_floor_and_the_mid_band_sits_under_quick_review() -> None:
+    # From phase 1c (C35) the artist floor is the songs' 56, so it sits inside the old
+    # mid-band, whose lead no longer auto-matches: a mid-band score is a suggestion.
+    assert mc.MIN_PRESENTATION_SCORE == mc.SONG_MIN_PRESENTATION_SCORE
+    assert mc.MID_BAND_LOWER < mc.MIN_PRESENTATION_SCORE <= mc.MID_BAND_UPPER
     assert mc.MID_BAND_UPPER < mc.QUICK_REVIEW_MIN_SCORE
     assert mc.MID_BAND_LOWER < mc.MID_BAND_UPPER

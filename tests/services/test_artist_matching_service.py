@@ -1251,12 +1251,11 @@ def test_match_artists_default_strong_threshold_boundary_stays_needs_review() ->
     assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
 
 
-def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> None:
+def test_match_artists_strong_lead_under_95_suggests() -> None:
     """An MB candidate scoring exactly 80 with a distant runner-up (gap >>
-    MB_SCORE_GAP) must AUTO_MATCH at the real strong_match_threshold default
-    (80), and would wrongly stay NEEDS_REVIEW if the default silently
-    drifted to 81 — a second off-by-one mutant on this exact default
-    (80 -> 81) previously survived mutation testing. Uses the MB tier (exact
+    MB_SCORE_GAP) auto-matched at the strong_match_threshold default (80) until artist
+    model phase 1c. From 1c (C35, SPEC S4) only 95+ links: both candidates are suggested,
+    best first, and the name waits in review with LINK_SUGGESTED. Uses the MB tier (exact
     integer scores) rather than fuzzy text so the boundary is unambiguous.
     """
     playlist_id = uuid4()
@@ -1296,11 +1295,17 @@ def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> No
 
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
-    assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = first_link(links, artist.id)
-    assert created is not None
-    assert _target(created) == "mb-80"
-    assert created.strength == 80
+    assert (stored.match_status, stored.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
+    suggested = [
+        (_target(link), link.state, link.strength) for link in links.list_by_name(artist.id)
+    ]
+    assert sorted(suggested, key=lambda s: -s[2]) == [
+        ("mb-80", LogNameLinkState.SUGGESTED, 80),
+        ("mb-60", LogNameLinkState.SUGGESTED, 60),
+    ]
 
 
 def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:
