@@ -43,8 +43,9 @@ def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
     ``run_id`` names the matching run this stage reports to (spec 2026-10-17): the stage
     finishes there once its song masters are recalculated. None for an upload's matching.
 
-    Every run is in title-scoring trial mode (AUD-R100): V11.1 scores beside today's scorer,
-    and each song takes the more cautious result. Ending the trial is Lance's decision.
+    Every run is in title-scoring trial mode (AUD-R100): V11.1 scores beside today's scorer.
+    V11.1 alone decides what is hidden, and a song auto-matches only when both auto-match the
+    same file (AUD-R101). Ending the trial is Lance's decision.
     """
     settings = get_settings()
 

@@ -178,8 +178,9 @@ class ReasonCode(StrEnum):
     # Song matching's Step B could not reach MusicBrainz (AUD-R028, D16): the song is
     # deferred, and every re-check rewinds it. DEFERRED_RETRY stays the artist cascade's.
     MB_UNAVAILABLE = "MB_UNAVAILABLE"
-    # Trial mode (AUD-R100): today's title scorer and V11.1 differ in status or file, so the
-    # song is in review.
+    # Trial mode (AUD-R100): today's title scorer and V11.1 differ in status or file. The song
+    # is in review, or hidden (auto_rejected) when V11.1 alone hides it (AUD-R101); a song
+    # both hide keeps today's reason.
     TITLE_SCORES_DISAGREE = "TITLE_SCORES_DISAGREE"
 
 

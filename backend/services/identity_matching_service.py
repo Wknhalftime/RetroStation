@@ -770,27 +770,28 @@ class IdentityMatchingEngine:
 
 
 def trial_result(today: IdentityMatchResult, trial: IdentityMatchResult) -> IdentityMatchResult:
-    """The more cautious of a song's two results in trial mode (AUD-R100).
+    """A song's result in trial mode (AUD-R100, amended by AUD-R101).
 
     ``today`` is today's strategy chain's result, ``trial`` the same chain's with V11.1 scoring
-    the titles. The song auto-matches only when both auto-match the same file, and is hidden
-    (auto_rejected) only when both hide it; the result is then today's. Every other song goes
-    to review, showing V11.1's file, score and tier unless V11.1 hides it (then today's), with
-    TITLE_SCORES_DISAGREE when the two differ in status or file, else the shown one's reason.
-    A result no title score went into (a mapping rule, no candidate) is the same in both, so
-    it comes back unchanged.
+    the titles. V11.1 alone decides whether the song is hidden (auto_rejected): when both hide
+    it the result is today's, and when only V11.1 does it is V11.1's, with
+    TITLE_SCORES_DISAGREE. The song auto-matches only when both auto-match the same file; the
+    result is then today's. Every other song goes to review, showing V11.1's file, score and
+    tier, with TITLE_SCORES_DISAGREE when the two differ in status or file, else V11.1's
+    reason. A result no title score went into (a mapping rule, no candidate) is the same in
+    both, so it comes back unchanged.
     """
     if today.status == trial.status == MatchStatus.AUTO_REJECTED:
         return today
     agree = today.status == trial.status and today.library_file_id == trial.library_file_id
     if agree and today.status == MatchStatus.AUTO_MATCHED:
         return today
-    shown = today if trial.status == MatchStatus.AUTO_REJECTED else trial
     if agree:
-        return replace(shown, status=MatchStatus.NEEDS_REVIEW)
+        return replace(trial, status=MatchStatus.NEEDS_REVIEW)
+    hidden = trial.status == MatchStatus.AUTO_REJECTED
     return replace(
-        shown,
-        status=MatchStatus.NEEDS_REVIEW,
+        trial,
+        status=MatchStatus.AUTO_REJECTED if hidden else MatchStatus.NEEDS_REVIEW,
         reason_code=ReasonCode.TITLE_SCORES_DISAGREE,
         reason_detail=format_title_scores_disagree(today.confidence_score, trial.confidence_score),
     )

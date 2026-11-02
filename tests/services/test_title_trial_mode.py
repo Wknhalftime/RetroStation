@@ -1,10 +1,11 @@
-"""Acceptance: song matching in trial mode (SPEC 2026-11-01, S3-S9, E2-E5; AUD-R100).
+"""Acceptance: song matching in trial mode (SPEC 2026-11-01, S3-S9, E2-E5; AUD-R100, AUD-R101).
 
 Lance: "don't remove the human from the equation." Until V11.1 passes his blind test, today's
-title scorer and V11.1 both decide each song, and the more cautious outcome wins:
+title scorer and V11.1 both decide each song:
 - auto-match only when both auto-match the same file (the result is today's);
-- hidden only when both hide it (the result is today's);
-- review otherwise, showing V11.1's pick unless V11.1 hides the song.
+- hidden whenever V11.1 hides it (AUD-R101; when both hide it the result is today's, and
+  test_title_v11_hides.py covers V11.1 hiding a song today's scorer shows);
+- review otherwise, showing V11.1's pick.
 
 T is a song's result from today's strategy chain, V the same chain scored by V11.1. V11.1's
 policy: auto-match at 95, or at 85 with a 10-point lead over a real competitor; hidden under 56.
@@ -286,12 +287,10 @@ def test_hidden_today_shown_by_v11_goes_to_review(monkeypatch: pytest.MonkeyPatc
     [
         # both review, different picks: V11.1's
         ({"A": (70.0, 50.0), "B": (65.0, 70.0)}, "B", 70.0),
-        # V11.1 hides: today's pick and score
-        ({"A": (70.0, 40.0), "B": (65.0, 30.0)}, "A", 70.0),
         # today auto-matches, V11.1 reviews the same file: V11.1's score
         ({"A": (100.0, 70.0), "B": (50.0, 30.0)}, "A", 70.0),
     ],
-    ids=["both_review", "v11_hides", "today_auto_v11_review"],
+    ids=["both_review", "today_auto_v11_review"],
 )
 def test_review_shows_v11_pick_unless_hidden(
     monkeypatch: pytest.MonkeyPatch,
