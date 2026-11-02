@@ -246,4 +246,4 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R101.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R102.
