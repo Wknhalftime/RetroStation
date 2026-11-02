@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import psycopg
 from psycopg.rows import dict_row
 
@@ -65,6 +66,7 @@ class _Tally:
     pairs_cached: int = 0
     pairs_fetched: int = 0
     pairs_unsearched: int = 0
+    pairs_failed: int = 0
     outcomes: Counter[str] = field(default_factory=Counter)
     confident_recordings: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
@@ -96,7 +98,15 @@ def _dry_run(
     budget = [max_searches]
     for pair in pairs:
         was_cached = cache.get(_search_key(pair)) is not None
-        hits = _hits_for(pair, cache, client, budget)
+        try:
+            hits = _hits_for(pair, cache, client, budget)
+        except httpx.HTTPError as exc:
+            # MusicBrainz said no (a 503 after the client's retries, a timeout): this pair
+            # is reported as unsearched and the run goes on, as the task would.
+            print(f"search failed for {pair.artist_mbid} / {pair.title!r}: {exc}")
+            tally.pairs_failed += 1
+            tally.outcomes["unsearched"] += len(pair.files)
+            continue
         if hits is None:
             tally.pairs_unsearched += 1
             tally.outcomes["unsearched"] += len(pair.files)
@@ -128,6 +138,7 @@ def _print_summary(tally: _Tally, cache: PgMusicBrainzCacheRepository, no_artist
     print(f"  with a cached search:          {tally.pairs_cached}")
     print(f"  searched now:                  {tally.pairs_fetched}")
     print(f"  not searched (budget):         {tally.pairs_unsearched}")
+    print(f"  search failed:                 {tally.pairs_failed}")
     print("file outcomes on the searched pairs:")
     for outcome in (PickOutcome.CONFIDENT, PickOutcome.AMBIGUOUS, PickOutcome.EMPTY):
         print(f"  {outcome.value:<10} {tally.outcomes[outcome.value]}")
