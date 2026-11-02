@@ -1,13 +1,16 @@
 """Characterisation, artist model phase 0a (SPEC S1): Reject and Unmatch of a log name, and
 their cascade on its lines.
 
-Phase 1b changes both on purpose (M24, AUD-R037: never take manual or same-name songs off air,
-after a confirmation with the off-air count) and relocks this file. Until then it records
-today's cascades, read only through ``play_file_resolution``:
+Phase 1b changed both on purpose (M24, AUD-R037: never take manual or same-name songs off air,
+after a confirmation with the off-air count) and relocked this file. It records the cascades,
+read only through ``play_file_resolution``:
 
-- Reject (POST /matching/artists/{id}/resolve, manual_rejected) takes every line of the name
-  off air except the manually matched ones, so the same-name song goes;
-- Unmatch (POST /matching/artists/{id}/unmatch) takes every line off air, manual ones too.
+- Reject (POST /matching/artists/{id}/resolve, manual_rejected) keeps the manually matched line
+  and the line matched to a same-name file on air;
+- Unmatch (POST /matching/artists/{id}/unmatch) keeps them on air too.
+
+What the cascades still take off air (a line matched to another artist's file) is pinned in
+``tests/routers/test_safe_reject.py`` and ``test_cascade_preview.py``.
 
 The log name and its lines come from the ingestion task; the name is resolved by hand through
 the route; its songs are matched by the identity matching task (MusicBrainz is never reached),
@@ -213,8 +216,8 @@ def _on_air(conn: Conn, name: _LogName) -> tuple[UUID | None, UUID | None]:
 
 
 def test_reject_of_a_log_name(conn: Conn, client: TestClient, cascade_band: _LogName) -> None:
-    """S1, Reject of a log name: the auto-matched same-name song goes off air, the song
-    matched by hand stays."""
+    """S1, Reject of a log name (M24, phase 1b): the auto-matched same-name song and the song
+    matched by hand both stay on air."""
     assert _on_air(conn, cascade_band) == (cascade_band.song_one_file, cascade_band.song_two_file)
 
     response = client.post(
@@ -223,14 +226,15 @@ def test_reject_of_a_log_name(conn: Conn, client: TestClient, cascade_band: _Log
     )
 
     assert response.status_code == 200
-    assert _on_air(conn, cascade_band) == (None, cascade_band.song_two_file)
+    assert _on_air(conn, cascade_band) == (cascade_band.song_one_file, cascade_band.song_two_file)
 
 
 def test_unmatch_of_a_log_name(conn: Conn, client: TestClient, cascade_band: _LogName) -> None:
-    """S1, Unmatch of a log name: every line goes off air, the one matched by hand too."""
+    """S1, Unmatch of a log name (M24, phase 1b): the auto-matched same-name song and the song
+    matched by hand both stay on air."""
     assert _on_air(conn, cascade_band) == (cascade_band.song_one_file, cascade_band.song_two_file)
 
     response = client.post(f"/api/v1/matching/artists/{cascade_band.id}/unmatch")
 
     assert response.status_code == 200
-    assert _on_air(conn, cascade_band) == (None, None)
+    assert _on_air(conn, cascade_band) == (cascade_band.song_one_file, cascade_band.song_two_file)

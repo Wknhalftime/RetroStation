@@ -604,11 +604,8 @@ class TestMissingMatchesReport:
     # ------------------------------------------------------------------
 
     def test_matched_statuses_excluded(self, client, db_conn):
-        """AUTO_MATCHED and MANUAL_MATCHED identities must not appear.
-
-        Both the identity *and* its artist must be matched — if the artist is
-        still PENDING the OR condition would correctly surface the track.
-        """
+        """AUTO_MATCHED and MANUAL_MATCHED identities must not appear (a line counts by its
+        own status, C37)."""
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
         _insert_identity_with_events(
@@ -657,11 +654,13 @@ class TestMissingMatchesReport:
         assert resp.status_code == 200
         assert resp.json()["total"] == 4
 
-    def test_artist_status_triggers_inclusion(self, client, db_conn):
-        """A track with AUTO_MATCHED identity but a PENDING artist must appear.
+    def test_artist_status_does_not_trigger_inclusion(self, client, db_conn):
+        """A track with an AUTO_MATCHED identity under a PENDING artist is not missing.
 
-        The OR condition on artist match_status ensures that an unresolved artist
-        surfaces the track even when the identity pipeline has already matched it.
+        C37 (AUD-R038, phase 1b): the report counts a line by its own status. Before 1b an
+        unresolved artist surfaced every one of its tracks, so the lines a safe Unmatch keeps
+        on air would have shown as missing. tests/routers/test_missing_matches_by_line_status.py
+        covers every status.
         """
         station = _insert_station(db_conn, "KAZR-FM")
         playlist = _insert_playlist(db_conn, station)
@@ -677,8 +676,8 @@ class TestMissingMatchesReport:
         resp = client.get(self._url(station.id))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 1
-        assert data["items"][0]["artist_name"] == "Pending Artist"
+        assert data["total"] == 0
+        assert data["items"] == []
 
     def test_response_shape(self, client, db_conn):
         """Every required field is present on each item."""

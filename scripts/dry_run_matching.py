@@ -65,6 +65,7 @@ from backend.services.artist_matching_service import (  # noqa: E402
     ArtistMatchThresholds,
     build_local_artist_engine,
     build_mb_artist_engine,
+    hold_back_rejected_link,
     resolve_one_name,
 )
 from backend.services.identity_matching_service import (  # noqa: E402
@@ -76,6 +77,7 @@ from backend.services.identity_matching_service import (  # noqa: E402
     load_exclusions,
     resolve_one_line,
 )
+from backend.services.log_name_link_service import LogNameLinkService  # noqa: E402
 from backend.services.mb_client import MusicBrainzApiClient  # noqa: E402
 from backend.services.recording_search import RecordingSearch  # noqa: E402
 
@@ -234,12 +236,14 @@ def artist_stage(conn: Conn, client: MusicBrainzApiClient, hook: Hook) -> dict[s
     hook("names", conn)
     inputs = ArtistEngineInputs(_artist_repos(conn), client, _artist_thresholds())
     local, mb = build_local_artist_engine(inputs), build_mb_artist_engine(inputs, {})
+    # The task holds back a match to a rejected link (phase 1b S4); so does the dry run.
+    links = LogNameLinkService(PgLogNameLinkRepository(conn), PgArtistRepository(conn))
     catalog = _catalog(conn)
     hook("engines", conn)
     stage: dict[str, Any] = {}
     for name in names:
         try:
-            result = resolve_one_name(name, local, mb)
+            result = hold_back_rejected_link(name, resolve_one_name(name, local, mb), links)
         except MusicBrainzUnavailableError:
             stage[str(name.id)] = _unavailable(name.original_name)
             continue

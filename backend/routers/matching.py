@@ -17,7 +17,8 @@ from backend.dependencies import (
     get_db_connection,
     get_mb_client,
 )
-from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.domain.artist_cascade import CascadeCounts
+from backend.domain.enums import CascadeAction, MatchStatus, MatchTier, ReasonCode
 from backend.domain.matching import (
     LogNameNotFoundError,
     LogNameNotUnmatchableError,
@@ -26,6 +27,7 @@ from backend.domain.matching import (
 from backend.domain.system import StorageUnavailableError
 from backend.services.artist_resolution_service import (
     ArtistResolutionRepos,
+    cascade_preview,
     match_by_hand,
     reject_by_hand,
     unmatch,
@@ -347,6 +349,41 @@ class ResolveResult(BaseModel):
     match_status: str
 
 
+class OffAirCount(BaseModel):
+    """The lines on air a Reject or Unmatch takes off air, and their plays."""
+
+    lines: int
+    plays: int
+
+
+class KeptCount(BaseModel):
+    """The lines on air it keeps: matched by hand, and matched to a same-name file."""
+
+    manual: int
+    same_name: int
+
+
+class CascadePreview(BaseModel):
+    """What a whole-name Reject or Unmatch takes off air and keeps (phase 1b, S5, E2)."""
+
+    off_air: OffAirCount
+    kept: KeptCount
+
+    @classmethod
+    def of(cls, counts: CascadeCounts) -> CascadePreview:
+        return cls(
+            off_air=OffAirCount(lines=counts.off_air_lines, plays=counts.off_air_plays),
+            kept=KeptCount(manual=counts.kept_manual, same_name=counts.kept_same_name),
+        )
+
+
+class ArtistResolveResult(ResolveResult):
+    """A log name's Resolve or Unmatch; a Reject and an Unmatch add the counts of what they
+    did (E2), a manual match none."""
+
+    cascade: CascadePreview | None = None
+
+
 # ---------------------------------------------------------------------------
 # GET /queue
 # ---------------------------------------------------------------------------
@@ -579,16 +616,39 @@ async def get_matching_queue(
 # ---------------------------------------------------------------------------
 
 
+@router.get("/artists/{artist_id}/cascade-preview", response_model=CascadePreview)
+def preview_artist_cascade(
+    _token: Token,
+    artist_id: UUID,
+    resolution: ResolutionRepos,
+    action: Annotated[CascadeAction, Query()],
+) -> CascadePreview:
+    """What a Reject or an Unmatch of the log name would take off air, and what it would keep
+    on air (phase 1b, S5): the panel's confirmation shows it before the action runs. Reads only.
+
+    Raises:
+        HTTPException: 404 if the artist does not exist; 422 if action is not reject or
+            unmatch; 503 if the database connection is lost.
+    """
+    try:
+        counts = cascade_preview(artist_id, action, resolution)
+    except LogNameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+    return CascadePreview.of(counts)
+
+
 @router.post(
     "/artists/{artist_id}/resolve",
-    response_model=ResolveResult,
+    response_model=ArtistResolveResult,
 )
 def resolve_artist(
     _token: Token,
     artist_id: UUID,
     body: ArtistResolution,
     resolution: ResolutionRepos,
-) -> ResolveResult:
+) -> ArtistResolveResult:
     """Manually resolve an artist as matched or rejected.
 
     A sync route on the request's one connection (C75): the status, the cascade to the
@@ -607,7 +667,8 @@ def resolve_artist(
         _token: Bearer token (auth check only).
 
     Returns:
-        :class:`ResolveResult` with updated id and match_status.
+        :class:`ArtistResolveResult` with updated id and match_status; a Reject adds the
+        counts of what it took off air and kept (phase 1b, S2, E2).
 
     Raises:
         HTTPException: 404 if the artist does not exist.
@@ -632,11 +693,12 @@ def resolve_artist(
         )
 
     new_status = MatchStatus(body.match_status)
+    cascade: CascadePreview | None = None
     try:
         if new_status == MatchStatus.MANUAL_MATCHED and target:
             playlist_ids = match_by_hand(artist_id, target, resolution)
         else:
-            reject_by_hand(artist_id, resolution)
+            cascade = CascadePreview.of(reject_by_hand(artist_id, resolution))
             playlist_ids = []
         if playlist_ids:
             # Commit BEFORE enqueueing. The Huey worker is a separate process with its own DB
@@ -668,7 +730,7 @@ def resolve_artist(
                 error=repr(exc),
             )
 
-    return ResolveResult(id=artist_id, match_status=new_status.value)
+    return ArtistResolveResult(id=artist_id, match_status=new_status.value, cascade=cascade)
 
 
 # ---------------------------------------------------------------------------
@@ -825,22 +887,20 @@ async def resolve_identity(
 
 @router.post(
     "/artists/{artist_id}/unmatch",
-    response_model=ResolveResult,
+    response_model=ArtistResolveResult,
 )
 def unmatch_artist(
     _token: Token,
     artist_id: UUID,
     resolution: ResolutionRepos,
-) -> ResolveResult:
-    """Revert a finalized artist match back to NEEDS_REVIEW.
+) -> ArtistResolveResult:
+    """Revert a finalized artist match back to NEEDS_REVIEW (reason USER_UNMATCHED).
 
-    Cascades to ALL child identities regardless of status — every child is
-    set to NEEDS_REVIEW with reason_code=USER_UNMATCHED and its match rows are deleted —
-    and every link of the artist, in every state, is removed (phase 1a S10). This is
-    intentionally more aggressive than ``resolve_artist``'s
-    MANUAL_REJECTED cascade (which protects manual children); unmatching an
-    artist is the curator saying "throw the whole tree out and start over."
-    A sync route on the request's one connection (C75).
+    Safe since phase 1b (M24, AUD-R037): the manual lines and the lines matched to a
+    same-name file keep their status and matches; every other line goes back to
+    NEEDS_REVIEW with USER_UNMATCHED and its match rows are deleted. Every link of the name
+    is remembered as rejected (C19). Answers with the counts of what it took off air and
+    kept (E2). A sync route on the request's one connection (C75).
 
     Raises:
         HTTPException: 404 if the artist does not exist.
@@ -849,7 +909,7 @@ def unmatch_artist(
         HTTPException: 503 if the database connection is lost.
     """
     try:
-        unmatch(artist_id, resolution)
+        counts = unmatch(artist_id, resolution)
     except LogNameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except StorageUnavailableError as lost:
@@ -862,7 +922,11 @@ def unmatch_artist(
             ),
         ) from exc
 
-    return ResolveResult(id=artist_id, match_status=MatchStatus.NEEDS_REVIEW.value)
+    return ArtistResolveResult(
+        id=artist_id,
+        match_status=MatchStatus.NEEDS_REVIEW.value,
+        cascade=CascadePreview.of(counts),
+    )
 
 
 # ---------------------------------------------------------------------------

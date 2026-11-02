@@ -6,7 +6,8 @@ feat/cue-editor-api, the editor API; the "Station liners" section was added 2026
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
-with its phase 1a. Rulings cited here are in `audit/rulings.jsonl`
+with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b. Rulings cited
+here are in `audit/rulings.jsonl`
 (AUD-R015..R058 ACTIVE). If the code and this page disagree, fix one of
 them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -48,7 +49,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 **Known gaps** (true today, not rules to copy):
 - Routers run SQL directly: 45 `.execute()` lines in 10 router files (phase 0c moved the works
   router's writes out, and phase 1a the artist Resolve and Unmatch, below).
-  `routers/matching.py` is 960 lines.
+  `routers/matching.py` is 1,030 lines.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
@@ -105,11 +106,13 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   and has no recorded error (0044's stubs and any made since), one transaction each, with every
   hand-off stubbed.
 - Writers: the artist matcher (`_persist_artist_result`: the catalog artist first, then the
-  link, origin automatic; never over a manual or rejected pair), Resolve (a manual link; the
-  name's other links stay) and Unmatch (every link of the name goes). Resolve and Unmatch are
-  sync routes on `SyncRepos` (C75) calling `services/artist_resolution_service.py`, whose
-  statements are `ArtistResolutionRepository`'s (moved from the router unchanged), so status,
-  cascade and link commit together.
+  link, origin automatic; never over a manual or rejected pair, and a match to a rejected pair
+  is held back, below), Resolve (a manual link, which makes even a rejected pair active again;
+  the name's other links stay), and Reject and Unmatch (every link of the name becomes
+  `rejected`, C19; none is deleted since phase 1b). Resolve, Reject and Unmatch are sync routes
+  on `SyncRepos` (C75) calling `services/artist_resolution_service.py`, so status, cascade and
+  link commit together. `unlink_all` has had no caller since 1b; it stays because the locked
+  single-writer test expects the service to own the port's delete.
 - Readers: Tier 1 of song matching (the first active link, manual first, then strength, then
   the oldest; the MBID is the linked artist's current one), the re-check wave's linked names
   (`normalized_names_linked_since`), and the works merge, which keeps a local artist a link in
@@ -127,6 +130,42 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `tests/repositories/test_log_name_links_contract.py`, the migration's
   `tests/integration/test_log_name_links_*_pg.py` and the naming's
   `tests/tasks/test_enrichment_names_stubs.py` and `tests/tasks/test_enrichment_stub_checks.py`.
+
+## Whole-name Reject and Unmatch: safe cascades (phase 1b, M24, AUD-R037)
+
+- One pure function decides what a whole-name Reject or Unmatch does to the name's lines:
+  `plan_cascade` (`domain/artist_cascade.py`). It keeps the manual lines (`manual_matched`,
+  `manual_rejected`) and the lines matched to a same-name file (`auto_matched`, and the match
+  `play_file_resolution` plays is to a file whose `normalized_artist_name` is the name's
+  `normalized_name`, C16); every other line changes. A line is on air while it is
+  `auto_matched` or `manual_matched`.
+- Reject: the name `manual_rejected`, its links `rejected`, the changed lines `auto_rejected`
+  (status only, as before). Unmatch: the name `needs_review` / `USER_UNMATCHED`, its links
+  `rejected`, the changed lines `needs_review` / `USER_UNMATCHED` with their matches deleted.
+  Kept lines are untouched. Each answers with the counts of what it did (`cascade`: lines and
+  plays taken off air; lines kept on air, manual and same-name), read when it runs.
+- `GET /matching/artists/{id}/cascade-preview?action=reject|unmatch` returns the same counts
+  from the same plan and writes nothing; the artist panel shows them in a confirmation before
+  either action, and the Resolution Center's banner shows the action's own counts after.
+- The lines are read and written through `ArtistCascadeRepository` (`repositories/
+  artist_cascade.py`, fake `tests/fakes/artist_cascade.py`, contract test
+  `tests/repositories/test_artist_cascade_contract.py`); `ArtistResolutionRepository` keeps
+  the name's status writes (its `reject_open_songs`, `reopen_every_song` and
+  `delete_song_matches` have had no caller since 1b; its locked fake and contract test still
+  run them). The action reads the lines `FOR UPDATE`, so a matcher's guarded song write waits
+  for it instead of being overwritten (AUD-R018).
+- A rejected pair stays rejected (S4, C19): when the artist matcher's automatic match targets
+  an artist whose link with the name is `rejected`, `hold_back_rejected_link` turns it into
+  `needs_review` / `LINK_REJECTED`, written through the same guarded write; no link, no
+  catalog upsert, no cascade. The gate's dry run asks the same function. Only a manual
+  Resolve makes the pair active again.
+- The station missing-matches report counts a line by its own status (C37, AUD-R038): a
+  matched line under an unresolved name still plays and is not missing.
+- The checks are `tests/domain/test_artist_cascade.py`, `tests/routers/test_safe_reject.py`,
+  `tests/routers/test_cascade_preview.py`, `tests/services/test_rejected_links_stay_rejected.py`,
+  `tests/routers/test_missing_matches_by_line_status.py`, the contract test above, and the
+  relocked `tests/routers/test_matching_unmatch.py` and
+  `tests/integration/test_curation_cascades_pg.py`.
 
 ## Derived counts kept by triggers
 
@@ -245,7 +284,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE) | ingest, matchers, review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE, LINK_REJECTED) | ingest, matchers (an artist match held back on a rejected link is `needs_review` / LINK_REJECTED, phase 1b S4), review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
@@ -300,7 +339,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - **Every re-check's rewind** takes undecided artists (`needs_review`, `auto_rejected`) and
   undecided songs (those two plus `manual_rejected`): a song the curator rejected waits for
   the next run, then is re-scored without its rejected files. A manually rejected artist is
-  never rewound (AUD-R029).
+  never rewound (AUD-R029). A name held back on a rejected link (LINK_REJECTED) is rewound
+  like any `needs_review` name and held back again until the curator decides it (1b S4).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
   a duplicated re-check repeats its rewind and fan-out, and matches and rejected artists are

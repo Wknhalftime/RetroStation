@@ -98,8 +98,37 @@ class LogNameLinkService:
             )
         )
 
+    def reject_all(self, broadcast_artist_id: UUID) -> None:
+        """Remember every link of the log name as rejected (C19, SPEC 1b S2, S3, E5): Reject and
+        Unmatch keep the pairs so the matcher never adds them back. A link already rejected is
+        left as it is."""
+        for link in self._links.list_by_name(broadcast_artist_id):
+            if link.state != LogNameLinkState.REJECTED:
+                self._links.set_link_state(
+                    broadcast_artist_id, link.artist_id, LogNameLinkState.REJECTED
+                )
+
+    def rejected_artist(self, broadcast_artist_id: UUID, target: str) -> Artist | None:
+        """The catalog artist *target* names, when the log name's link to it is rejected; None
+        otherwise (SPEC 1b S4). Makes no stub: an artist with no catalog row has no link.
+        Reads the name's links first: most names have no rejected link, and then the catalog
+        is not read."""
+        rejected = {
+            link.artist_id
+            for link in self._links.list_by_name(broadcast_artist_id)
+            if link.state == LogNameLinkState.REJECTED
+        }
+        if not rejected:
+            return None
+        artist = self._catalog.get_by_id(target) or self._catalog.get_by_mbid(target)
+        return artist if artist is not None and artist.id in rejected else None
+
     def unlink_all(self, broadcast_artist_id: UUID) -> None:
-        """Remove every link of the log name, in every state (SPEC 1a S10)."""
+        """Remove every link of the log name, in every state (SPEC 1a S10).
+
+        No caller since phase 1b, whose Unmatch rejects the links instead (C19); it stays
+        because the locked ``tests/test_log_name_links_single_writer.py`` expects the service
+        to own the port's delete."""
         self._links.delete_links_of_name(broadcast_artist_id)
 
     def tier1_link(self, broadcast_artist_id: UUID) -> LogNameLink | None:
