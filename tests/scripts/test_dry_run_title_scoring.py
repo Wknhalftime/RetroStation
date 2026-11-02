@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from psycopg.rows import dict_row, tuple_row
 
 from backend.services.normalization import (
     compute_normalized_signature,
@@ -58,7 +59,10 @@ def _seed(conn: psycopg.Connection[Any]) -> None:
     )
     # Linked to an artist whose MBID no file carries: Step A finds nothing and Step B has
     # nothing to add. Seeded as artist model phase 1a seeds a link (tests/matching_seed.py).
-    seed_pg_link(conn, artist_id, str(uuid4()))
+    conn.row_factory = dict_row  # the adapters read rows by column name
+    with conn.transaction():  # and the stub's write takes a savepoint
+        seed_pg_link(conn, artist_id, str(uuid4()))
+    conn.row_factory = tuple_row  # _counts reads them by position
     files: dict[str, UUID] = {}
     for title in ("Big Love", "Ship Of Fools", "Heart Beat"):
         files[title] = uuid4()
