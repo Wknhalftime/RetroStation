@@ -21,6 +21,11 @@ from backend.domain.catalog import Artist, Recording, Work
 from backend.domain.enums import LogCategory, RecheckScope, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
+from backend.services.library_enrichment_service import (
+    EnrichmentRepos,
+    apply_recording_lookup,
+    needs_recording_lookup,
+)
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.repository_factory import RepositoryFactory
@@ -648,7 +653,12 @@ def _run_recordings_phase(
     ctx: _PhaseContext,
     settings: Settings,
 ) -> None:
-    """Recording duration backfill with MBID coalescing + orphan cleanup.
+    """Recording lookup phase with MBID coalescing + orphan cleanup.
+
+    A recording that lacks a duration or a MusicBrainz work is looked up
+    (`needs_recording_lookup`) and the payload's length, live flag and
+    performed work are applied (`apply_recording_lookup`); the rest are
+    marked enhanced without a call.
 
     Mutates `ctx.done["recordings"]`, `ctx.failed["recordings"]`,
     `ctx.metrics["recordings"]`, and `ctx.orphans_deleted` (the rowcount
@@ -672,15 +682,34 @@ def _run_recordings_phase(
             def _recording_heartbeat(current: int, total: int, mbid: str) -> None:
                 _emit_pre_pass_heartbeat(ctx, "recordings", current, total, mbid)
 
-            # Duration is the only field this phase writes, and the batched
-            # search that created the recording already stored it. Looking up
-            # a recording that has a duration buys nothing (a 2026-11-02
-            # profile: 10,936 of 11,166 lookups returned the length we held).
+            # A lookup carries the length, the live flag and the performed
+            # work. The batched search that created the recording stored the
+            # length but no relations, so a recording that has a duration AND
+            # sits on a MusicBrainz work has nothing left to learn and is not
+            # looked up (a 2026-11-02 profile: 10,936 of 11,166 lookups
+            # returned the length we held, while 7,026 named a work the
+            # recording was not on).
+            musicbrainz_work_ids = repos.works.list_musicbrainz_ids(
+                [r.work_id for r in pending_recordings if r.work_id is not None]
+            )
+            to_look_up = {
+                r.id for r in pending_recordings if needs_recording_lookup(r, musicbrainz_work_ids)
+            }
             recording_map = coalesce_recording_lookups(
-                (r.id for r in pending_recordings if r.duration_ms is None),
+                to_look_up,
                 mb_client,
                 on_progress=_recording_heartbeat,
             )
+            enrichment_repos = EnrichmentRepos(
+                files=repos.library_files,
+                enrichment_queries=repos.library_files,
+                recordings=repos.recordings,
+                works=repos.works,
+                song_masters=repos.song_masters,
+                matches=repos.matches,
+                artists=repos.artists,
+            )
+            applied_totals = {"works_linked": 0, "files_moved": 0, "marked_live": 0}
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
             # a failing first item silently discards all coalesced
@@ -698,7 +727,7 @@ def _run_recordings_phase(
                 # DB writes can fail. Counter increments + success log
                 # live in the `else:` branch so a logic bug there
                 # surfaces instead of being silently caught.
-                needs_duration = recording.duration_ms is None
+                needs_lookup = recording.id in to_look_up
                 cache_hit = recording.id in recording_map
                 cached_payload = recording_map.get(recording.id)
                 try:
@@ -706,19 +735,26 @@ def _run_recordings_phase(
                     # that was already authoritative). Map miss -> the
                     # pre-pass failed transiently for this MBID, retry
                     # the lookup live inside this same try/except. A
-                    # recording with a duration is not looked up at all.
+                    # recording with nothing to learn is not looked up.
                     data: MbRecording | None = None
-                    if needs_duration and cache_hit:
+                    if needs_lookup and cache_hit:
                         data = cached_payload
-                    elif needs_duration:
+                    elif needs_lookup:
                         data = mb_client.lookup_recording(recording.id)
-                    if data and needs_duration:
-                        length_ms = data.get("length")
-                        if length_ms is not None:
-                            conn.execute(
-                                "UPDATE recordings SET duration_ms = %s WHERE id = %s",
-                                (int(length_ms), recording.id),
-                            )
+                    if data:
+                        applied = apply_recording_lookup(recording, data, enrichment_repos)
+                        applied_totals["works_linked"] += int(applied.recording_linked)
+                        applied_totals["files_moved"] += applied.files_moved
+                        applied_totals["marked_live"] += int(applied.marked_live)
+                        logger.info(
+                            "mb_recording_lookup_applied",
+                            mbid=recording.id,
+                            work_id=applied.work_id,
+                            recording_linked=applied.recording_linked,
+                            files_moved=applied.files_moved,
+                            marked_live=applied.marked_live,
+                            duration_set=applied.duration_set,
+                        )
                     repos.recordings.mark_enhanced(recording.id)
                     conn.commit()
                 except _PER_ITEM_RETRIABLE_ERRORS as exc:
@@ -740,12 +776,16 @@ def _run_recordings_phase(
 
                 _advance_progress(ctx, "recordings", f"recording:{recording.id}")
 
-            ctx.metrics["recordings"] = _phase_metrics(
-                rows_queued=len(pending_recordings),
-                distinct_mbids=len({r.id for r in pending_recordings}),
-                live_fetches_delta=mb_client.live_fetches - live_start,
-                cache_hits_delta=mb_client.cache_hits - hits_start,
-            )
+            ctx.metrics["recordings"] = {
+                **_phase_metrics(
+                    rows_queued=len(pending_recordings),
+                    distinct_mbids=len({r.id for r in pending_recordings}),
+                    live_fetches_delta=mb_client.live_fetches - live_start,
+                    cache_hits_delta=mb_client.cache_hits - hits_start,
+                ),
+                "looked_up": len(to_look_up),
+                **applied_totals,
+            }
 
         orphan_cur = conn.execute(
             """DELETE FROM recordings r

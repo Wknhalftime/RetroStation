@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import uuid4
 
 from backend.domain.catalog import Work, WorkFootprint
@@ -63,6 +64,13 @@ class FakeWorkRepository(WorkRepository):
             needs_enhancement=True,
         )
         return work_id
+
+    def list_musicbrainz_ids(self, work_ids: Sequence[str]) -> set[str]:
+        return {
+            w.id
+            for w in self._data.values()
+            if w.id in set(work_ids) and w.origin == CatalogSource.MUSICBRAINZ
+        }
 
     def delete_if_empty(self, work_id: str) -> bool:
         # Mirrors PgWorkRepository for the links the fakes model: a work that
