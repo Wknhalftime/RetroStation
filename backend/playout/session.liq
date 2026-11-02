@@ -433,6 +433,11 @@ def wire(q, name, free_at) =
         not fired()
       then
         fired := true
+        # on_position reads position when the deck's next track begins, before on_track
+        # sets the new sn_rem. A stale sn_rem at least as long as that track's span makes
+        # the callback count as spent, so a short liner after a long segue never starts the
+        # next item and the stream drops to filler. A zero position cannot be met early.
+        sn_rem := 0.
         push_next("startnext_#{name}")
       end
   )
