@@ -83,7 +83,7 @@ def test_mb_api_fetch_start_fires_before_http_call(monkeypatch: pytest.MonkeyPat
     assert len(fetch_events) == 1
     ev = fetch_events[0]
     assert "artist/mbid-A" in ev["url"]
-    assert ev["params"] == {"fmt": "json", "inc": "aliases+tags"}
+    assert ev["params"] == {"fmt": "json"}
     assert ev["log_level"] == "debug"
 
 
