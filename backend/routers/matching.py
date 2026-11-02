@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from backend.config import get_settings
 from backend.dependencies import get_current_token, get_db_connection, get_mb_client
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
-from backend.domain.matching import RecheckNotQueuedError
+from backend.domain.matching import SONG_UNDECIDED_STATUSES, RecheckNotQueuedError
 from backend.domain.system import StorageUnavailableError
 from backend.services.identity_resolution_service import (
     IdentityNotFoundError,
@@ -44,6 +44,14 @@ MbClient = Annotated[MusicBrainzClientProtocol, Depends(get_mb_client)]
 
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
+
+# Songs an artist link sends back to pending: the re-check's undecided set (AUD-R022, R029)
+# plus pending. A link changes what the matcher can score against, so a song it rejected
+# for lack of a match is worth scoring again.
+_ARTIST_LINK_REWIND_STATUSES: list[str] = [
+    MatchStatus.PENDING.value,
+    *(status.value for status in SONG_UNDECIDED_STATUSES),
+]
 
 # Statuses that remain when cascading a MANUAL_REJECTED artist
 _PROTECTED_STATUSES: list[str] = [
@@ -672,9 +680,10 @@ async def resolve_artist(
         # against the corrected artist target. Without this, NEEDS_REVIEW
         # children (now visible in the queue via the broadened CTE above)
         # remain stuck — `get_pending_for_playlist` filters strictly to
-        # PENDING, so a worker re-run alone wouldn't reprocess them. AUTO_*,
-        # MANUAL_*, and *_REJECTED children stay untouched (same philosophy as
-        # _PROTECTED_STATUSES on the MANUAL_REJECTED branch below).
+        # PENDING, so a worker re-run alone wouldn't reprocess them. The same goes
+        # for AUTO_REJECTED and MANUAL_REJECTED children: a low-confidence song is
+        # re-scored against the new target. AUTO_MATCHED and MANUAL_MATCHED
+        # children stay untouched.
         await conn.execute(
             """
             UPDATE track_identities
@@ -688,7 +697,7 @@ async def resolve_artist(
             (
                 MatchStatus.PENDING.value,
                 artist_id,
-                _QUEUE_STATUSES,
+                _ARTIST_LINK_REWIND_STATUSES,
             ),
         )
         # Drop stale identity-keyed match rows for ALL children currently
