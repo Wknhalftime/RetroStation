@@ -236,3 +236,47 @@ def test_lookup_recordings_swallows_transient_error_per_mbid():
     assert "mbid-ok" in result
     assert result["mbid-ok"] is not None
     assert "mbid-flaky" not in result  # omitted, distinct from 404-as-None
+
+
+def test_artist_phase_survives_a_failed_batch_and_still_enhances_each_artist(monkeypatch):
+    """A transient failure of the batch search must not fail the phase.
+
+    The phase logs ``mb_artist_batch_failed`` and hands every artist an empty
+    map, so each one reaches `_enhance_artist` and takes its own live lookup.
+    """
+    from contextlib import nullcontext
+    from datetime import UTC, datetime
+
+    from structlog.testing import capture_logs
+
+    from backend.tasks import mb_enrichment_tasks as tasks
+    from tests.fakes.task_progress import FakeTaskProgressRepository
+
+    fake_client = FakeMbClient(error_mbids={"mbid-1"})
+    artists = [_mbid_artist(id=f"a-{i}", mbid=f"mbid-{i}") for i in (1, 2)]
+    seen_maps: list[object] = []
+
+    def spy(artist, mb_client, conn, repos, *, mbid_map=None):
+        seen_maps.append(mbid_map)
+        return ArtistEnhanceOutcome.ENHANCED
+
+    monkeypatch.setattr(tasks, "connect_sync", lambda _url: nullcontext(MagicMock()))
+    monkeypatch.setattr(tasks, "PgMusicBrainzCacheRepository", MagicMock())
+    monkeypatch.setattr(tasks, "RepositoryFactory", MagicMock())
+    monkeypatch.setattr(tasks, "MusicBrainzApiClient", lambda *a, **k: nullcontext(fake_client))
+    monkeypatch.setattr(tasks, "_enhance_artist", spy)
+    ctx = tasks._PhaseContext(
+        task_id="t",
+        task_started_at=datetime.now(tz=UTC),
+        total=2,
+        progress_repo=FakeTaskProgressRepository(),
+    )
+
+    with capture_logs() as logs:
+        tasks._run_artist_phase(artists, ctx, MagicMock())
+
+    failed = [e for e in logs if e["event"] == "mb_artist_batch_failed"]
+    assert len(failed) == 1
+    assert failed[0]["distinct"] == 2
+    assert seen_maps == [{}, {}]
+    assert ctx.done["artists"] == 2

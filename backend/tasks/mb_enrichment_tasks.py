@@ -36,8 +36,8 @@ from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
 
-# Threshold for the slow-iteration warning emitted from inside the batch
-# lookups. If the wall-clock gap between consecutive heartbeats exceeds this,
+# Threshold for the slow-iteration warning emitted from the phases' heartbeat
+# callbacks. If the wall-clock gap between consecutive heartbeats exceeds this,
 # we log a structured warning so post-hoc analysis can spot drift toward the
 # 10-minute WS stale threshold (`STALE_THRESHOLD_MINUTES` in `backend/websocket.py`). Independent
 # of the cadence math; this is a guardrail, not a contract.
@@ -126,8 +126,10 @@ def _enhance_artist(
     MB API or a cached 404 in `mbid_map`) maps to FAILED.
 
     `mbid_map` is the pre-fetched batch from `search_artists_by_mbids`, keyed
-    by MBID and found-only: an MBID absent from it (merged, deleted, or a
-    failed batch) falls through to a live `lookup_artist`, which follows merges.
+    by MBID and found-only: an MBID absent from it (merged or deleted) falls
+    through to a live `lookup_artist`, which follows merges. When the whole
+    batch fails, the phase passes an empty map, so every artist takes that
+    live lookup inside its own per-item retriable try/except.
 
     Returns ArtistEnhanceOutcome so the caller increments the right counter.
     """
@@ -389,12 +391,32 @@ def _run_artist_phase(
             rows_queued = len(pending_artists)
             distinct_mbids = {a.mbid for a in pending_artists if a.mbid is not None}
 
-            def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
-                _emit_pre_pass_heartbeat(ctx, "artists", current, total, mbid)
+            last_heartbeat_at = 0.0
 
-            mbid_map = mb_client.search_artists_by_mbids(
-                sorted(distinct_mbids), on_progress=_artist_heartbeat
-            )
+            def _artist_heartbeat(current: int, total: int, mbid: str) -> None:
+                nonlocal last_heartbeat_at
+                last_heartbeat_at = _heartbeat_with_slow_warning(
+                    lambda c, t, m: _emit_pre_pass_heartbeat(ctx, "artists", c, t, m),
+                    last_heartbeat_at,
+                    current,
+                    total,
+                    mbid,
+                    phase_label="artists",
+                )
+
+            try:
+                mbid_map = mb_client.search_artists_by_mbids(
+                    sorted(distinct_mbids), on_progress=_artist_heartbeat
+                )
+            except httpx.HTTPError as exc:
+                # One failed batch must not fail the task: an empty map sends every
+                # artist to the live lookup in the per-item loop below.
+                logger.warning(
+                    "mb_artist_batch_failed",
+                    error=str(exc),
+                    distinct=len(distinct_mbids),
+                )
+                mbid_map = {}
             # Commit pre-pass cache writes NOW so they can't be rolled
             # back by a later per-item rollback. Otherwise a queue with
             # a failing first item silently discards all coalesced
@@ -562,8 +584,18 @@ def _run_recordings_phase(
             # the map inside the loop; absent keys (transient pre-pass
             # failure) fall through to a live fallback lookup — same
             # shape as the Tier 2/3 artist coalescing above.
+            last_heartbeat_at = 0.0
+
             def _recording_heartbeat(current: int, total: int, mbid: str) -> None:
-                _emit_pre_pass_heartbeat(ctx, "recordings", current, total, mbid)
+                nonlocal last_heartbeat_at
+                last_heartbeat_at = _heartbeat_with_slow_warning(
+                    lambda c, t, m: _emit_pre_pass_heartbeat(ctx, "recordings", c, t, m),
+                    last_heartbeat_at,
+                    current,
+                    total,
+                    mbid,
+                    phase_label="recordings",
+                )
 
             # A lookup carries the length, the live flag and the performed
             # work. The batched search that created the recording stored the

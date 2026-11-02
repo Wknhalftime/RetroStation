@@ -378,3 +378,32 @@ def test_emit_pre_pass_heartbeat_resurrects_failed_row() -> None:
     assert resurrected.completed_at is None, (
         "touch_running must clear completed_at when resurrecting a failed row"
     )
+
+
+# ---------------------------------------------------------------------------
+# Slow-gap warning — `_heartbeat_with_slow_warning`
+# ---------------------------------------------------------------------------
+
+
+def test_slow_gap_between_heartbeats_logs_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gap over the threshold between two heartbeats logs `mb_coalesce_slow_iteration`.
+
+    The phases' heartbeat callbacks route through this helper, so a stalled batch
+    still leaves a trail before the 10-minute WS stale threshold. The clock is
+    patched; nothing sleeps.
+    """
+    from backend.tasks import mb_enrichment_tasks as tasks
+
+    clock = iter([100.0, 100.0 + tasks._SLOW_ITERATION_WARN_SECONDS + 1.0, 200.0, 200.0])
+    monkeypatch.setattr(tasks.time, "monotonic", lambda: next(clock))
+    cb = _CaptureCallback()
+
+    with capture_logs() as logs:
+        last = tasks._heartbeat_with_slow_warning(cb, 0.0, 1, 2, "m1", phase_label="artists")
+        last = tasks._heartbeat_with_slow_warning(cb, last, 2, 2, "m2", phase_label="artists")
+
+    slow = [e for e in logs if e.get("event") == "mb_coalesce_slow_iteration"]
+    assert len(slow) == 1
+    assert slow[0]["mbid"] == "m2"
+    assert slow[0]["phase"] == "artists"
+    assert cb.calls == [(1, 2, "m1"), (2, 2, "m2")]
