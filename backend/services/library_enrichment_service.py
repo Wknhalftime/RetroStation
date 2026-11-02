@@ -109,14 +109,20 @@ def _musicbrainz_marks_live(rec_data: MbRecording) -> bool:
     for rel in rec_data.get("relations", []):
         if rel.get("type") == "performance" and "live" in rel.get("attributes", []):
             return True
-    return _LIVE_WORD_RE.search(rec_data.get("disambiguation", "")) is not None
+    return _LIVE_WORD_RE.search(_text(rec_data, "disambiguation")) is not None
+
+
+def _text(rec_data: MbRecording, key: str) -> str:
+    """A payload's text field, or "" when it is absent or not text (a JSON null, say)."""
+    value: object = rec_data.get(key, "")
+    return value if isinstance(value, str) else ""
 
 
 def recording_version_type(rec_data: MbRecording) -> VersionType:
     """The version a MusicBrainz recording is: live if MusicBrainz says so, else from its title."""
     if _musicbrainz_marks_live(rec_data):
         return VersionType.LIVE
-    _, version_type = extract_version_info(rec_data.get("title", ""))
+    _, version_type = extract_version_info(_text(rec_data, "title"))
     return version_type
 
 
@@ -190,6 +196,96 @@ def _move_file_to_work(
             matches=repos.matches,
         ),
     )
+
+
+def needs_recording_lookup(recording: Recording, musicbrainz_work_ids: set[str]) -> bool:
+    """Whether a recording lookup can still tell us something: no length, or no MB work.
+
+    The batched search that creates most recordings stores the length but
+    carries no relations, so a recording on no MusicBrainz work (none, or a
+    local one from grouping) may still perform a work the lookup names.
+    ``musicbrainz_work_ids`` are the MusicBrainz works among the pending
+    recordings' works (``WorkRepository.list_musicbrainz_ids``).
+    """
+    return recording.duration_ms is None or recording.work_id not in musicbrainz_work_ids
+
+
+@dataclass(frozen=True)
+class RecordingLookupApplied:
+    """What one recording lookup's payload changed about the stored recording."""
+
+    work_id: str | None
+    """The work the payload says the recording performs, once upserted; else None."""
+    recording_linked: bool
+    """Whether ``recordings.work_id`` was set to it (False when the version slot is taken)."""
+    files_moved: int
+    marked_live: bool
+    duration_set: bool
+
+
+def apply_recording_lookup(
+    recording: Recording,
+    rec_data: MbRecording,
+    repos: EnrichmentRepos,
+) -> RecordingLookupApplied:
+    """Write what a per-recording lookup carries beyond the title: length, live, work.
+
+    The length fills a missing duration only. The live flag is the one
+    version MusicBrainz states outright (:func:`recording_version_type`);
+    another version the title now reads as is left as stored, since the
+    title has not changed. The performed work is upserted with the track
+    artist, as the per-release path does, the recording is put on it where
+    its version slot is free, and every file of the recording moves onto it
+    (see :func:`work_move_service.move_file_to_work` for what a move settles).
+    """
+    duration_set = False
+    length = rec_data.get("length")
+    if recording.duration_ms is None and length is not None:
+        repos.recordings.update_duration(recording.id, int(length))
+        duration_set = True
+
+    marked_live = False
+    if (
+        recording.version_type != VersionType.LIVE
+        and recording_version_type(rec_data) == VersionType.LIVE
+    ):
+        marked_live = repos.recordings.update_version_type(recording.id, VersionType.LIVE)
+
+    work_id = _upsert_performed_work(rec_data, repos)
+    recording_linked = False
+    files_moved = 0
+    if work_id is not None:
+        if recording.work_id != work_id:
+            recording_linked = repos.recordings.link_work(recording.id, work_id)
+        for library_file in repos.files.get_by_recording(recording.id):
+            if library_file.work_id != work_id:
+                _move_file_to_work(library_file, work_id, repos)
+                files_moved += 1
+
+    return RecordingLookupApplied(
+        work_id=work_id,
+        recording_linked=recording_linked,
+        files_moved=files_moved,
+        marked_live=marked_live,
+        duration_set=duration_set,
+    )
+
+
+def performed_work_of(rec_data: MbRecording) -> tuple[str, str] | None:
+    """(work mbid, work title) of the work a recording payload says it performs, if any."""
+    return _extract_work_from_relations(rec_data.get("relations", []))
+
+
+def _upsert_performed_work(rec_data: MbRecording, repos: EnrichmentRepos) -> str | None:
+    """Upsert the work the payload's performance relation names, under its track artist."""
+    work_info = performed_work_of(rec_data)
+    if work_info is None:
+        return None
+    artist_id = _upsert_artist_from_credits(rec_data.get("artist-credit", []), repos.artists)
+    if artist_id is None:
+        return None
+    work_mbid, work_title = work_info
+    return repos.works.upsert_from_mb(mbid=work_mbid, title=work_title, artist_id=artist_id)
 
 
 def _resolve_track_recording(

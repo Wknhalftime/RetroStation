@@ -32,6 +32,32 @@ class FakeRecordingRepository(RecordingRepository):
         if rec := self._data.get(mbid):
             rec.needs_enhancement = False
 
+    def update_duration(self, mbid: str, duration_ms: int) -> None:
+        if rec := self._data.get(mbid):
+            rec.duration_ms = duration_ms
+
+    def _slot_taken(self, rec: Recording, work_id: str | None, version_type: VersionType) -> bool:
+        # Mirrors uq_recordings_work_version: one recording per (work, version);
+        # a recording on no work clashes with nothing.
+        return work_id is not None and any(
+            o.work_id == work_id and o.version_type == version_type and o.id != rec.id
+            for o in self._data.values()
+        )
+
+    def update_version_type(self, mbid: str, version_type: VersionType) -> bool:
+        rec = self._data.get(mbid)
+        if rec is None or self._slot_taken(rec, rec.work_id, version_type):
+            return False
+        rec.version_type = version_type
+        return True
+
+    def link_work(self, mbid: str, work_id: str) -> bool:
+        rec = self._data.get(mbid)
+        if rec is None or self._slot_taken(rec, work_id, rec.version_type):
+            return False
+        rec.work_id = work_id
+        return True
+
     def get_or_create_local(
         self,
         work_id: str,

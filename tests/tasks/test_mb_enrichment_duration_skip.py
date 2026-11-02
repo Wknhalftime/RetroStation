@@ -1,14 +1,16 @@
-"""The recordings phase looks up only recordings that lack a duration.
+"""The recordings phase skips the lookup of a recording that has nothing left to learn.
 
-Duration is the one field `_run_recordings_phase` writes, and the batched
-recording search that creates a recording already stores it. A 2026-11-02
-profile of the dev DB found 10,936 of 11,166 recording lookups returned the
-length already held, so a recording with a duration is marked enhanced
-without a MusicBrainz call.
+The batched recording search that creates a recording already stores its
+length. A 2026-11-02 profile of the dev DB found 10,936 of 11,166 recording
+lookups returned the length already held, so a recording with a duration that
+also sits on a MusicBrainz work (the other thing a lookup carries, see
+test_mb_enrichment_lookup_gate.py) is marked enhanced without a MusicBrainz
+call.
 """
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.tasks.test_mb_enrichment_progress import (
@@ -36,10 +38,17 @@ def test_recordings_phase_skips_lookup_when_duration_known(
 ) -> None:
     known = _make_entity("r-known", name_field="title")
     known.duration_ms = 215_000
+    known.work_id = "w-mb"
     missing = _make_entity("r-missing", name_field="title")
+    missing.work_id = "w-mb"
+
+    def factory(conn: Any) -> MagicMock:
+        repos: MagicMock = _stub_repo_factory([], [], [known, missing])(conn)
+        repos.works.list_musicbrainz_ids.return_value = {"w-mb"}
+        return repos
 
     mock_connect.side_effect = _fake_connect
-    mock_factory_cls.side_effect = _stub_repo_factory([], [], [known, missing])
+    mock_factory_cls.side_effect = factory
     mock_mb_cls.return_value.lookup_recording.return_value = None
     mock_mb_cls.return_value.live_fetches = 0
     mock_mb_cls.return_value.cache_hits = 0
