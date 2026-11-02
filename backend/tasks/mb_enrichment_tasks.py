@@ -672,8 +672,12 @@ def _run_recordings_phase(
             def _recording_heartbeat(current: int, total: int, mbid: str) -> None:
                 _emit_pre_pass_heartbeat(ctx, "recordings", current, total, mbid)
 
+            # Duration is the only field this phase writes, and the batched
+            # search that created the recording already stored it. Looking up
+            # a recording that has a duration buys nothing (a 2026-11-02
+            # profile: 10,936 of 11,166 lookups returned the length we held).
             recording_map = coalesce_recording_lookups(
-                (r.id for r in pending_recordings),
+                (r.id for r in pending_recordings if r.duration_ms is None),
                 mb_client,
                 on_progress=_recording_heartbeat,
             )
@@ -694,15 +698,21 @@ def _run_recordings_phase(
                 # DB writes can fail. Counter increments + success log
                 # live in the `else:` branch so a logic bug there
                 # surfaces instead of being silently caught.
+                needs_duration = recording.duration_ms is None
                 cache_hit = recording.id in recording_map
                 cached_payload = recording_map.get(recording.id)
                 try:
                     # Map hit -> use cached value (may be None for a 404
                     # that was already authoritative). Map miss -> the
                     # pre-pass failed transiently for this MBID, retry
-                    # the lookup live inside this same try/except.
-                    data = cached_payload if cache_hit else mb_client.lookup_recording(recording.id)
-                    if data and recording.duration_ms is None:
+                    # the lookup live inside this same try/except. A
+                    # recording with a duration is not looked up at all.
+                    data: MbRecording | None = None
+                    if needs_duration and cache_hit:
+                        data = cached_payload
+                    elif needs_duration:
+                        data = mb_client.lookup_recording(recording.id)
+                    if data and needs_duration:
                         length_ms = data.get("length")
                         if length_ms is not None:
                             conn.execute(
