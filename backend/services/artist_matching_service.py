@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
@@ -17,6 +18,7 @@ from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
+from backend.repositories.log_name_placeholders import LogNamePlaceholderRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
 from backend.services.log_name_link_service import (
@@ -38,6 +40,8 @@ from backend.services.matching_reasons import (
     format_answer_suggested,
     format_deferred_retry,
     format_link_rejected,
+    format_listed_name,
+    format_placeholder_refused,
 )
 from backend.services.matching_utils import is_likely_truncated, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
@@ -591,28 +595,71 @@ def _run_mb_or_deferred_phase(
     }
 
 
-def hold_back_rejected_link(
+def listed_name_result() -> ArtistMatchResult:
+    """The result for a log name on the not-an-artist list (C7, phase 1c S6, E3): no engine
+    runs for it and nothing is linked; it waits in review with NO_CANDIDATES, which starts no
+    cascade. The task and the gate's dry run both give it."""
+    return ArtistMatchResult(
+        status=MatchStatus.NEEDS_REVIEW,
+        tier=MatchTier.UNCLASSIFIED,
+        confidence_score=0.0,
+        target_id="",
+        reason_code=ReasonCode.NO_CANDIDATES,
+        reason_detail=format_listed_name(),
+    )
+
+
+def hold_back_refused_link(
     broadcast_artist: BroadcastArtist, result: ArtistMatchResult, links: LogNameLinkService | None
 ) -> ArtistMatchResult:
-    """The result to write for *broadcast_artist* (SPEC 1b S4, 1c E3; C19).
+    """The result to write for *broadcast_artist* (SPEC 1b S4, 1c S5, E3; C7, C19).
 
-    An automatic match to an artist whose link the curator rejected is held back: the name goes
-    to review with LINK_REJECTED (no link, no catalog upsert, and no cascade, which only
-    AUTO_REJECTED and DEFERRED_RETRY start). A suggestion of such an artist is dropped; when
-    every suggestion is dropped, the result is LINK_REJECTED the same way. Every other result is
-    returned as it is. The task and the gate's dry run both ask this, so a dry run decides what
-    the task would.
+    A link the writer refuses is held back, in this order:
+
+    - to one of MusicBrainz's special-purpose artists (1c S5): an automatic match to one sends
+      the name to review with NO_CANDIDATES;
+    - to an artist whose link the curator rejected (1b S4): LINK_REJECTED.
+
+    Neither writes a link or a catalog upsert, or starts a cascade (only AUTO_REJECTED and
+    DEFERRED_RETRY do). A suggestion of such an artist is dropped; when every suggestion is
+    dropped, the result is held back the same way. Every other result is returned as it is.
+    The task and the gate's dry run both ask this, so a dry run decides what the task would.
     """
     if links is None or (result.status != MatchStatus.AUTO_MATCHED and not result.suggestions):
         return result
-    refused = links.rejected_in(broadcast_artist.id, matcher_answer(result))
-    if not refused:
-        return result
+    placeholders = links.placeholders_in(matcher_answer(result))
+
+    def placeholder(target: str) -> tuple[ReasonCode, str]:
+        return ReasonCode.NO_CANDIDATES, format_placeholder_refused(placeholders[target])
+
+    if placeholders:
+        result = _without(result, set(placeholders), placeholder)
+        if result.status != MatchStatus.AUTO_MATCHED and not result.suggestions:
+            return result
+    rejected = links.rejected_in(broadcast_artist.id, matcher_answer(result))
+
+    def rejected_pair(target: str) -> tuple[ReasonCode, str]:
+        return ReasonCode.LINK_REJECTED, format_link_rejected(rejected[target].name)
+
+    return _without(result, set(rejected), rejected_pair) if rejected else result
+
+
+def _without(
+    result: ArtistMatchResult,
+    refused: set[str],
+    reason: Callable[[str], tuple[ReasonCode, str]],
+) -> ArtistMatchResult:
+    """*result* without the targets in *refused*: an automatic match to one, or suggestions
+    that were all refused, are held back with the reason the first refused target gives."""
     if result.status == MatchStatus.AUTO_MATCHED:
-        return _held_back(result, refused[result.target_id].name)
+        if result.target_id not in refused:
+            return result
+        return _held_back(result, *reason(result.target_id))
     kept = tuple(s for s in result.suggestions if s.target_id not in refused)
     if not kept:
-        return _held_back(result, refused[result.suggestions[0].target_id].name)
+        return _held_back(result, *reason(result.suggestions[0].target_id))
+    if len(kept) == len(result.suggestions):
+        return result
     return replace(
         result,
         target_id=kept[0].target_id,
@@ -622,12 +669,12 @@ def hold_back_rejected_link(
     )
 
 
-def _held_back(result: ArtistMatchResult, artist_name: str) -> ArtistMatchResult:
+def _held_back(result: ArtistMatchResult, code: ReasonCode, detail: str) -> ArtistMatchResult:
     return replace(
         result,
         status=MatchStatus.NEEDS_REVIEW,
-        reason_code=ReasonCode.LINK_REJECTED,
-        reason_detail=format_link_rejected(artist_name),
+        reason_code=code,
+        reason_detail=detail,
         mb_candidate=None,
         suggestions=(),
     )
@@ -690,6 +737,19 @@ class ArtistMatchingRepos:
     # The matcher's link writer (phase 1a S6). None: no links are written (statuses still
     # are); the tasks always pass it (tests/services/test_matching_repos_wiring.py).
     link_repo: LogNameLinkRepository | None = None
+    # The not-an-artist list (phase 1c S6, C7): a listed name is never matched. None: nothing
+    # is listed; the task and the dry run always pass it
+    # (tests/services/test_placeholder_list_wiring.py).
+    placeholders: LogNamePlaceholderRepository | None = None
+
+
+def listed_names(
+    names: Iterable[BroadcastArtist], placeholders: LogNamePlaceholderRepository | None
+) -> set[str]:
+    """The normalized names of *names* that are on the not-an-artist list."""
+    if placeholders is None:
+        return set()
+    return placeholders.listed({name.normalized_name for name in names})
 
 
 @dataclass(frozen=True)
@@ -793,6 +853,9 @@ def match_artists_for_playlist(
     Persistence lives here, not in strategies. AUTO_REJECTED cascade
     preserved from legacy. ``progress`` ticks once per pending artist, after its result is
     persisted (spec 2026-10-17).
+
+    A name on the not-an-artist list (phase 1c S6, E3) runs through no engine, so no
+    MusicBrainz search is made for it: it gets ``listed_name_result``, and no cascade.
     """
     pending = repos.broadcast_artist_repo.get_pending_for_playlist(playlist_id)
     inputs = ArtistEngineInputs(repos=repos, mb_client=mb_client, thresholds=thresholds)
@@ -803,7 +866,9 @@ def match_artists_for_playlist(
     distinct_search_keys = 0  # populated below; retained for the finally summary
 
     try:
-        resolved, unresolved = _run_local_phase(pending, local_engine)
+        listed = listed_names(pending, repos.placeholders)
+        to_match = [name for name in pending if name.normalized_name not in listed]
+        resolved, unresolved = _run_local_phase(to_match, local_engine)
         search_map, distinct_search_keys = _build_truncated_search_map(
             unresolved,
             mb_client,
@@ -812,16 +877,23 @@ def match_artists_for_playlist(
         resolved.update(
             _run_mb_or_deferred_phase(unresolved, build_mb_artist_engine(inputs, search_map))
         )
+        resolved.update(
+            {name.id: listed_name_result() for name in pending if name.normalized_name in listed}
+        )
 
         links = LogNameLinkService(
             repos.link_repo or NO_LINK_STORE, repos.artist_repo, repos.broadcast_artist_repo
         )
         deferred_artist_ids: list[UUID] = []
         for broadcast_artist in ticking(pending, progress):
-            result = hold_back_rejected_link(broadcast_artist, resolved[broadcast_artist.id], links)
+            result = hold_back_refused_link(broadcast_artist, resolved[broadcast_artist.id], links)
             # Planned once: the status it writes comes from the name's links, so a suggested
             # name the matcher defers stays LINK_SUGGESTED and starts no cascade (S3's order).
             plan = links.plan_answer(broadcast_artist.id, matcher_answer(result))
+            if plan.writes and listed_names([broadcast_artist], repos.placeholders):
+                # Listed while this run matched it (phase 1c S6): read again before a link is
+                # written, it gets the list's answer, and no link.
+                plan = links.plan_answer(broadcast_artist.id, matcher_answer(listed_name_result()))
             # Only artists this run actually wrote: one the user decided meanwhile keeps
             # its songs as they are (AUD-R018).
             if (
@@ -830,7 +902,9 @@ def match_artists_for_playlist(
             ):
                 deferred_artist_ids.append(broadcast_artist.id)
 
-        _cascade_auto_rejected(playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo)
+        _cascade_auto_rejected(
+            playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo, repos.placeholders
+        )
         _cascade_deferred(deferred_artist_ids, repos.track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
@@ -863,14 +937,20 @@ def _cascade_auto_rejected(
     playlist_id: UUID,
     broadcast_artist_repo: BroadcastArtistRepository,
     track_identity_repo: BroadcastTrackIdentityRepository,
+    placeholders: LogNamePlaceholderRepository | None = None,
 ) -> None:
     """Cascade: AUTO_REJECTED artists -> bulk reject child identities.
 
-    Preserved from the legacy implementation.
+    Preserved from the legacy implementation. A name on the not-an-artist list is passed by:
+    its lines keep their state (phase 1c, C7).
     """
     all_playlist_artists = broadcast_artist_repo.get_all_for_playlist(playlist_id)
+    listed = listed_names(all_playlist_artists, placeholders)
     for broadcast_artist in all_playlist_artists:
-        if broadcast_artist.match_status == MatchStatus.AUTO_REJECTED:
+        if (
+            broadcast_artist.match_status == MatchStatus.AUTO_REJECTED
+            and broadcast_artist.normalized_name not in listed
+        ):
             track_identity_repo.bulk_reject_by_artist(broadcast_artist.id)
 
 

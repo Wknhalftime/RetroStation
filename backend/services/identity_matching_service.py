@@ -24,6 +24,7 @@ from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
+from backend.repositories.log_name_placeholders import LogNamePlaceholderRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.recording_search_reach import RecordingSearchReachRepository
@@ -154,6 +155,27 @@ def group_by_artist(
     for identity in identities:
         first_seen.setdefault(identity.broadcast_artist_id, len(first_seen))
     return sorted(identities, key=lambda identity: first_seen[identity.broadcast_artist_id])
+
+
+def lines_to_match(
+    identities: list[BroadcastTrackIdentity],
+    artists_by_id: Mapping[UUID, BroadcastArtist],
+    placeholders: LogNamePlaceholderRepository | None,
+) -> list[BroadcastTrackIdentity]:
+    """The songs song matching decides: all but those of a name on the not-an-artist list.
+
+    No run song-matches a line of a listed name (C7, phase 1c; Lance, 2026-11-03): a file named
+    like a station placeholder could otherwise put a spot line on the stream. Such a line keeps
+    its state. The task and the gate's dry run both ask this, so a dry run decides what the
+    task would. None: nothing is listed.
+    """
+    if placeholders is None or not identities:
+        return identities
+    listed = placeholders.listed({artist.normalized_name for artist in artists_by_id.values()})
+    if not listed:
+        return identities
+    skipped = {artist.id for artist in artists_by_id.values() if artist.normalized_name in listed}
+    return [identity for identity in identities if identity.broadcast_artist_id not in skipped]
 
 
 def _eligible(
@@ -812,6 +834,9 @@ class IdentityMatchingRepos:
     # Tier 1's link reader (phase 1a S7). None: no links, so a resolved name is a data fault;
     # the tasks always pass it (tests/services/test_matching_repos_wiring.py).
     link_repo: LogNameLinkRepository | None = None
+    # The not-an-artist list (phase 1c, C7): no line of a listed name is decided
+    # (lines_to_match). None: nothing is listed; the task and the dry run pass it.
+    placeholders: LogNamePlaceholderRepository | None = None
 
 
 @dataclass(frozen=True)
@@ -1002,6 +1027,8 @@ def match_identities_for_playlist(
     carries on; a permanent MusicBrainz error propagates (AUD-R028, D16).
 
     ``progress`` ticks once per pending song, after its result is written (spec 2026-10-17).
+
+    A pending song of a name on the not-an-artist list is left as it is (``lines_to_match``).
     """
     pending = repos.track_identity_repo.get_pending_for_playlist(playlist_id)
     if not pending:
@@ -1011,6 +1038,10 @@ def match_identities_for_playlist(
     # Resolve artists up-front to avoid N+1 queries inside the loop.
     artist_ids = [identity.broadcast_artist_id for identity in pending]
     artists_by_id = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
+    pending = lines_to_match(pending, artists_by_id, repos.placeholders)
+    if not pending:
+        logger.info("no_pending_identities", playlist_id=str(playlist_id))
+        return []
 
     engines = build_song_engines(
         pending, repos, mb_client, strong_match_threshold, trial_title_score=trial_title_score
@@ -1022,10 +1053,18 @@ def match_identities_for_playlist(
     deferred = 0
     decided_meanwhile = 0
     work_ids: list[str] = []
+    # A name listed while this run matches (phase 1c S6): the list is read again as each
+    # artist's songs begin, and a listed name's songs are passed by.
+    checked: dict[UUID, bool] = {}
 
     # Each artist's songs together, so the strategies read each artist once (_ArtistMemo).
     for identity in ticking(group_by_artist(pending), progress):
         artist = artists_by_id.get(identity.broadcast_artist_id)
+        if artist is not None and repos.placeholders is not None:
+            if artist.id not in checked:
+                checked[artist.id] = bool(repos.placeholders.listed({artist.normalized_name}))
+            if checked[artist.id]:
+                continue
         if artist is None:
             logger.warning(
                 "orphaned_identity_marked_for_review",

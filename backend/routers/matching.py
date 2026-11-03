@@ -20,16 +20,20 @@ from backend.dependencies import (
 from backend.domain.artist_cascade import CascadeCounts
 from backend.domain.enums import CascadeAction, MatchStatus, MatchTier, ReasonCode
 from backend.domain.matching import (
+    ListedLogNameError,
     LogNameNotFoundError,
     LogNameNotUnmatchableError,
+    PlaceholderArtistError,
     RecheckNotQueuedError,
 )
 from backend.domain.system import StorageUnavailableError
 from backend.services.artist_resolution_service import (
     ArtistResolutionRepos,
     cascade_preview,
+    list_not_an_artist,
     match_by_hand,
     reject_by_hand,
+    unlist_not_an_artist,
     unmatch,
 )
 from backend.services.identity_resolution_service import (
@@ -85,27 +89,52 @@ _REJECTED_SONG_STATUSES_SQL: str = _sql_in_list(
 # A name whose suggestions make it likely (phase 1c S8): one still in review.
 _REVIEW_ARTIST_STATUSES_SQL: str = _sql_in_list((MatchStatus.PENDING, MatchStatus.NEEDS_REVIEW))
 
-# Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
-# bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
-# count all reference the same filtered set. Thresholds come from
-# matching_constants (single source of truth); the f-string interpolates trusted
-# module-level ints and enum values, never user input.
-_QUEUE_BUCKET_CTE = f"""
+# A name on the not-an-artist list (phase 1c S6, C7), by its exact cleaned name.
+_LISTED_SQL = """EXISTS (SELECT 1 FROM log_name_placeholders ph
+                 WHERE ph.normalized_name = ba.normalized_name)"""
+
+# The names the review queue shows. Surface artists in three cases:
+#   1) The artist itself is review-relevant (PENDING / NEEDS_REVIEW), or
+#   2) The artist is resolved (e.g. AUTO_MATCHED) but at least one child
+#      track_identity is review-relevant. Without (2), a curator has no
+#      way to reach a NEEDS_REVIEW child whose parent the matcher already
+#      resolved (the Saliva/"Your Disease" visibility bug, fix #45), or
+#   3) The artist is matched and has a song the matcher or the curator
+#      rejected -- nothing to review, so never likely: it stays reachable
+#      behind 'Show N artists with no likely match' (spec 2026-10-13 R7,
+#      AUD-R029).
+# Never a name on the not-an-artist list, which the list hides (phase 1c S6).
+# The identity_best CTE below independently filters identities to
+# _QUEUE_STATUSES, so a resolved parent pulled in only by (2) or (3) still
+# produces the correct triage bucket (its resolved siblings do not
+# inflate the headline). Binds: _QUEUE_STATUSES twice.
+_REVIEW_NAMES_SQL = f"""(ba.match_status = ANY(%s)
+        OR EXISTS (
+            SELECT 1 FROM track_identities ti
+            WHERE ti.broadcast_artist_id = ba.id
+              AND ti.match_status = ANY(%s)
+        )
+        OR (ba.match_status IN ({_MATCHED_ARTIST_STATUSES_SQL})
+            AND EXISTS (
+                SELECT 1 FROM track_identities ti
+                WHERE ti.broadcast_artist_id = ba.id
+                  AND ti.match_status IN ({_REJECTED_SONG_STATUSES_SQL})
+            )))
+      AND NOT {_LISTED_SQL}"""
+
+# The names the placeholder view shows (phase 1c S9): every listed name, whatever its status
+# and songs, so one can be taken off the list later. No binds.
+_PLACEHOLDER_NAMES_SQL = _LISTED_SQL
+
+
+def _queue_bucket_cte(names_sql: str) -> str:
+    """The CTE chain for the /queue endpoint, over the names *names_sql* selects (the review
+    queue's or the placeholder view's). Materialises the artist-level triage bucket in SQL
+    so the bucket filter, LIMIT/OFFSET pagination, and the `total` count all reference the
+    same filtered set. Thresholds come from matching_constants (single source of truth); the
+    f-string interpolates trusted module-level ints and enum values, never user input."""
+    return f"""
 artist_base AS (
-    -- Surface artists in three cases:
-    --   1) The artist itself is review-relevant (PENDING / NEEDS_REVIEW), or
-    --   2) The artist is resolved (e.g. AUTO_MATCHED) but at least one child
-    --      track_identity is review-relevant. Without (2), a curator has no
-    --      way to reach a NEEDS_REVIEW child whose parent the matcher already
-    --      resolved (the Saliva/"Your Disease" visibility bug, fix #45), or
-    --   3) The artist is matched and has a song the matcher or the curator
-    --      rejected -- nothing to review, so never likely: it stays reachable
-    --      behind 'Show N artists with no likely match' (spec 2026-10-13 R7,
-    --      AUD-R029).
-    -- The identity_best CTE below independently filters identities to
-    -- _QUEUE_STATUSES, so a resolved parent pulled in only by (2) or (3) still
-    -- produces the correct triage bucket (its resolved siblings do not
-    -- inflate the headline).
     -- The search predicate sits here (vs. the page query) so pagination,
     -- the `total` window count, and the empty-page count fallback all see
     -- the same filtered artist set. Special LIKE chars in the user's term
@@ -122,18 +151,7 @@ artist_base AS (
                        WHERE l.broadcast_artist_id = ba.id AND l.state = 'suggested')
                AS has_suggestion
     FROM broadcast_artists ba
-    WHERE (ba.match_status = ANY(%s)
-        OR EXISTS (
-            SELECT 1 FROM track_identities ti
-            WHERE ti.broadcast_artist_id = ba.id
-              AND ti.match_status = ANY(%s)
-        )
-        OR (ba.match_status IN ({_MATCHED_ARTIST_STATUSES_SQL})
-            AND EXISTS (
-                SELECT 1 FROM track_identities ti
-                WHERE ti.broadcast_artist_id = ba.id
-                  AND ti.match_status IN ({_REJECTED_SONG_STATUSES_SQL})
-            )))
+    WHERE {names_sql}
       AND (%s::text IS NULL OR ba.original_name ILIKE '%%' || %s || '%%' ESCAPE '!')
 ),
 identity_best AS (
@@ -182,6 +200,10 @@ artist_bucket AS (
     GROUP BY a.id
 )
 """
+
+
+_QUEUE_BUCKET_CTE = _queue_bucket_cte(_REVIEW_NAMES_SQL)
+_PLACEHOLDER_BUCKET_CTE = _queue_bucket_cte(_PLACEHOLDER_NAMES_SQL)
 
 
 # The page's suggested links of each name (phase 1c S8), best first: strength, then the
@@ -451,6 +473,13 @@ class ArtistResolveResult(ResolveResult):
     cascade: CascadePreview | None = None
 
 
+class PlaceholderListing(BaseModel):
+    """Whether the log name is on the not-an-artist list after the request (phase 1c S6)."""
+
+    id: UUID
+    listed: bool
+
+
 # ---------------------------------------------------------------------------
 # GET /queue
 # ---------------------------------------------------------------------------
@@ -466,6 +495,7 @@ async def get_matching_queue(
     search: str | None = Query(default=None, max_length=200),  # noqa: B008
     sort: QueueSort = Query(default="created_at"),  # noqa: B008
     include_unlikely: bool = Query(default=True),  # noqa: B008
+    placeholders: bool = Query(default=False),  # noqa: B008
 ) -> MatchingQueue:
     """Return paginated artists that need curator review.
 
@@ -483,7 +513,11 @@ async def get_matching_queue(
     historical created_at, id order.
 
     `include_unlikely=false` leaves out artists with no likely match (see
-    `likely` in _QUEUE_BUCKET_CTE); `unlikely_total` counts them either way.
+    `likely` in _queue_bucket_cte); `unlikely_total` counts them either way.
+
+    A name on the not-an-artist list is never in the queue (phase 1c S6). `placeholders=true`
+    is the placeholder view instead (S9): every listed name, whatever its status, likely or
+    not, so the curator can take one off the list.
 
     Locked-artist invariant: a persisted match row whose library_file's
     normalized_artist_name disagrees with the locked broadcast_artist's
@@ -493,9 +527,21 @@ async def get_matching_queue(
     """
     search_term = _normalize_search(search)
     order_by = _SORT_CLAUSES[sort]
+    # The artist_base binds: the review queue's names take _QUEUE_STATUSES twice, the
+    # placeholder view's none; then the search term twice.
+    cte = _PLACEHOLDER_BUCKET_CTE if placeholders else _QUEUE_BUCKET_CTE
+    base_binds: tuple[object, ...] = (
+        (search_term, search_term)
+        if placeholders
+        else (_QUEUE_STATUSES, _QUEUE_STATUSES, search_term, search_term)
+    )
+    # The placeholder view shows every listed name: likely or not, in any bucket.
+    include_unlikely = include_unlikely or placeholders
+    if placeholders:
+        bucket = None
     page_cur = await conn.execute(
         f"""
-        WITH {_QUEUE_BUCKET_CTE},
+        WITH {cte},
         filtered AS (
             SELECT a.id, a.original_name, a.normalized_name, a.match_status,
                    a.reason_code, a.reason_detail,
@@ -513,8 +559,8 @@ async def get_matching_queue(
         LIMIT %s OFFSET %s
         """,
         # Bind order, top-to-bottom through the SQL:
-        #   artist_base WHERE       — _QUEUE_STATUSES (artist status)
-        #   artist_base EXISTS      — _QUEUE_STATUSES (identity status)
+        #   artist_base WHERE       — base_binds: _QUEUE_STATUSES (artist status) and
+        #   artist_base EXISTS        _QUEUE_STATUSES (identity status), queue view only
         #   artist_base name guard  — search_term (NULL check)
         #   artist_base ILIKE       — search_term (pattern)
         #   identity_best WHERE     — _QUEUE_STATUSES (identity status, again)
@@ -523,10 +569,7 @@ async def get_matching_queue(
         #   page WHERE              — include_unlikely
         #   LIMIT / OFFSET          — limit / offset
         (
-            _QUEUE_STATUSES,
-            _QUEUE_STATUSES,
-            search_term,
-            search_term,
+            *base_binds,
             _QUEUE_STATUSES,
             bucket,
             bucket,
@@ -541,7 +584,7 @@ async def get_matching_queue(
         # No rows on this page — issue a standalone count for accurate total.
         count_cur = await conn.execute(
             f"""
-            WITH {_QUEUE_BUCKET_CTE}
+            WITH {cte}
             SELECT COUNT(*) FILTER (WHERE %s OR likely) AS total,
                    COUNT(*) FILTER (WHERE NOT likely)   AS unlikely_total
             FROM artist_bucket
@@ -551,10 +594,7 @@ async def get_matching_queue(
             # then include_unlikely for the total's FILTER and the two
             # `bucket` bindings for the count's WHERE.
             (
-                _QUEUE_STATUSES,
-                _QUEUE_STATUSES,
-                search_term,
-                search_term,
+                *base_binds,
                 _QUEUE_STATUSES,
                 include_unlikely,
                 bucket,
@@ -735,8 +775,9 @@ def resolve_artist(
 
     Raises:
         HTTPException: 404 if the artist does not exist.
-        HTTPException: 422 if match_status is invalid or target_artist_id is
-            missing for MANUAL_MATCHED.
+        HTTPException: 409 if the artist is on the not-an-artist list (phase 1c S6).
+        HTTPException: 422 if match_status is invalid, target_artist_id is
+            missing for MANUAL_MATCHED, or it names a special-purpose artist (phase 1c S5).
         HTTPException: 503 if the database connection is lost.
     """
     # Validate match_status
@@ -773,6 +814,12 @@ def resolve_artist(
             resolution.commit()
     except LogNameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ListedLogNameError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PlaceholderArtistError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except StorageUnavailableError as lost:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     # Enqueue is fire-and-forget across a transaction boundary the request has already
@@ -990,6 +1037,59 @@ def unmatch_artist(
         match_status=MatchStatus.NEEDS_REVIEW.value,
         cascade=CascadePreview.of(counts),
     )
+
+
+# ---------------------------------------------------------------------------
+# POST / DELETE /artists/{artist_id}/not-an-artist
+# ---------------------------------------------------------------------------
+
+
+@router.post("/artists/{artist_id}/not-an-artist", response_model=PlaceholderListing)
+def list_as_not_an_artist(
+    _token: Token,
+    artist_id: UUID,
+    resolution: ResolutionRepos,
+) -> PlaceholderListing:
+    """Not an artist (phase 1c S6, C7): put the log name on the not-an-artist list and remove
+    its active and suggested links; a pair the curator rejected stays rejected (C19). The
+    name keeps its status and leaves the queue and the missing-matches report; its lines are
+    untouched, and no run matches them. Pressing it twice lists the name once (E4). A sync
+    route on the request's one connection (C75).
+
+    Raises:
+        HTTPException: 404 if the artist does not exist; 503 if the database connection is
+            lost.
+    """
+    try:
+        list_not_an_artist(artist_id, resolution)
+    except LogNameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+    return PlaceholderListing(id=artist_id, listed=True)
+
+
+@router.delete("/artists/{artist_id}/not-an-artist", response_model=PlaceholderListing)
+def take_off_the_not_an_artist_list(
+    _token: Token,
+    artist_id: UUID,
+    resolution: ResolutionRepos,
+) -> PlaceholderListing:
+    """Take the log name off the not-an-artist list (phase 1c S6, E4): it is back in the
+    queue, with the status its links give (a matched name with none goes to review with
+    LINK_REMOVED). Harmless twice. A sync route on the request's one connection (C75).
+
+    Raises:
+        HTTPException: 404 if the artist does not exist; 503 if the database connection is
+            lost.
+    """
+    try:
+        unlist_not_an_artist(artist_id, resolution)
+    except LogNameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+    return PlaceholderListing(id=artist_id, listed=False)
 
 
 # ---------------------------------------------------------------------------

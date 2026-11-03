@@ -54,6 +54,16 @@ class LogNameNotUnmatchableError(MatchingError):
         self.status = status
 
 
+class PlaceholderArtistError(MatchingError):
+    """A link to one of MusicBrainz's special-purpose artists (Various Artists, [unknown] and
+    the rest), which is never a performer a log name can be (C7, phase 1c S5)."""
+
+
+class ListedLogNameError(MatchingError):
+    """A link asked for a log name on the not-an-artist list, which is never linked (C7, phase
+    1c S6): take it off the list first."""
+
+
 class MusicBrainzUnavailableError(MatchingError):
     """Song matching's MusicBrainz recording search could not be answered: a transient failure
     (HTTP 429 or 5xx, a timeout, a network error) or this run's cut-off (AUD-R028, D16). The

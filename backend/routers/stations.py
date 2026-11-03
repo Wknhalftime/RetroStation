@@ -365,6 +365,13 @@ async def get_station_events_by_date(
 # Missing Matches report endpoint
 # ---------------------------------------------------------------------------
 
+#: A line of the report (``ti``) is not under a name on the not-an-artist list (phase 1c S6,
+#: C7): SPOT BREAK's lines are not missing matches.
+_NOT_LISTED = """NOT EXISTS (
+            SELECT 1 FROM broadcast_artists lba
+            JOIN log_name_placeholders ph ON ph.normalized_name = lba.normalized_name
+            WHERE lba.id = ti.broadcast_artist_id)"""
+
 #: Statuses considered "unresolved" for the purposes of the missing-matches report.
 _UNRESOLVED_STATUSES = (
     "pending",
@@ -386,7 +393,8 @@ async def get_missing_matches_report(
 
     An identity is included when its own match_status is one of: pending, needs_review,
     auto_rejected, manual_rejected (C37, AUD-R038, phase 1b): a matched line under an
-    unresolved name still plays, so it is not missing.
+    unresolved name still plays, so it is not missing. A line of a name on the not-an-artist
+    list never is (phase 1c S6): it is left out of the total, the items and the impact share.
 
     Rows are sorted alphabetically by artist name then track title.  Impact
     percentage is computed as (identity play-count / total play-count across
@@ -407,12 +415,13 @@ async def get_missing_matches_report(
     # Using COUNT(*) OVER() in the items query would return 0 on an empty page,
     # making it impossible to distinguish "no unresolved tracks" from "page past end".
     count_cur = await conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS total
         FROM station_identity_plays sip
         JOIN track_identities  ti ON ti.id = sip.identity_id
         WHERE sip.station_id = %s
           AND ti.match_status = ANY(%s)
+          AND {_NOT_LISTED}
         """,
         (station_id, unresolved),
     )
@@ -423,7 +432,7 @@ async def get_missing_matches_report(
     # LIMIT/OFFSET in PostgreSQL, so impact_pct always reflects the full
     # unfiltered denominator regardless of the current page.
     items_cur = await conn.execute(
-        """
+        f"""
         WITH missing AS (
             SELECT
                 ti.id                AS identity_id,
@@ -436,6 +445,7 @@ async def get_missing_matches_report(
             JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
             WHERE sip.station_id = %s
               AND ti.match_status = ANY(%s)
+              AND {_NOT_LISTED}
         )
         SELECT
             identity_id,

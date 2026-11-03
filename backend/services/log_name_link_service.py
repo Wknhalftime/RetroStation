@@ -9,6 +9,10 @@ From phase 1c (S3, C36) it also writes the log name's status, in the same transa
 link change, by ``status_from_links`` (``domain/log_name_status.py``): the matcher's answer
 (guarded on pending, AUD-R018), Resolve and Reject. Unmatch's decided-only write stays in the
 resolution repository, as the guard behind its 409.
+
+Placeholders are never linked (C7, phase 1c S5, S6): no link of any state names one of
+MusicBrainz's special-purpose artists (``SPECIAL_PURPOSE_MBIDS``), and a log name on the
+not-an-artist list is never linked by hand.
 """
 
 from __future__ import annotations
@@ -18,14 +22,27 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from backend.domain.catalog import Artist
-from backend.domain.enums import LogNameLinkOrigin, LogNameLinkState, MatchStatus, MatchTier
+from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS, Artist
+from backend.domain.enums import (
+    LogNameLinkOrigin,
+    LogNameLinkState,
+    MatchStatus,
+    MatchTier,
+    ReasonCode,
+)
 from backend.domain.log_name_status import NameState, status_from_links
-from backend.domain.matching import LogNameLink
+from backend.domain.matching import (
+    ListedLogNameError,
+    LogNameLink,
+    LogNameNotFoundError,
+    PlaceholderArtistError,
+)
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
+from backend.repositories.log_name_placeholders import LogNamePlaceholderRepository
 from backend.services.matching_constants import MAX_ARTIST_SUGGESTIONS
+from backend.services.matching_reasons import format_placeholder_refused
 from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import normalize_artist
 
@@ -117,7 +134,8 @@ class LogNameLinkService:
     """Writes and reads a log name's links to catalog artists, and the status they give it.
 
     ``names`` writes the status (phase 1c S3); without it the service writes links only, as the
-    readers and the locked 1a link tests build it.
+    readers and the locked 1a link tests build it. ``placeholders`` is the not-an-artist list
+    (phase 1c S6); without it no name is listed.
     """
 
     def __init__(
@@ -125,10 +143,12 @@ class LogNameLinkService:
         links: LogNameLinkRepository,
         catalog: ArtistCatalogRepository,
         names: BroadcastArtistRepository | None = None,
+        placeholders: LogNamePlaceholderRepository | None = None,
     ) -> None:
         self._links = links
         self._catalog = catalog
         self._names = names
+        self._placeholders = placeholders
 
     def artist_for_target(self, target: str) -> Artist:
         """The catalog artist a match target names: the one with that id, else the one holding
@@ -139,6 +159,28 @@ class LogNameLinkService:
 
     def _known(self, target: str) -> Artist | None:
         return self._catalog.get_by_id(target) or self._catalog.get_by_mbid(target)
+
+    def placeholder_named(self, target: str, hit: MbArtistResult | None = None) -> str | None:
+        """The name of the special-purpose artist *target* names (C7, phase 1c S5): its MBID,
+        or the catalog artist holding one; None for any other target. Makes no stub."""
+        if target in SPECIAL_PURPOSE_MBIDS:
+            known = self._catalog.get_by_mbid(target)
+            if known is not None:
+                return known.name
+            return hit["name"] if hit is not None else "a placeholder artist"
+        known = self._catalog.get_by_id(target)
+        if known is not None and known.mbid in SPECIAL_PURPOSE_MBIDS:
+            return known.name
+        return None
+
+    def placeholders_in(self, answer: MatcherAnswer) -> dict[str, str]:
+        """The special-purpose artist each target of *answer* names, by target (E3); a target
+        that names a performer is left out."""
+        found = {
+            target.target: self.placeholder_named(target.target, target.mb_candidate)
+            for target, _ in _wanted(answer)
+        }
+        return {target: name for target, name in found.items() if name is not None}
 
     # --- the matcher (phase 1c S3, S4) ------------------------------------------------------
 
@@ -175,11 +217,22 @@ class LogNameLinkService:
         """What writing *answer* does, and the status it gives the pending name: S3's rule over
         the links it will hold. Reads only. A rejected or manual pair is never touched (C18,
         C19), a suggestion never demotes or rewrites a pair the name holds, and a name holds at
-        most MAX_ARTIST_SUGGESTIONS suggestions (AUD-R038)."""
+        most MAX_ARTIST_SUGGESTIONS suggestions (AUD-R038). A special-purpose artist is never
+        planned (C7, S5): when the answer named only such artists, the name waits in review
+        with NO_CANDIDATES, never matched with no link."""
+        refused = self.placeholders_in(answer)
+        wanted = [(t, s) for t, s in _wanted(answer) if t.target not in refused]
+        proposed = answer.proposed
+        if refused and not wanted:
+            proposed = NameState(
+                MatchStatus.NEEDS_REVIEW,
+                ReasonCode.NO_CANDIDATES,
+                format_placeholder_refused(next(iter(refused.values()))),
+            )
         held = {link.artist_id: link for link in self._links.list_by_name(broadcast_artist_id)}
         after: dict[str, LogNameLink] = dict(held)
         writes: list[tuple[LinkTarget, LogNameLinkState]] = []
-        for target, state in _wanted(answer):
+        for target, state in wanted:
             artist = self._resolve(target, state)
             key = artist.id if artist is not None else f"new:{target.target}"
             pair = after.get(key)
@@ -200,7 +253,7 @@ class LogNameLinkService:
                 evidence=_evidence(target.tier, target.score),
             )
             writes.append((target, state))
-        state_after = status_from_links(_PENDING, after.values(), answer.proposed)
+        state_after = status_from_links(_PENDING, after.values(), proposed)
         return AnswerPlan(state=state_after, writes=tuple(writes))
 
     def write_plan(self, broadcast_artist_id: UUID, plan: AnswerPlan) -> bool:
@@ -252,9 +305,14 @@ class LogNameLinkService:
 
     def _suggest(self, broadcast_artist_id: UUID, target: LinkTarget) -> None:
         """A suggested link to the artist *target* names (phase 1c S4), unless the name already
-        holds the pair in any state. A MusicBrainz hit's name and disambiguation go into its
-        evidence (C30: the target as it was), for a stub enrichment has not named yet."""
+        holds the pair in any state, or it is a special-purpose artist (S5). A MusicBrainz hit's
+        name and disambiguation go into its evidence (C30: the target as it was), for a stub
+        enrichment has not named yet."""
+        if target.target in SPECIAL_PURPOSE_MBIDS:
+            return
         artist = self.artist_for_target(target.target)
+        if artist.mbid in SPECIAL_PURPOSE_MBIDS:
+            return
         if any(
             link.artist_id == artist.id for link in self._links.list_by_name(broadcast_artist_id)
         ):
@@ -280,10 +338,15 @@ class LogNameLinkService:
     ) -> None:
         """The artist matcher's link to the artist *target* names (SPEC 1a S6).
 
-        A pair the curator rejected stays rejected (C19), and a manual link is never replaced
-        by an automatic one (C18).
+        A pair the curator rejected stays rejected (C19), a manual link is never replaced by an
+        automatic one (C18), and a special-purpose artist is never linked, nor its stub made
+        (C7, phase 1c S5).
         """
+        if target in SPECIAL_PURPOSE_MBIDS:
+            return
         artist = self.artist_for_target(target)
+        if artist.mbid in SPECIAL_PURPOSE_MBIDS:
+            return
         links = {link.artist_id: link for link in self._links.list_by_name(broadcast_artist_id)}
         held = links.get(artist.id)
         if held is not None and (
@@ -320,7 +383,17 @@ class LogNameLinkService:
     def link_by_hand(self, broadcast_artist_id: UUID, target: str) -> None:
         """The curator's link to the artist *target* names (SPEC 1a S9): the name
         ``manual_matched``, and one manual link per pair, whatever the pair held before; the
-        name's other links stay. The name's row first, as the matcher writes it."""
+        name's other links stay. The name's row first, as the matcher writes it.
+
+        Raises (before anything is written):
+            ListedLogNameError: the name is on the not-an-artist list (phase 1c S6).
+            PlaceholderArtistError: *target* names a special-purpose artist (phase 1c S5).
+        """
+        if self._is_listed(broadcast_artist_id):
+            raise ListedLogNameError(f"Artist {broadcast_artist_id} is on the not-an-artist list")
+        placeholder = self.placeholder_named(target)
+        if placeholder is not None:
+            raise PlaceholderArtistError(f"{placeholder} is a placeholder, never a performer")
         self._write_by_hand(broadcast_artist_id, NameState(MatchStatus.MANUAL_MATCHED))
         artist = self.artist_for_target(target)
         self._links.upsert_link(
@@ -351,6 +424,44 @@ class LogNameLinkService:
                     broadcast_artist_id, link.artist_id, LogNameLinkState.REJECTED
                 )
 
+    # --- the not-an-artist list (phase 1c S6) -------------------------------------------------
+
+    def unlink_keeping_rejected(self, broadcast_artist_id: UUID) -> None:
+        """Remove the log name's active and suggested links; a pair the curator rejected stays
+        rejected (C19; Lance, 2026-11-03), so no later run links or suggests it. The port has
+        no one-link delete: every link goes, and each rejected one is written back as it was
+        (its id, ``created_at``, strength and evidence)."""
+        held = self._links.list_by_name(broadcast_artist_id)
+        if all(link.state == LogNameLinkState.REJECTED for link in held):
+            return
+        self._links.delete_links_of_name(broadcast_artist_id)
+        for link in held:
+            if link.state == LogNameLinkState.REJECTED:
+                self._links.upsert_link(link)
+
+    def write_status_from_links(self, broadcast_artist_id: UUID) -> None:
+        """The status S3's rule gives the name's links, with no proposal: a matched name with
+        no link goes to review with LINK_REMOVED; any other keeps what its last writer set."""
+        if self._names is None:
+            raise RuntimeError("the status is written to the names: pass names")
+        name = self._names.get_by_id(broadcast_artist_id)
+        if name is None:
+            raise LogNameNotFoundError(f"Artist {broadcast_artist_id} not found")
+        current = NameState(name.match_status, name.reason_code, name.reason_detail)
+        state = status_from_links(current, self._links.list_by_name(broadcast_artist_id))
+        if state != current:
+            self._names.update_match_status(
+                broadcast_artist_id, state.status, state.reason_code, state.reason_detail
+            )
+
+    def _is_listed(self, broadcast_artist_id: UUID) -> bool:
+        if self._placeholders is None or self._names is None:
+            return False
+        name = self._names.get_by_id(broadcast_artist_id)
+        if name is None:
+            return False
+        return bool(self._placeholders.listed({name.normalized_name}))
+
     # --- readers ------------------------------------------------------------------------------
 
     def rejected_artist(self, broadcast_artist_id: UUID, target: str) -> Artist | None:
@@ -374,9 +485,9 @@ class LogNameLinkService:
     def unlink_all(self, broadcast_artist_id: UUID) -> None:
         """Remove every link of the log name, in every state (SPEC 1a S10).
 
-        No caller since phase 1b, whose Unmatch rejects the links instead (C19); it stays
-        because the locked ``tests/test_log_name_links_single_writer.py`` expects the service
-        to own the port's delete (it retires in phase 1c's S12)."""
+        No caller since phase 1b, whose Unmatch rejects the links instead (C19), and 1c's Not an
+        artist keeps the rejected pairs (``unlink_keeping_rejected``); it retires in phase 1c's
+        S12."""
         self._links.delete_links_of_name(broadcast_artist_id)
 
     def tier1_link(self, broadcast_artist_id: UUID) -> LogNameLink | None:

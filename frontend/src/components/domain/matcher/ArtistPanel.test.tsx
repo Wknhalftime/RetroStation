@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { QueueArtist } from "@/lib/schemas/matcher";
@@ -524,5 +524,138 @@ describe("ArtistPanel suggested links", () => {
         }),
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1c (SPEC S9, E4): Not an artist, with a confirmation and an Undo. The panel asks; the
+// page holds the listing for its five-second Undo and sends it only then (Lance, 2026-11-03),
+// so an Undo inside the five seconds has nothing to take back (MatcherBrowser.test.tsx).
+// ---------------------------------------------------------------------------
+
+const NOT_AN_ARTIST_URL = `${ARTIST_URL}/not-an-artist`;
+const UNLISTED = { id: "00000000-0000-0000-0000-000000000001", listed: false };
+
+function listCalls(): unknown[][] {
+  return mockedApiFetch.mock.calls.filter(([url]) => String(url) === NOT_AN_ARTIST_URL);
+}
+
+describe("ArtistPanel Not an artist", () => {
+  function renderPanel(overrides: Partial<QueueArtist> = {}, onNotAnArtist = vi.fn()) {
+    render(
+      <ArtistPanel
+        artist={makeArtist({
+          original_name: "SPOT BREAK",
+          normalized_name: "spot break",
+          ...overrides,
+        })}
+        onNotAnArtist={onNotAnArtist}
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    return onNotAnArtist;
+  }
+
+  it("not_an_artist_with_undo: asks first, and on Confirm hands the name to the page's Undo, sending nothing", async () => {
+    const onNotAnArtist = renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/SPOT BREAK/);
+    // It says what Confirm does: the name's links are removed.
+    expect(dialog.textContent).toMatch(/links/i);
+    expect(onNotAnArtist).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
+
+    expect(onNotAnArtist).toHaveBeenCalledTimes(1);
+    const [artist] = onNotAnArtist.mock.calls[0] as [QueueArtist];
+    expect([artist.id, artist.original_name]).toEqual([
+      "00000000-0000-0000-0000-000000000001",
+      "SPOT BREAK",
+    ]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    // The panel writes nothing: the page sends the listing when its Undo is over.
+    expect(listCalls()).toEqual([]);
+  });
+
+  it("Cancel hands nothing over and closes the dialog", async () => {
+    const onNotAnArtist = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+    await screen.findByRole("alertdialog");
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onNotAnArtist).not.toHaveBeenCalled();
+    expect(listCalls()).toEqual([]);
+  });
+
+  it("E4: Confirm pressed twice hands the name over once", async () => {
+    const onNotAnArtist = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: /^Confirm/i });
+
+    // Both presses before React re-renders, so the second still reaches the open dialog.
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
+
+    expect(onNotAnArtist).toHaveBeenCalledTimes(1);
+  });
+
+  it("is offered for a matched name too (VARIOUS was auto_matched)", () => {
+    renderPanel({ original_name: "VARIOUS", match_status: "auto_matched" });
+
+    expect(screen.getByRole("button", { name: /^Not an artist$/i })).toBeDefined();
+  });
+
+  it("in the placeholder view offers only Back to the queue, which takes the name off", async () => {
+    mockedApiFetch.mockResolvedValue(UNLISTED);
+    const offers = [
+      /^Not an artist$/i,
+      /^Accept/i,
+      /Reject Artist/i,
+      /Unmatch artist/i,
+      /Search Library/i,
+      /Search MusicBrainz/i,
+    ];
+    function renderListed(overrides: Partial<QueueArtist>) {
+      return render(
+        <ArtistPanel
+          artist={makeArtist({ original_name: "VARIOUS", normalized_name: "various", ...overrides })}
+          listed
+          onNotAnArtist={vi.fn()}
+          onSearchLibrary={vi.fn()}
+          onSearchMusicBrainz={vi.fn()}
+        />,
+        { wrapper: wrapperFor(makeClient()) }
+      );
+    }
+
+    // A listed name is never linked (Resolve answers 409): no decision is offered but this one.
+    // In review with a candidate, Accept and Reject would show; matched, Unmatch would.
+    for (const overrides of [
+      { match_status: "needs_review", candidates: [SOME_CANDIDATE] },
+      { match_status: "auto_matched" },
+    ]) {
+      const view = renderListed(overrides);
+      for (const name of offers) {
+        expect(screen.queryByRole("button", { name })).toBeNull();
+      }
+      view.unmount();
+    }
+
+    renderListed({ match_status: "auto_matched" });
+    fireEvent.click(screen.getByRole("button", { name: /Back to the queue/i }));
+
+    await waitFor(() =>
+      expect(listCalls()).toEqual([
+        [NOT_AN_ARTIST_URL, expect.objectContaining({ method: "DELETE" })],
+      ])
+    );
   });
 });

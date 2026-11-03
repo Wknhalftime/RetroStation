@@ -173,14 +173,18 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
         return [row["id"] for row in rows]
 
     def rewind_undecided(self, names: Collection[str] | None) -> int:
+        # A name on the not-an-artist list is never rewound (phase 1c, C7; Lance, 2026-11-03):
+        # the list hides it and no run matches it, so it keeps its state.
         wanted = None if names is None else list(names)
         if wanted is not None and not wanted:
             return 0
         cur = self._conn.execute(
-            """UPDATE broadcast_artists
+            """UPDATE broadcast_artists ba
                SET match_status = %s, reason_code = NULL, reason_detail = NULL
-               WHERE match_status = ANY(%s)
-                 AND (%s::text[] IS NULL OR normalized_name = ANY(%s::text[]))""",
+               WHERE ba.match_status = ANY(%s)
+                 AND (%s::text[] IS NULL OR ba.normalized_name = ANY(%s::text[]))
+                 AND NOT EXISTS (SELECT 1 FROM log_name_placeholders ph
+                                  WHERE ph.normalized_name = ba.normalized_name)""",
             (
                 MatchStatus.PENDING.value,
                 [status.value for status in ARTIST_UNDECIDED_STATUSES],
