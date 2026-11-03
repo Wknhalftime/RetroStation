@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { QueueArtist } from "@/lib/schemas/matcher";
@@ -577,7 +577,7 @@ describe("ArtistPanel Not an artist", () => {
     ]);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     // The panel writes nothing: the page sends the listing when its Undo is over.
-    expect(mockedApiFetch).not.toHaveBeenCalled();
+    expect(listCalls()).toEqual([]);
   });
 
   it("Cancel hands nothing over and closes the dialog", async () => {
@@ -589,7 +589,7 @@ describe("ArtistPanel Not an artist", () => {
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(onNotAnArtist).not.toHaveBeenCalled();
-    expect(mockedApiFetch).not.toHaveBeenCalled();
+    expect(listCalls()).toEqual([]);
   });
 
   it("E4: Confirm pressed twice hands the name over once", async () => {
@@ -598,8 +598,11 @@ describe("ArtistPanel Not an artist", () => {
     const dialog = await screen.findByRole("alertdialog");
     const confirm = within(dialog).getByRole("button", { name: /^Confirm/i });
 
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
+    // Both presses before React re-renders, so the second still reaches the open dialog.
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
 
     expect(onNotAnArtist).toHaveBeenCalledTimes(1);
   });
@@ -650,7 +653,9 @@ describe("ArtistPanel Not an artist", () => {
     fireEvent.click(screen.getByRole("button", { name: /Back to the queue/i }));
 
     await waitFor(() =>
-      expect(listCalls()).toEqual([[NOT_AN_ARTIST_URL, { method: "DELETE" }]])
+      expect(listCalls()).toEqual([
+        [NOT_AN_ARTIST_URL, expect.objectContaining({ method: "DELETE" })],
+      ])
     );
   });
 });

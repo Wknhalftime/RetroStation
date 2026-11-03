@@ -542,7 +542,12 @@ describe("MatcherBrowser — a confirmation never carries over to another artist
 describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
   const spot = makeArtist("00000000-0000-0000-0000-00000000000c", "SPOT BREAK");
   const delta = makeArtist("00000000-0000-0000-0000-00000000000d", "Delta");
+  // Only in the answer sorted by name, so a test can tell that answer has arrived.
+  const echo = makeArtist("00000000-0000-0000-0000-00000000000e", "Echo");
   const LIST_URL = `/api/v1/matching/artists/${spot.id}/not-an-artist`;
+  // The listing's request: its method is pinned, not its other options (keepalive may be).
+  const POSTED = [LIST_URL, expect.objectContaining({ method: "POST" })];
+  const DELETED = [LIST_URL, expect.objectContaining({ method: "DELETE" })];
 
   afterEach(() => {
     vi.useRealTimers();
@@ -573,7 +578,7 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
         if (u.includes("placeholders=true")) {
           return { items: listed ? [spot] : [], total: listed ? 1 : 0, unlikely_total: 0 };
         }
-        const items = listed ? [delta] : [spot, delta];
+        const items = [...(listed ? [] : [spot]), delta, ...(u.includes("sort=name") ? [echo] : [])];
         return { items, total: items.length, unlikely_total: 0 };
       }
       return {};
@@ -626,7 +631,7 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
 
     await advanceTo(shown, 5100);
 
-    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
+    await waitFor(() => expect(listCalls()).toEqual([POSTED]));
     expect(screen.queryByRole("button", { name: /^Undo$/i })).toBeNull();
     await waitFor(() => expect(spotInTheList()).toBe(false));
   });
@@ -657,13 +662,14 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
     });
 
     await waitFor(() => expect(queueUrls().length).toBeGreaterThan(fetched));
+    // Echo is only in the sorted answer: once it shows, that answer is on screen.
     await waitFor(() =>
-      expect(within(sidebar()).getByRole("button", { name: /Delta/i })).toBeDefined()
+      expect(within(sidebar()).getByRole("button", { name: /Echo/i })).toBeDefined()
     );
     expect(spotInTheList()).toBe(false); // the server's answer still has it
     expect(listCalls()).toEqual([]);
     await advanceTo(shown, 5100);
-    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
+    await waitFor(() => expect(listCalls()).toEqual([POSTED]));
   });
 
   it("a listing that fails after the five seconds shows the error and puts the name back", async () => {
@@ -676,7 +682,7 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
     const error = await screen.findByText(/unavailable/i);
     expect(error.closest('[role="status"]')).not.toBeNull();
     await waitFor(() => expect(spotInTheList()).toBe(true));
-    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
+    expect(listCalls()).toEqual([POSTED]);
   });
 
   it("leaving the page inside the five seconds sends the listing then, once", async () => {
@@ -686,9 +692,9 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
 
     unmount();
 
-    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
+    await waitFor(() => expect(listCalls()).toEqual([POSTED]));
     await advanceTo(shown, 6000);
-    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
+    expect(listCalls()).toEqual([POSTED]);
   });
 
   it("placeholder_filter: Show placeholders lists the listed names, and Back to the queue takes one off", async () => {
@@ -713,7 +719,7 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Back to the queue/i }));
     });
 
-    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "DELETE" }]]));
+    await waitFor(() => expect(listCalls()).toEqual([DELETED]));
     // Off the list, it leaves the placeholder view; the filter stays there to untick.
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /^SPOT BREAK/i })).toBeNull()
