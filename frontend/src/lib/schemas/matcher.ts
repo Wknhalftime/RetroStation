@@ -53,6 +53,19 @@ export type QueueIdentity = z.infer<typeof QueueIdentitySchema>;
 // Queue Artist
 // ---------------------------------------------------------------------------
 
+// A suggested link of the log name (phase 1c S8): the catalog artist it names, the link's
+// strength as its score, and why it is suggested. Accept resolves the name to `artist_id`.
+export const SuggestedLinkSchema = z.object({
+  artist_id: z.string(),
+  mbid: z.string().nullable(),
+  name: z.string(),
+  disambiguation: z.string().nullable(),
+  score: z.number(),
+  reason: z.string(),
+});
+
+export type SuggestedLink = z.infer<typeof SuggestedLinkSchema>;
+
 export const QueueArtistSchema = z.object({
   id: z.string().uuid(),
   original_name: z.string(),
@@ -61,10 +74,8 @@ export const QueueArtistSchema = z.object({
   reason_code: z.string().nullable().optional(),
   reason_detail: z.string().nullable().optional(),
   triage_bucket: TriageBucketSchema,
-  // Backend returns `candidates: list[...] | None`; null arrives as `null`
-  // on the wire when no MB search has been run yet. Accept both the null
-  // and the array form so schema parsing doesn't reject legitimate rows.
-  candidates: z.array(z.record(z.unknown()).nullable()).nullable(),
+  // The name's suggested links, best first (phase 1c S8); empty when it has none.
+  candidates: z.array(SuggestedLinkSchema),
   identities: z.array(QueueIdentitySchema),
 });
 

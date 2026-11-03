@@ -2,7 +2,11 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { useProgressStore } from "@/store/progressStore";
-import { CascadeCountsSchema, MbArtistSearchResponseSchema } from "@/lib/schemas/matcher";
+import {
+  CascadeCountsSchema,
+  MatchingQueueSchema,
+  MbArtistSearchResponseSchema,
+} from "@/lib/schemas/matcher";
 import type {
   CascadeCounts,
   MatchingQueue,
@@ -51,7 +55,12 @@ export function useMatchingQueue(
   }
   return useQuery<MatchingQueue>({
     queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort, includeUnlikely),
-    queryFn: () => apiFetch<MatchingQueue>(`/api/v1/matching/queue?${params.toString()}`),
+    // Parsed, so a response the schema does not describe is an error, not silently passed on
+    // (phase 1c S8: the candidates are typed on both sides).
+    queryFn: async () =>
+      MatchingQueueSchema.parse(
+        await apiFetch<unknown>(`/api/v1/matching/queue?${params.toString()}`)
+      ),
     placeholderData: keepPreviousData,
   });
 }

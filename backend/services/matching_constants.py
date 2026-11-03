@@ -13,7 +13,11 @@ MB_MIN_CANDIDATE_SCORE: int = 60
 MID_BAND_LOWER: int = 55
 MID_BAND_UPPER: int = 64
 MID_BAND_GAP_THRESHOLD: int = 5
-MIN_PRESENTATION_SCORE: int = 50
+# The artist floor: a fuzzy score under it is no answer, and no suggestion. The songs' 56 from
+# artist model phase 1c (C35, AUD-R038), so nothing under 56 is shown.
+MIN_PRESENTATION_SCORE: int = 56
+# At most this many suggestions per answer of the artist matcher, best first (C35).
+MAX_ARTIST_SUGGESTIONS: int = 3
 # Song matching only (AUD-R022 D6). A song whose best candidate scores under this (and does not
 # auto-match) is auto_rejected; the router's song triage starts "needs_attention" here. Songs
 # have no mid-band (D12): MID_BAND_* and MIN_PRESENTATION_SCORE are artist matching's.

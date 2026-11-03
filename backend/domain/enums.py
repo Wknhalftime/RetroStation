@@ -209,6 +209,11 @@ class ReasonCode(StrEnum):
     # The artist matcher matched the log name to an artist whose link the curator rejected
     # (phase 1b S4, C19): the match is not written, the name waits in review, no cascade.
     LINK_REJECTED = "LINK_REJECTED"
+    # The name has no active link and one or more suggested ones (phase 1c S3, S4; C35, C36):
+    # the matcher's answer under 95, or a fuzzy link migration 0045 demoted (M22). No cascade.
+    LINK_SUGGESTED = "LINK_SUGGESTED"
+    # A matched name lost its last link and has no suggestion (phase 1c S1, S3).
+    LINK_REMOVED = "LINK_REMOVED"
 
 
 class CascadeAction(StrEnum):

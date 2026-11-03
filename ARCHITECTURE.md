@@ -6,7 +6,8 @@ feat/cue-editor-api, the editor API; the "Station liners" section was added 2026
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
-with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b. Rulings cited
+with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b, "Status from
+links and suggestions" 2026-11-03 with its phase 1c. Rulings cited
 here are in `audit/rulings.jsonl` (AUD-R015..R059, R100 and R101 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -104,18 +105,21 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `scripts/name_stubs.py --dsn` names, on a gate copy, every artist whose name is still its MBID
   and has no recorded error (0044's stubs and any made since), one transaction each, with every
   hand-off stubbed.
-- Writers: the artist matcher (`_persist_artist_result`: the catalog artist first, then the
-  link, origin automatic; never over a manual or rejected pair, and a match to a rejected pair
-  is held back, below), Resolve (a manual link, which makes even a rejected pair active again;
-  the name's other links stay), and Reject and Unmatch (every link of the name becomes
-  `rejected`, C19; none is deleted since phase 1b). Resolve, Reject and Unmatch are sync routes
-  on `SyncRepos` (C75) calling `services/artist_resolution_service.py`, so status, cascade and
-  link commit together. `unlink_all` has had no caller since 1b; it stays because the locked
-  single-writer test expects the service to own the port's delete.
+- Writers: the artist matcher (`LogNameLinkService.write_answer`: the name's status, guarded,
+  then each MusicBrainz hit into the catalog, then the link, origin automatic, or its
+  suggestions; never over a manual or rejected pair, and a match or suggestion of a rejected
+  pair is held back, below), Resolve (a manual link, which makes even a rejected pair active
+  again; the name's other links stay), Reject and Unmatch (every link of the name becomes
+  `rejected`, C19; none is deleted since phase 1b), and migration 0045 once (below). Resolve,
+  Reject and Unmatch are sync routes on `SyncRepos` (C75) calling
+  `services/artist_resolution_service.py`, so status, cascade and link commit together.
+  `unlink_all` has had no caller since 1b; it stays because the locked single-writer test
+  expects the service to own the port's delete (it retires in phase 1c's S12).
 - Readers: Tier 1 of song matching (the first active link, manual first, then strength, then
-  the oldest; the MBID is the linked artist's current one), the re-check wave's linked names
-  (`normalized_names_linked_since`), and the works merge, which keeps a local artist a link in
-  any state points at (AUD-R035, which changes AUD-R004).
+  the oldest; the MBID is the linked artist's current one; a name with only suggestions has
+  none), the re-check wave's linked names (`normalized_names_linked_since`), the works merge,
+  which keeps a local artist a link in any state points at (AUD-R035, which changes AUD-R004),
+  and the Resolution Center queue's candidates (the suggested links, phase 1c S8).
 - The artist rows of `matches` were copied once (0044) and stay, unread and unwritten, until
   phase 1c drops them with `matches.artist_id` and `get_by_artist` (M35).
   `scripts/check_log_name_links_copy.py --dsn` checks the copy on the gate's copy.
@@ -148,11 +152,13 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   either action, and the Resolution Center's banner shows the action's own counts after.
 - The lines are read and written through `ArtistCascadeRepository` (`repositories/
   artist_cascade.py`, fake `tests/fakes/artist_cascade.py`, contract test
-  `tests/repositories/test_artist_cascade_contract.py`); `ArtistResolutionRepository` keeps
-  the name's status writes (its `reject_open_songs`, `reopen_every_song` and
-  `delete_song_matches` have had no caller since 1b; its locked fake and contract test still
-  run them). The action reads the lines `FOR UPDATE`, so a matcher's guarded song write waits
-  for it instead of being overwritten (AUD-R018).
+  `tests/repositories/test_artist_cascade_contract.py`). From phase 1c the name's status is
+  written by `LogNameLinkService` (below) except Unmatch's decided-only write
+  (`unmatch_if_decided`, the guard behind its 409); `ArtistResolutionRepository.set_status`,
+  `reject_open_songs`, `reopen_every_song` and `delete_song_matches` have no production caller
+  (their locked fake and contract test still run them) and retire in phase 1c's S12. The
+  action reads the lines `FOR UPDATE`, so a matcher's guarded song write waits for it instead
+  of being overwritten (AUD-R018).
 - A rejected pair stays rejected (S4, C19): when the artist matcher's automatic match targets
   an artist whose link with the name is `rejected`, `hold_back_rejected_link` turns it into
   `needs_review` / `LINK_REJECTED`, written through the same guarded write; no link, no
@@ -165,6 +171,46 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `tests/routers/test_missing_matches_by_line_status.py`, the contract test above, and the
   relocked `tests/routers/test_matching_unmatch.py` and
   `tests/integration/test_curation_cascades_pg.py`.
+
+## Status from links and suggestions (phase 1c, M22, C35, C36, AUD-R038)
+
+- A log name's status comes from its links, by one rule, `status_from_links`
+  (`domain/log_name_status.py`), which `LogNameLinkService` applies in the same transaction as
+  every link change it writes, in order: a user action writes the status it names (Resolve
+  `manual_matched`, Reject `manual_rejected`, their old machine reason cleared; Unmatch keeps
+  `unmatch_if_decided`); a rejected name keeps its status; an active manual link
+  `manual_matched`; any active link `auto_matched`; a suggestion `needs_review` /
+  `LINK_SUGGESTED`; else the writer's own answer (`LINK_REJECTED`, `DEFERRED_RETRY`); else a
+  matched name left with no link `needs_review` / `LINK_REMOVED`; else the last writer's
+  status stands (pending after the re-check's rewind, other review reasons).
+- The interim artist matcher (until phase 4): only 95+ (`MB_AUTO_LINK_SCORE`) or an exact
+  name pointing at one artist links (`_decide_artist_zone`, `NormalizationStrategy`). Everything
+  else it would have decided is a suggestion: the two old lead rules, an exact name of several
+  MBID artists, and what was `AMBIGUOUS_GAP` or `LOW_CONFIDENCE`. One answer suggests at most 3
+  (`MAX_ARTIST_SUGGESTIONS`), best first, each at the floor `MIN_PRESENTATION_SCORE` (56, as
+  songs) or over, as `suggested` links (origin automatic); a MusicBrainz suggestion's artist is
+  upserted into the catalog first, as a MusicBrainz match's is. A suggestion starts no cascade,
+  so by-name song matching goes on; a suggested name the matcher defers stays `LINK_SUGGESTED`.
+  `DEFERRED_RETRY` and its cascade are unchanged until phase 4. The status written is asked
+  first (`answer_state`), so only a written `DEFERRED_RETRY` defers the name's songs.
+- Migration 0045 (once, AUD-R039: an exception to D2 of AUD-R022, as amended by AUD-R036)
+  copied every link and name it
+  changed into `link_demotion_backup` (kept until Lance accepts 1c), deleted the links to
+  MusicBrainz placeholders and of listed names (C7), rejected any active link of a rejected
+  name, demoted each active legacy fuzzy link (v0 tier normalization, strength under 95) to a
+  suggestion when its old score is 56 or more and deleted it otherwise, and set each changed
+  name's status by the rule. Lines and song matches were not touched. It also created
+  `log_name_placeholders`, the station names that are programming, not performers (its route
+  and refusals come with phase 1c's PR 2). `backend/db/rollback_0045_link_demotion.sql` restores
+  what still holds what 0045 wrote.
+- The Resolution Center queue's `candidates` are the name's suggested links, typed
+  (`SuggestedLink`, and the zod schema `useMatchingQueue` parses with), best first; Accept is
+  the manual resolve by the artist's catalog id. A name with a suggestion is likely, so the
+  default view shows it (a change may widen the curator's review, never hide it).
+- The checks are `tests/services/test_status_from_links.py`,
+  `tests/integration/test_status_from_links_pg.py` (every row agrees),
+  `tests/services/test_interim_artist_rules.py`, `tests/integration/test_link_demotion_pg.py`
+  and `tests/routers/test_queue_suggested_links.py`.
 
 ## Derived counts kept by triggers
 
@@ -283,7 +329,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE, LINK_REJECTED) | ingest, matchers (an artist match held back on a rejected link is `needs_review` / LINK_REJECTED, phase 1b S4), review UI, re-check rewind, migration 0036 (once, AUD-R025) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE, LINK_REJECTED, LINK_SUGGESTED, LINK_REMOVED) | ingest, matchers (an artist's status from its links through `LogNameLinkService`, C36: a match held back on a rejected link is `needs_review` / LINK_REJECTED, phase 1b S4; an answer under 95 is LINK_SUGGESTED, phase 1c S4), review UI, re-check rewind, migrations 0036 (once, AUD-R025) and 0045 (once, AUD-R039) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
@@ -339,7 +385,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   undecided songs (those two plus `manual_rejected`): a song the curator rejected waits for
   the next run, then is re-scored without its rejected files. A manually rejected artist is
   never rewound (AUD-R029). A name held back on a rejected link (LINK_REJECTED) is rewound
-  like any `needs_review` name and held back again until the curator decides it (1b S4).
+  like any `needs_review` name and held back again until the curator decides it (1b S4); a
+  suggested name (LINK_SUGGESTED) is rewound with its suggestions and, whatever the matcher
+  answers short of a link, is in review with them again (1c S3).
 - **One worker per queue is a constraint, not a setting** (AUD-R017). Duplicate
   delivery is harmless only because jobs run one at a time and re-check their status column;
   a duplicated re-check repeats its rewind and fan-out, and matches and rejected artists are

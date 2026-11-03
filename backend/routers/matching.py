@@ -46,6 +46,7 @@ from backend.services.matching_constants import (
     QUICK_REVIEW_MIN_SCORE,
     SONG_MIN_PRESENTATION_SCORE,
 )
+from backend.services.matching_reasons import suggestion_reason
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.repository_factory import recalc_repos
 from backend.tasks.identity_matching_tasks import identity_matching_task
@@ -109,8 +110,13 @@ artist_base AS (
     -- (percent, underscore, and the bang we use as the escape marker) are
     -- pre-escaped by _normalize_search; the ESCAPE '!' clause then makes
     -- them match literally.
+    -- has_suggestion: the name holds a suggested link (phase 1c S4, S8), which makes it
+    -- likely below, so the default view shows it.
     SELECT id, original_name, normalized_name, match_status,
-           artist_candidates, reason_code, reason_detail, created_at
+           reason_code, reason_detail, created_at,
+           EXISTS (SELECT 1 FROM log_name_links l
+                   WHERE l.broadcast_artist_id = ba.id AND l.state = 'suggested')
+               AS has_suggestion
     FROM broadcast_artists ba
     WHERE (ba.match_status = ANY(%s)
         OR EXISTS (
@@ -156,19 +162,54 @@ artist_bucket AS (
            END AS bucket,
            -- Likely = worth a curator's time by default: a review item with a
            -- guess at the presentation floor, one released by deleting its missing
-           -- library file (no score, spec C2), or an artist the curator unmatched.
+           -- library file (no score, spec C2), an artist the curator unmatched, or a
+           -- name with a suggested link to confirm (phase 1c S8: a change may widen the
+           -- curator's review, never hide it).
            -- A song the curator rejected is manual_rejected and out of the main list
            -- (its artist stays reachable behind the no-likely-match toggle, R7)
            -- until a re-check (AUD-R029, spec 2026-10-13 R4).
            COALESCE(bool_or(ib.confidence_score >= {SONG_MIN_PRESENTATION_SCORE}
                             OR ib.reason_code = '{_LIBRARY_FILE_REMOVED}'), FALSE)
                OR COALESCE(bool_or(a.reason_code = '{_USER_UNMATCHED}'), FALSE)
+               OR COALESCE(bool_or(a.has_suggestion), FALSE)
                AS likely
     FROM artist_base a
     LEFT JOIN identity_best ib ON ib.broadcast_artist_id = a.id
     GROUP BY a.id
 )
 """
+
+
+# The page's suggested links of each name (phase 1c S8), best first: strength, then the
+# oldest. The tier is the evidence's own, or the copied row's for a demoted link (C50).
+_CANDIDATES_SQL = """(
+    SELECT COALESCE(json_agg(json_build_object(
+               'artist_id', ar.id, 'mbid', ar.mbid, 'name', ar.name,
+               'disambiguation', ar.disambiguation, 'score', l.strength,
+               'origin', l.origin,
+               'tier', COALESCE(l.evidence ->> 'tier', l.evidence -> 'legacy' ->> 'tier'))
+           ORDER BY l.strength DESC, l.created_at, l.id), '[]'::json)
+      FROM log_name_links l
+      JOIN artists ar ON ar.id = l.artist_id
+     WHERE l.broadcast_artist_id = filtered.id AND l.state = 'suggested')"""
+
+
+def _suggested_links(raw: object) -> list[SuggestedLink]:
+    """The page query's ``candidates`` as typed suggested links, with their reason."""
+    rows = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(rows, list):
+        return []
+    return [
+        SuggestedLink(
+            artist_id=row["artist_id"],
+            mbid=row["mbid"],
+            name=row["name"],
+            disambiguation=row["disambiguation"],
+            score=row["score"],
+            reason=suggestion_reason(row["origin"], row["tier"], row["score"]),
+        )
+        for row in rows
+    ]
 
 
 TriageBucket = Literal["quick_review", "needs_attention", "blocked"]
@@ -296,8 +337,22 @@ class QueueIdentity(BaseModel):
     )
 
 
+class SuggestedLink(BaseModel):
+    """A suggested link of the log name (phase 1c S8): the catalog artist it names, the
+    link's strength as its score, and why it is suggested. Accepting it is the manual
+    resolve, by ``artist_id``."""
+
+    artist_id: str
+    mbid: str | None
+    name: str
+    disambiguation: str | None
+    score: int
+    reason: str
+
+
 class QueueArtist(BaseModel):
-    """Artist row for the review queue, including child identities."""
+    """Artist row for the review queue, including child identities. ``candidates`` are the
+    name's suggested links, best first (strength, then the oldest)."""
 
     id: UUID
     original_name: str
@@ -306,7 +361,7 @@ class QueueArtist(BaseModel):
     reason_code: str | None = None
     reason_detail: str | None = None
     triage_bucket: TriageBucket
-    candidates: list[dict[str, Any]] | None
+    candidates: list[SuggestedLink]
     identities: list[QueueIdentity]
 
 
@@ -431,14 +486,15 @@ async def get_matching_queue(
         WITH {_QUEUE_BUCKET_CTE},
         filtered AS (
             SELECT a.id, a.original_name, a.normalized_name, a.match_status,
-                   a.artist_candidates, a.reason_code, a.reason_detail,
+                   a.reason_code, a.reason_detail,
                    a.created_at, ab.bucket, ab.likely
             FROM artist_base a
             JOIN artist_bucket ab ON ab.id = a.id
             WHERE %s::text IS NULL OR ab.bucket = %s::text
         )
         SELECT *, COUNT(*) OVER () AS _total,
-               (SELECT COUNT(*) FROM filtered WHERE NOT likely) AS _unlikely_total
+               (SELECT COUNT(*) FROM filtered WHERE NOT likely) AS _unlikely_total,
+               {_CANDIDATES_SQL} AS candidates
         FROM filtered
         WHERE %s OR likely
         {order_by}
@@ -586,12 +642,7 @@ async def get_matching_queue(
 
     items: list[QueueArtist] = []
     for row in artist_rows:
-        raw_candidates = row.get("artist_candidates")
-        # JSONB may come back as a string depending on the driver version
-        if isinstance(raw_candidates, str):
-            candidates: list[dict[str, Any]] | None = json.loads(raw_candidates)
-        else:
-            candidates = raw_candidates
+        candidates = _suggested_links(row.get("candidates"))
         identities = identities_by_artist.get(row["id"], [])
         artist_bucket = _artist_bucket_from_identities(identities)
         items.append(

@@ -6,8 +6,12 @@ import {
   useResolveArtist,
   useUnmatchArtist,
 } from "@/api/matcher";
-import { CascadeCountsSchema, type CascadeCounts, type QueueArtist } from "@/lib/schemas/matcher";
-import type { MatchCandidate } from "@/lib/schemas/matches";
+import {
+  CascadeCountsSchema,
+  type CascadeCounts,
+  type QueueArtist,
+  type SuggestedLink,
+} from "@/lib/schemas/matcher";
 
 const FINALIZED_ARTIST_STATUSES = new Set([
   "auto_matched",
@@ -19,6 +23,8 @@ const FINALIZED_ARTIST_STATUSES = new Set([
 // Reason codes said in words when the row has no detail of its own.
 const ARTIST_REASON_LABELS: Record<string, string> = {
   LINK_REJECTED: "The matcher found an artist you rejected for this name",
+  LINK_SUGGESTED: "Suggested artists below: accept one, or search",
+  LINK_REMOVED: "Its link was removed: pick an artist",
 };
 
 function songs(n: number): string {
@@ -90,12 +96,14 @@ export function ArtistPanel({
   // back in review, and with it every song that is not manual or matched to a same-name file.
   const isFinalized = FINALIZED_ARTIST_STATUSES.has(artist.match_status);
 
-  function handleAccept(candidate: MatchCandidate) {
+  // Accept is the manual resolve, to the suggested link's artist by its catalog id (phase
+  // 1c S8): a suggestion may be a local artist with no MBID.
+  function handleAccept(candidate: SuggestedLink) {
     resolveArtist.mutate({
       id: artist.id,
       resolution: {
         match_status: "manual_matched",
-        target_artist_id: candidate.mbid,
+        target_artist_id: candidate.artist_id,
       },
     });
   }
@@ -127,21 +135,8 @@ export function ArtistPanel({
     }
   }
 
-  // Parse candidates — each item in the array may be null or a plain record.
-  // We cast to MatchCandidate only when mbid + name exist.
-  const candidates: MatchCandidate[] = (artist.candidates ?? []).flatMap((raw) => {
-    if (!raw || typeof raw !== "object") return [];
-    const r = raw as Record<string, unknown>;
-    if (typeof r["mbid"] !== "string" || typeof r["name"] !== "string") return [];
-    return [
-      {
-        mbid: r["mbid"],
-        name: r["name"],
-        score: typeof r["score"] === "number" ? r["score"] : 0,
-        disambiguation: typeof r["disambiguation"] === "string" ? r["disambiguation"] : undefined,
-      },
-    ];
-  });
+  // The name's suggested links, best first (phase 1c S8).
+  const candidates = artist.candidates;
 
   const isPending = resolveArtist.isPending || unmatchArtist.isPending;
   const actionError =
@@ -186,7 +181,7 @@ export function ArtistPanel({
             </p>
             {candidates.map((candidate) => (
               <div
-                key={candidate.mbid}
+                key={candidate.artist_id}
                 className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2"
               >
                 <div className="min-w-0">
@@ -194,11 +189,14 @@ export function ArtistPanel({
                   {candidate.disambiguation && (
                     <p className="truncate text-xs text-gray-400">{candidate.disambiguation}</p>
                   )}
-                  <p className="text-xs text-gray-400">Score: {candidate.score.toFixed(2)}</p>
+                  <p className="text-xs text-gray-400">
+                    {candidate.score}% · {candidate.reason}
+                  </p>
                 </div>
                 <button
                   onClick={() => handleAccept(candidate)}
                   disabled={isPending}
+                  aria-label={`Accept ${candidate.name}`}
                   className="shrink-0 rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                 >
                   Accept
