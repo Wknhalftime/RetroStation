@@ -1,0 +1,118 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=arid%3A%2865f4f0c5-ef9e-490c-aee3-909e7ae6b2ab+OR+66c662b6-6e2f-4930-8610-912e24c63ed1%29&fmt=json&limit=100
+  response:
+    body:
+      string: "{\"created\":\"2026-11-02T15:10:51.657Z\",\"count\":2,\"offset\":0,\"artists\":[{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":100,\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"1f40c6e1-47ba-4e35-996f-fe6ee5840e62\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Los
+        Angeles\",\"sort-name\":\"Los Angeles\",\"life-span\":{\"ended\":null}},\"isnis\":[\"0000000122939631\"],\"life-span\":{\"begin\":\"1981-10-28\",\"ended\":null},\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":-1,\"name\":\"political\"},{\"count\":1,\"name\":\"rock\"},{\"count\":-2,\"name\":\"alternative
+        rock\"},{\"count\":-4,\"name\":\"80s\"},{\"count\":41,\"name\":\"heavy metal\"},{\"count\":-4,\"name\":\"90s\"},{\"count\":-1,\"name\":\"progressive
+        metal\"},{\"count\":67,\"name\":\"thrash metal\"},{\"count\":34,\"name\":\"metal\"},{\"count\":7,\"name\":\"american\"},{\"count\":-4,\"name\":\"grunge\"},{\"count\":-6,\"name\":\"seen
+        live\"},{\"count\":-4,\"name\":\"band\"},{\"count\":21,\"name\":\"hard rock\"},{\"count\":-1,\"name\":\"usa\"},{\"count\":-4,\"name\":\"nu
+        metal\"},{\"count\":-6,\"name\":\"trash\"},{\"count\":-4,\"name\":\"blues
+        rock\"},{\"count\":-1,\"name\":\"am\xE9ricain\"},{\"count\":-3,\"name\":\"thrash\"},{\"count\":-3,\"name\":\"megadeth\"},{\"count\":-4,\"name\":\"symphonic
+        metal\"},{\"count\":-3,\"name\":\"alternative metal\"},{\"count\":0,\"name\":\"speed
+        metal\"},{\"count\":-3,\"name\":\"groove metal\"},{\"count\":-1,\"name\":\"california\"},{\"count\":-4,\"name\":\"los
+        angeles\"},{\"count\":0,\"name\":\"virtuoso\"},{\"count\":-6,\"name\":\"crap\"},{\"count\":0,\"name\":\"bay
+        area\"},{\"count\":-5,\"name\":\"trash metal\"},{\"count\":-2,\"name\":\"80s
+        thrash metal\"},{\"count\":-7,\"name\":\"douchebag metal\"},{\"count\":-2,\"name\":\"american
+        thrash metal\"},{\"count\":-6,\"name\":\"rock and indie\"},{\"count\":-1,\"name\":\"united
+        states\"},{\"count\":0,\"name\":\"angry\"},{\"count\":0,\"name\":\"energetic\"},{\"count\":-2,\"name\":\"pop
+        metal\"},{\"count\":-6,\"name\":\"metallica\"},{\"count\":-4,\"name\":\"classic
+        metal\"},{\"count\":-2,\"name\":\"80s metal\"},{\"count\":-4,\"name\":\"classic
+        thrash metal\"},{\"count\":-1,\"name\":\"90s metal\"},{\"count\":-3,\"name\":\"southern
+        metal\"},{\"count\":-1,\"name\":\"80's\"},{\"count\":-1,\"name\":\"90's\"},{\"count\":-1,\"name\":\"progressive
+        thrash metal\"},{\"count\":-4,\"name\":\"destroyer\"},{\"count\":-4,\"name\":\"hard'n'heavy\"},{\"count\":-6,\"name\":\"lame\"},{\"count\":-4,\"name\":\"a
+        filk artist\"},{\"count\":-5,\"name\":\"the unforgiving\"},{\"count\":-6,\"name\":\"stopped
+        being good after '97\"},{\"count\":-6,\"name\":\"stopped being good after
+        '88\"},{\"count\":-3,\"name\":\"traditional heavy metal\"},{\"count\":-6,\"name\":\"pompous
+        asses\"},{\"count\":-1,\"name\":\"old school thrash\"},{\"count\":-1,\"name\":\"pessimistic\"},{\"count\":-4,\"name\":\"teen
+        metal\"},{\"count\":-4,\"name\":\"a bit overrated\"},{\"count\":-1,\"name\":\"amerikansk\"},{\"count\":-1,\"name\":\"estados
+        unidos\"},{\"count\":-1,\"name\":\"michael moers\"},{\"count\":1,\"name\":\"rockgruppe\"}]},{\"id\":\"66c662b6-6e2f-4930-8610-912e24c63ed1\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":94,\"name\":\"AC/DC\",\"sort-name\":\"AC/DC\",\"country\":\"AU\",\"area\":{\"id\":\"106e0bec-b638-3b37-b731-f53d507dc00e\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"Australia\",\"sort-name\":\"Australia\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"3f179da4-83c6-4a28-a627-e46b4a8ff1ed\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Sydney\",\"sort-name\":\"Sydney\",\"life-span\":{\"ended\":null}},\"disambiguation\":\"Australian
+        hard rock band\",\"ipis\":[\"00133076008\"],\"isnis\":[\"000000012271298X\"],\"life-span\":{\"begin\":\"1973-11\",\"ended\":null},\"aliases\":[{\"sort-name\":\"AC/DC\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"AC/DC\",\"locale\":null,\"type\":\"Artist
+        name\",\"primary\":null,\"begin-date\":\"1973-11\",\"end-date\":null},{\"sort-name\":\"AC|DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC|DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Akka
+        Dakka\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Akka
+        Dakka\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Acca
+        Dacca\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Acca
+        Dacca\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC.DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC.DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\u26A1\uFE0EDC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\u26A1\uFE0EDC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"ACDC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"ACDC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC-DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC-DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\u26A1DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\u26A1DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC?DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC?DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC\\\\DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC\\\\DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"AC
+        DC\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"AC DC\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":19,\"name\":\"rock\"},{\"count\":0,\"name\":\"heavy
+        metal\"},{\"count\":-3,\"name\":\"metal\"},{\"count\":-2,\"name\":\"australian\"},{\"count\":-3,\"name\":\"band\"},{\"count\":50,\"name\":\"hard
+        rock\"},{\"count\":-1,\"name\":\"relaxed\"},{\"count\":12,\"name\":\"blues
+        rock\"},{\"count\":-6,\"name\":\"glam rock\"},{\"count\":2,\"name\":\"classic
+        rock\"},{\"count\":-2,\"name\":\"1980s\"},{\"count\":-2,\"name\":\"1970s\"},{\"count\":-4,\"name\":\"arena
+        rock\"},{\"count\":2,\"name\":\"rock and roll\"},{\"count\":-3,\"name\":\"english\"},{\"count\":-2,\"name\":\"australia\"},{\"count\":-3,\"name\":\"blues-rock\"},{\"count\":-3,\"name\":\"classic
+        pop and rock\"},{\"count\":-3,\"name\":\"australie\"},{\"count\":-3,\"name\":\"australien\"},{\"count\":-3,\"name\":\"best\"},{\"count\":-3,\"name\":\"best
+        rock\"},{\"count\":-2,\"name\":\"australian rock\"},{\"count\":-3,\"name\":\"capa\"},{\"count\":-1,\"name\":\"rock
+        & roll\"},{\"count\":-3,\"name\":\"want to listen\"},{\"count\":-3,\"name\":\"volts\"},{\"count\":0,\"name\":\"hard
+        & heavy\"},{\"count\":-4,\"name\":\"+australia (sydney)\"},{\"count\":-1,\"name\":\"not
+        acoustic\"},{\"count\":-1,\"name\":\"not sad\"},{\"count\":-1,\"name\":\"not
+        electronic\"},{\"count\":-1,\"name\":\"not happy\"},{\"count\":-1,\"name\":\"not
+        aggressive\"},{\"count\":-1,\"name\":\"not party\"}]}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '7548'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Mon, 02 Nov 2026 15:10:51 GMT
+      etag:
+      - '"NzA0Y2VjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Mon, 02 Nov 2026 15:10:10 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '211'
+      x-ratelimit-reset:
+      - '1793632252'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1
