@@ -528,11 +528,12 @@ describe("ArtistPanel suggested links", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 1c (SPEC S9, E4): Not an artist, with a confirmation and an Undo
+// Phase 1c (SPEC S9, E4): Not an artist, with a confirmation and an Undo. The panel asks; the
+// page holds the listing for its five-second Undo and sends it only then (Lance, 2026-11-03),
+// so an Undo inside the five seconds has nothing to take back (MatcherBrowser.test.tsx).
 // ---------------------------------------------------------------------------
 
 const NOT_AN_ARTIST_URL = `${ARTIST_URL}/not-an-artist`;
-const LISTED = { id: "00000000-0000-0000-0000-000000000001", listed: true };
 const UNLISTED = { id: "00000000-0000-0000-0000-000000000001", listed: false };
 
 function listCalls(): unknown[][] {
@@ -540,29 +541,23 @@ function listCalls(): unknown[][] {
 }
 
 describe("ArtistPanel Not an artist", () => {
-  function renderPanel(
-    overrides: Partial<QueueArtist> = {},
-    onNotAnArtist = vi.fn(),
-    listed = false
-  ) {
-    const view = render(
+  function renderPanel(overrides: Partial<QueueArtist> = {}, onNotAnArtist = vi.fn()) {
+    render(
       <ArtistPanel
         artist={makeArtist({
           original_name: "SPOT BREAK",
           normalized_name: "spot break",
           ...overrides,
         })}
-        listed={listed}
         onNotAnArtist={onNotAnArtist}
       />,
       { wrapper: wrapperFor(makeClient()) }
     );
-    return { onNotAnArtist, unmount: view.unmount };
+    return onNotAnArtist;
   }
 
-  it("not_an_artist_with_undo: asks first, lists the name on Confirm, and hands back an Undo", async () => {
-    mockedApiFetch.mockResolvedValueOnce(LISTED).mockResolvedValueOnce(UNLISTED);
-    const { onNotAnArtist, unmount } = renderPanel();
+  it("not_an_artist_with_undo: asks first, and on Confirm hands the name to the page's Undo, sending nothing", async () => {
+    const onNotAnArtist = renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
 
@@ -570,63 +565,43 @@ describe("ArtistPanel Not an artist", () => {
     expect(dialog.textContent).toMatch(/SPOT BREAK/);
     // It says what Confirm does: the name's links are removed.
     expect(dialog.textContent).toMatch(/links/i);
-    expect(listCalls()).toEqual([]);
+    expect(onNotAnArtist).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
 
-    await waitFor(() => expect(onNotAnArtist).toHaveBeenCalledTimes(1));
-    expect(listCalls()).toEqual([[NOT_AN_ARTIST_URL, { method: "POST" }]]);
-    const [message, undo] = onNotAnArtist.mock.calls[0] as [string, () => Promise<unknown>];
-    expect(message).toMatch(/SPOT BREAK/);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-
-    // The name leaves the queue, so its panel goes; the Undo still works.
-    unmount();
-    await undo();
-
-    expect(listCalls()).toEqual([
-      [NOT_AN_ARTIST_URL, { method: "POST" }],
-      [NOT_AN_ARTIST_URL, { method: "DELETE" }],
+    expect(onNotAnArtist).toHaveBeenCalledTimes(1);
+    const [artist] = onNotAnArtist.mock.calls[0] as [QueueArtist];
+    expect([artist.id, artist.original_name]).toEqual([
+      "00000000-0000-0000-0000-000000000001",
+      "SPOT BREAK",
     ]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    // The panel writes nothing: the page sends the listing when its Undo is over.
+    expect(mockedApiFetch).not.toHaveBeenCalled();
   });
 
-  it("Cancel lists nothing and closes the dialog", async () => {
-    const { onNotAnArtist } = renderPanel();
+  it("Cancel hands nothing over and closes the dialog", async () => {
+    const onNotAnArtist = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
     await screen.findByRole("alertdialog");
 
     fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(listCalls()).toEqual([]);
     expect(onNotAnArtist).not.toHaveBeenCalled();
+    expect(mockedApiFetch).not.toHaveBeenCalled();
   });
 
-  it("a failed listing keeps the dialog open with the error, and reports nothing", async () => {
-    mockedApiFetch.mockRejectedValueOnce(new Error("API 503: unavailable"));
-    const { onNotAnArtist } = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
-    const dialog = await screen.findByRole("alertdialog");
-
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
-
-    await waitFor(() => expect(dialog.textContent).toMatch(/unavailable/i));
-    expect(screen.getByRole("alertdialog")).toBeDefined();
-    expect(onNotAnArtist).not.toHaveBeenCalled();
-  });
-
-  it("E4: Confirm is disabled while the listing runs, so a second press sends nothing", async () => {
-    mockedApiFetch.mockImplementation(() => new Promise(() => {})); // never answers
-    renderPanel();
+  it("E4: Confirm pressed twice hands the name over once", async () => {
+    const onNotAnArtist = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
     const dialog = await screen.findByRole("alertdialog");
     const confirm = within(dialog).getByRole("button", { name: /^Confirm/i });
 
     fireEvent.click(confirm);
-
-    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(true));
     fireEvent.click(confirm);
-    expect(listCalls()).toHaveLength(1);
+
+    expect(onNotAnArtist).toHaveBeenCalledTimes(1);
   });
 
   it("is offered for a matched name too (VARIOUS was auto_matched)", () => {

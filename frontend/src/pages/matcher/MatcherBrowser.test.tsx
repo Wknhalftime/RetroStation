@@ -535,7 +535,10 @@ describe("MatcherBrowser — a confirmation never carries over to another artist
 });
 
 // Phase 1c (SPEC S9, E4): Not an artist's five-second Undo, and the "Show placeholders" filter
-// through which a name is taken off the list later.
+// through which a name is taken off the list later. The Undo really undoes (Lance,
+// 2026-11-03): the page hides the name at once and sends the listing only when the banner's
+// five seconds are up, so an Undo inside them sends and writes nothing. Leaving the page inside
+// them sends it then: the curator confirmed it in the dialog.
 describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
   const spot = makeArtist("00000000-0000-0000-0000-00000000000c", "SPOT BREAK");
   const delta = makeArtist("00000000-0000-0000-0000-00000000000d", "Delta");
@@ -555,13 +558,14 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
       .filter((u) => u.includes("/api/v1/matching/queue"));
   }
 
-  /** The server: SPOT BREAK is in the main view until it is listed, then in the placeholder
-   *  view (``placeholders=true``) only. */
-  function routeApi(listedAtFirst: boolean) {
+  /** The server: SPOT BREAK is in the main view until a POST lists it, then in the
+   *  placeholder view (``placeholders=true``) only. With *failListing*, the POST fails. */
+  function routeApi(listedAtFirst: boolean, failListing = false) {
     let listed = listedAtFirst;
     mockedApiFetch.mockImplementation((async (url: string, init?: { method?: string }) => {
       const u = String(url);
       if (u === LIST_URL) {
+        if (failListing && init?.method === "POST") throw new Error("API 503: unavailable");
         listed = init?.method === "POST";
         return { id: spot.id, listed };
       }
@@ -580,9 +584,22 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
     return screen.getByText(/Artists \(\d+\)/).closest("aside") as HTMLElement;
   }
 
-  /** Select SPOT BREAK, press Not an artist and confirm; the banner's Undo button. */
-  async function listSpotBreak(): Promise<HTMLElement> {
-    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+  function spotInTheList(): boolean {
+    return within(sidebar()).queryByRole("button", { name: /SPOT BREAK/i }) !== null;
+  }
+
+  /** Advance the fake clock to *ms* after *from* (it also moves with real time, so the
+   *  margin is counted from a moment the test saw, not from the call). */
+  async function advanceTo(from: number, ms: number) {
+    await act(async () => {
+      vi.advanceTimersByTime(Math.max(0, from + ms - Date.now()));
+    });
+  }
+
+  /** Select SPOT BREAK, press Not an artist and confirm: the banner's Undo button, when it
+   *  was seen, and the page's unmount. */
+  async function listSpotBreak() {
+    const view = render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
     await screen.findByText(/Artists \(2\)/);
     fireEvent.click(within(sidebar()).getByRole("button", { name: /SPOT BREAK/i }));
     fireEvent.click(await screen.findByRole("button", { name: /^Not an artist$/i }));
@@ -590,46 +607,88 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
     });
-    return screen.findByRole("button", { name: /^Undo$/i });
+    const undo = await screen.findByRole("button", { name: /^Undo$/i });
+    return { undo, shown: Date.now(), unmount: view.unmount };
   }
 
-  it("not_an_artist_undo_for_five_seconds: the banner offers Undo for five seconds", async () => {
+  it("not_an_artist_undo_for_five_seconds: hidden at once, sent when the five seconds are up", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     routeApi(false);
 
-    const undo = await listSpotBreak();
-    // The fake clock also moves with real time: count from when the banner was seen, so a
-    // slow machine cannot use up the margin.
-    const shown = Date.now();
+    const { undo, shown } = await listSpotBreak();
 
     expect(undo.closest('[role="status"]')?.textContent).toMatch(/SPOT BREAK/);
-    await screen.findByText(/Artists \(1\)/); // it left the queue
-    await act(async () => {
-      vi.advanceTimersByTime(Math.max(0, shown + 4000 - Date.now())); // past the others' 3 s
-    });
+    expect(spotInTheList()).toBe(false); // hidden at once, though the server still lists it
+    expect(listCalls()).toEqual([]);
+    await advanceTo(shown, 4000); // past the other banners' three seconds
     expect(screen.getByRole("button", { name: /^Undo$/i })).toBeDefined();
-    await act(async () => {
-      vi.advanceTimersByTime(Math.max(0, shown + 5100 - Date.now()));
-    });
+    expect(listCalls()).toEqual([]);
+
+    await advanceTo(shown, 5100);
+
+    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
     expect(screen.queryByRole("button", { name: /^Undo$/i })).toBeNull();
-    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
+    await waitFor(() => expect(spotInTheList()).toBe(false));
   });
 
-  it("Undo takes the name off the list, and it is back in the queue", async () => {
+  it("an Undo inside the five seconds sends nothing, and the name is back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     routeApi(false);
-    const undo = await listSpotBreak();
+    const { undo, shown } = await listSpotBreak();
 
     await act(async () => {
       fireEvent.click(undo);
     });
 
+    expect(spotInTheList()).toBe(true);
+    expect(screen.queryByRole("button", { name: /^Undo$/i })).toBeNull();
+    await advanceTo(shown, 6000);
+    expect(listCalls()).toEqual([]);
+  });
+
+  it("stays hidden across a refetch inside the five seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    routeApi(false);
+    const { shown } = await listSpotBreak();
+    const fetched = queueUrls().length;
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Name$/ })); // sort: a new fetch
+    });
+
+    await waitFor(() => expect(queueUrls().length).toBeGreaterThan(fetched));
     await waitFor(() =>
-      expect(listCalls()).toEqual([
-        [LIST_URL, { method: "POST" }],
-        [LIST_URL, { method: "DELETE" }],
-      ])
+      expect(within(sidebar()).getByRole("button", { name: /Delta/i })).toBeDefined()
     );
-    await screen.findByText(/Artists \(2\)/);
+    expect(spotInTheList()).toBe(false); // the server's answer still has it
+    expect(listCalls()).toEqual([]);
+    await advanceTo(shown, 5100);
+    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
+  });
+
+  it("a listing that fails after the five seconds shows the error and puts the name back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    routeApi(false, true);
+    const { shown } = await listSpotBreak();
+
+    await advanceTo(shown, 5100);
+
+    const error = await screen.findByText(/unavailable/i);
+    expect(error.closest('[role="status"]')).not.toBeNull();
+    await waitFor(() => expect(spotInTheList()).toBe(true));
+    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
+  });
+
+  it("leaving the page inside the five seconds sends the listing then, once", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    routeApi(false);
+    const { shown, unmount } = await listSpotBreak();
+
+    unmount();
+
+    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]));
+    await advanceTo(shown, 6000);
+    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
   });
 
   it("placeholder_filter: Show placeholders lists the listed names, and Back to the queue takes one off", async () => {
