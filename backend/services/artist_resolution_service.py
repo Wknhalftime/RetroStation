@@ -173,11 +173,11 @@ def list_not_an_artist(broadcast_artist_id: UUID, repos: ArtistResolutionRepos) 
 def unlist_not_an_artist(broadcast_artist_id: UUID, repos: ArtistResolutionRepos) -> None:
     """Take the log name off the not-an-artist list (S6, E4): it takes the status its links
     give (S3; a matched name with none goes to review with LINK_REMOVED). A name not listed
-    is left as it is, but for that status.
+    is left as it is.
 
     Raises:
         LogNameNotFoundError: no log name has this id.
     """
     name = _name(broadcast_artist_id, repos)
-    repos.not_an_artist_list().remove(name.normalized_name)
-    repos.link_service().write_status_from_links(broadcast_artist_id)
+    if repos.not_an_artist_list().remove(name.normalized_name):
+        repos.link_service().write_status_from_links(broadcast_artist_id)

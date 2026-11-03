@@ -110,7 +110,7 @@ export function ArtistPanel({
   function handleBackToQueue() {
     unlist.mutate(
       { id: artist.id },
-      { onSuccess: () => onBackToQueue?.(`${artist.original_name} is back in the queue.`) }
+      { onSuccess: () => onBackToQueue?.(`${artist.original_name} is off the not-an-artist list.`) }
     );
   }
 

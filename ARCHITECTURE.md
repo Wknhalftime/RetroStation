@@ -244,7 +244,12 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   their SQL, and the song stage decides none of its lines (`lines_to_match`). The gate's dry
   runs ask the same functions: the artist dry run records the refusal, the identity dry run
   leaves the lines out. A refused placeholder answer is held back the same way
-  (`hold_back_refused_link`, before a rejected pair's: `NO_CANDIDATES`).
+  (`hold_back_refused_link`, before a rejected pair's: `NO_CANDIDATES`). A name listed while a
+  run is under way: the matcher reads the list again before it writes a link, and the song
+  stage as it reaches each artist, so neither writes for it. The auto-reject cascade passes a
+  listed name by. A pending line of a listed name is no pending work (the matching run's count
+  and the re-check's playlists leave it out). The one-off `scripts/dry_run_title_scoring.py`
+  (AUD-R100's trial) does not filter listed names.
 - Not an artist: `POST /matching/artists/{id}/not-an-artist` lists the name (`curator`) and
   removes its active and suggested links; a rejected pair stays rejected, written back as it
   was (`unlink_keeping_rejected`), so a name listed by mistake keeps the curator's rejections.
@@ -252,10 +257,12 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   with none: `LINK_REMOVED`). Both are sync routes on `SyncRepos` (C75), idempotent (E4). The
   panel asks first; the page hides the name at once and sends the POST only when its
   five-second Undo is over, so an Undo inside them writes nothing (leaving the page sends it
-  then; a closed tab may drop it, which writes nothing). After that the "Show placeholders"
-  view (`/queue?placeholders=true`: every listed name, any status) has "Back to the queue".
-- Known gap: a pending line of a listed name stays pending, so it counts in the matching run's
-  pending work until the name is taken off the list.
+  then; a closed tab may drop it, which writes nothing). The Undo has a banner of its own, and
+  each held name stays hidden until its listing is sent. After that the "Show placeholders"
+  view (`/queue?placeholders=true`: every listed name, any status or bucket) has "Back to the
+  queue", and no song decision. `DELETE` writes the status only for a name that was listed.
+- Known gap: the song resolve route itself does not refuse a line of a listed name; only the
+  page offers no song action for one.
 - The checks are `tests/services/test_placeholder_links_refused.py`,
   `tests/services/test_placeholder_list_wiring.py`,
   `tests/repositories/test_log_name_placeholders_contract.py`,

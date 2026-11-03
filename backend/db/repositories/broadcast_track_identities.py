@@ -17,8 +17,8 @@ from backend.domain.matching import SONG_UNDECIDED_STATUSES
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_reasons import format_deferred_retry
 
-# The line (``ti``) is not under a name on the not-an-artist list (phase 1c, C7): the
-# re-check's rewinds pass such lines by, so no run song-matches them.
+# The line (``ti``) is not under a name on the not-an-artist list (phase 1c, C7): no run
+# song-matches such a line, so the re-check's rewinds pass it by and it is no pending work.
 _NOT_LISTED = """NOT EXISTS (SELECT 1 FROM broadcast_artists ba
                               JOIN log_name_placeholders ph
                                 ON ph.normalized_name = ba.normalized_name
@@ -287,11 +287,12 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         return cur.rowcount
 
     def playlist_ids_with_pending(self) -> set[UUID]:
+        # A pending line of a name on the not-an-artist list is no work (phase 1c, C7).
         rows = self._conn.execute(
-            """SELECT DISTINCT pe.playlist_id
+            f"""SELECT DISTINCT pe.playlist_id
                  FROM play_events pe
                  JOIN track_identities ti ON ti.id = pe.identity_id
-                WHERE ti.match_status = %s""",
+                WHERE ti.match_status = %s AND {_NOT_LISTED}""",
             (MatchStatus.PENDING.value,),
         ).fetchall()
         return {row["playlist_id"] for row in rows}

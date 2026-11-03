@@ -20,8 +20,7 @@ import { TitlePanel } from "@/components/domain/matcher/TitlePanel";
 import { SearchSlideOver } from "@/components/domain/matcher/SearchSlideOver";
 import type { MbArtistResult, QueueArtist } from "@/lib/schemas/matcher";
 
-// "undo": a confirmed Not an artist the page holds for UNDO_MS before sending it (phase 1c S9).
-type Feedback = { kind: "success" | "error" | "undo"; message: string } | null;
+type Feedback = { kind: "success" | "error"; message: string } | null;
 
 // Not an artist's Undo (phase 1c S9; Lance, 2026-11-03): the listing is sent only once these
 // are up, so an Undo inside them sends and writes nothing.
@@ -152,16 +151,27 @@ export function MatcherBrowser() {
     targetArtistId: string;
   } | null>(null);
 
-  // A confirmed Not an artist the page holds for its Undo (phase 1c S9): the name is hidden
-  // from the list at once, and across refetches, until the listing has been sent and the
-  // queue fetched again, or it is undone. A ref too, so leaving the page can send it.
+  // A confirmed Not an artist the page holds for its Undo (phase 1c S9). Each such name is
+  // hidden from the list at once, and across refetches, until its listing has been sent and
+  // the queue fetched again, or it is undone. The one the Undo banner offers is ``undoable``
+  // (its own banner: no other message replaces it), and a ref, so leaving the page can send it.
   const queryClient = useQueryClient();
-  const [held, setHeld] = useState<QueueArtist | null>(null);
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  const [undoable, setUndoable] = useState<QueueArtist | null>(null);
   const heldRef = useRef<{ artist: QueueArtist; timer: ReturnType<typeof setTimeout> } | null>(
     null,
   );
 
-  const artists: QueueArtist[] = (data?.items ?? []).filter((a) => a.id !== held?.id);
+  const hide = useCallback((id: string, on: boolean) => {
+    setHidden((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const artists: QueueArtist[] = (data?.items ?? []).filter((a) => !hidden.has(a.id));
   const total: number = data?.total ?? 0;
   const unlikelyTotal: number = data?.unlikely_total ?? 0;
   const hasHiddenOrShownUnlikely = unlikelyTotal > 0 || includeUnlikely;
@@ -173,48 +183,49 @@ export function MatcherBrowser() {
 
   // Auto-dismiss success banners after 3s; keep errors until the next user
   // action so the curator has time to read what failed. Re-runs whenever
-  // `feedback` changes, so each new success starts its own timer. The Undo banner lasts as
-  // long as the listing is held (UNDO_MS).
+  // `feedback` changes, so each new success starts its own timer.
   useEffect(() => {
     if (feedback?.kind !== "success") return;
     const t = setTimeout(() => setFeedback(null), 3000);
     return () => clearTimeout(t);
   }, [feedback]);
 
-  // Send a held listing: the banner goes, and the name stays hidden until the queue has been
-  // fetched again without it; a failure shows the error and puts the name back.
+  // Send a listing: the name stays hidden until the queue has been fetched again without it;
+  // a failure shows the error and puts the name back.
   const sendListing = useCallback(
     (artist: QueueArtist) => {
-      setFeedback(null);
       listNotAnArtist(artist.id)
         .then(() => queryClient.invalidateQueries({ queryKey: ["matching"] }))
-        .then(() => setHeld((current) => (current?.id === artist.id ? null : current)))
+        .then(() => hide(artist.id, false))
         .catch((err: unknown) => {
-          setHeld((current) => (current?.id === artist.id ? null : current));
+          hide(artist.id, false);
           setFeedback({
             kind: "error",
             message: `Could not list ${artist.original_name} as not an artist: ${errorMessage(err)}`,
           });
         });
     },
-    [queryClient],
+    [queryClient, hide],
   );
 
+  // The held listing goes now: its Undo is over, or another name takes the banner.
+  function sendHeld() {
+    const current = heldRef.current;
+    if (current === null) return;
+    clearTimeout(current.timer);
+    heldRef.current = null;
+    setUndoable(null);
+    sendListing(current.artist);
+  }
+
   function handleNotAnArtist(artist: QueueArtist) {
-    // A listing already held is sent now: only one Undo is offered at a time.
-    const before = heldRef.current;
-    if (before !== null) {
-      clearTimeout(before.timer);
-      sendListing(before.artist);
-    }
-    const timer = setTimeout(() => {
-      heldRef.current = null;
-      sendListing(artist);
-    }, UNDO_MS);
+    // Only one Undo is offered at a time: a listing already held is sent now.
+    sendHeld();
+    const timer = setTimeout(sendHeld, UNDO_MS);
     heldRef.current = { artist, timer };
-    setHeld(artist);
+    hide(artist.id, true);
+    setUndoable(artist);
     setSelectedArtistId(null);
-    setFeedback({ kind: "undo", message: `${artist.original_name} is listed as not an artist.` });
   }
 
   function handleUndo() {
@@ -222,8 +233,8 @@ export function MatcherBrowser() {
     if (current === null) return;
     clearTimeout(current.timer);
     heldRef.current = null;
-    setHeld(null);
-    setFeedback(null);
+    setUndoable(null);
+    hide(current.artist.id, false);
   }
 
   // Leaving the page inside the Undo sends the listing then: the curator confirmed it.
@@ -233,9 +244,11 @@ export function MatcherBrowser() {
       if (current === null) return;
       clearTimeout(current.timer);
       heldRef.current = null;
-      void listNotAnArtist(current.artist.id).catch(() => undefined);
+      void listNotAnArtist(current.artist.id)
+        .then(() => queryClient.invalidateQueries({ queryKey: ["matching"] }))
+        .catch(() => undefined);
     },
-    [],
+    [queryClient],
   );
 
   // Clamp page when `total` shrinks (e.g. after resolving items reduces the queue).
@@ -395,22 +408,32 @@ export function MatcherBrowser() {
           role="status"
           aria-live="polite"
           className={cn(
-            "mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm",
-            feedback.kind === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-green-200 bg-green-50 text-green-700",
+            "mx-4 mb-2 rounded-md border px-3 py-2 text-sm",
+            feedback.kind === "success"
+              ? "border-green-200 bg-green-50 text-green-700"
+              : "border-red-200 bg-red-50 text-red-700",
           )}
         >
-          <span>{feedback.message}</span>
-          {feedback.kind === "undo" && (
-            <button
-              type="button"
-              onClick={handleUndo}
-              className="shrink-0 rounded border border-green-300 px-2 py-0.5 text-xs font-medium hover:bg-green-100"
-            >
-              Undo
-            </button>
-          )}
+          {feedback.message}
+        </div>
+      )}
+
+      {/* Not an artist's Undo (phase 1c S9): a banner of its own, for as long as the listing
+          is held (UNDO_MS). */}
+      {undoable && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          <span>{undoable.original_name} is listed as not an artist.</span>
+          <button
+            type="button"
+            onClick={handleUndo}
+            className="shrink-0 rounded border border-amber-300 px-2 py-0.5 text-xs font-medium hover:bg-amber-100"
+          >
+            Undo
+          </button>
         </div>
       )}
 
@@ -575,7 +598,11 @@ export function MatcherBrowser() {
                   onNotAnArtist={handleNotAnArtist}
                   onBackToQueue={(message) => setFeedback({ kind: "success", message })}
                 />
-                <TitlePanel artist={selectedArtist} onFileSearch={handleFileSearch} />
+                {/* A listed name's songs are never matched (phase 1c S6): the placeholder
+                    view offers no song decision. */}
+                {!showPlaceholders && (
+                  <TitlePanel artist={selectedArtist} onFileSearch={handleFileSearch} />
+                )}
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-300 p-12 text-center">

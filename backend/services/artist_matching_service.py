@@ -890,6 +890,10 @@ def match_artists_for_playlist(
             # Planned once: the status it writes comes from the name's links, so a suggested
             # name the matcher defers stays LINK_SUGGESTED and starts no cascade (S3's order).
             plan = links.plan_answer(broadcast_artist.id, matcher_answer(result))
+            if plan.writes and listed_names([broadcast_artist], repos.placeholders):
+                # Listed while this run matched it (phase 1c S6): read again before a link is
+                # written, it gets the list's answer, and no link.
+                plan = links.plan_answer(broadcast_artist.id, matcher_answer(listed_name_result()))
             # Only artists this run actually wrote: one the user decided meanwhile keeps
             # its songs as they are (AUD-R018).
             if (
@@ -898,7 +902,9 @@ def match_artists_for_playlist(
             ):
                 deferred_artist_ids.append(broadcast_artist.id)
 
-        _cascade_auto_rejected(playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo)
+        _cascade_auto_rejected(
+            playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo, repos.placeholders
+        )
         _cascade_deferred(deferred_artist_ids, repos.track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
@@ -931,14 +937,20 @@ def _cascade_auto_rejected(
     playlist_id: UUID,
     broadcast_artist_repo: BroadcastArtistRepository,
     track_identity_repo: BroadcastTrackIdentityRepository,
+    placeholders: LogNamePlaceholderRepository | None = None,
 ) -> None:
     """Cascade: AUTO_REJECTED artists -> bulk reject child identities.
 
-    Preserved from the legacy implementation.
+    Preserved from the legacy implementation. A name on the not-an-artist list is passed by:
+    its lines keep their state (phase 1c, C7).
     """
     all_playlist_artists = broadcast_artist_repo.get_all_for_playlist(playlist_id)
+    listed = listed_names(all_playlist_artists, placeholders)
     for broadcast_artist in all_playlist_artists:
-        if broadcast_artist.match_status == MatchStatus.AUTO_REJECTED:
+        if (
+            broadcast_artist.match_status == MatchStatus.AUTO_REJECTED
+            and broadcast_artist.normalized_name not in listed
+        ):
             track_identity_repo.bulk_reject_by_artist(broadcast_artist.id)
 
 

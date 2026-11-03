@@ -535,7 +535,10 @@ async def get_matching_queue(
         if placeholders
         else (_QUEUE_STATUSES, _QUEUE_STATUSES, search_term, search_term)
     )
+    # The placeholder view shows every listed name: likely or not, in any bucket.
     include_unlikely = include_unlikely or placeholders
+    if placeholders:
+        bucket = None
     page_cur = await conn.execute(
         f"""
         WITH {cte},

@@ -177,9 +177,13 @@ export function listNotAnArtist(id: string): Promise<PlaceholderListing> {
   return apiFetch<PlaceholderListing>(notAnArtistUrl(id), { method: "POST", keepalive: true });
 }
 
+interface NotAnArtistVariables {
+  id: string;
+}
+
 export function useUnlistNotAnArtist() {
   const queryClient = useQueryClient();
-  return useMutation<PlaceholderListing, Error, UnmatchVariables>({
+  return useMutation<PlaceholderListing, Error, NotAnArtistVariables>({
     mutationFn: ({ id }) => apiFetch<PlaceholderListing>(notAnArtistUrl(id), { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["matching"] });

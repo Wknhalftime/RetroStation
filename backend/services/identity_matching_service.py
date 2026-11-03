@@ -1053,10 +1053,18 @@ def match_identities_for_playlist(
     deferred = 0
     decided_meanwhile = 0
     work_ids: list[str] = []
+    # A name listed while this run matches (phase 1c S6): the list is read again as each
+    # artist's songs begin, and a listed name's songs are passed by.
+    checked: dict[UUID, bool] = {}
 
     # Each artist's songs together, so the strategies read each artist once (_ArtistMemo).
     for identity in ticking(group_by_artist(pending), progress):
         artist = artists_by_id.get(identity.broadcast_artist_id)
+        if artist is not None and repos.placeholders is not None:
+            if artist.id not in checked:
+                checked[artist.id] = bool(repos.placeholders.listed({artist.normalized_name}))
+            if checked[artist.id]:
+                continue
         if artist is None:
             logger.warning(
                 "orphaned_identity_marked_for_review",

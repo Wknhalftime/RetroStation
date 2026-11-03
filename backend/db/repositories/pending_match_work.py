@@ -19,8 +19,16 @@ COUNT_OPTIONS = "-c lock_timeout=2000 -c statement_timeout=10000"
 its own on ``match_status``, bounded as the cue coverage counts are (10 s, 2 s on a lock), so
 a cold disk does not lose a stage its start count."""
 
+# A pending song of a name on the not-an-artist list is no work: no run matches it, so it
+# keeps its state (phase 1c, C7).
 _COUNT_SQL = """SELECT (SELECT count(*) FROM broadcast_artists WHERE match_status = 'pending')
-                     + (SELECT count(*) FROM track_identities WHERE match_status = 'pending')
+                     + (SELECT count(*) FROM track_identities ti
+                         WHERE ti.match_status = 'pending'
+                           AND NOT EXISTS (
+                               SELECT 1 FROM broadcast_artists ba
+                               JOIN log_name_placeholders ph
+                                 ON ph.normalized_name = ba.normalized_name
+                               WHERE ba.id = ti.broadcast_artist_id))
                     AS pending"""
 
 
