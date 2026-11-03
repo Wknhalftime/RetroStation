@@ -2393,6 +2393,7 @@ source = { editable = "." }
 dependencies = [
     { name = "chardet" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "huey" },
     { name = "mutagen" },
@@ -2444,6 +2445,7 @@ requires-dist = [
     { name = "deptry", marker = "extra == 'dev'" },
     { name = "diff-cover", marker = "extra == 'dev'" },
     { name = "fastapi", specifier = ">=0.134" },
+    { name = "filelock", specifier = ">=3.25" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "huey", specifier = ">=2.6" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },

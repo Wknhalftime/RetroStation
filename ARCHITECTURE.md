@@ -217,6 +217,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
+- **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
+  `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
+  cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
+  enrichment's recording search are batched 100 per request; the recordings phase's
+  `lookup_recording` stays one call per recording because only it carries work relations.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, the local-artist linking and the matching re-check, `task_failure_telemetry`,
   the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016). A matching

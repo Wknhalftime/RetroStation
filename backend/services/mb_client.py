@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import threading
-import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -14,34 +13,25 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 from backend.domain.catalog import MusicBrainzId
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
+from backend.services import mb_clock
 from backend.services.mb_types import MbArtist, MbArtistResult, MbRecording, MbRelease
 
 logger = structlog.get_logger()
 
+# Reports progress through a batch: (done, total, mbid just answered).
+type Progress = Callable[[int, int, str], None]
+
+# Blocks until it is this client's turn to call MusicBrainz (test seam, like ``transport``).
+type WaitTurn = Callable[[], None]
+
 # --- Module-level constants ---
 _MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
 _USER_AGENT = "RetroStation/0.1.0 (https://github.com/retrostation)"
-_RATE_LIMIT_SECONDS = 1.1
 _CACHE_TTL_DAYS = 30
 # MusicBrainz caps search results at 100 per request.
 _SEARCH_BATCH_SIZE = 100
 # Marker stored for an MBID the search index does not know, so it is not asked again.
 _NOT_IN_INDEX = "not_in_index"
-
-# --- Module-level mutable state (rate-limiting) ---
-_rate_lock: threading.Lock = threading.Lock()
-_last_request_time: float = 0.0
-
-
-def _rate_limit() -> None:
-    """Enforce 1.1s between MusicBrainz API calls (thread-safe)."""
-    global _last_request_time
-    with _rate_lock:
-        elapsed = time.monotonic() - _last_request_time
-        if elapsed < _RATE_LIMIT_SECONDS:
-            time.sleep(_RATE_LIMIT_SECONDS - elapsed)
-        _last_request_time = time.monotonic()
-
 
 # Lucene special characters that must be escaped inside a query term.
 # See https://musicbrainz.org/doc/MusicBrainz_API/Search#Lucene_Search_Syntax.
@@ -80,6 +70,12 @@ class MusicBrainzClientProtocol(Protocol):
         self, artist_mbid: str, title: str, limit: int = 10
     ) -> list[MbRecording]: ...
     def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, MbRecording]: ...
+    def search_artists_by_mbids(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbArtist]: ...
+    def lookup_recordings(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbRecording | None]: ...
 
 
 def _slim_recording(recording: MbRecording) -> MbRecording:
@@ -110,6 +106,53 @@ def _slim_recording(recording: MbRecording) -> MbRecording:
     return cast(MbRecording, slim)
 
 
+def _well_formed(entity: str, mbids: Sequence[str]) -> list[MusicBrainzId]:
+    """Distinct well-formed MBIDs in input order; malformed ones are logged and dropped."""
+    wanted: list[MusicBrainzId] = []
+    for raw in dict.fromkeys(mbids):
+        parsed = MusicBrainzId.parse(raw)
+        if parsed is None:
+            logger.warning("malformed_mbid_skipped", entity=entity, mbid=raw)
+        else:
+            wanted.append(parsed)
+    return wanted
+
+
+def _slim_artist(hit: MbArtist) -> MbArtist:
+    """Keep the four fields anything reads from an artist.
+
+    A search hit carries aliases, tags, area and life-span that nothing
+    reads. ``lookup_artist`` caches the same shape, so one cache row serves
+    both paths.
+    """
+    slim: dict[str, Any] = {"id": hit.get("id"), "name": hit.get("name", "")}
+    if "sort-name" in hit:
+        slim["sort-name"] = hit["sort-name"]
+    if hit.get("disambiguation"):
+        slim["disambiguation"] = hit["disambiguation"]
+    return cast(MbArtist, slim)
+
+
+@dataclass(frozen=True)
+class _SearchableEntity[T]:
+    """What differs between entity types in a search-by-MBIDs batch."""
+
+    path: str  # URL segment and payload key stem, e.g. "recording"
+    id_field: str  # Lucene field holding the MBID, e.g. "rid"
+    key_prefix: str  # cache key prefix, e.g. "recording-by-mbid"
+    entity_type: str  # cache row entity_type, e.g. "recording-search"
+    slim: Callable[[T], T]
+    negative_cache: bool  # True: cache {_NOT_IN_INDEX: True} for IDs the index lacks
+
+
+_RECORDINGS = _SearchableEntity[MbRecording](
+    "recording", "rid", "recording-by-mbid", "recording-search", _slim_recording, True
+)
+# Artists share the cache key and row shape of ``lookup_artist``; an unknown id is not
+# cached, because the direct lookup (which also follows merges) is the fallback.
+_ARTISTS = _SearchableEntity[MbArtist]("artist", "arid", "artist", "artist", _slim_artist, False)
+
+
 class MusicBrainzApiClient:
     """MusicBrainz API client with caching, rate limiting, and exponential-backoff retry.
 
@@ -133,6 +176,10 @@ class MusicBrainzApiClient:
       across threads is supported.
     - ``httpx.Client`` is documented as safe to share across threads.
 
+    Request pacing is machine-wide, not per process: every client waits its turn on
+    the shared clock in ``mb_clock``, so the API and the worker together stay within
+    MusicBrainz's rate limit.
+
     If a future change swaps either backing resource for a driver that enforces
     a creator-thread check or relies on thread-local state (stdlib ``sqlite3``
     with ``check_same_thread=True``, some ODBC drivers, etc.), the call sites
@@ -147,9 +194,12 @@ class MusicBrainzApiClient:
         cache_repo: MusicBrainzCacheRepository,
         ttl_days: int = _CACHE_TTL_DAYS,
         transport: httpx.BaseTransport | None = None,
+        wait_turn: WaitTurn | None = None,
     ) -> None:
         self._cache = cache_repo
         self._ttl_days = ttl_days
+        # ``wait_turn`` is a test seam; production paces on the machine-wide clock.
+        self._wait_turn = wait_turn if wait_turn is not None else mb_clock.wait_turn
         # ``transport`` is a test seam (httpx.MockTransport); production leaves
         # it None so the client's own settings, redirects included, apply.
         self._http = httpx.Client(
@@ -235,7 +285,7 @@ class MusicBrainzApiClient:
         # HTTP call, the post-call info logs never fire. Emitting here makes
         # the in-flight request visible in a DEBUG trail without spamming INFO.
         logger.debug("mb_api_fetch_start", url=url, params=params)
-        _rate_limit()
+        self._wait_turn()
         response = self._http.get(url, params=params)
         response.raise_for_status()
         return response
@@ -327,66 +377,126 @@ class MusicBrainzApiClient:
         Search results carry artist credits, length and releases, but no
         work relations.
         """
-        wanted: list[str] = []
-        for mbid in dict.fromkeys(mbids):
-            if MusicBrainzId.parse(mbid) is None:
-                logger.warning("malformed_recording_mbid_skipped", recording_mbid=mbid)
-                continue
-            wanted.append(mbid)
+        return self._search_by_mbids(_RECORDINGS, mbids)
 
-        found: dict[str, MbRecording] = {}
+    def search_artists_by_mbids(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbArtist]:
+        """Fetch many artists by MBID, up to 100 per search request.
+
+        Found-only: an MBID the index does not know (merged, deleted) or a
+        malformed one is absent from the result; callers fall back to
+        ``lookup_artist``, which follows merges. ``on_progress(i, total, mbid)``
+        fires once per distinct well-formed MBID: first for every cache hit
+        (input order), then for each request's MBIDs as soon as that request has landed.
+        """
+        return self._search_by_mbids(_ARTISTS, mbids, on_progress=on_progress)
+
+    def lookup_recordings(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, MbRecording | None]:
+        """Look up each distinct recording by MBID, one request each (via the cache).
+
+        Unlike ``search_artists_by_mbids`` (found-only), a 404 is stored as ``None`` so
+        the caller knows it was asked; only a transient failure omits the key, and the
+        caller then retries it live. ``on_progress(i, total, mbid)`` fires once per
+        MBID, after its lookup, whatever the outcome.
+        """
+        distinct = list(dict.fromkeys(mbids))
+        result: dict[str, MbRecording | None] = {}
+        for index, mbid in enumerate(distinct, start=1):
+            try:
+                result[mbid] = self.lookup_recording(mbid)
+            except httpx.HTTPError as exc:
+                logger.warning("mb_lookup_recordings_omitted", mbid=mbid, error=str(exc))
+            if on_progress is not None:
+                on_progress(index, len(distinct), mbid)
+        return result
+
+    def _search_by_mbids[T](
+        self,
+        entity: _SearchableEntity[T],
+        mbids: Sequence[str],
+        *,
+        on_progress: Progress | None = None,
+    ) -> dict[str, T]:
+        """Search one entity type by MBID, ``_SEARCH_BATCH_SIZE`` per request, via the cache.
+
+        ``on_progress(i, total, mbid)`` fires per distinct well-formed MBID: cache hits
+        first, then each request's MBIDs right after that request's cache write.
+        """
+        wanted = _well_formed(entity.path, mbids)
+        if not wanted:
+            return {}
+        total = len(wanted)
+        done = 0
+
+        def advance(mbid: str) -> None:
+            nonlocal done
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total, mbid)
+
+        found: dict[str, T] = {}
         misses: list[str] = []
-        cached = self._cache.get_many([f"recording-by-mbid:{m}" for m in wanted])
+        cached = self._cache.get_many([f"{entity.key_prefix}:{m.value}" for m in wanted])
         for mbid in wanted:
-            entry = cached.get(f"recording-by-mbid:{mbid}")
+            entry = cached.get(f"{entity.key_prefix}:{mbid.value}")
             if entry is None:
-                misses.append(mbid)
+                misses.append(mbid.value)
                 continue
             self.cache_hits += 1
             # A negative entry means the search index has no such MBID
             # (merged or deleted); keep it out of the result without asking.
-            if entry.response_data.get(_NOT_IN_INDEX):
-                continue
-            found[mbid] = cast(MbRecording, entry.response_data)
+            if not entry.response_data.get(_NOT_IN_INDEX):
+                found[mbid.value] = cast(T, entry.response_data)
+            advance(mbid.value)
 
         for start in range(0, len(misses), _SEARCH_BATCH_SIZE):
             batch = misses[start : start + _SEARCH_BATCH_SIZE]
             self.live_fetches += 1
             response = self._fetch(
-                f"{_MUSICBRAINZ_API}/recording/",
+                f"{_MUSICBRAINZ_API}/{entity.path}/",
                 {
-                    "query": "rid:(" + " OR ".join(batch) + ")",
+                    "query": f"{entity.id_field}:(" + " OR ".join(batch) + ")",
                     "fmt": "json",
                     "limit": str(_SEARCH_BATCH_SIZE),
                 },
             )
             payload: dict[str, object] = response.json()
-            recordings = cast(list[MbRecording], payload.get("recordings", []))
+            hits = cast(list[dict[str, Any]], payload.get(f"{entity.path}s", []))
             asked = set(batch)
-            for recording in recordings:
-                rec_id = recording.get("id")
-                if rec_id and rec_id in asked:
-                    found[rec_id] = _slim_recording(recording)
-            # One write per batch: the hits, plus a negative entry for every
-            # MBID the index did not know so it is not asked again.
-            self._cache.set_many(
-                [
-                    self._cache_entry(
-                        cache_key=f"recording-by-mbid:{mbid}",
-                        entity_type="recording-search",
-                        entity_mbid=mbid,
-                        response_data=(
-                            dict(found[mbid]) if mbid in found else {_NOT_IN_INDEX: True}
-                        ),
-                    )
-                    for mbid in batch
-                ]
-            )
+            for hit in hits:
+                hit_id = hit.get("id")
+                if hit_id and hit_id in asked:
+                    found[hit_id] = entity.slim(cast(T, hit))
+            # One write per batch: the hits, plus (where the entity asks for it)
+            # a negative entry for every MBID the index did not know so it is
+            # not asked again.
+            entries = [
+                self._cache_entry(
+                    cache_key=f"{entity.key_prefix}:{mbid}",
+                    entity_type=entity.entity_type,
+                    entity_mbid=mbid,
+                    response_data=(
+                        dict(cast(dict[str, Any], found[mbid]))
+                        if mbid in found
+                        else {_NOT_IN_INDEX: True}
+                    ),
+                )
+                for mbid in batch
+                if mbid in found or entity.negative_cache
+            ]
+            if entries:
+                self._cache.set_many(entries)
             logger.info(
-                "mb_api_search_recordings_by_mbids",
+                "mb_api_search_by_mbids",
+                entity=entity.path,
                 asked=len(batch),
-                found=len(recordings),
+                found=len(hits),
             )
+            for mbid_value in batch:
+                advance(mbid_value)
         return found
 
     def lookup_release(self, mbid: str) -> MbRelease | None:
@@ -474,7 +584,7 @@ class MusicBrainzApiClient:
         return recording
 
     def lookup_artist(self, mbid: str) -> MbArtist | None:
-        """Fetch an artist by MBID, including aliases and tags.
+        """Fetch an artist by MBID, slimmed to the shape the batch search caches.
 
         Cache-aside read-through — identical pattern to lookup_recording.
         `url-rels` is intentionally omitted: MbArtist does not surface it and no
@@ -497,7 +607,7 @@ class MusicBrainzApiClient:
         try:
             response = self._fetch(
                 f"{_MUSICBRAINZ_API}/artist/{mbid}",
-                {"fmt": "json", "inc": "aliases+tags"},
+                {"fmt": "json"},
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
@@ -505,7 +615,7 @@ class MusicBrainzApiClient:
                 return None
             raise
 
-        artist = cast(MbArtist, response.json())
+        artist = _slim_artist(cast(MbArtist, response.json()))
 
         self._cache_write(
             cache_key=cache_key,

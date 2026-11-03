@@ -1,0 +1,58 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab?fmt=json
+  response:
+    body:
+      string: '{"name":"Metallica","ipis":[],"gender":null,"end-area":null,"country":"US","sort-name":"Metallica","gender-id":null,"id":"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab","begin-area":{"name":"Los
+        Angeles","id":"1f40c6e1-47ba-4e35-996f-fe6ee5840e62","sort-name":"Los Angeles","type-id":null,"type":null,"disambiguation":""},"isnis":["0000000122939631"],"area":{"disambiguation":"","type-id":null,"type":null,"sort-name":"United
+        States","id":"489ce91b-6658-3307-9877-795b68554c98","name":"United States","iso-3166-1-codes":["US"]},"type":"Group","type-id":"e431f5f6-b5d2-343d-8b36-72607fffb74b","life-span":{"ended":false,"end":null,"begin":"1981-10-28"},"disambiguation":""}'
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '663'
+      content-type:
+      - application/json; charset=utf-8
+      date:
+      - Mon, 02 Nov 2026 15:10:50 GMT
+      etag:
+      - W/"e41f0b8a6e8a46775d5d11785e69cba7"
+      keep-alive:
+      - timeout=15
+      server:
+      - Plack::Handler::Starlet
+      transfer-encoding:
+      - chunked
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '1900'
+      x-ratelimit-remaining:
+      - '1788'
+      x-ratelimit-reset:
+      - '1793632252'
+      x-runtime:
+      - '0.032274'
+    status:
+      code: 200
+      message: OK
+version: 1
