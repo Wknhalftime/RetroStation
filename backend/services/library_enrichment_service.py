@@ -443,7 +443,23 @@ def enrich_by_recording(
     pending_files = repos.enrichment_queries.get_pending_enrichment_by_recording(recording_mbid)
     if not pending_files:
         return 0
+    return enrich_files_by_recording(recording_mbid, pending_files, repos, mb_client)
 
+
+def enrich_files_by_recording(
+    recording_mbid: str,
+    pending_files: list[LibraryFile],
+    repos: EnrichmentRepos,
+    mb_client: MusicBrainzClientProtocol,
+) -> int:
+    """Link *pending_files* to one recording from its lookup; the step behind
+    :func:`enrich_by_recording`, also fed by the untagged-file pass
+    (:mod:`untagged_recording_service`), whose files carry no recording tag.
+
+    One lookup gives the recording its title, length, live flag and performed
+    work; every file is linked to it and moved onto that work. Returns the
+    count of files enriched; a lookup that fails marks them all FAILED.
+    """
     recording_id = MusicBrainzId.parse(recording_mbid)
     if recording_id is None:
         logger.warning("malformed_recording_mbid", recording_mbid=recording_mbid)
