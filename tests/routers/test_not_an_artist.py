@@ -6,9 +6,12 @@ exact cleaned name, seeded with the five station names (SPOT BREAK, SPECIAL PROG
 SYNDICATED PROGRAM, VARIOUS, VARIOUS ARTISTS). A listed name:
 
 - is never linked: ``POST /api/v1/matching/artists/{id}/not-an-artist`` lists it (added by
-  ``curator``) and removes its links in every state; Resolve to an artist answers 409, and
-  nothing is written. The matcher never matches it (``tests/services/
-  test_placeholder_links_refused.py``);
+  ``curator``) and removes its active and suggested links. A pair the curator rejected stays
+  rejected (C19; Lance, 2026-11-03): a name listed by mistake and taken off again keeps the
+  curator's rejections, so no later run links or suggests that pair. Resolve to an artist
+  answers 409, and nothing is written. The matcher never matches it (``tests/services/
+  test_placeholder_links_refused.py``), and no run song-matches its lines
+  (``tests/scripts/test_listed_names_not_song_matched.py``);
 - keeps its status, because the list hides it (S3), and its lines are untouched;
 - is hidden from the Resolution Center queue, in every view, with its count;
 - has its lines left out of the station missing-matches report: the total, the items and the
@@ -18,8 +21,9 @@ SYNDICATED PROGRAM, VARIOUS, VARIOUS ARTISTS). A listed name:
 holds (S3's rule): a matched name with none goes to ``needs_review`` with ``LINK_REMOVED``.
 Both are sync routes on ``SyncRepos`` (C75) and answer 404 for a name that does not exist.
 
-E4: pressing Not an artist twice is one listing, and taking a name off twice is harmless. An
-Undo after its toast is gone goes through the queue's placeholder view
+E4: pressing Not an artist twice is one listing, and taking a name off twice is harmless. The
+page sends the POST only once its five-second Undo is over (an Undo inside them sends nothing;
+``MatcherBrowser.test.tsx``). An Undo after that goes through the queue's placeholder view
 (``placeholders=true``), which shows every listed name, whatever its status and likelihood.
 
 Resolve to a special-purpose artist (``SPECIAL_PURPOSE_MBIDS``, S5) answers 422 and writes
@@ -44,6 +48,13 @@ from fastapi.testclient import TestClient
 from backend.dependencies import get_db_connection, get_sync_repos
 from backend.domain.enums import LogNameLinkOrigin, LogNameLinkState, MatchStatus
 from backend.routers.matching import router
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    match_artists_for_playlist,
+)
+from backend.services.matching_recheck_service import rewind_wave
+from backend.services.repository_factory import RepositoryFactory
+from tests.fakes.mb_client import FakeMbClient
 from tests.routers.cascade_seed import CascadeWorld, Conn, line_row, links, match_files, name_row
 
 VARIOUS_ARTISTS = "89ad4ac3-39f7-470e-963a-56509c546377"
@@ -123,6 +134,16 @@ def _missing(client: TestClient, station_id: UUID) -> set[str]:
     return {item["identity_id"] for item in _report(client, station_id)["items"]}
 
 
+def _kept(conn: Conn, name_id: UUID) -> dict[str, dict[str, Any]]:
+    """The name's links by artist id, without ``updated_at`` (a link kept as it was may be
+    written again)."""
+    conn.commit()
+    return {
+        artist: {k: v for k, v in row.items() if k != "updated_at"}
+        for artist, row in links(conn, name_id).items()
+    }
+
+
 def _snapshot(conn: Conn, name_id: UUID, line_ids: list[UUID]) -> dict[str, Any]:
     """The name's row and its lines' rows and match files, to compare before and after."""
     conn.commit()
@@ -139,15 +160,17 @@ def _snapshot(conn: Conn, name_id: UUID, line_ids: list[UUID]) -> dict[str, Any]
 def test_not_an_artist_lists_the_name_and_removes_its_links(
     client: TestClient, db_conn: Conn
 ) -> None:
-    """Every link goes, whatever its state; the name keeps its status, its lines and their
-    matches are untouched."""
+    """The active and suggested links go; the rejected pair stays as it was (its row, but for
+    when it was last written). The name keeps its status, its lines and their matches are
+    untouched."""
     world = CascadeWorld(db_conn)
     name_id = world.name("ZZ TRAFFIC AND WEATHER", MatchStatus.AUTO_MATCHED)
     world.link(name_id, "mbid-active")
     world.link(name_id, "mbid-suggested", state=LogNameLinkState.SUGGESTED, strength=70)
-    world.link(
+    rejected = world.link(
         name_id, "mbid-rejected", origin=LogNameLinkOrigin.MANUAL, state=LogNameLinkState.REJECTED
     )
+    kept = _kept(db_conn, name_id)[rejected]
     playing = world.line(
         name_id, "WEATHER", MatchStatus.AUTO_MATCHED, file_artist="Somebody", plays=3
     )
@@ -161,8 +184,53 @@ def test_not_an_artist_lists_the_name_and_removes_its_links(
     assert (body["id"], body["listed"]) == (str(name_id), True)
     seeded = dict.fromkeys(SEEDED, "migration")
     assert _list(db_conn) == {**seeded, "zz traffic and weather": "curator"}
-    assert links(db_conn, name_id) == {}
+    assert _kept(db_conn, name_id) == {rejected: kept}
     assert _snapshot(db_conn, name_id, [playing.id, waiting.id]) == before
+
+
+def test_a_rejected_pair_stays_rejected_off_the_list(client: TestClient, db_conn: Conn) -> None:
+    """A name the curator unmatched (its pair rejected, the name in review with
+    USER_UNMATCHED) is listed by mistake and taken off again. A re-check's rewind and a matcher
+    run follow, and the catalog holds an act of the name's very name, which the matcher
+    answers: the pair stays rejected, neither linked nor suggested, and the name waits in
+    review (LINK_REJECTED, 1b)."""
+    world = CascadeWorld(db_conn)
+    name_id = world.name("ZZ REJECTED BAND", MatchStatus.NEEDS_REVIEW)
+    band = _catalog_artist(db_conn, "Zz Rejected Band", str(uuid4()))
+    world.link(name_id, band, origin=LogNameLinkOrigin.MANUAL, state=LogNameLinkState.REJECTED)
+    world.line(name_id, "A SONG", MatchStatus.NEEDS_REVIEW, reason_code="USER_UNMATCHED")
+    db_conn.execute(
+        "UPDATE broadcast_artists SET reason_code = 'USER_UNMATCHED' WHERE id = %s", (name_id,)
+    )
+    db_conn.commit()
+
+    assert client.post(_url(name_id)).status_code == 200
+    assert client.delete(_url(name_id)).status_code == 200
+    repos = RepositoryFactory(db_conn)
+    rewind_wave(None, repos.broadcast_artists, repos.broadcast_identities)
+    db_conn.commit()
+    assert name_row(db_conn, name_id)["match_status"] == "pending"
+    match_artists_for_playlist(
+        playlist_id=world.playlist_id,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=repos.broadcast_artists,
+            track_identity_repo=repos.broadcast_identities,
+            artist_repo=repos.artists,
+            match_repo=repos.matches,
+            rules_repo=repos.mapping_rules,
+            link_repo=repos.log_name_links,
+            placeholders=repos.log_name_placeholders,
+        ),
+        mb_client=FakeMbClient(),
+    )
+    db_conn.commit()
+
+    found = {
+        artist: (row["state"], row["origin"]) for artist, row in _kept(db_conn, name_id).items()
+    }
+    assert found == {band: ("rejected", "manual")}
+    state = name_row(db_conn, name_id)
+    assert (state["match_status"], state["reason_code"]) == ("needs_review", "LINK_REJECTED")
 
 
 def test_a_listed_name_leaves_the_queue(client: TestClient, db_conn: Conn) -> None:
