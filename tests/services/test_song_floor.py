@@ -8,7 +8,9 @@ Spec 2026-10-05 §4.3 and §2: D6 (floor), D12 (no song mid-band), D13 (tagged a
   65 and above are unchanged.
 - D13: when the artist-MBID steps (A, B) do not auto-match, Step C also scores every file of the
   artist, tagged or not; the better score wins and a tie keeps the MBID result.
-- Artist matching keeps MID_BAND_LOWER 55, its mid-band and MIN_PRESENTATION_SCORE 50.
+- Artist matching keeps MID_BAND_LOWER 55 and its mid-band. From artist model phase 1c (C35,
+  AUD-R038) its floor MIN_PRESENTATION_SCORE is the songs' 56, and a lead in the mid-band
+  gives a suggestion, never a match.
 
 Candidate scores are pinned per file by patching _candidate_scores, so every boundary is exact.
 """
@@ -105,20 +107,24 @@ def test_the_song_floor_is_56_and_sits_below_quick_review() -> None:
     assert mc.SONG_MIN_PRESENTATION_SCORE < mc.QUICK_REVIEW_MIN_SCORE
 
 
-def test_artist_thresholds_are_unchanged() -> None:
+def test_artist_thresholds_with_the_56_floor() -> None:
+    """The mid-band stays; the artist floor rises to the songs' 56 (phase 1c, C35)."""
     assert mc.MID_BAND_LOWER == 55
     assert mc.MID_BAND_UPPER == 64
     assert mc.MID_BAND_GAP_THRESHOLD == 5
-    assert mc.MIN_PRESENTATION_SCORE == 50
-    assert Settings.model_fields["min_presentation_score"].default == 50
+    assert mc.MIN_PRESENTATION_SCORE == 56
+    assert Settings.model_fields["min_presentation_score"].default == 56
 
 
-def test_artist_zones_keep_the_55_mid_band() -> None:
-    """D6 and D12 are songs only: an artist at 55.5 or 60 with a 6-point lead auto-matches."""
-    assert _decide_artist_zone(55.5, 6.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
-    assert _decide_artist_zone(60.0, 6.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
-    # The band's lower edge is inclusive and a 5-point gap suffices (a song here is floored).
-    assert _decide_artist_zone(55.0, 5.0, 80, 10, True) == (MatchStatus.AUTO_MATCHED, None, None)
+def test_artist_mid_band_leads_suggest() -> None:
+    """D6 and D12 are songs only. An artist at 55.5 or 60 with a 6-point lead auto-matched
+    until phase 1c; from 1c the zone gives a suggestion instead (C35, AUD-R038; E7's named
+    stubs). The strategy's floor of 56 drops 55 and 55.5 before the zone is asked."""
+    suggestion = (MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED)
+    assert _decide_artist_zone(55.5, 6.0, 80, 10, True)[:2] == suggestion
+    assert _decide_artist_zone(60.0, 6.0, 80, 10, True)[:2] == suggestion
+    # The band's lower edge with a 5-point gap: the zone suggests too.
+    assert _decide_artist_zone(55.0, 5.0, 80, 10, True)[:2] == suggestion
 
 
 # --- _score_candidates ------------------------------------------------------------------------

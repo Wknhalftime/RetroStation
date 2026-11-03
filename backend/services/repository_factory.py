@@ -288,4 +288,5 @@ def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
         catalog=repos.artists,
         cascade=repos.broadcast.cascade,
         commit=repos.commit_or_unavailable,
+        names=repos.broadcast_artists,
     )

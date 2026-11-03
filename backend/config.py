@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # MusicBrainz payloads for a given MBID do not change; refresh by clearing mb_cache.
     mb_cache_ttl_days: int = 3650
     strong_match_threshold: int = 80
-    min_presentation_score: int = 50
+    min_presentation_score: int = 56
     broadcast_name_max_len: int = 30
     library_scan_paths: list[str] = []
     # Tune-in streaming (docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md).

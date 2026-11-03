@@ -54,17 +54,51 @@ describe("QueueArtistSchema", () => {
     expect(parsed.reason_code).toBe("LOW_CONFIDENCE");
   });
 
-  it("accepts null candidates (backend returns null pre-MB-search)", () => {
+  it("parses the suggested links the queue sends as candidates (phase 1c, S8)", () => {
     const parsed = QueueArtistSchema.parse({
       id: "00000000-0000-0000-0000-000000000003",
-      original_name: "Prince",
-      normalized_name: "prince",
-      match_status: "pending",
+      original_name: "Blue Oyster Cult",
+      normalized_name: "blue oyster cult",
+      match_status: "needs_review",
       triage_bucket: "blocked",
-      candidates: null,
+      candidates: [
+        {
+          artist_id: "artist-club",
+          mbid: "mbid-club",
+          name: "Blue Oyster Club",
+          disambiguation: "Long Island bar band",
+          score: 88,
+          reason: "Close name in the library",
+        },
+        {
+          artist_id: "artist-local",
+          mbid: null,
+          name: "Blue Oyster",
+          disambiguation: null,
+          score: 81,
+          reason: "Close name in the library",
+        },
+      ],
       identities: [],
     });
-    expect(parsed.candidates).toBeNull();
+    expect(parsed.candidates.map((c) => [c.artist_id, c.mbid, c.score])).toEqual([
+      ["artist-club", "mbid-club", 88],
+      ["artist-local", null, 81],
+    ]);
+  });
+
+  it("rejects a candidate without its artist id", () => {
+    expect(() =>
+      QueueArtistSchema.parse({
+        id: "00000000-0000-0000-0000-000000000004",
+        original_name: "Prince",
+        normalized_name: "prince",
+        match_status: "needs_review",
+        triage_bucket: "blocked",
+        candidates: [{ mbid: "abc-123", name: "Prince", score: 100 }],
+        identities: [],
+      })
+    ).toThrow();
   });
 });
 

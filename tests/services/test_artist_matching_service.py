@@ -287,9 +287,10 @@ def test_match_artists_mbid_bearing_canonical_preferred_over_local_only() -> Non
     assert created.evidence["tier"] == MatchTier.NORMALIZATION.value
 
 
-def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
-    """Updated reason-string baseline: a mid-confidence fuzzy hit now
-    persists ReasonCode.LOW_CONFIDENCE + a formatted detail string.
+def test_match_artists_fuzzy_mid_persists_a_suggestion_reason() -> None:
+    """Updated reason-string baseline: a mid-confidence fuzzy hit persists a reason and a
+    formatted detail string: LOW_CONFIDENCE until artist model phase 1c, LINK_SUGGESTED with
+    the hit suggested since (C35, SPEC S4).
 
     Previously (PR 2 baseline) this was pinned to `_reason_codes.get(...) is
     None` because the legacy fuzzy path never passed reason kwargs. PR 4
@@ -330,10 +331,14 @@ def test_match_artists_fuzzy_mid_persists_low_confidence_reason() -> None:
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    # No Match row on NEEDS_REVIEW (service only writes Match on AUTO_MATCHED).
-    assert first_link(links, artist.id) is None
-    # NEW behavior: reason is persisted.
-    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    # No active link on NEEDS_REVIEW: from phase 1c (C35, SPEC S4) the lone 77.8 is a
+    # suggestion, and the reason says so (LOW_CONFIDENCE until 1c).
+    [suggested] = links.list_by_name(artist.id)
+    assert (suggested.artist_id, suggested.state) == (
+        "mbid-metallica",
+        LogNameLinkState.SUGGESTED,
+    )
+    assert stored.reason_code == ReasonCode.LINK_SUGGESTED
     assert stored.reason_detail is not None
     assert stored.reason_detail  # non-empty formatted string
 
@@ -1202,9 +1207,10 @@ def test_cascade_isolation_each_cascade_only_touches_its_own_status() -> None:
 
 def test_match_artists_default_strong_threshold_boundary_stays_needs_review() -> None:
     """A canonical scoring ~79.25 (gap >> MB_SCORE_GAP) against a distant
-    runner-up must stay NEEDS_REVIEW/LOW_CONFIDENCE at the real
-    strong_match_threshold default (80), and would wrongly AUTO_MATCH if the
-    default silently drifted to 79.
+    runner-up stayed NEEDS_REVIEW/LOW_CONFIDENCE at the real
+    strong_match_threshold default (80), and would have AUTO_MATCHED had the
+    default drifted to 79. From artist model phase 1c (C35, SPEC S4) the lead
+    rule only suggests, so it stays NEEDS_REVIEW with LINK_SUGGESTED either way.
     """
     playlist_id = uuid4()
     broadcast_artist_repo = FakeBroadcastArtistRepository()
@@ -1248,15 +1254,14 @@ def test_match_artists_default_strong_threshold_boundary_stays_needs_review() ->
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
     assert stored.match_status == MatchStatus.NEEDS_REVIEW
-    assert stored.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert stored.reason_code == ReasonCode.LINK_SUGGESTED
 
 
-def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> None:
+def test_match_artists_strong_lead_under_95_suggests() -> None:
     """An MB candidate scoring exactly 80 with a distant runner-up (gap >>
-    MB_SCORE_GAP) must AUTO_MATCH at the real strong_match_threshold default
-    (80), and would wrongly stay NEEDS_REVIEW if the default silently
-    drifted to 81 — a second off-by-one mutant on this exact default
-    (80 -> 81) previously survived mutation testing. Uses the MB tier (exact
+    MB_SCORE_GAP) auto-matched at the strong_match_threshold default (80) until artist
+    model phase 1c. From 1c (C35, SPEC S4) only 95+ links: both candidates are suggested,
+    best first, and the name waits in review with LINK_SUGGESTED. Uses the MB tier (exact
     integer scores) rather than fuzzy text so the boundary is unambiguous.
     """
     playlist_id = uuid4()
@@ -1296,11 +1301,17 @@ def test_match_artists_default_strong_threshold_boundary_mb_auto_matches() -> No
 
     stored = broadcast_artist_repo.get_by_id(artist.id)
     assert stored is not None
-    assert stored.match_status == MatchStatus.AUTO_MATCHED
-    created = first_link(links, artist.id)
-    assert created is not None
-    assert _target(created) == "mb-80"
-    assert created.strength == 80
+    assert (stored.match_status, stored.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
+    suggested = [
+        (_target(link), link.state, link.strength) for link in links.list_by_name(artist.id)
+    ]
+    assert sorted(suggested, key=lambda s: -s[2]) == [
+        ("mb-80", LogNameLinkState.SUGGESTED, 80),
+        ("mb-60", LogNameLinkState.SUGGESTED, 60),
+    ]
 
 
 def test_match_artists_default_broadcast_name_max_len_boundary_stays_deferred() -> None:

@@ -8,6 +8,10 @@ together or not at all. Nothing here commits or queues work.
 Reject and Unmatch cascade safely (phase 1b, M24, AUD-R037): ``plan_cascade`` keeps the
 manual lines and the lines matched to a same-name file, and the name's links are remembered as
 rejected (C19). Each answers with the counts of what it did, read when it runs (E2).
+
+The name's status is the link service's to write, with the link change (phase 1c S3, C36):
+Resolve ``manual_matched``, Reject ``manual_rejected``. Unmatch keeps its decided-only write
+(``unmatch_if_decided``), the guard behind its 409 (1b's E3).
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from backend.domain.matching import LogNameNotFoundError, LogNameNotUnmatchableE
 from backend.repositories.artist_cascade import ArtistCascadeRepository
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_resolution import ArtistResolutionRepository
+from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.services.log_name_link_service import LogNameLinkService
 
@@ -30,16 +35,18 @@ from backend.services.log_name_link_service import LogNameLinkService
 class ArtistResolutionRepos:
     """The repositories a log-name decision writes through, on one connection, and that
     connection's commit: the route commits before it queues song matching, and a lost
-    connection is ``StorageUnavailableError``."""
+    connection is ``StorageUnavailableError``. ``names`` is where the link service writes the
+    name's status (phase 1c S3)."""
 
     resolution: ArtistResolutionRepository
     links: LogNameLinkRepository
     catalog: ArtistCatalogRepository
     cascade: ArtistCascadeRepository
     commit: Callable[[], None]
+    names: BroadcastArtistRepository
 
     def link_service(self) -> LogNameLinkService:
-        return LogNameLinkService(self.links, self.catalog)
+        return LogNameLinkService(self.links, self.catalog, self.names)
 
 
 def _require(broadcast_artist_id: UUID, repos: ArtistResolutionRepos) -> None:
@@ -59,7 +66,6 @@ def match_by_hand(
         LogNameNotFoundError: no log name has this id.
     """
     _require(broadcast_artist_id, repos)
-    repos.resolution.set_status(broadcast_artist_id, MatchStatus.MANUAL_MATCHED)
     repos.link_service().link_by_hand(broadcast_artist_id, target)
     repos.resolution.reopen_songs_in_review(broadcast_artist_id)
     repos.resolution.delete_pending_song_matches(broadcast_artist_id)
@@ -96,14 +102,13 @@ def reject_by_hand(broadcast_artist_id: UUID, repos: ArtistResolutionRepos) -> C
         LogNameNotFoundError: no log name has this id.
     """
     _require(broadcast_artist_id, repos)
-    # The name's row first, then its lines: the artist matcher's order, so the two never
-    # wait on each other (a deadlock would fail one of them).
-    repos.resolution.set_status(broadcast_artist_id, MatchStatus.MANUAL_REJECTED)
+    # The name's row (with its links) first, then its lines: the artist matcher's order, so
+    # the two never wait on each other (a deadlock would fail one of them).
+    repos.link_service().reject_by_hand(broadcast_artist_id)
     plan = _locked_plan(broadcast_artist_id, CascadeAction.REJECT, repos)
     repos.cascade.reject_lines(
         [line.identity_id for line in plan.changed if line.status != MatchStatus.AUTO_REJECTED]
     )
-    repos.link_service().reject_all(broadcast_artist_id)
     return plan.counts()
 
 

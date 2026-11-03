@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -22,7 +21,7 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import EnrichmentStatus, MatchStatus
+from backend.domain.enums import EnrichmentStatus, LogNameLinkState, MatchStatus
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.routers.matching import (
     QueueIdentity,
@@ -30,6 +29,7 @@ from backend.routers.matching import (
     _compute_triage_bucket,
 )
 from backend.services.matching_constants import SONG_MIN_PRESENTATION_SCORE
+from tests.matching_seed import seed_pg_link
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -70,26 +70,25 @@ def _insert_artist(
         original_name=original_name,
         normalized_name=original_name.lower(),
         match_status=match_status,
-        artist_candidates=(
-            [{"mbid": "abc-123", "name": original_name, "score": 100}] if with_candidates else None
-        ),
     )
-    # upsert won't persist candidates; insert directly so candidates land in JSONB column
+    # Inserted directly, with the status asked for
     conn.execute(
         """
-        INSERT INTO broadcast_artists (
-            id, original_name, normalized_name, match_status, artist_candidates
-        )
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO broadcast_artists (id, original_name, normalized_name, match_status)
+        VALUES (%s, %s, %s, %s)
         """,
         (
             artist.id,
             artist.original_name,
             artist.normalized_name,
             artist.match_status.value,
-            json.dumps(artist.artist_candidates) if artist.artist_candidates else None,
         ),
     )
+    if with_candidates:
+        # A candidate is a suggested link of the name (artist model phase 1c, S8; C34
+        # retires artist_candidates), seeded as tests/matching_seed.py seeds a link: the
+        # MBID abc-123 gets a stub artist.
+        seed_pg_link(conn, artist.id, "abc-123", state=LogNameLinkState.SUGGESTED)
     conn.commit()
     return artist
 
@@ -205,7 +204,10 @@ def _insert_recording(conn: psycopg.Connection, rec_id: str, work_id: str | None
 def _seed_review_chain(
     db_conn: psycopg.Connection,
     artist_name: str = "Review Artist",
-    with_candidates: bool = True,
+    # A candidate is a second link of the name (phase 1c, S8), so only a chain that asks
+    # for one gets it: before 1c every chain carried artist_candidates JSON that only the
+    # two queue-shape tests read, and they ask.
+    with_candidates: bool = False,
 ) -> tuple[
     BroadcastStation,
     BroadcastPlaylist,

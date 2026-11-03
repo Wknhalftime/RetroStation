@@ -11,6 +11,7 @@ from rapidfuzz import fuzz
 from backend.domain.broadcast import BroadcastArtist
 from backend.domain.catalog import Artist
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.log_name_status import NameState
 from backend.domain.matching import MappingRule
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
@@ -18,22 +19,25 @@ from backend.repositories.broadcast_track_identities import BroadcastTrackIdenti
 from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
-from backend.services.log_name_link_service import LogNameLinkService
+from backend.services.log_name_link_service import (
+    NO_LINK_STORE,
+    AnswerPlan,
+    LinkTarget,
+    LogNameLinkService,
+    MatcherAnswer,
+)
 from backend.services.matching_constants import (
+    MAX_ARTIST_SUGGESTIONS,
     MB_AUTO_LINK_SCORE,
     MB_MIN_CANDIDATE_SCORE,
     MB_SCORE_GAP,
-    MID_BAND_GAP_THRESHOLD,
-    MID_BAND_LOWER,
-    MID_BAND_UPPER,
     MIN_PRESENTATION_SCORE,
 )
 from backend.services.matching_progress import NO_PROGRESS, MatchingProgress, ticking
 from backend.services.matching_reasons import (
-    format_ambiguous_gap,
+    format_answer_suggested,
     format_deferred_retry,
     format_link_rejected,
-    format_low_confidence,
 )
 from backend.services.matching_utils import is_likely_truncated, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
@@ -55,6 +59,17 @@ logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
+class ArtistSuggestion:
+    """An artist a result suggests (phase 1c S4, C35): its target (an MBID, or a local
+    artist's catalog id), its score, and the MusicBrainz hit when the MusicBrainz tier
+    found it (the catalog takes it before its link)."""
+
+    target_id: str
+    score: float
+    mb_candidate: MbArtistResult | None = None
+
+
+@dataclass(frozen=True)
 class ArtistMatchResult:
     """Immutable result returned by an ArtistMatchingStrategy.
 
@@ -71,6 +86,10 @@ class ArtistMatchResult:
     reason_code / reason_detail are None for AUTO_MATCHED; populated for
     NEEDS_REVIEW using the stable ReasonCode vocabulary.
 
+    suggestions (phase 1c S4) are what a NEEDS_REVIEW / LINK_SUGGESTED result suggests,
+    best first, at most MAX_ARTIST_SUGGESTIONS, each at the presentation floor or over;
+    empty for every other result. target_id and confidence_score are the first one's.
+
     mb_candidate carries the raw MB search result for the orchestration to
     upsert into the local catalog when status == AUTO_MATCHED. Populated only
     by MusicBrainzApiStrategy; None for all other strategies. Decoupling the
@@ -85,6 +104,7 @@ class ArtistMatchResult:
     reason_code: ReasonCode | None = None
     reason_detail: str | None = None
     mb_candidate: MbArtistResult | None = None
+    suggestions: tuple[ArtistSuggestion, ...] = ()
 
 
 class ArtistMatchingStrategy(Protocol):
@@ -101,50 +121,56 @@ def _decide_artist_zone(
     has_competitor: bool,
     mb_auto_link_score: int = MB_AUTO_LINK_SCORE,
 ) -> tuple[MatchStatus, ReasonCode | None, str | None]:
-    """Four-zone decision from matching_constants. Shared between
-    NormalizationStrategy and MusicBrainzApiStrategy to avoid duplication
-    while keeping each strategy's structure flat and readable.
+    """The zone of a fuzzy or MusicBrainz top score, shared by NormalizationStrategy and
+    MusicBrainzApiStrategy.
 
-    `has_competitor` guards BOTH gap-dependent auto-match clauses: when
-    there is no real second candidate, gap is synthesized (100 locally,
-    or top_score for MB where second=0). Without the guard, a lone
-    candidate at score 85 would auto-match via the strong_match_threshold+gap
-    clause (synthetic gap >> MB_SCORE_GAP), which is exactly the "too
-    permissive" bug the mid-band guard was added to prevent. Apply the
-    same guard on both gap-based clauses so a lone candidate always
-    needs human review, regardless of the band.
-
-    `mb_auto_link_score` is operator-tunable (from settings); defaults to the
-    module constant. This is the unconditional-AUTO gate (gap irrelevant,
-    no competitor check — at >= 95 score the token match is effectively
-    a literal identity and a lone result is still trustworthy).
+    From artist model phase 1c (C35, AUD-R038; SPEC S4) only the unconditional gate links: a
+    score of ``mb_auto_link_score`` (operator-tunable, MB_AUTO_LINK_SCORE by default) or more,
+    gap irrelevant, no competitor needed (at 95+ the token match is effectively a literal
+    identity). Every other score is a suggestion: NEEDS_REVIEW / LINK_SUGGESTED, which starts
+    no cascade. That covers the two lead rules this zone had (``strong_match_threshold`` with a
+    ``score_gap`` lead over a real competitor; 55 to 64 with a 5-point lead), through which
+    named stubs were matched wrongly (E7), and what was AMBIGUOUS_GAP or LOW_CONFIDENCE. The
+    lead arguments stay in the signature, unused, for its callers until phase 4's linker.
     """
-    auto_match = (
-        top_score >= mb_auto_link_score
-        or (has_competitor and top_score >= strong_match_threshold and gap >= score_gap)
-        or (
-            has_competitor
-            and MID_BAND_LOWER <= top_score <= MID_BAND_UPPER
-            and gap >= MID_BAND_GAP_THRESHOLD
-        )
-    )
-    if auto_match:
+    if top_score >= mb_auto_link_score:
         return MatchStatus.AUTO_MATCHED, None, None
-    # AMBIGUOUS_GAP only applies when there's a real peer that's close on
-    # score. A lone candidate (has_competitor=False) with synthetic gap=100
-    # is NOT ambiguous — there's nobody to be ambiguous with. Report it as
-    # LOW_CONFIDENCE so format_ambiguous_gap's "top candidates within 100
-    # points" message never renders.
-    if has_competitor and top_score >= strong_match_threshold:
-        return (
-            MatchStatus.NEEDS_REVIEW,
-            ReasonCode.AMBIGUOUS_GAP,
-            format_ambiguous_gap(gap, float(score_gap)),
-        )
     return (
         MatchStatus.NEEDS_REVIEW,
-        ReasonCode.LOW_CONFIDENCE,
-        format_low_confidence(top_score),
+        ReasonCode.LINK_SUGGESTED,
+        format_answer_suggested(top_score),
+    )
+
+
+def _suggestions(
+    scored: list[tuple[float, str, MbArtistResult | None]], floor: float
+) -> tuple[ArtistSuggestion, ...]:
+    """The best MAX_ARTIST_SUGGESTIONS of *scored* (already best first) at *floor* or over."""
+    return tuple(
+        ArtistSuggestion(target_id=target, score=score, mb_candidate=hit)
+        for score, target, hit in scored[:MAX_ARTIST_SUGGESTIONS]
+        if score >= floor
+    )
+
+
+def _exact_answer(targets: list[str], tier: MatchTier) -> ArtistMatchResult:
+    """An exact name (100): one artist links; several are suggested, in target order (C35)."""
+    if len(targets) == 1:
+        return ArtistMatchResult(
+            status=MatchStatus.AUTO_MATCHED,
+            tier=tier,
+            confidence_score=100.0,
+            target_id=targets[0],
+        )
+    suggested = _suggestions([(100.0, target, None) for target in sorted(targets)], 100.0)
+    return ArtistMatchResult(
+        status=MatchStatus.NEEDS_REVIEW,
+        tier=tier,
+        confidence_score=100.0,
+        target_id=suggested[0].target_id,
+        reason_code=ReasonCode.LINK_SUGGESTED,
+        reason_detail=format_answer_suggested(100.0),
+        suggestions=suggested,
     )
 
 
@@ -196,36 +222,32 @@ class NormalizationStrategy:
             return None
 
         target = broadcast_artist.normalized_name
-        # Exact pass 1 — MBID-bearing canonicals: target_id is the MBID so the
-        # identity tier's MBID graph path works with no further changes.
-        for c in self._all_canonical:
-            if c.mbid is None:
-                continue
-            if normalize_artist(c.name) == target:
-                return ArtistMatchResult(
-                    status=MatchStatus.AUTO_MATCHED,
-                    tier=MatchTier.NORMALIZATION,
-                    confidence_score=100.0,
-                    target_id=c.mbid,
-                )
+        # Exact pass 1 — MBID-bearing canonicals: target_id is the MBID so the identity tier's
+        # MBID graph path works with no further changes. One artist links; several of the name
+        # (two acts both called Nirvana) are suggested (phase 1c S4, C35). The catalog leaves
+        # a second artist of a name without a normalized name, so the name itself is compared.
+        exact = [
+            c.mbid
+            for c in self._all_canonical
+            if c.mbid is not None and normalize_artist(c.name) == target
+        ]
+        if exact:
+            return _exact_answer(exact, MatchTier.NORMALIZATION)
 
-        # Exact pass 2 — local-only canonicals (mbid=None).
-        # AUTO_MATCHED requires a good score — not an MBID. An exact name match
-        # (100%) qualifies. target_id is the local catalog UUID; the identity
-        # tier's ResolvedArtistMbidStrategy falls back to name-based search
-        # (Step C) when get_by_artist_mbid returns no files.
-        # Previously skipped, causing non-truncated names like "VAN HALEN" to
-        # loop in DEFERRED_RETRY because Phase-2 only sends truncated names to MB.
-        for c in self._all_canonical:
-            if c.mbid is not None:
-                continue
-            if normalize_artist(c.name) == target:
-                return ArtistMatchResult(
-                    status=MatchStatus.AUTO_MATCHED,
-                    tier=MatchTier.NORMALIZATION,
-                    confidence_score=100.0,
-                    target_id=c.id,
-                )
+        # Exact pass 2 — local-only canonicals (mbid=None). An exact name (100%) qualifies; an
+        # MBID is not required. target_id is the local catalog UUID; the identity tier's
+        # ResolvedArtistMbidStrategy falls back to name-based search (Step C) when
+        # get_by_artist_mbid returns no files. An MBID artist of the name wins over a local one
+        # (pass 1): the local one is the library's own copy of the act.
+        local = [
+            c.id
+            for c in self._all_canonical
+            if c.mbid is None and normalize_artist(c.name) == target
+        ]
+        if local:
+            # Several local-only artists of the name link the first, as before 1c: the
+            # ruling's several artists are several MBID artists (Lance, 2026-11-02).
+            return _exact_answer(local[:1], MatchTier.NORMALIZATION)
 
         # Fuzzy pass — restrict to MBID-bearing canonicals, without the artists the local-artist
         # linker gave an MBID (AUD-R026). This filter is what keeps artist matching unchanged by
@@ -268,6 +290,14 @@ class NormalizationStrategy:
             mb_auto_link_score=self._mb_auto_link_score,
         )
         assert best.mbid is not None  # guaranteed by the with_mbid filter above
+        suggestions = (
+            ()
+            if status == MatchStatus.AUTO_MATCHED
+            else _suggestions(
+                [(score, c.mbid or "", None) for score, c in scored],
+                self._min_presentation_score,
+            )
+        )
         return ArtistMatchResult(
             status=status,
             tier=MatchTier.NORMALIZATION,
@@ -275,6 +305,7 @@ class NormalizationStrategy:
             target_id=best.mbid,
             reason_code=rc,
             reason_detail=rd,
+            suggestions=suggestions,
         )
 
 
@@ -346,6 +377,14 @@ class MusicBrainzApiStrategy:
             mb_auto_link_score=self._mb_auto_link_score,
         )
 
+        suggestions = (
+            ()
+            if status == MatchStatus.AUTO_MATCHED
+            else _suggestions(
+                [(float(r.get("score", 0)), r["id"], r) for r in candidates],
+                MB_MIN_CANDIDATE_SCORE,
+            )
+        )
         return ArtistMatchResult(
             status=status,
             tier=MatchTier.MUSICBRAINZ_API,
@@ -354,6 +393,7 @@ class MusicBrainzApiStrategy:
             reason_code=rc,
             reason_detail=rd,
             mb_candidate=best,
+            suggestions=suggestions,
         )
 
 
@@ -554,73 +594,80 @@ def _run_mb_or_deferred_phase(
 def hold_back_rejected_link(
     broadcast_artist: BroadcastArtist, result: ArtistMatchResult, links: LogNameLinkService | None
 ) -> ArtistMatchResult:
-    """The result to write for *broadcast_artist* (SPEC 1b S4, C19).
+    """The result to write for *broadcast_artist* (SPEC 1b S4, 1c E3; C19).
 
     An automatic match to an artist whose link the curator rejected is held back: the name goes
     to review with LINK_REJECTED (no link, no catalog upsert, and no cascade, which only
-    AUTO_REJECTED and DEFERRED_RETRY start). Every other result is returned as it is. The
-    task and the gate's dry run both ask this, so a dry run decides what the task would.
+    AUTO_REJECTED and DEFERRED_RETRY start). A suggestion of such an artist is dropped; when
+    every suggestion is dropped, the result is LINK_REJECTED the same way. Every other result is
+    returned as it is. The task and the gate's dry run both ask this, so a dry run decides what
+    the task would.
     """
-    if links is None or result.status != MatchStatus.AUTO_MATCHED:
+    if links is None or (result.status != MatchStatus.AUTO_MATCHED and not result.suggestions):
         return result
-    rejected = links.rejected_artist(broadcast_artist.id, result.target_id)
-    if rejected is None:
+    refused = links.rejected_in(broadcast_artist.id, matcher_answer(result))
+    if not refused:
         return result
+    if result.status == MatchStatus.AUTO_MATCHED:
+        return _held_back(result, refused[result.target_id].name)
+    kept = tuple(s for s in result.suggestions if s.target_id not in refused)
+    if not kept:
+        return _held_back(result, refused[result.suggestions[0].target_id].name)
+    return replace(
+        result,
+        target_id=kept[0].target_id,
+        confidence_score=kept[0].score,
+        mb_candidate=kept[0].mb_candidate,
+        suggestions=kept,
+    )
+
+
+def _held_back(result: ArtistMatchResult, artist_name: str) -> ArtistMatchResult:
     return replace(
         result,
         status=MatchStatus.NEEDS_REVIEW,
         reason_code=ReasonCode.LINK_REJECTED,
-        reason_detail=format_link_rejected(rejected.name),
+        reason_detail=format_link_rejected(artist_name),
         mb_candidate=None,
+        suggestions=(),
+    )
+
+
+def matcher_answer(result: ArtistMatchResult) -> MatcherAnswer:
+    """What *result* writes, for the link service: the status it names, and its link (an
+    automatic match) or its suggestions (phase 1c S3, S4)."""
+    proposed = NameState(result.status, result.reason_code, result.reason_detail)
+    if result.status == MatchStatus.AUTO_MATCHED:
+        link = LinkTarget(
+            result.target_id, result.tier, result.confidence_score, result.mb_candidate
+        )
+        return MatcherAnswer(proposed, link=link)
+    return MatcherAnswer(
+        proposed,
+        suggestions=tuple(
+            LinkTarget(s.target_id, result.tier, s.score, s.mb_candidate)
+            for s in result.suggestions
+        ),
     )
 
 
 def _persist_artist_result(
-    broadcast_artist: BroadcastArtist,
-    result: ArtistMatchResult,
-    broadcast_artist_repo: BroadcastArtistRepository,
-    artist_repo: ArtistCatalogRepository,
-    links: LogNameLinkService | None,
+    broadcast_artist: BroadcastArtist, plan: AnswerPlan, links: LogNameLinkService
 ) -> bool:
-    """Apply a single result to repositories. Owned by orchestration so
-    strategies stay read-only (Invariant 1).
+    """Apply a single result, planned by the link service (``plan_answer``). Owned by
+    orchestration so strategies stay read-only (Invariant 1); the writes are the link
+    service's (phase 1c S3).
 
-    Returns whether the result was written. The status write is guarded on the
-    PENDING status this run read (AUD-R018): if the user decided the artist in
-    the meantime, their decision wins and nothing that follows from this
-    result (catalog upsert, link) is written either.
-
-    An automatic match upserts the catalog artist first, when the MB tier found one, then links
-    the artist the result's target names through the link service (phase 1a S6): the upsert can
-    return another MBID's artist that holds the name, so the link goes by the target, to a stub
-    when no catalog artist holds it. ``links`` None writes no link.
+    Returns whether the result was written. The name's status, from its links, is written
+    first, guarded on the PENDING status this run read (AUD-R018): if the user decided the
+    artist in the meantime, their decision wins and nothing that follows from this result
+    (catalog upsert, link, suggestion) is written either. Then a MusicBrainz hit goes into the
+    catalog before its link, so the link names the artist (phase 1a S6).
     """
-    written = broadcast_artist_repo.update_match_status_if_pending(
-        broadcast_artist.id,
-        result.status,
-        reason_code=result.reason_code,
-        reason_detail=result.reason_detail,
-    )
+    written = links.write_plan(broadcast_artist.id, plan)
     if not written:
         logger.info("artist_decided_during_matching", broadcast_artist_id=str(broadcast_artist.id))
-        return False
-    if result.status != MatchStatus.AUTO_MATCHED:
-        return True
-    # Catalog upsert moved out of MusicBrainzApiStrategy (SRP). Only the MB
-    # tier populates mb_candidate, so this fires only on MB hits.
-    if result.mb_candidate is not None:
-        artist_repo.upsert_musicbrainz_artist(
-            mbid=result.mb_candidate["id"],
-            name=result.mb_candidate["name"],
-            sort_name=result.mb_candidate.get("sort-name", result.mb_candidate["name"]),
-            normalized_name=normalize_artist(result.mb_candidate["name"]),
-            disambiguation=result.mb_candidate.get("disambiguation"),
-        )
-    if links is not None:
-        links.link_automatically(
-            broadcast_artist.id, result.target_id, result.tier, result.confidence_score
-        )
-    return True
+    return written
 
 
 @dataclass(frozen=True)
@@ -640,8 +687,8 @@ class ArtistMatchingRepos:
     # tests that build this dataclass still pass it.
     match_repo: MatchRepository
     rules_repo: MappingRuleRepository
-    # The matcher's link writer (phase 1a S6). None: no links are written; the tasks always
-    # pass it (tests/services/test_matching_repos_wiring.py).
+    # The matcher's link writer (phase 1a S6). None: no links are written (statuses still
+    # are); the tasks always pass it (tests/services/test_matching_repos_wiring.py).
     link_repo: LogNameLinkRepository | None = None
 
 
@@ -766,30 +813,24 @@ def match_artists_for_playlist(
             _run_mb_or_deferred_phase(unresolved, build_mb_artist_engine(inputs, search_map))
         )
 
-        written_ids: set[UUID] = set()
-        links = (
-            None
-            if repos.link_repo is None
-            else LogNameLinkService(repos.link_repo, repos.artist_repo)
+        links = LogNameLinkService(
+            repos.link_repo or NO_LINK_STORE, repos.artist_repo, repos.broadcast_artist_repo
         )
+        deferred_artist_ids: list[UUID] = []
         for broadcast_artist in ticking(pending, progress):
-            if _persist_artist_result(
-                broadcast_artist,
-                hold_back_rejected_link(broadcast_artist, resolved[broadcast_artist.id], links),
-                repos.broadcast_artist_repo,
-                repos.artist_repo,
-                links,
+            result = hold_back_rejected_link(broadcast_artist, resolved[broadcast_artist.id], links)
+            # Planned once: the status it writes comes from the name's links, so a suggested
+            # name the matcher defers stays LINK_SUGGESTED and starts no cascade (S3's order).
+            plan = links.plan_answer(broadcast_artist.id, matcher_answer(result))
+            # Only artists this run actually wrote: one the user decided meanwhile keeps
+            # its songs as they are (AUD-R018).
+            if (
+                _persist_artist_result(broadcast_artist, plan, links)
+                and plan.state.reason_code == ReasonCode.DEFERRED_RETRY
             ):
-                written_ids.add(broadcast_artist.id)
+                deferred_artist_ids.append(broadcast_artist.id)
 
         _cascade_auto_rejected(playlist_id, repos.broadcast_artist_repo, repos.track_identity_repo)
-        # Only artists this run actually wrote: one the user decided meanwhile keeps
-        # its songs as they are (AUD-R018).
-        deferred_artist_ids = [
-            artist_id
-            for artist_id, result in resolved.items()
-            if artist_id in written_ids and result.reason_code == ReasonCode.DEFERRED_RETRY
-        ]
         _cascade_deferred(deferred_artist_ids, repos.track_identity_repo)
     finally:
         # Emit in finally so observability survives exceptions raised from
@@ -840,9 +881,9 @@ def _cascade_deferred(
     """Cascade: DEFERRED_RETRY artists -> defer their child identities.
 
     Mirrors _cascade_auto_rejected with retryable status (Invariant 6:
-    cascade isolation). Caller passes artist IDs whose result was
-    DEFERRED_RETRY in this run, sourced from the orchestration's
-    ``resolved`` map. Avoids re-fetching reason_codes from the repo.
+    cascade isolation). Caller passes the artist IDs this run wrote as
+    DEFERRED_RETRY (the planned status, phase 1c S3), so a suggested name
+    is never deferred. Avoids re-fetching reason_codes from the repo.
 
     Asymmetry note: _cascade_auto_rejected scans the playlist (legacy
     signature, retained to preserve its existing test contract). Aligning

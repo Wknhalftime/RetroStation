@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import math
 
-from backend.domain.enums import ReasonCode
+from backend.domain.enums import LogNameLinkOrigin, MatchTier, ReasonCode
 
 __all__ = [
     "ReasonCode",
     "format_ambiguous_gap",
+    "format_answer_suggested",
     "format_deferred_retry",
     "format_low_confidence",
     "format_mb_unavailable",
     "format_title_scores_disagree",
+    "suggestion_reason",
 ]
 
 
@@ -40,6 +42,27 @@ def format_ambiguous_gap(gap: float, threshold: float) -> str:
         f"Top candidates within {_round_half_up(gap)} points "
         f"(gap < {_round_half_up(threshold)} required)"
     )
+
+
+def format_answer_suggested(score: float) -> str:
+    # The matcher's own answer under 95 (phase 1c S4, C35): what the name's suggestions are is
+    # said when the status is written from its links (domain/log_name_status.py).
+    return f"Best score {_round_half_up(score)}% — suggested, not linked"
+
+
+def suggestion_reason(origin: str, tier: str | None, score: int) -> str:
+    # Why the Resolution Center shows a suggested link (phase 1c S8), from the link's origin
+    # and the tier of its evidence: a fuzzy link migration 0045 demoted (M22), or the
+    # matcher's answer under 95 (C35).
+    if origin == LogNameLinkOrigin.LEGACY:
+        return "Was linked automatically by a close name; now a suggestion to confirm"
+    if tier == MatchTier.MUSICBRAINZ_API:
+        return "Found by a MusicBrainz search for the name"
+    if tier == MatchTier.NORMALIZATION and score >= 100:
+        return "Same name as this artist, and as others: pick the right one"
+    if tier == MatchTier.NORMALIZATION:
+        return "Close name in the catalog"
+    return "Suggested automatically"
 
 
 def format_deferred_retry() -> str:

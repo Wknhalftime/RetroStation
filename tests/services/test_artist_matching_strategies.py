@@ -115,13 +115,14 @@ def test_normalization_exact_hit_auto_matches() -> None:
     assert result.reason_code is None
 
 
-def test_normalization_high_score_with_gap_auto_matches() -> None:
+def test_normalization_high_score_with_gap_suggests() -> None:
     # Pick a fuzzy near-miss of "metallica"; should still score high AND
-    # the runner-up (totally unrelated) should be well below.
+    # the runner-up (totally unrelated) should be well below. Until artist model phase 1c
+    # this lead auto-matched; from 1c it is a suggestion (C35, SPEC S4).
     best = _canonical("metallic")
     other = _canonical("radiohead")
-    # Lower strong_match_threshold so ~94 score clears the AUTO_MATCHED bar via the
-    # "strong_match_threshold + gap" branch rather than the MB_AUTO_LINK_SCORE bypass.
+    # strong_match_threshold 80: the ~94 score sits in the old "strong_match_threshold + gap"
+    # branch, under the MB_AUTO_LINK_SCORE bypass.
     strategy = NormalizationStrategy(
         all_canonical=[best, other],
         strong_match_threshold=80,
@@ -130,16 +131,21 @@ def test_normalization_high_score_with_gap_auto_matches() -> None:
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
     assert result is not None
-    # High score + large gap → AUTO_MATCHED
-    assert result.status == MatchStatus.AUTO_MATCHED
+    # High score + large gap, under 95 → a suggestion of the best
+    assert (result.status, result.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
     assert result.tier == MatchTier.NORMALIZATION
     assert result.target_id == best.mbid
     assert result.confidence_score >= 90
+    assert [s.target_id for s in result.suggestions] == [best.mbid]
 
 
-def test_normalization_gap_insufficient_needs_review_ambiguous_gap() -> None:
+def test_normalization_gap_insufficient_suggests_both() -> None:
     # Neither canonical normalizes to the target, but both score high
-    # and close. broadcast normalized_name = "metalica" (typo)
+    # and close. broadcast normalized_name = "metalica" (typo). Was AMBIGUOUS_GAP; from
+    # artist model phase 1c (C35, SPEC S4) both are suggested, best first.
     c1 = _canonical("metallica")
     c2 = _canonical("metallicca")
     strategy = NormalizationStrategy(
@@ -152,13 +158,14 @@ def test_normalization_gap_insufficient_needs_review_ambiguous_gap() -> None:
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
     assert result.tier == MatchTier.NORMALIZATION
-    assert result.reason_code == ReasonCode.AMBIGUOUS_GAP
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED
     assert result.reason_detail is not None
+    assert [s.target_id for s in result.suggestions] == [c1.mbid, c2.mbid]  # 94.1, 88.9
 
 
-def test_normalization_low_score_needs_review_low_confidence() -> None:
-    # Only loosely similar canonicals → top score in the 50-64 band with
-    # small gap (no MID_BAND auto-match), forces LOW_CONFIDENCE.
+def test_normalization_low_score_suggests_what_clears_the_floor() -> None:
+    # Only loosely similar canonicals: "metal" 66.7, "metal band" 50. Was LOW_CONFIDENCE;
+    # from phase 1c the one at 56 or more is suggested (C35, SPEC S4).
     c1 = _canonical("metal")
     c2 = _canonical("metal band")
     strategy = NormalizationStrategy(all_canonical=[c1, c2])
@@ -167,7 +174,8 @@ def test_normalization_low_score_needs_review_low_confidence() -> None:
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
     assert result.tier == MatchTier.NORMALIZATION
-    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED
+    assert [s.target_id for s in result.suggestions] == [c1.mbid]
 
 
 def test_normalization_empty_canonical_returns_none() -> None:
@@ -191,18 +199,19 @@ def test_normalization_lone_candidate_below_mid_band_needs_review_not_auto() -> 
     result = strategy.apply(_broadcast_artist("Metal", "metal"))
 
     assert result is not None
-    # Top score is in MID_BAND but there's no real competitor: must NOT auto-match.
+    # Top score is in MID_BAND but there's no real competitor: must NOT auto-match. From
+    # phase 1c it is a suggestion (C35, SPEC S4).
     assert result.status == MatchStatus.NEEDS_REVIEW
-    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED
 
 
 def test_mb_lone_candidate_mid_band_needs_review_not_auto() -> None:
     """Issue #1: a SINGLE MB candidate scoring in MID_BAND must NEEDS_REVIEW,
     not AUTO_MATCH, because second=0 makes gap=top_score (no real competitor).
 
-    The orchestration layer's upsert is gated on status == AUTO_MATCHED, so a
-    NEEDS_REVIEW result naturally won't trigger a catalog write — verified at
-    the service layer; here we only check the strategy result shape."""
+    From phase 1c the result is a suggestion, whose artist the orchestration upserts
+    (tests/services/test_interim_artist_rules.py); here we only check the strategy
+    result shape."""
     mb = FakeMbClient(
         responses={
             "Foo": [
@@ -229,10 +238,10 @@ def test_normalization_below_noise_floor_falls_through_to_next_strategy() -> Non
     assert result is None
 
 
-def test_normalization_score_90_with_gap_auto_matches_via_strong_match_threshold() -> None:
-    """Issue #3: a score of ~90-94 with sufficient gap must AUTO_MATCH via the
-    strong_match_threshold(80)+gap(10) band. Previously broken because both ctor params
-    were conflated to MB_AUTO_LINK_SCORE=95, so 90 < 95 forced NEEDS_REVIEW."""
+def test_normalization_score_90_with_gap_suggests() -> None:
+    """Issue #3 made a score of ~90-94 with sufficient gap AUTO_MATCH via the
+    strong_match_threshold(80)+gap(10) band. Artist model phase 1c (C35, SPEC S4) turns that
+    lead rule into a suggestion: only 95+ or an exact name with one artist links."""
     best = _canonical("metallic")  # fuzzy ~94 against "metallica"
     other = _canonical("radiohead")  # far away — gap is large
     # Rely on DEFAULT ctor (no kwargs) so we're testing the default separation
@@ -241,10 +250,12 @@ def test_normalization_score_90_with_gap_auto_matches_via_strong_match_threshold
     result = strategy.apply(_broadcast_artist("Metallica", "metallica"))
 
     assert result is not None
-    assert result.status == MatchStatus.AUTO_MATCHED
+    assert (result.status, result.reason_code) == (
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+    )
     assert result.target_id == best.mbid
-    # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95)
-    # — so the AUTO decision came through the strong_match_threshold+gap branch.
+    # Score should be in the 80-94 band, i.e. strictly below MB_AUTO_LINK_SCORE(95).
     assert result.confidence_score < 95
 
 
@@ -319,10 +330,9 @@ def test_mb_strategy_all_below_60_returns_none() -> None:
 
 
 def test_mb_strategy_mid_score_needs_review() -> None:
-    # Top candidate in 60-94 band with small gap (not in MID_BAND) → NEEDS_REVIEW
-    # with LOW_CONFIDENCE. The orchestration's upsert is gated on AUTO_MATCHED,
-    # so a NEEDS_REVIEW result naturally won't trigger one — verified at the
-    # service layer; here we only check the strategy result shape.
+    # Top candidate in 60-94 band with small gap (not in MID_BAND) → NEEDS_REVIEW.
+    # Was LOW_CONFIDENCE; from phase 1c both candidates are suggestions (C35, SPEC S4).
+    # Here we only check the strategy result shape.
     mb = FakeMbClient(
         responses={
             "Metallica": [
@@ -337,8 +347,9 @@ def test_mb_strategy_mid_score_needs_review() -> None:
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
     assert result.tier == MatchTier.MUSICBRAINZ_API
-    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED
     assert result.target_id == "mbid-top"
+    assert [s.target_id for s in result.suggestions] == ["mbid-top", "mbid-two"]
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +589,7 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     # Override: raise the gate to 98. Score 95 no longer clears it; the
     # strong_match_threshold+gap clause is blocked by gap=5 < score_gap(10);
     # mid-band clause doesn't fire (score 95 is above the band). Falls to
-    # NEEDS_REVIEW with AMBIGUOUS_GAP reason.
+    # NEEDS_REVIEW: AMBIGUOUS_GAP until phase 1c, a suggestion since (C35, SPEC S4).
     overridden = MusicBrainzApiStrategy(
         FakeMbClient(responses=responses),
         strong_match_threshold=80,
@@ -587,7 +598,7 @@ def test_mb_auto_link_score_operator_override_raises_threshold() -> None:
     ).apply(_broadcast_artist(original="Metallica", normalized="metallica"))
     assert overridden is not None
     assert overridden.status == MatchStatus.NEEDS_REVIEW
-    assert overridden.reason_code == ReasonCode.AMBIGUOUS_GAP
+    assert overridden.reason_code == ReasonCode.LINK_SUGGESTED
 
 
 # ---------------------------------------------------------------------------
@@ -616,10 +627,10 @@ def test_normalization_lone_candidate_high_band_needs_review_not_auto() -> None:
 
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
-    # Reason must be LOW_CONFIDENCE, not AMBIGUOUS_GAP — there's no peer
-    # to be ambiguous with, so the "within N points" message would be
-    # nonsensical if rendered.
-    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+    # Was LOW_CONFIDENCE (no peer to be ambiguous with); from phase 1c a lone candidate
+    # under 95 is a suggestion (C35, SPEC S4).
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED
+    assert [s.target_id for s in result.suggestions] == ["mbid-metallica-xxx"]
 
 
 def test_mb_lone_candidate_high_band_needs_review_not_auto() -> None:
@@ -639,7 +650,7 @@ def test_mb_lone_candidate_high_band_needs_review_not_auto() -> None:
 
     assert result is not None
     assert result.status == MatchStatus.NEEDS_REVIEW
-    assert result.reason_code == ReasonCode.LOW_CONFIDENCE
+    assert result.reason_code == ReasonCode.LINK_SUGGESTED  # LOW_CONFIDENCE until 1c
 
 
 def test_mb_lone_candidate_above_auto_link_still_auto_matches() -> None:
