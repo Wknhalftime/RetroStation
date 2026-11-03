@@ -534,3 +534,136 @@ describe("MatcherBrowser — a confirmation never carries over to another artist
   });
 });
 
+// Phase 1c (SPEC S9, E4): Not an artist's five-second Undo, and the "Show placeholders" filter
+// through which a name is taken off the list later.
+describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
+  const spot = makeArtist("00000000-0000-0000-0000-00000000000c", "SPOT BREAK");
+  const delta = makeArtist("00000000-0000-0000-0000-00000000000d", "Delta");
+  const LIST_URL = `/api/v1/matching/artists/${spot.id}/not-an-artist`;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function listCalls(): unknown[][] {
+    return mockedApiFetch.mock.calls.filter(([url]) => String(url) === LIST_URL);
+  }
+
+  function queueUrls(): string[] {
+    return mockedApiFetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((u) => u.includes("/api/v1/matching/queue"));
+  }
+
+  /** The server: SPOT BREAK is in the main view until it is listed, then in the placeholder
+   *  view (``placeholders=true``) only. */
+  function routeApi(listedAtFirst: boolean) {
+    let listed = listedAtFirst;
+    mockedApiFetch.mockImplementation((async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u === LIST_URL) {
+        listed = init?.method === "POST";
+        return { id: spot.id, listed };
+      }
+      if (u.includes("/api/v1/matching/queue")) {
+        if (u.includes("placeholders=true")) {
+          return { items: listed ? [spot] : [], total: listed ? 1 : 0, unlikely_total: 0 };
+        }
+        const items = listed ? [delta] : [spot, delta];
+        return { items, total: items.length, unlikely_total: 0 };
+      }
+      return {};
+    }) as typeof apiFetch);
+  }
+
+  function sidebar(): HTMLElement {
+    return screen.getByText(/Artists \(\d+\)/).closest("aside") as HTMLElement;
+  }
+
+  /** Select SPOT BREAK, press Not an artist and confirm; the banner's Undo button. */
+  async function listSpotBreak(): Promise<HTMLElement> {
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await screen.findByText(/Artists \(2\)/);
+    fireEvent.click(within(sidebar()).getByRole("button", { name: /SPOT BREAK/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Not an artist$/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
+    });
+    return screen.findByRole("button", { name: /^Undo$/i });
+  }
+
+  it("not_an_artist_undo_for_five_seconds: the banner offers Undo for five seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    routeApi(false);
+
+    const undo = await listSpotBreak();
+
+    expect(undo.closest('[role="status"]')?.textContent).toMatch(/SPOT BREAK/);
+    await screen.findByText(/Artists \(1\)/); // it left the queue
+    await act(async () => {
+      vi.advanceTimersByTime(4000); // past the other banners' three seconds
+    });
+    expect(screen.getByRole("button", { name: /^Undo$/i })).toBeDefined();
+    await act(async () => {
+      vi.advanceTimersByTime(1100);
+    });
+    expect(screen.queryByRole("button", { name: /^Undo$/i })).toBeNull();
+    expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);
+  });
+
+  it("Undo takes the name off the list, and it is back in the queue", async () => {
+    routeApi(false);
+    const undo = await listSpotBreak();
+
+    await act(async () => {
+      fireEvent.click(undo);
+    });
+
+    await waitFor(() =>
+      expect(listCalls()).toEqual([
+        [LIST_URL, { method: "POST" }],
+        [LIST_URL, { method: "DELETE" }],
+      ])
+    );
+    await screen.findByText(/Artists \(2\)/);
+  });
+
+  it("placeholder_filter: Show placeholders lists the listed names, and Back to the queue takes one off", async () => {
+    routeApi(true);
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+    await screen.findByText(/Artists \(1\)/);
+    expect(queueUrls().every((u) => !u.includes("placeholders=true"))).toBe(true);
+    expect(screen.queryByText("SPOT BREAK")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: /Show placeholders/i }));
+    });
+
+    await waitFor(() =>
+      expect(within(sidebar()).getByRole("button", { name: /SPOT BREAK/i })).toBeDefined()
+    );
+    expect(queueUrls().some((u) => u.includes("placeholders=true"))).toBe(true);
+    expect(within(sidebar()).queryByRole("button", { name: /Delta/i })).toBeNull();
+
+    fireEvent.click(within(sidebar()).getByRole("button", { name: /SPOT BREAK/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /Back to the queue/i }));
+    });
+
+    await waitFor(() => expect(listCalls()).toEqual([[LIST_URL, { method: "DELETE" }]]));
+    // Off the list, it leaves the placeholder view; the filter stays there to untick.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^SPOT BREAK/i })).toBeNull()
+    );
+    expect(screen.getByRole("checkbox", { name: /Show placeholders/i })).toBeDefined();
+  });
+
+  it("keeps Show placeholders reachable when the queue is empty", async () => {
+    mockedApiFetch.mockResolvedValue({ items: [], total: 0, unlikely_total: 0 });
+    render(<MatcherBrowser />, { wrapper: wrapperFor(makeClient()) });
+
+    await screen.findByRole("checkbox", { name: /Show placeholders/i });
+  });
+});
+

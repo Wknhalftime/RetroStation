@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { QueueArtist } from "@/lib/schemas/matcher";
@@ -524,5 +524,129 @@ describe("ArtistPanel suggested links", () => {
         }),
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1c (SPEC S9, E4): Not an artist, with a confirmation and an Undo
+// ---------------------------------------------------------------------------
+
+const NOT_AN_ARTIST_URL = `${ARTIST_URL}/not-an-artist`;
+const LISTED = { id: "00000000-0000-0000-0000-000000000001", listed: true };
+const UNLISTED = { id: "00000000-0000-0000-0000-000000000001", listed: false };
+
+function listCalls(): unknown[][] {
+  return mockedApiFetch.mock.calls.filter(([url]) => String(url) === NOT_AN_ARTIST_URL);
+}
+
+describe("ArtistPanel Not an artist", () => {
+  function renderPanel(
+    overrides: Partial<QueueArtist> = {},
+    onNotAnArtist = vi.fn(),
+    listed = false
+  ) {
+    const view = render(
+      <ArtistPanel
+        artist={makeArtist({
+          original_name: "SPOT BREAK",
+          normalized_name: "spot break",
+          ...overrides,
+        })}
+        listed={listed}
+        onNotAnArtist={onNotAnArtist}
+      />,
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    return { onNotAnArtist, unmount: view.unmount };
+  }
+
+  it("not_an_artist_with_undo: asks first, lists the name on Confirm, and hands back an Undo", async () => {
+    mockedApiFetch.mockResolvedValueOnce(LISTED).mockResolvedValueOnce(UNLISTED);
+    const { onNotAnArtist, unmount } = renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/SPOT BREAK/);
+    // It says what Confirm does: the name's links are removed.
+    expect(dialog.textContent).toMatch(/links/i);
+    expect(listCalls()).toEqual([]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
+
+    await waitFor(() => expect(onNotAnArtist).toHaveBeenCalledTimes(1));
+    expect(listCalls()).toEqual([[NOT_AN_ARTIST_URL, { method: "POST" }]]);
+    const [message, undo] = onNotAnArtist.mock.calls[0] as [string, () => Promise<unknown>];
+    expect(message).toMatch(/SPOT BREAK/);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    // The name leaves the queue, so its panel goes; the Undo still works.
+    unmount();
+    await undo();
+
+    expect(listCalls()).toEqual([
+      [NOT_AN_ARTIST_URL, { method: "POST" }],
+      [NOT_AN_ARTIST_URL, { method: "DELETE" }],
+    ]);
+  });
+
+  it("Cancel lists nothing and closes the dialog", async () => {
+    const { onNotAnArtist } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+    await screen.findByRole("alertdialog");
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(listCalls()).toEqual([]);
+    expect(onNotAnArtist).not.toHaveBeenCalled();
+  });
+
+  it("a failed listing keeps the dialog open with the error, and reports nothing", async () => {
+    mockedApiFetch.mockRejectedValueOnce(new Error("API 503: unavailable"));
+    const { onNotAnArtist } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+    const dialog = await screen.findByRole("alertdialog");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Confirm/i }));
+
+    await waitFor(() => expect(dialog.textContent).toMatch(/unavailable/i));
+    expect(screen.getByRole("alertdialog")).toBeDefined();
+    expect(onNotAnArtist).not.toHaveBeenCalled();
+  });
+
+  it("E4: Confirm is disabled while the listing runs, so a second press sends nothing", async () => {
+    mockedApiFetch.mockImplementation(() => new Promise(() => {})); // never answers
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /^Not an artist$/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: /^Confirm/i });
+
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(confirm);
+    expect(listCalls()).toHaveLength(1);
+  });
+
+  it("is offered for a matched name too (VARIOUS was auto_matched)", () => {
+    renderPanel({ original_name: "VARIOUS", match_status: "auto_matched" });
+
+    expect(screen.getByRole("button", { name: /^Not an artist$/i })).toBeDefined();
+  });
+
+  it("in the placeholder view offers Back to the queue, which takes the name off the list", async () => {
+    mockedApiFetch.mockResolvedValue(UNLISTED);
+    renderPanel({}, vi.fn(), true);
+
+    expect(screen.queryByRole("button", { name: /^Not an artist$/i })).toBeNull();
+    // A listed name is never linked (Resolve answers 409), so it offers no decision of its own.
+    expect(screen.queryByRole("button", { name: /Reject Artist/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Back to the queue/i }));
+
+    await waitFor(() =>
+      expect(listCalls()).toEqual([[NOT_AN_ARTIST_URL, { method: "DELETE" }]])
+    );
   });
 });
