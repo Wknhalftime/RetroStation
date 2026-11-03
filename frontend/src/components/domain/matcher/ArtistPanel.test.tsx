@@ -635,14 +635,43 @@ describe("ArtistPanel Not an artist", () => {
     expect(screen.getByRole("button", { name: /^Not an artist$/i })).toBeDefined();
   });
 
-  it("in the placeholder view offers Back to the queue, which takes the name off the list", async () => {
+  it("in the placeholder view offers only Back to the queue, which takes the name off", async () => {
     mockedApiFetch.mockResolvedValue(UNLISTED);
-    renderPanel({}, vi.fn(), true);
+    const offers = [
+      /^Not an artist$/i,
+      /^Accept/i,
+      /Reject Artist/i,
+      /Unmatch artist/i,
+      /Search Library/i,
+      /Search MusicBrainz/i,
+    ];
+    function renderListed(overrides: Partial<QueueArtist>) {
+      return render(
+        <ArtistPanel
+          artist={makeArtist({ original_name: "VARIOUS", normalized_name: "various", ...overrides })}
+          listed
+          onNotAnArtist={vi.fn()}
+          onSearchLibrary={vi.fn()}
+          onSearchMusicBrainz={vi.fn()}
+        />,
+        { wrapper: wrapperFor(makeClient()) }
+      );
+    }
 
-    expect(screen.queryByRole("button", { name: /^Not an artist$/i })).toBeNull();
-    // A listed name is never linked (Resolve answers 409), so it offers no decision of its own.
-    expect(screen.queryByRole("button", { name: /Reject Artist/i })).toBeNull();
+    // A listed name is never linked (Resolve answers 409): no decision is offered but this one.
+    // In review with a candidate, Accept and Reject would show; matched, Unmatch would.
+    for (const overrides of [
+      { match_status: "needs_review", candidates: [SOME_CANDIDATE] },
+      { match_status: "auto_matched" },
+    ]) {
+      const view = renderListed(overrides);
+      for (const name of offers) {
+        expect(screen.queryByRole("button", { name })).toBeNull();
+      }
+      view.unmount();
+    }
 
+    renderListed({ match_status: "auto_matched" });
     fireEvent.click(screen.getByRole("button", { name: /Back to the queue/i }));
 
     await waitFor(() =>

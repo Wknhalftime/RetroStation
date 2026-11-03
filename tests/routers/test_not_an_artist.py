@@ -227,7 +227,10 @@ def test_the_station_placeholders_are_hidden(
     other = world.name("ZZ SOMEBODY", MatchStatus.AUTO_MATCHED)
     other_line = world.line(other, "B LINE", MatchStatus.NEEDS_REVIEW, plays=3)
 
-    assert _queued(client, include_unlikely="true") == {str(other)}
+    body = _queue(client, include_unlikely="true")
+    assert {item["id"] for item in body["items"]} == {str(other)}
+    # A page with rows counts as the empty page does: only ZZ SOMEBODY, which is not likely.
+    assert (body["total"], body["unlikely_total"]) == (1, 1)
     assert _missing(client, world.station_id) == {str(other_line.id)}
     assert _report(client, world.station_id)["total"] == 1
     assert str(review.id) not in _missing(client, world.station_id)
@@ -332,16 +335,27 @@ def test_an_unknown_name_is_404(client: TestClient, db_conn: Conn) -> None:
 
 
 def _resolve(client: TestClient, name_id: UUID, target: str) -> int:
+    """Resolve to *target*; the status, with the refusal's own detail (a string, where a
+    request the model rejects gets a list)."""
     response = client.post(
         f"/api/v1/matching/artists/{name_id}/resolve",
         json={"match_status": "manual_matched", "target_artist_id": target},
     )
+    if response.status_code >= 400:
+        assert isinstance(response.json()["detail"], str), response.text
     return response.status_code
 
 
 def _stubs_of(conn: Conn, mbid: str) -> int:
     conn.commit()
     row = conn.execute("SELECT count(*) AS n FROM artists WHERE mbid = %s", (mbid,)).fetchone()
+    assert row is not None
+    return int(row["n"])
+
+
+def _artists(conn: Conn) -> int:
+    conn.commit()
+    row = conn.execute("SELECT count(*) AS n FROM artists").fetchone()
     assert row is not None
     return int(row["n"])
 
@@ -353,12 +367,13 @@ def test_resolve_refuses_a_listed_name(
     name_id = world.name("SPOT BREAK", MatchStatus.NEEDS_REVIEW)
     world.line(name_id, "A LINE", MatchStatus.NEEDS_REVIEW)
     before = _snapshot(db_conn, name_id, [])
+    artists = _artists(db_conn)
 
     assert _resolve(client, name_id, "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab") == 409
 
     assert _snapshot(db_conn, name_id, []) == before
     assert links(db_conn, name_id) == {}
-    assert _stubs_of(db_conn, "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab") == 0
+    assert _artists(db_conn) == artists  # no stub for the MBID
     enqueue.assert_not_called()
 
 
@@ -384,11 +399,13 @@ def test_resolve_refuses_a_placeholder_artist(
     unknown = _catalog_artist(db_conn, "[unknown]", UNKNOWN)
     target = unknown if by_id else VARIOUS_ARTISTS
     before = _snapshot(db_conn, name_id, [])
+    artists = _artists(db_conn)
 
     assert _resolve(client, name_id, target) == 422
 
     assert _snapshot(db_conn, name_id, []) == before
     assert links(db_conn, name_id) == {}
+    assert _artists(db_conn) == artists
     assert _stubs_of(db_conn, VARIOUS_ARTISTS) == 0
     enqueue.assert_not_called()
 
@@ -415,7 +432,11 @@ def test_both_routes_are_sync_routes_on_sync_repos() -> None:
     }
 
     assert set(routes) == {"POST", "DELETE"}
-    for route in routes.values():
-        assert not inspect.iscoroutinefunction(route.endpoint)
-        assert get_sync_repos in _calls(route.dependant)
-        assert get_db_connection not in _calls(route.dependant)
+    for method, route in routes.items():
+        assert not inspect.iscoroutinefunction(route.endpoint), method
+        assert get_sync_repos in _calls(route.dependant), method
+        assert get_db_connection not in _calls(route.dependant), method
+        # One connection, one transaction: the one cached, "function"-scoped SyncRepos.
+        uses = [d for d in _dependencies(route.dependant) if d.call is get_sync_repos]
+        assert len({d.cache_key for d in uses}) == 1, method
+        assert all(d.scope == "function" and d.use_cache for d in uses), method

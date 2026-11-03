@@ -3,9 +3,11 @@
 S5: the link writer (``LogNameLinkService``) refuses every link to one of MusicBrainz's
 special-purpose artists (``SPECIAL_PURPOSE_MBIDS``: Various Artists, [unknown] and the rest),
 whether the target names the MBID or the catalog artist holding it. A refused automatic link
-writes nothing, not even the stub an unknown MBID would get, and a link by hand is refused with
-``PlaceholderArtistError`` (the Resolve route answers 422). Migration 0045 deleted the links
-that existed (``test_link_demotion_pg.py::test_placeholder_links_removed``).
+writes nothing, not even the stub an unknown MBID would get or the catalog upsert of a
+MusicBrainz hit; the plan of a matcher answer (``plan_answer``) leaves a placeholder out, and a
+link by hand is refused with ``PlaceholderArtistError`` (the Resolve route answers 422).
+Migration 0045 deleted the links that existed
+(``test_link_demotion_pg.py::test_placeholder_links_removed``).
 
 E3, the two halves PR 1 left (PR 1 proved the rejected pair, ``test_interim_artist_rules.py``):
 
@@ -31,14 +33,22 @@ import pytest
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Artist
-from backend.domain.enums import CatalogSource, MatchStatus, MatchTier, ReasonCode
+from backend.domain.enums import (
+    CatalogSource,
+    LogNameLinkState,
+    MatchStatus,
+    MatchTier,
+    ReasonCode,
+)
+from backend.domain.log_name_status import NameState
 from backend.domain.matching import PlaceholderArtistError
 from backend.services.artist_linking_service import SPECIAL_PURPOSE_MBIDS
 from backend.services.artist_matching_service import (
     ArtistMatchingRepos,
     match_artists_for_playlist,
 )
-from backend.services.log_name_link_service import LogNameLinkService
+from backend.services.log_name_link_service import LinkTarget, LogNameLinkService, MatcherAnswer
+from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import compute_normalized_signature, normalize_artist
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
@@ -150,6 +160,65 @@ def test_a_placeholder_mbid_no_artist_holds_is_refused_by_hand_without_a_stub() 
 
     assert writer.catalog.get_by_mbid(VARIOUS_ARTISTS) is None
     assert writer.links.list_by_name(name_id) == []
+
+
+def test_the_writer_plans_no_placeholder_suggestion() -> None:
+    """A matcher answer's plan (``plan_answer``, then ``write_plan``) leaves out a placeholder
+    suggestion, local or MusicBrainz, and writes the others; the placeholder's hit is not
+    upserted."""
+    writer = _writer()
+    various = writer.catalog.upsert(_artist("Various Artists", VARIOUS_ARTISTS))
+    band = writer.catalog.upsert(_artist("Various Artistry Band", str(uuid4())))
+    name_id = writer.name("VARIOUS ARTISTRY")
+    unknown_hit: MbArtistResult = {"id": UNKNOWN, "name": "[unknown]", "score": 85}
+    answer = MatcherAnswer(
+        NameState(MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, "3 suggested artists"),
+        suggestions=(
+            LinkTarget(various.id, MatchTier.NORMALIZATION, 90.32),
+            LinkTarget(UNKNOWN, MatchTier.MUSICBRAINZ_API, 85.0, unknown_hit),
+            LinkTarget(band.id, MatchTier.NORMALIZATION, 86.49),
+        ),
+    )
+
+    plan = writer.service.plan_answer(name_id, answer)
+    assert writer.service.write_plan(name_id, plan)
+
+    assert [target.target for target, _ in plan.writes] == [band.id]
+    assert {link.artist_id: link.state for link in writer.links.list_by_name(name_id)} == {
+        band.id: LogNameLinkState.SUGGESTED
+    }
+    assert writer.catalog.get_by_mbid(UNKNOWN) is None
+    assert writer.catalog.musicbrainz_upserts == []
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        LinkTarget(VARIOUS_ARTISTS, MatchTier.NORMALIZATION, 100.0),
+        LinkTarget(
+            UNKNOWN,
+            MatchTier.MUSICBRAINZ_API,
+            100.0,
+            {"id": UNKNOWN, "name": "[unknown]", "score": 100},
+        ),
+    ],
+    ids=["local", "MusicBrainz"],
+)
+def test_the_writer_plans_no_placeholder_link(link: LinkTarget) -> None:
+    """An automatic link to a placeholder is not planned, and the status the plan writes is the
+    run's refusal, never a match with no link (S3's rule would not give it)."""
+    writer = _writer()
+    name_id = writer.name()
+    answer = MatcherAnswer(NameState(MatchStatus.AUTO_MATCHED), link=link)
+
+    plan = writer.service.plan_answer(name_id, answer)
+    assert writer.service.write_plan(name_id, plan)
+
+    assert plan.writes == ()
+    assert (plan.state.status, plan.state.reason_code) == REFUSED
+    assert writer.links.list_by_name(name_id) == []
+    assert writer.catalog.get_by_mbid(link.target) is None
+    assert writer.catalog.musicbrainz_upserts == []
 
 
 # --- E3: a matcher run ---------------------------------------------------------------------------

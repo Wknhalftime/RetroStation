@@ -598,15 +598,18 @@ describe("MatcherBrowser — Not an artist and the placeholder filter", () => {
     routeApi(false);
 
     const undo = await listSpotBreak();
+    // The fake clock also moves with real time: count from when the banner was seen, so a
+    // slow machine cannot use up the margin.
+    const shown = Date.now();
 
     expect(undo.closest('[role="status"]')?.textContent).toMatch(/SPOT BREAK/);
     await screen.findByText(/Artists \(1\)/); // it left the queue
     await act(async () => {
-      vi.advanceTimersByTime(4000); // past the other banners' three seconds
+      vi.advanceTimersByTime(Math.max(0, shown + 4000 - Date.now())); // past the others' 3 s
     });
     expect(screen.getByRole("button", { name: /^Undo$/i })).toBeDefined();
     await act(async () => {
-      vi.advanceTimersByTime(1100);
+      vi.advanceTimersByTime(Math.max(0, shown + 5100 - Date.now()));
     });
     expect(screen.queryByRole("button", { name: /^Undo$/i })).toBeNull();
     expect(listCalls()).toEqual([[LIST_URL, { method: "POST" }]]);

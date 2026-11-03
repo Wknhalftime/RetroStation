@@ -98,3 +98,23 @@ def test_a_seed_name_can_come_off_and_back(placeholders: LogNamePlaceholderRepos
 
     assert placeholders.add("various", PlaceholderSource.CURATOR) is True
     assert placeholders.listed({"various"}) == {"various"}
+
+
+@pytest.mark.integration
+def test_the_adapter_writes_in_the_callers_transaction(migrated_db: str) -> None:
+    """C75: the adapter commits nothing. Another connection sees neither write until the
+    caller commits (this one rolls back)."""
+    with (
+        psycopg.connect(migrated_db, row_factory=dict_row) as conn,
+        psycopg.connect(migrated_db, row_factory=dict_row, autocommit=True) as other,
+    ):
+        placeholders = RepositoryFactory(conn).log_name_placeholders
+        placeholders.add(NEW_NAME, PlaceholderSource.CURATOR)
+        placeholders.remove("various")
+
+        rows = other.execute("SELECT normalized_name FROM log_name_placeholders").fetchall()
+        seen = {row["normalized_name"] for row in rows}
+        conn.rollback()
+
+    assert NEW_NAME not in seen
+    assert "various" in seen
