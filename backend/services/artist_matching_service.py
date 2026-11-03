@@ -21,6 +21,7 @@ from backend.repositories.mapping_rules import MappingRuleRepository
 from backend.repositories.matches import MatchRepository
 from backend.services.log_name_link_service import (
     NO_LINK_STORE,
+    AnswerPlan,
     LinkTarget,
     LogNameLinkService,
     MatcherAnswer,
@@ -244,7 +245,9 @@ class NormalizationStrategy:
             if c.mbid is None and normalize_artist(c.name) == target
         ]
         if local:
-            return _exact_answer(local, MatchTier.NORMALIZATION)
+            # Several local-only artists of the name link the first, as before 1c: the
+            # ruling's several artists are several MBID artists (Lance, 2026-11-02).
+            return _exact_answer(local[:1], MatchTier.NORMALIZATION)
 
         # Fuzzy pass — restrict to MBID-bearing canonicals, without the artists the local-artist
         # linker gave an MBID (AUD-R026). This filter is what keeps artist matching unchanged by
@@ -600,16 +603,13 @@ def hold_back_rejected_link(
     returned as it is. The task and the gate's dry run both ask this, so a dry run decides what
     the task would.
     """
-    if links is None:
+    if links is None or (result.status != MatchStatus.AUTO_MATCHED and not result.suggestions):
         return result
-    if result.status == MatchStatus.AUTO_MATCHED:
-        rejected = links.rejected_artist(broadcast_artist.id, result.target_id)
-        return result if rejected is None else _held_back(result, rejected.name)
-    if not result.suggestions:
-        return result
-    refused = links.rejected_artists(broadcast_artist.id, [s.target_id for s in result.suggestions])
+    refused = links.rejected_in(broadcast_artist.id, matcher_answer(result))
     if not refused:
         return result
+    if result.status == MatchStatus.AUTO_MATCHED:
+        return _held_back(result, refused[result.target_id].name)
     kept = tuple(s for s in result.suggestions if s.target_id not in refused)
     if not kept:
         return _held_back(result, refused[result.suggestions[0].target_id].name)
@@ -652,10 +652,11 @@ def matcher_answer(result: ArtistMatchResult) -> MatcherAnswer:
 
 
 def _persist_artist_result(
-    broadcast_artist: BroadcastArtist, result: ArtistMatchResult, links: LogNameLinkService
+    broadcast_artist: BroadcastArtist, plan: AnswerPlan, links: LogNameLinkService
 ) -> bool:
-    """Apply a single result. Owned by orchestration so strategies stay read-only
-    (Invariant 1); the writes are the link service's (phase 1c S3).
+    """Apply a single result, planned by the link service (``plan_answer``). Owned by
+    orchestration so strategies stay read-only (Invariant 1); the writes are the link
+    service's (phase 1c S3).
 
     Returns whether the result was written. The name's status, from its links, is written
     first, guarded on the PENDING status this run read (AUD-R018): if the user decided the
@@ -663,7 +664,7 @@ def _persist_artist_result(
     (catalog upsert, link, suggestion) is written either. Then a MusicBrainz hit goes into the
     catalog before its link, so the link names the artist (phase 1a S6).
     """
-    written = links.write_answer(broadcast_artist.id, matcher_answer(result))
+    written = links.write_plan(broadcast_artist.id, plan)
     if not written:
         logger.info("artist_decided_during_matching", broadcast_artist_id=str(broadcast_artist.id))
     return written
@@ -818,14 +819,14 @@ def match_artists_for_playlist(
         deferred_artist_ids: list[UUID] = []
         for broadcast_artist in ticking(pending, progress):
             result = hold_back_rejected_link(broadcast_artist, resolved[broadcast_artist.id], links)
-            # The status the result writes, from the name's links: a suggested name
-            # the matcher defers stays LINK_SUGGESTED, and starts no cascade (S3's order).
-            state = links.answer_state(broadcast_artist.id, matcher_answer(result))
+            # Planned once: the status it writes comes from the name's links, so a suggested
+            # name the matcher defers stays LINK_SUGGESTED and starts no cascade (S3's order).
+            plan = links.plan_answer(broadcast_artist.id, matcher_answer(result))
             # Only artists this run actually wrote: one the user decided meanwhile keeps
             # its songs as they are (AUD-R018).
             if (
-                _persist_artist_result(broadcast_artist, result, links)
-                and state.reason_code == ReasonCode.DEFERRED_RETRY
+                _persist_artist_result(broadcast_artist, plan, links)
+                and plan.state.reason_code == ReasonCode.DEFERRED_RETRY
             ):
                 deferred_artist_ids.append(broadcast_artist.id)
 
@@ -880,9 +881,9 @@ def _cascade_deferred(
     """Cascade: DEFERRED_RETRY artists -> defer their child identities.
 
     Mirrors _cascade_auto_rejected with retryable status (Invariant 6:
-    cascade isolation). Caller passes artist IDs whose result was
-    DEFERRED_RETRY in this run, sourced from the orchestration's
-    ``resolved`` map. Avoids re-fetching reason_codes from the repo.
+    cascade isolation). Caller passes the artist IDs this run wrote as
+    DEFERRED_RETRY (the planned status, phase 1c S3), so a suggested name
+    is never deferred. Avoids re-fetching reason_codes from the repo.
 
     Asymmetry note: _cascade_auto_rejected scans the playlist (legacy
     signature, retained to preserve its existing test contract). Aligning

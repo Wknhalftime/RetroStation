@@ -14,7 +14,6 @@ resolution repository, as the guard behind its 409.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -26,6 +25,7 @@ from backend.domain.matching import LogNameLink
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
+from backend.services.matching_constants import MAX_ARTIST_SUGGESTIONS
 from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import normalize_artist
 
@@ -68,6 +68,24 @@ class MatcherAnswer:
     proposed: NameState
     link: LinkTarget | None = None
     suggestions: tuple[LinkTarget, ...] = ()
+
+
+@dataclass(frozen=True)
+class AnswerPlan:
+    """What writing a matcher answer does: the status it gives the name, and the links it
+    writes, each with the state it gets (planned once, written once)."""
+
+    state: NameState
+    writes: tuple[tuple[LinkTarget, LogNameLinkState], ...] = ()
+
+
+def _wanted(answer: MatcherAnswer) -> list[tuple[LinkTarget, LogNameLinkState]]:
+    wanted = [(answer.link, LogNameLinkState.ACTIVE)] if answer.link is not None else []
+    return wanted + [(target, LogNameLinkState.SUGGESTED) for target in answer.suggestions]
+
+
+def _suggested(links: dict[str, LogNameLink]) -> int:
+    return sum(1 for link in links.values() if link.state == LogNameLinkState.SUGGESTED)
 
 
 class _NoLinkStore(LogNameLinkRepository):
@@ -124,20 +142,45 @@ class LogNameLinkService:
 
     # --- the matcher (phase 1c S3, S4) ------------------------------------------------------
 
-    def _plan(
-        self, broadcast_artist_id: UUID, answer: MatcherAnswer
-    ) -> tuple[list[LogNameLink], list[tuple[LinkTarget, LogNameLinkState]]]:
-        """The links the name holds once *answer* is written, and the writes that get there.
-        Reads only: an artist the catalog does not hold yet is a new pair. A rejected or manual
-        pair is never touched (C18, C19), and a suggestion never demotes or rewrites a pair the
-        name holds."""
+    def _resolve(self, target: LinkTarget, state: LogNameLinkState) -> Artist | None:
+        """The catalog artist the write will link, read before anything is written; None for a
+        new pair. A MusicBrainz hit of an automatic match is resolved as its upsert will: its
+        MBID's artist, else a local-only artist of its name, which the upsert gives the MBID. A
+        suggestion's hit never gives a local artist its MBID (``_upsert_suggested``), so only
+        its MBID's artist counts."""
+        hit = target.mb_candidate
+        if hit is None:
+            return self._known(target.target)
+        found = self._catalog.get_by_mbid(target.target)
+        if found is not None or state != LogNameLinkState.ACTIVE:
+            return found
+        holder = self._catalog.get_by_normalized_name(normalize_artist(hit["name"]))
+        return holder if holder is not None and holder.mbid is None else None
+
+    def rejected_in(self, broadcast_artist_id: UUID, answer: MatcherAnswer) -> dict[str, Artist]:
+        """The rejected catalog artist each target of *answer* names, by target (SPEC 1b S4, 1c
+        E3); a target whose pair is not rejected is left out. Reads the name's links first:
+        most names have no rejected link, and then the catalog is not read."""
+        rejected = self._rejected_pairs(broadcast_artist_id)
+        if not rejected:
+            return {}
+        found = {target.target: self._resolve(target, state) for target, state in _wanted(answer)}
+        return {
+            target: artist
+            for target, artist in found.items()
+            if artist is not None and artist.id in rejected
+        }
+
+    def plan_answer(self, broadcast_artist_id: UUID, answer: MatcherAnswer) -> AnswerPlan:
+        """What writing *answer* does, and the status it gives the pending name: S3's rule over
+        the links it will hold. Reads only. A rejected or manual pair is never touched (C18,
+        C19), a suggestion never demotes or rewrites a pair the name holds, and a name holds at
+        most MAX_ARTIST_SUGGESTIONS suggestions (AUD-R038)."""
         held = {link.artist_id: link for link in self._links.list_by_name(broadcast_artist_id)}
         after: dict[str, LogNameLink] = dict(held)
         writes: list[tuple[LinkTarget, LogNameLinkState]] = []
-        wanted = [(answer.link, LogNameLinkState.ACTIVE)] if answer.link is not None else []
-        wanted += [(target, LogNameLinkState.SUGGESTED) for target in answer.suggestions]
-        for target, state in wanted:
-            artist = self._known(target.target)
+        for target, state in _wanted(answer):
+            artist = self._resolve(target, state)
             key = artist.id if artist is not None else f"new:{target.target}"
             pair = after.get(key)
             if pair is not None and (
@@ -145,6 +188,8 @@ class LogNameLinkService:
                 or pair.origin == LogNameLinkOrigin.MANUAL
                 or state == LogNameLinkState.SUGGESTED
             ):
+                continue
+            if state == LogNameLinkState.SUGGESTED and _suggested(after) >= MAX_ARTIST_SUGGESTIONS:
                 continue
             after[key] = LogNameLink(
                 broadcast_artist_id=broadcast_artist_id,
@@ -155,37 +200,32 @@ class LogNameLinkService:
                 evidence=_evidence(target.tier, target.score),
             )
             writes.append((target, state))
-        return list(after.values()), writes
+        state_after = status_from_links(_PENDING, after.values(), answer.proposed)
+        return AnswerPlan(state=state_after, writes=tuple(writes))
 
-    def answer_state(self, broadcast_artist_id: UUID, answer: MatcherAnswer) -> NameState:
-        """The status *answer* gives the pending name: S3's rule over the links it will hold.
-        Reads only."""
-        after, _ = self._plan(broadcast_artist_id, answer)
-        return status_from_links(_PENDING, after, answer.proposed)
-
-    def write_answer(self, broadcast_artist_id: UUID, answer: MatcherAnswer) -> bool:
-        """Write the matcher's *answer*: the name's status first, guarded on the pending status
-        the run read (AUD-R018), then, only if it was written, each MusicBrainz hit into the
-        catalog and each link. Whether it was written."""
+    def write_plan(self, broadcast_artist_id: UUID, plan: AnswerPlan) -> bool:
+        """Write a matcher answer's *plan*: the name's status first, guarded on the pending
+        status the run read (AUD-R018), then, only if it was written, each MusicBrainz hit into
+        the catalog and each link. Whether it was written."""
         if self._names is None:
             raise RuntimeError("the matcher's answer writes the name's status: pass names")
-        after, writes = self._plan(broadcast_artist_id, answer)
-        state = status_from_links(_PENDING, after, answer.proposed)
         if not self._names.update_match_status_if_pending(
             broadcast_artist_id,
-            state.status,
-            reason_code=state.reason_code,
-            reason_detail=state.reason_detail,
+            plan.state.status,
+            reason_code=plan.state.reason_code,
+            reason_detail=plan.state.reason_detail,
         ):
             return False
-        for target, link_state in writes:
-            if target.mb_candidate is not None:
-                self._upsert_musicbrainz_artist(target.mb_candidate)
+        for target, link_state in plan.writes:
             if link_state == LogNameLinkState.ACTIVE:
+                if target.mb_candidate is not None:
+                    self._upsert_musicbrainz_artist(target.mb_candidate)
                 self.link_automatically(
                     broadcast_artist_id, target.target, target.tier, target.score
                 )
             else:
+                if target.mb_candidate is not None:
+                    self._upsert_suggested(target.mb_candidate)
                 self._suggest(broadcast_artist_id, target)
         return True
 
@@ -200,14 +240,29 @@ class LogNameLinkService:
             disambiguation=hit.get("disambiguation"),
         )
 
+    def _upsert_suggested(self, hit: MbArtistResult) -> None:
+        """A suggested MusicBrainz hit's artist, upserted unless the upsert would give its MBID
+        to a local-only artist of its name: an unconfirmed suggestion never changes a local
+        artist (the suggestion then names a stub, and its evidence keeps the hit's name)."""
+        if self._catalog.get_by_mbid(hit["id"]) is None:
+            holder = self._catalog.get_by_normalized_name(normalize_artist(hit["name"]))
+            if holder is not None and holder.mbid is None:
+                return
+        self._upsert_musicbrainz_artist(hit)
+
     def _suggest(self, broadcast_artist_id: UUID, target: LinkTarget) -> None:
         """A suggested link to the artist *target* names (phase 1c S4), unless the name already
-        holds the pair in any state."""
+        holds the pair in any state. A MusicBrainz hit's name and disambiguation go into its
+        evidence (C30: the target as it was), for a stub enrichment has not named yet."""
         artist = self.artist_for_target(target.target)
         if any(
             link.artist_id == artist.id for link in self._links.list_by_name(broadcast_artist_id)
         ):
             return
+        evidence = _evidence(target.tier, target.score)
+        if target.mb_candidate is not None:
+            evidence["target_name"] = target.mb_candidate["name"]
+            evidence["target_disambiguation"] = target.mb_candidate.get("disambiguation")
         self._links.upsert_link(
             LogNameLink(
                 broadcast_artist_id=broadcast_artist_id,
@@ -216,7 +271,7 @@ class LogNameLinkService:
                 state=LogNameLinkState.SUGGESTED,
                 origin=LogNameLinkOrigin.AUTOMATIC,
                 strength=_strength(target.score),
-                evidence=_evidence(target.tier, target.score),
+                evidence=evidence,
             )
         )
 
@@ -308,21 +363,6 @@ class LogNameLinkService:
             return None
         artist = self._known(target)
         return artist if artist is not None and artist.id in rejected else None
-
-    def rejected_artists(
-        self, broadcast_artist_id: UUID, targets: Sequence[str]
-    ) -> dict[str, Artist]:
-        """The rejected catalog artist each of *targets* names, by target; the others are left
-        out (phase 1c S4's suggestions). One read of the name's links."""
-        rejected = self._rejected_pairs(broadcast_artist_id)
-        if not rejected:
-            return {}
-        found = {target: self._known(target) for target in targets}
-        return {
-            target: artist
-            for target, artist in found.items()
-            if artist is not None and artist.id in rejected
-        }
 
     def _rejected_pairs(self, broadcast_artist_id: UUID) -> set[str]:
         return {

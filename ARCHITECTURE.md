@@ -186,13 +186,17 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The interim artist matcher (until phase 4): only 95+ (`MB_AUTO_LINK_SCORE`) or an exact
   name pointing at one artist links (`_decide_artist_zone`, `NormalizationStrategy`). Everything
   else it would have decided is a suggestion: the two old lead rules, an exact name of several
-  MBID artists, and what was `AMBIGUOUS_GAP` or `LOW_CONFIDENCE`. One answer suggests at most 3
-  (`MAX_ARTIST_SUGGESTIONS`), best first, each at the floor `MIN_PRESENTATION_SCORE` (56, as
-  songs) or over, as `suggested` links (origin automatic); a MusicBrainz suggestion's artist is
-  upserted into the catalog first, as a MusicBrainz match's is. A suggestion starts no cascade,
-  so by-name song matching goes on; a suggested name the matcher defers stays `LINK_SUGGESTED`.
-  `DEFERRED_RETRY` and its cascade are unchanged until phase 4. The status written is asked
-  first (`answer_state`), so only a written `DEFERRED_RETRY` defers the name's songs.
+  MBID artists (several local-only ones still link the first), and what was `AMBIGUOUS_GAP` or
+  `LOW_CONFIDENCE`. A name holds at most 3 suggestions (`MAX_ARTIST_SUGGESTIONS`), best first,
+  each at the floor `MIN_PRESENTATION_SCORE` (56, as songs) or over, as `suggested` links
+  (origin automatic). A MusicBrainz suggestion's artist is upserted into the catalog first, as
+  a MusicBrainz match's is, unless the upsert would give its MBID to a local-only artist of its
+  name: then it names a stub, and its evidence keeps the hit's name for the panel. A suggestion
+  starts no cascade, so by-name song matching goes on; a suggested name the matcher defers
+  stays `LINK_SUGGESTED`. `DEFERRED_RETRY` and its cascade are unchanged until phase 4. Each
+  answer is planned once (`plan_answer`, which resolves a MusicBrainz target as its upsert
+  will, so a rejected pair is refused) and written once (`write_plan`); only a planned
+  `DEFERRED_RETRY` defers the name's songs.
 - Migration 0045 (once, AUD-R039: an exception to D2 of AUD-R022, as amended by AUD-R036)
   copied every link and name it
   changed into `link_demotion_backup` (kept until Lance accepts 1c), deleted the links to
@@ -202,15 +206,20 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   name's status by the rule. Lines and song matches were not touched. It also created
   `log_name_placeholders`, the station names that are programming, not performers (its route
   and refusals come with phase 1c's PR 2). `backend/db/rollback_0045_link_demotion.sql` restores
-  what still holds what 0045 wrote.
+  what still holds what 0045 wrote (a name a re-check rewound or re-suggested counts as
+  unmoved), and puts any name left with a reason the code before 1c cannot read back to
+  pending. Run it before 0044's rollback, never after: nothing stops 0044's alone.
 - The Resolution Center queue's `candidates` are the name's suggested links, typed
   (`SuggestedLink`, and the zod schema `useMatchingQueue` parses with), best first; Accept is
-  the manual resolve by the artist's catalog id. A name with a suggestion is likely, so the
-  default view shows it (a change may widen the curator's review, never hide it).
+  the manual resolve by the artist's catalog id. A name in review with a suggestion is likely,
+  so the default view shows it (a change may widen the curator's review, never hide it); a
+  matched name's leftover suggestions do not make it likely. The song file search is not
+  restricted to a suggestion.
 - The checks are `tests/services/test_status_from_links.py`,
   `tests/integration/test_status_from_links_pg.py` (every row agrees),
-  `tests/services/test_interim_artist_rules.py`, `tests/integration/test_link_demotion_pg.py`
-  and `tests/routers/test_queue_suggested_links.py`.
+  `tests/services/test_interim_artist_rules.py`, `tests/integration/test_link_demotion_pg.py`,
+  `tests/integration/test_rollback_0045_after_matching_pg.py` and
+  `tests/routers/test_queue_suggested_links.py`.
 
 ## Derived counts kept by triggers
 
@@ -329,7 +338,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 
 | column / predicate | written by | read by |
 |---|---|---|
-| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE, LINK_REJECTED, LINK_SUGGESTED, LINK_REMOVED) | ingest, matchers (an artist's status from its links through `LogNameLinkService`, C36: a match held back on a rejected link is `needs_review` / LINK_REJECTED, phase 1b S4; an answer under 95 is LINK_SUGGESTED, phase 1c S4), review UI, re-check rewind, migrations 0036 (once, AUD-R025) and 0045 (once, AUD-R039) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
+| `broadcast_artists` / `track_identities.match_status` (+ `reason_code` DEFERRED_RETRY, MB_UNAVAILABLE, LINK_REJECTED, LINK_SUGGESTED, LINK_REMOVED) | ingest, matchers (an artist's status from its links through `LogNameLinkService`, C36: a match held back on a rejected link is `needs_review` / LINK_REJECTED, phase 1b S4; an answer under 95, or an exact name of several artists, is LINK_SUGGESTED, phase 1c S4), review UI, re-check rewind, migrations 0036 (once, AUD-R025) and 0045 (once, AUD-R039) | artist / identity matching; the re-check rewinds every MB_UNAVAILABLE song (AUD-R028, extended by AUD-R042) |
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |

@@ -173,3 +173,4 @@ UPDATE broadcast_artists ba
 
 ANALYZE link_demotion_backup;
 ANALYZE log_name_links;
+ANALYZE broadcast_artists;

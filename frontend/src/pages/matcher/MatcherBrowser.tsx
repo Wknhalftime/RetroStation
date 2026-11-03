@@ -17,7 +17,6 @@ import { ArtistPanel } from "@/components/domain/matcher/ArtistPanel";
 import { TitlePanel } from "@/components/domain/matcher/TitlePanel";
 import { SearchSlideOver } from "@/components/domain/matcher/SearchSlideOver";
 import type { MbArtistResult, QueueArtist } from "@/lib/schemas/matcher";
-import { firstCandidateMbid } from "@/lib/matcher/candidates";
 
 type Feedback = { kind: "success" | "error"; message: string } | null;
 
@@ -479,7 +478,8 @@ export function MatcherBrowser() {
         open={slideOverOpen}
         onClose={() => setSlideOverOpen(false)}
         mode="file"
-        restrictArtistMbid={firstCandidateMbid(selectedArtist)}
+        // Never restricted to a suggestion the curator has not confirmed (phase 1c S8).
+        restrictArtistMbid={null}
         onSelectFile={handleFileSelect}
       />
 

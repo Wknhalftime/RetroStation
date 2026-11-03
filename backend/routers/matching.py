@@ -82,6 +82,8 @@ _MATCHED_ARTIST_STATUSES_SQL: str = _sql_in_list(
 _REJECTED_SONG_STATUSES_SQL: str = _sql_in_list(
     (MatchStatus.AUTO_REJECTED, MatchStatus.MANUAL_REJECTED)
 )
+# A name whose suggestions make it likely (phase 1c S8): one still in review.
+_REVIEW_ARTIST_STATUSES_SQL: str = _sql_in_list((MatchStatus.PENDING, MatchStatus.NEEDS_REVIEW))
 
 # Shared CTE chain for the /queue endpoint. Materialises the artist-level triage
 # bucket in SQL so the bucket filter, LIMIT/OFFSET pagination, and the `total`
@@ -110,12 +112,14 @@ artist_base AS (
     -- (percent, underscore, and the bang we use as the escape marker) are
     -- pre-escaped by _normalize_search; the ESCAPE '!' clause then makes
     -- them match literally.
-    -- has_suggestion: the name holds a suggested link (phase 1c S4, S8), which makes it
-    -- likely below, so the default view shows it.
+    -- has_suggestion: a name in review holds a suggested link (phase 1c S4, S8), which
+    -- makes it likely below, so the default view shows it. A matched name's leftover
+    -- suggestions do not (R7 keeps such a name unlikely).
     SELECT id, original_name, normalized_name, match_status,
            reason_code, reason_detail, created_at,
-           EXISTS (SELECT 1 FROM log_name_links l
-                   WHERE l.broadcast_artist_id = ba.id AND l.state = 'suggested')
+           ba.match_status IN ({_REVIEW_ARTIST_STATUSES_SQL})
+           AND EXISTS (SELECT 1 FROM log_name_links l
+                       WHERE l.broadcast_artist_id = ba.id AND l.state = 'suggested')
                AS has_suggestion
     FROM broadcast_artists ba
     WHERE (ba.match_status = ANY(%s)
@@ -181,11 +185,19 @@ artist_bucket AS (
 
 
 # The page's suggested links of each name (phase 1c S8), best first: strength, then the
-# oldest. The tier is the evidence's own, or the copied row's for a demoted link (C50).
+# oldest. The tier is the evidence's own, or the copied row's for a demoted link (C50). A
+# stub enrichment has not named yet (its name is its MBID) shows the MusicBrainz hit's
+# name, which the suggestion's evidence keeps.
 _CANDIDATES_SQL = """(
     SELECT COALESCE(json_agg(json_build_object(
-               'artist_id', ar.id, 'mbid', ar.mbid, 'name', ar.name,
-               'disambiguation', ar.disambiguation, 'score', l.strength,
+               'artist_id', ar.id, 'mbid', ar.mbid,
+               'name', CASE WHEN ar.name = ar.mbid
+                            THEN COALESCE(l.evidence ->> 'target_name', ar.name)
+                            ELSE ar.name END,
+               'disambiguation', CASE WHEN ar.name = ar.mbid
+                                      THEN l.evidence ->> 'target_disambiguation'
+                                      ELSE ar.disambiguation END,
+               'score', l.strength,
                'origin', l.origin,
                'tier', COALESCE(l.evidence ->> 'tier', l.evidence -> 'legacy' ->> 'tier'))
            ORDER BY l.strength DESC, l.created_at, l.id), '[]'::json)

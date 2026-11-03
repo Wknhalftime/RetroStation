@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 
-from backend.domain.enums import ReasonCode
+from backend.domain.enums import LogNameLinkOrigin, MatchTier, ReasonCode
 
 __all__ = [
     "ReasonCode",
@@ -54,13 +54,13 @@ def suggestion_reason(origin: str, tier: str | None, score: int) -> str:
     # Why the Resolution Center shows a suggested link (phase 1c S8), from the link's origin
     # and the tier of its evidence: a fuzzy link migration 0045 demoted (M22), or the
     # matcher's answer under 95 (C35).
-    if origin == "legacy":
+    if origin == LogNameLinkOrigin.LEGACY:
         return "Was linked automatically by a close name; now a suggestion to confirm"
-    if tier == "musicbrainz_api":
+    if tier == MatchTier.MUSICBRAINZ_API:
         return "Found by a MusicBrainz search for the name"
-    if tier == "normalization" and score >= 100:
+    if tier == MatchTier.NORMALIZATION and score >= 100:
         return "Same name as this artist, and as others: pick the right one"
-    if tier == "normalization":
+    if tier == MatchTier.NORMALIZATION:
         return "Close name in the catalog"
     return "Suggested automatically"
 

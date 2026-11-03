@@ -20,10 +20,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from backend.domain.enums import LogNameLinkOrigin, LogNameLinkState, MatchStatus, ReasonCode
-from backend.domain.matching import LogNameLink
+from backend.domain.matching import LogNameLink, MatchingError
 
 _REJECTED = (MatchStatus.MANUAL_REJECTED, MatchStatus.AUTO_REJECTED)
 _MATCHED = (MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED)
+
+
+class UserActionWithoutStatusError(MatchingError):
+    """A user action asked of the rule without the status it names."""
 
 
 @dataclass(frozen=True)
@@ -54,7 +58,7 @@ def status_from_links(
     matcher's own answer) and *by_user* whether the writer is the curator."""
     if by_user:
         if proposed is None:
-            raise ValueError("a user action names the status it writes")
+            raise UserActionWithoutStatusError("a user action names the status it writes")
         return proposed
     if current.status in _REJECTED:
         return current

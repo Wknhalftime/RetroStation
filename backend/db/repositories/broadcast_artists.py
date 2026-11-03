@@ -6,13 +6,21 @@ from uuid import UUID
 
 import psycopg
 
-from backend.db.repositories._pg_utils import format_embedding, parse_embedding
-from backend.domain.broadcast import BroadcastArtist
+from backend.db.repositories._pg_utils import (
+    format_embedding,
+    parse_embedding,
+    translate_lost_connection,
+)
+from backend.domain.broadcast import BroadcastArtist, BroadcastStorageError
 from backend.domain.enums import MatchStatus, ReasonCode
 from backend.domain.matching import ARTIST_UNDECIDED_STATUSES
 from backend.repositories.broadcast_artists import BroadcastArtistRepository
 
 
+# A lost connection is BroadcastStorageError, as its track-identity sibling's is: from
+# phase 1c Resolve and Reject write the name's status here (S3), and their routes answer
+# 503 to StorageUnavailableError.
+@translate_lost_connection(BroadcastStorageError)
 class PgBroadcastArtistRepository(BroadcastArtistRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
