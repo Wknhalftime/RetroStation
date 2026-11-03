@@ -93,3 +93,14 @@ def format_link_rejected(artist_name: str) -> str:
     # The matcher's match is held back (phase 1b S4, C19): the curator rejected this link, so
     # the name waits in review for them instead of being matched again.
     return f"Matched {artist_name}, a link you rejected — waiting for your decision"
+
+
+def format_placeholder_refused(artist_name: str) -> str:
+    # The matcher's answer is a MusicBrainz special-purpose artist (phase 1c S5, E3; C7), which
+    # is never linked: the name waits in review for a real artist.
+    return f"Matched {artist_name}, a placeholder, not a performer — not linked"
+
+
+def format_listed_name() -> str:
+    # The name is on the not-an-artist list (phase 1c S6, E3; C7): the matcher never matches it.
+    return "On the not-an-artist list — never matched"

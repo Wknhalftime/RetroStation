@@ -22,6 +22,7 @@ from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
+from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.missing_files import PgMissingFileListingRepository
@@ -53,7 +54,8 @@ from backend.services.work_curation_service import WorkCurationRepos
 class BroadcastRepos:
     """Broadcast-domain repositories; ``liners`` is each station's liner library (LR3);
     ``resolution`` holds what the artist Resolve and Unmatch write (phase 1a, C75), and
-    ``cascade`` their cascade on the name's lines (phase 1b)."""
+    ``cascade`` their cascade on the name's lines (phase 1b); ``placeholders`` is the
+    not-an-artist list (phase 1c, C7)."""
 
     stations: PgBroadcastStationRepository
     playlists: PgBroadcastPlaylistRepository
@@ -64,6 +66,7 @@ class BroadcastRepos:
     liners: PgStationLinerRepository
     resolution: PgArtistResolutionRepository
     cascade: PgArtistCascadeRepository
+    placeholders: PgLogNamePlaceholderRepository
 
 
 @dataclass
@@ -145,6 +148,7 @@ class RepositoryFactory:
             liners=PgStationLinerRepository(conn),
             resolution=PgArtistResolutionRepository(conn),
             cascade=PgArtistCascadeRepository(conn),
+            placeholders=PgLogNamePlaceholderRepository(conn),
         )
         self.library = LibraryRepos(
             files=PgLibraryFileRepository(conn),
@@ -186,6 +190,7 @@ class RepositoryFactory:
         self.broadcast_identities = self.broadcast.identities
         self.broadcast_events = self.broadcast.events
         self.broadcast_days = self.broadcast.days
+        self.log_name_placeholders = self.broadcast.placeholders
         self.artists = self.catalog.artists
         self.artist_linking = self.catalog.artist_linking
         self.works = self.catalog.works
@@ -289,4 +294,5 @@ def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
         cascade=repos.broadcast.cascade,
         commit=repos.commit_or_unavailable,
         names=repos.broadcast_artists,
+        placeholders=repos.log_name_placeholders,
     )

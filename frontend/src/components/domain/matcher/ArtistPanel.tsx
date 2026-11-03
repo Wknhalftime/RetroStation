@@ -4,6 +4,7 @@ import {
   type CascadeAction,
   useCascadePreview,
   useResolveArtist,
+  useUnlistNotAnArtist,
   useUnmatchArtist,
 } from "@/api/matcher";
 import {
@@ -61,6 +62,12 @@ interface ArtistPanelProps {
   onSearchLibrary?: () => void;
   /** Called with what a confirmed Reject or Unmatch did, in words (E2). */
   onCascadeDone?: (message: string) => void;
+  /** The name is on the not-an-artist list: the placeholder view (phase 1c S9). */
+  listed?: boolean;
+  /** Called once a confirmed Not an artist is the page's to send, after its Undo (S9). */
+  onNotAnArtist?: (artist: QueueArtist) => void;
+  /** Called, in words, when the placeholder view's "Back to the queue" is done. */
+  onBackToQueue?: (message: string) => void;
 }
 
 export function ArtistPanel({
@@ -68,17 +75,71 @@ export function ArtistPanel({
   onSearchMusicBrainz,
   onSearchLibrary,
   onCascadeDone,
+  listed = false,
+  onNotAnArtist,
+  onBackToQueue,
 }: ArtistPanelProps) {
   const resolveArtist = useResolveArtist();
   const unmatchArtist = useUnmatchArtist();
+  const unlist = useUnlistNotAnArtist();
   // The whole-name action awaiting confirmation; null when no confirmation is open.
   const [confirming, setConfirming] = useState<CascadeAction | null>(null);
   const preview = useCascadePreview(artist.id, confirming);
-  // Focus Cancel when the confirmation opens, so Enter never confirms by accident.
+  // Not an artist's own confirmation (phase 1c S9), and whether its Confirm was pressed, so
+  // a second press before the dialog closes hands nothing over again (E4).
+  const [confirmingNotAnArtist, setConfirmingNotAnArtist] = useState(false);
+  const handedOver = useRef(false);
+  // Focus Cancel when a confirmation opens, so Enter never confirms by accident.
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (confirming !== null) cancelRef.current?.focus();
-  }, [confirming]);
+    if (confirming !== null || confirmingNotAnArtist) cancelRef.current?.focus();
+  }, [confirming, confirmingNotAnArtist]);
+
+  function openNotAnArtist() {
+    handedOver.current = false;
+    setConfirmingNotAnArtist(true);
+  }
+
+  function handleNotAnArtist() {
+    if (handedOver.current) return;
+    handedOver.current = true;
+    setConfirmingNotAnArtist(false);
+    onNotAnArtist?.(artist);
+  }
+
+  function handleBackToQueue() {
+    unlist.mutate(
+      { id: artist.id },
+      { onSuccess: () => onBackToQueue?.(`${artist.original_name} is back in the queue.`) }
+    );
+  }
+
+  // The placeholder view (S9): a listed name is never linked (Resolve answers 409), so the
+  // only decision it offers is taking the name off the list.
+  if (listed) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-lg font-semibold text-gray-900">{artist.original_name}</p>
+            <p className="text-sm text-gray-500">
+              Not an artist: hidden from the queue and the missing-matches report, and never
+              matched.
+            </p>
+          </div>
+          <MatchStatusBadge status={artist.match_status} className="shrink-0" />
+        </div>
+        {unlist.error && <p className="mb-2 text-sm text-red-600">{unlist.error.message}</p>}
+        <button
+          onClick={handleBackToQueue}
+          disabled={unlist.isPending}
+          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+        >
+          Back to the queue
+        </button>
+      </div>
+    );
+  }
 
   // The queue's broadened CTE now surfaces AUTO_MATCHED / MANUAL_MATCHED
   // parents that have at least one review-relevant child. For those rows the
@@ -232,8 +293,40 @@ export function ArtistPanel({
       )}
 
       {/* Reject and Unmatch ask first (phase 1b, S6): the confirmation shows how many songs
-          would go off air, from the preview, and runs the action only on Confirm. */}
-      {confirming !== null ? (
+          would go off air, from the preview, and runs the action only on Confirm. Not an
+          artist asks first too (phase 1c S9); its Confirm hands the name to the page, which
+          sends it once its five-second Undo is over. */}
+      {confirmingNotAnArtist ? (
+        <div
+          role="alertdialog"
+          aria-labelledby="artist-not-an-artist-title"
+          className="rounded-md border border-amber-200 bg-amber-50 p-3"
+        >
+          <p id="artist-not-an-artist-title" className="text-sm font-medium text-gray-900">
+            {artist.original_name} is not an artist?
+          </p>
+          <p className="mt-1 text-sm text-gray-700">
+            It leaves the queue and the missing-matches report, and its links are removed (a
+            pair you rejected stays rejected). No run matches it or its songs. You can undo it
+            for five seconds, and later through Show placeholders.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleNotAnArtist}
+              className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Confirm Not an artist
+            </button>
+            <button
+              ref={cancelRef}
+              onClick={() => setConfirmingNotAnArtist(false)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : confirming !== null ? (
         <div
           role="alertdialog"
           aria-labelledby="artist-cascade-title"
@@ -294,6 +387,18 @@ export function ArtistPanel({
               aria-label={`Unmatch artist ${artist.original_name}`}
             >
               Unmatch artist
+            </button>
+          )}
+
+          {/* Not an artist (phase 1c S9): for any status, a matched placeholder such as
+              VARIOUS too. */}
+          {onNotAnArtist && (
+            <button
+              onClick={openNotAnArtist}
+              disabled={isPending}
+              className="mt-2 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+            >
+              Not an artist
             </button>
           )}
         </>

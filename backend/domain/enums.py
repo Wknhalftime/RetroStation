@@ -120,6 +120,13 @@ class LogNameLinkOrigin(StrEnum):
     LEGACY = "legacy"  # copied from an artist row of matches by migration 0044
 
 
+class PlaceholderSource(StrEnum):
+    """Who put a log name on the not-an-artist list, ``log_name_placeholders`` (C7, phase 1c)."""
+
+    MIGRATION = "migration"  # migration 0045's seed: the five station names
+    CURATOR = "curator"  # the Resolution Center's Not an artist
+
+
 class CreditRole(StrEnum):
     """A credited artist's role (C44): a main performer, or one the credit features."""
 

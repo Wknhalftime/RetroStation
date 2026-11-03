@@ -17,6 +17,13 @@ from backend.domain.matching import SONG_UNDECIDED_STATUSES
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 from backend.services.matching_reasons import format_deferred_retry
 
+# The line (``ti``) is not under a name on the not-an-artist list (phase 1c, C7): the
+# re-check's rewinds pass such lines by, so no run song-matches them.
+_NOT_LISTED = """NOT EXISTS (SELECT 1 FROM broadcast_artists ba
+                              JOIN log_name_placeholders ph
+                                ON ph.normalized_name = ba.normalized_name
+                             WHERE ba.id = ti.broadcast_artist_id)"""
+
 
 @translate_lost_connection(BroadcastStorageError)
 class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
@@ -240,15 +247,18 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         return cur.rowcount
 
     def rewind_undecided(self, artist_ids: Collection[UUID] | None) -> int:
+        # A line of a name on the not-an-artist list is never rewound (phase 1c, C7; Lance,
+        # 2026-11-03): no run song-matches it, so it keeps its state.
         wanted = None if artist_ids is None else list(artist_ids)
         if wanted is not None and not wanted:
             return 0
         cur = self._conn.execute(
-            """UPDATE track_identities
+            f"""UPDATE track_identities ti
                SET match_status = %s, match_tier = NULL,
                    reason_code = NULL, reason_detail = NULL
-               WHERE match_status = ANY(%s)
-                 AND (%s::uuid[] IS NULL OR broadcast_artist_id = ANY(%s::uuid[]))""",
+               WHERE ti.match_status = ANY(%s)
+                 AND (%s::uuid[] IS NULL OR ti.broadcast_artist_id = ANY(%s::uuid[]))
+                 AND {_NOT_LISTED}""",
             (
                 MatchStatus.PENDING.value,
                 [status.value for status in SONG_UNDECIDED_STATUSES],
@@ -259,13 +269,15 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         return cur.rowcount
 
     def rewind_mb_unavailable(self) -> int:
-        # Every song a MusicBrainz outage deferred, whatever its artist (AUD-R028, D16). The
-        # status guard keeps a decided song that still carries the reason where it is.
+        # Every song a MusicBrainz outage deferred, whatever its artist (AUD-R028, D16), but one
+        # of a name on the not-an-artist list (phase 1c, C7). The status guard keeps a decided
+        # song that still carries the reason where it is.
         cur = self._conn.execute(
-            """UPDATE track_identities
+            f"""UPDATE track_identities ti
                SET match_status = %s, match_tier = NULL,
                    reason_code = NULL, reason_detail = NULL
-               WHERE match_status = %s AND reason_code = %s""",
+               WHERE ti.match_status = %s AND ti.reason_code = %s
+                 AND {_NOT_LISTED}""",
             (
                 MatchStatus.PENDING.value,
                 MatchStatus.NEEDS_REVIEW.value,

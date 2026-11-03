@@ -28,18 +28,23 @@ const matchingQueueKey = (
   search: string,
   sort: QueueSort,
   includeUnlikely: boolean,
-) => ["matching", "queue", { limit, offset, search, sort, includeUnlikely }] as const;
+  placeholders: boolean,
+) =>
+  ["matching", "queue", { limit, offset, search, sort, includeUnlikely, placeholders }] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 
+// ``placeholders`` asks for the placeholder view instead of the queue (phase 1c S9): every
+// name on the not-an-artist list, whatever its status, so one can be taken off the list.
 export function useMatchingQueue(
   limit = 50,
   offset = 0,
   search: string = "",
   sort: QueueSort = "created_at",
   includeUnlikely = false,
+  placeholders = false,
 ) {
   // Trim once and feed both the cache key and the URL through the same value
   // so "  prince" and "prince" share a cache entry and a single request.
@@ -53,8 +58,11 @@ export function useMatchingQueue(
   if (trimmedSearch.length > 0) {
     params.set("search", trimmedSearch);
   }
+  if (placeholders) {
+    params.set("placeholders", "true");
+  }
   return useQuery<MatchingQueue>({
-    queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort, includeUnlikely),
+    queryKey: matchingQueueKey(limit, offset, trimmedSearch, sort, includeUnlikely, placeholders),
     // Parsed, so a response the schema does not describe is an error, not silently passed on
     // (phase 1c S8: the candidates are typed on both sides).
     queryFn: async () =>
@@ -146,6 +154,33 @@ export function useUnmatchArtist() {
       apiFetch<ResolveResult>(`/api/v1/matching/artists/${id}/unmatch`, {
         method: "POST",
       }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["matching"] });
+    },
+  });
+}
+
+// Not an artist (phase 1c S6, S9): the log name goes on the not-an-artist list, which hides
+// it, and loses its active and suggested links; DELETE takes it off again. The page sends the
+// listing itself once its five-second Undo is over, so it is a plain call, not a hook;
+// ``keepalive`` lets a listing sent as the page is left still reach the server.
+export interface PlaceholderListing {
+  id: string;
+  listed: boolean;
+}
+
+function notAnArtistUrl(id: string): string {
+  return `/api/v1/matching/artists/${id}/not-an-artist`;
+}
+
+export function listNotAnArtist(id: string): Promise<PlaceholderListing> {
+  return apiFetch<PlaceholderListing>(notAnArtistUrl(id), { method: "POST", keepalive: true });
+}
+
+export function useUnlistNotAnArtist() {
+  const queryClient = useQueryClient();
+  return useMutation<PlaceholderListing, Error, UnmatchVariables>({
+    mutationFn: ({ id }) => apiFetch<PlaceholderListing>(notAnArtistUrl(id), { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["matching"] });
     },

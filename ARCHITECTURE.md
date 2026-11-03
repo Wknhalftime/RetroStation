@@ -7,7 +7,8 @@ feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue edit
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
 with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b, "Status from
-links and suggestions" 2026-11-03 with its phase 1c. Rulings cited
+links and suggestions" and "Placeholders are never artists" 2026-11-03 with its phase 1c.
+Rulings cited
 here are in `audit/rulings.jsonl` (AUD-R015..R059, R100 and R101 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
@@ -105,7 +106,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `scripts/name_stubs.py --dsn` names, on a gate copy, every artist whose name is still its MBID
   and has no recorded error (0044's stubs and any made since), one transaction each, with every
   hand-off stubbed.
-- Writers: the artist matcher (`LogNameLinkService.write_answer`: the name's status, guarded,
+- Writers: the artist matcher (`LogNameLinkService.write_plan`: the name's status, guarded,
   then each MusicBrainz hit into the catalog, then the link, origin automatic, or its
   suggestions; never over a manual or rejected pair, and a match or suggestion of a rejected
   pair is held back, below), Resolve (a manual link, which makes even a rejected pair active
@@ -113,8 +114,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `rejected`, C19; none is deleted since phase 1b), and migration 0045 once (below). Resolve,
   Reject and Unmatch are sync routes on `SyncRepos` (C75) calling
   `services/artist_resolution_service.py`, so status, cascade and link commit together.
-  `unlink_all` has had no caller since 1b; it stays because the locked single-writer test
-  expects the service to own the port's delete (it retires in phase 1c's S12).
+  `unlink_all` has had no caller since 1b and retires in phase 1c's S12; the port's delete is
+  the service's through Not an artist's `unlink_keeping_rejected` (below).
 - Readers: Tier 1 of song matching (the first active link, manual first, then strength, then
   the oldest; the MBID is the linked artist's current one; a name with only suggestions has
   none), the re-check wave's linked names (`normalized_names_linked_since`), the works merge,
@@ -160,7 +161,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   action reads the lines `FOR UPDATE`, so a matcher's guarded song write waits for it instead
   of being overwritten (AUD-R018).
 - A rejected pair stays rejected (S4, C19): when the artist matcher's automatic match targets
-  an artist whose link with the name is `rejected`, `hold_back_rejected_link` turns it into
+  an artist whose link with the name is `rejected`, `hold_back_refused_link` turns it into
   `needs_review` / `LINK_REJECTED`, written through the same guarded write; no link, no
   catalog upsert, no cascade. The gate's dry run asks the same function. Only a manual
   Resolve makes the pair active again.
@@ -204,8 +205,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   name, demoted each active legacy fuzzy link (v0 tier normalization, strength under 95) to a
   suggestion when its old score is 56 or more and deleted it otherwise, and set each changed
   name's status by the rule. Lines and song matches were not touched. It also created
-  `log_name_placeholders`, the station names that are programming, not performers (its route
-  and refusals come with phase 1c's PR 2). `backend/db/rollback_0045_link_demotion.sql` restores
+  `log_name_placeholders`, the station names that are programming, not performers (the next
+  section). `backend/db/rollback_0045_link_demotion.sql` restores
   what still holds what 0045 wrote (a name a re-check rewound or re-suggested counts as
   unmoved), and puts any name left with a reason the code before 1c cannot read back to
   pending. Run it before 0044's rollback, never after: nothing stops 0044's alone.
@@ -220,6 +221,48 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `tests/services/test_interim_artist_rules.py`, `tests/integration/test_link_demotion_pg.py`,
   `tests/integration/test_rollback_0045_after_matching_pg.py` and
   `tests/routers/test_queue_suggested_links.py`.
+
+## Placeholders are never artists (phase 1c S5-S7, S9, C7, AUD-R037)
+
+- Two kinds. MusicBrainz's special-purpose artists (`SPECIAL_PURPOSE_MBIDS`,
+  `domain/catalog.py`: Various Artists, [unknown] and the rest) are refused by the link
+  writer: `LogNameLinkService` writes no link of any state to one, by MBID or by the catalog
+  artist holding it, and makes no stub; the matcher's plan leaves it out, and Resolve to one
+  answers 422 (`PlaceholderArtistError`). The Library's artist list and search leave them out.
+- And the not-an-artist list, `log_name_placeholders` (port `repositories/
+  log_name_placeholders.py`, fake `tests/fakes/log_name_placeholders.py`), by exact cleaned
+  name: 0045 seeded the five station names (SPOT BREAK, SPECIAL PROGRAMMING, SYNDICATED
+  PROGRAM, VARIOUS, VARIOUS ARTISTS); "38 Special" and "Traffic" are real acts, so no pattern.
+  A listed name keeps its status (S3: the list hides it). It is hidden from the Resolution
+  Center queue and its counts, and its lines from the station missing-matches report (total,
+  items, impact share). Resolve on it answers 409 (`ListedLogNameError`).
+- No run matches a listed name or song-matches its lines, which keep their state (Lance,
+  2026-11-03: a file named like a spot could otherwise reach the stream). The artist matcher
+  runs no engine for a pending one (`listed_name_result`: `needs_review` / `NO_CANDIDATES`,
+  no cascade, no MusicBrainz search). The artist task's DEFERRED_RETRY reset passes it by, the
+  re-check's rewinds (both scopes, and the `MB_UNAVAILABLE` sweep) skip it and its lines in
+  their SQL, and the song stage decides none of its lines (`lines_to_match`). The gate's dry
+  runs ask the same functions: the artist dry run records the refusal, the identity dry run
+  leaves the lines out. A refused placeholder answer is held back the same way
+  (`hold_back_refused_link`, before a rejected pair's: `NO_CANDIDATES`).
+- Not an artist: `POST /matching/artists/{id}/not-an-artist` lists the name (`curator`) and
+  removes its active and suggested links; a rejected pair stays rejected, written back as it
+  was (`unlink_keeping_rejected`), so a name listed by mistake keeps the curator's rejections.
+  `DELETE` takes it off the list; the name takes the status its links give (a matched name
+  with none: `LINK_REMOVED`). Both are sync routes on `SyncRepos` (C75), idempotent (E4). The
+  panel asks first; the page hides the name at once and sends the POST only when its
+  five-second Undo is over, so an Undo inside them writes nothing (leaving the page sends it
+  then; a closed tab may drop it, which writes nothing). After that the "Show placeholders"
+  view (`/queue?placeholders=true`: every listed name, any status) has "Back to the queue".
+- Known gap: a pending line of a listed name stays pending, so it counts in the matching run's
+  pending work until the name is taken off the list.
+- The checks are `tests/services/test_placeholder_links_refused.py`,
+  `tests/services/test_placeholder_list_wiring.py`,
+  `tests/repositories/test_log_name_placeholders_contract.py`,
+  `tests/routers/test_not_an_artist.py`, `tests/routers/test_library_hides_placeholders.py`,
+  `tests/scripts/test_dry_run_placeholders.py`,
+  `tests/scripts/test_listed_names_not_song_matched.py`, and the panel's and page's cases in
+  `ArtistPanel.test.tsx` and `MatcherBrowser.test.tsx`.
 
 ## Derived counts kept by triggers
 

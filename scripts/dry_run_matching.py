@@ -51,6 +51,9 @@ from backend.db.repositories.broadcast_track_identities import (  # noqa: E402
 )
 from backend.db.repositories.library_files import PgLibraryFileRepository  # noqa: E402
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository  # noqa: E402
+from backend.db.repositories.log_name_placeholders import (  # noqa: E402
+    PgLogNamePlaceholderRepository,
+)
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository  # noqa: E402
 from backend.db.repositories.matches import PgMatchRepository  # noqa: E402
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository  # noqa: E402
@@ -65,7 +68,9 @@ from backend.services.artist_matching_service import (  # noqa: E402
     ArtistMatchThresholds,
     build_local_artist_engine,
     build_mb_artist_engine,
-    hold_back_rejected_link,
+    hold_back_refused_link,
+    listed_name_result,
+    listed_names,
     resolve_one_name,
 )
 from backend.services.identity_matching_service import (  # noqa: E402
@@ -74,6 +79,7 @@ from backend.services.identity_matching_service import (  # noqa: E402
     IdentityMatchResult,
     build_identity_engine,
     group_by_artist,
+    lines_to_match,
     load_exclusions,
     resolve_one_line,
 )
@@ -170,6 +176,7 @@ def _artist_repos(conn: Conn) -> ArtistMatchingRepos:
         match_repo=PgMatchRepository(conn),
         rules_repo=PgMappingRuleRepository(conn),
         link_repo=PgLogNameLinkRepository(conn),
+        placeholders=PgLogNamePlaceholderRepository(conn),
     )
 
 
@@ -235,16 +242,22 @@ def artist_stage(conn: Conn, client: MusicBrainzApiClient, hook: Hook) -> dict[s
         for row in conn.execute("SELECT * FROM broadcast_artists ORDER BY id").fetchall()
     ]
     hook("names", conn)
-    inputs = ArtistEngineInputs(_artist_repos(conn), client, _artist_thresholds())
+    repos = _artist_repos(conn)
+    inputs = ArtistEngineInputs(repos, client, _artist_thresholds())
     local, mb = build_local_artist_engine(inputs), build_mb_artist_engine(inputs, {})
-    # The task holds back a match to a rejected link (phase 1b S4); so does the dry run.
+    # The task holds back a match to a rejected link (phase 1b S4) or to a placeholder (1c
+    # S5), and matches no name on the not-an-artist list (1c S6); so does the dry run.
     links = LogNameLinkService(PgLogNameLinkRepository(conn), PgArtistRepository(conn))
+    listed = listed_names(names, repos.placeholders)
     catalog = _catalog(conn)
     hook("engines", conn)
     stage: dict[str, Any] = {}
     for name in names:
+        if name.normalized_name in listed:
+            stage[str(name.id)] = _artist_entry(name.original_name, listed_name_result(), catalog)
+            continue
         try:
-            result = hold_back_rejected_link(name, resolve_one_name(name, local, mb), links)
+            result = hold_back_refused_link(name, resolve_one_name(name, local, mb), links)
         except MusicBrainzUnavailableError:
             stage[str(name.id)] = _unavailable(name.original_name)
             continue
@@ -268,6 +281,7 @@ def _identity_repos(conn: Conn) -> IdentityMatchingRepos:
         catalog_repo=PgArtistRepository(conn),
         recording_search_reach=library_files,
         link_repo=PgLogNameLinkRepository(conn),
+        placeholders=PgLogNamePlaceholderRepository(conn),
     )
 
 
@@ -283,7 +297,8 @@ def _line_entry(result: IdentityMatchResult) -> dict[str, Any]:
 
 
 def identity_stage(conn: Conn, client: MusicBrainzApiClient, hook: Hook) -> dict[str, Any]:
-    """Every line of a resolved name through the identity task's engine, artist by artist."""
+    """Every line of a resolved name through the identity task's engine, artist by artist; a
+    line of a name on the not-an-artist list is decided by no run, so it is left out."""
     lines_repo = PgBroadcastTrackIdentityRepository(conn)
     lines = [
         lines_repo._row_to_model(row)
@@ -293,6 +308,7 @@ def identity_stage(conn: Conn, client: MusicBrainzApiClient, hook: Hook) -> dict
     repos = _identity_repos(conn)
     artist_ids = sorted({line.broadcast_artist_id for line in lines}, key=str)
     artists = {a.id: a for a in repos.broadcast_artist_repo.get_by_ids(artist_ids)}
+    lines = lines_to_match(lines, artists, repos.placeholders)
     inputs = IdentityEngineInputs(
         repos=repos,
         mb_client=client,

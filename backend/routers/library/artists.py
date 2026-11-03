@@ -7,11 +7,20 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel
 
 from backend.dependencies import get_current_token, get_db_connection
+from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 
 router = APIRouter()
 
-_NAMED = "a.name IS DISTINCT FROM a.mbid"
+# Trusted constants, never user input.
+_PLACEHOLDER_MBIDS_SQL = ", ".join(f"'{mbid}'" for mbid in sorted(SPECIAL_PURPOSE_MBIDS))
+# A listed artist: named (an unnamed stub's name is its MBID, phase 1a S15) and no
+# special-purpose artist (phase 1c S7, C7). ``IS DISTINCT FROM``, because a local artist's
+# ``mbid`` is NULL.
+_NAMED = (
+    "a.name IS DISTINCT FROM a.mbid"
+    f" AND (a.mbid IS NULL OR a.mbid NOT IN ({_PLACEHOLDER_MBIDS_SQL}))"
+)
 
 
 def _artist_search_fragments(
@@ -34,8 +43,8 @@ def _artist_search_fragments(
     ORDER BY for ranking — not in WHERE — so the index is exercised for
     filtering via the ``%%`` arm.
 
-    An unnamed stub (phase 1a S15: its name is still its MBID) is never listed. ``IS
-    DISTINCT FROM``, because a local artist's ``mbid`` is NULL.
+    An unnamed stub (phase 1a S15: its name is still its MBID) is never listed, and neither
+    is one of MusicBrainz's special-purpose artists (phase 1c S7), by its MBID (``_NAMED``).
     """
     if not search:
         return f"WHERE {_NAMED}", "ORDER BY a.sort_name, a.id", (), ()

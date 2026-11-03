@@ -9,6 +9,7 @@ from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
+from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
@@ -18,6 +19,7 @@ from backend.domain.enums import LogCategory, MatchStatus, ReasonCode, TaskType
 from backend.services.artist_matching_service import (
     ArtistMatchingRepos,
     ArtistMatchThresholds,
+    listed_names,
     match_artists_for_playlist,
 )
 from backend.services.mb_client import MusicBrainzApiClient
@@ -65,15 +67,20 @@ def artist_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                 # task runs.
                 broadcast_artist_repo = PgBroadcastArtistRepository(conn)
                 track_identity_repo = PgBroadcastTrackIdentityRepository(conn)
+                placeholders = PgLogNamePlaceholderRepository(conn)
 
                 # Reset scope is intentionally per-playlist: derived from
-                # get_all_for_playlist(pid). See plan §"Reset scope rationale".
+                # get_all_for_playlist(pid). See plan §"Reset scope rationale". A name on the
+                # not-an-artist list is never reset, so it and its deferred lines stay
+                # deferred (phase 1c, C7; Lance, 2026-11-03).
                 playlist_artists = broadcast_artist_repo.get_all_for_playlist(pid)
+                listed = listed_names(playlist_artists, placeholders)
                 deferred_artist_ids = [
                     a.id
                     for a in playlist_artists
                     if a.match_status == MatchStatus.NEEDS_REVIEW
                     and a.reason_code == ReasonCode.DEFERRED_RETRY
+                    and a.normalized_name not in listed
                 ]
                 artists_reset = broadcast_artist_repo.reset_deferred_by_ids(deferred_artist_ids)
                 identities_reset = track_identity_repo.reset_deferred_by_artist_ids(
@@ -93,6 +100,7 @@ def artist_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                     match_repo=PgMatchRepository(conn),
                     rules_repo=PgMappingRuleRepository(conn),
                     link_repo=PgLogNameLinkRepository(conn),
+                    placeholders=placeholders,
                 )
                 thresholds = ArtistMatchThresholds(
                     strong_match_threshold=settings.strong_match_threshold,

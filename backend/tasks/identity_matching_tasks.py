@@ -12,6 +12,7 @@ from backend.db.repositories.broadcast_track_identities import (
 )
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
+from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
@@ -71,6 +72,7 @@ def identity_matching_task(playlist_id: str, run_id: str | None = None) -> None:
                     catalog_repo=PgArtistRepository(conn),
                     recording_search_reach=library_files,
                     link_repo=PgLogNameLinkRepository(conn),
+                    placeholders=PgLogNamePlaceholderRepository(conn),
                 )
                 work_ids = match_identities_for_playlist(
                     playlist_id=UUID(playlist_id),
