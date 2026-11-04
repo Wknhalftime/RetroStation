@@ -42,7 +42,7 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, ReasonCode
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.domain.matching import Match
 from backend.services.identity_matching_service import (
@@ -97,20 +97,6 @@ def _artist(conn: Conn, status: MatchStatus = MatchStatus.AUTO_MATCHED) -> Broad
     )
     repo.update_match_status(artist.id, status, None, None)
     return artist
-
-
-def _artist_row(conn: Conn, artist: BroadcastArtist, score: float = 100.0) -> Match:
-    """The artist's old match row, which 1a leaves alone (1c drops it)."""
-    return PgMatchRepository(conn).create(
-        Match(
-            id=uuid4(),
-            artist_id=artist.id,
-            target_id=MBID,
-            target_type=TargetType.ARTIST,
-            confidence_score=score,
-            match_tier=MatchTier.MUSICBRAINZ_ID_EXACT,
-        )
-    )
 
 
 def _file(conn: Conn, title: str = "Some File") -> LibraryFile:
@@ -324,16 +310,14 @@ def test_a_song_is_judged_by_its_best_row(migrated_db: str) -> None:
     "status", [MatchStatus.AUTO_MATCHED, MatchStatus.MANUAL_MATCHED, MatchStatus.NEEDS_REVIEW]
 )
 def test_artists_are_untouched(migrated_db: str, status: MatchStatus) -> None:
-    """Artist matching keeps its own mid-band (D12): an artist at 60 stays as it is."""
+    """Artist matching keeps its own mid-band (D12): 0036 leaves a name's status as it is."""
     with _connect(migrated_db) as conn:
         artist = _artist(conn, status)
-        row = _artist_row(conn, artist, 60.0)
 
         assert _migrate(conn) == 0
 
         stored = PgBroadcastArtistRepository(conn).get_by_id(artist.id)
         assert stored is not None and stored.match_status == status
-        assert PgMatchRepository(conn).get_by_artist(artist.id) == row
 
 
 # --- Once only ------------------------------------------------------------------------------

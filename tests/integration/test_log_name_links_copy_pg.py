@@ -1,5 +1,5 @@
 """Migration 0044 copies the artist rows of ``matches`` into ``log_name_links`` (artist model
-phase 1a, SPEC S2, S3, S13, S17; E6, E7, E8; C30, C45, C50).
+phase 1a, SPEC S2, S3, S17; E6, E7, E8; C30, C45, C50).
 
 S2: every artist row of ``matches`` becomes one link per (log name, artist). The row's
 ``target_id`` resolves to ``artists.id`` by catalog id, else by MBID. The link is ``active``,
@@ -13,27 +13,25 @@ S3: a target MBID no catalog artist holds gets one stub artist: a new UUID id, t
 ``mbid``, ``name`` and ``sort_name``, ``normalized_name`` NULL, origin ``musicbrainz``,
 ``needs_enhancement`` true; its id goes into ``link_copy_stubs`` for the rollback.
 
-S13: straight after the copy, ``scripts/check_log_name_links_copy.py`` maps every old row to
-exactly one link (its own, or the one its duplicate collapsed into), and every link to a row.
+S13, 1a's check that every old row mapped to exactly one link and every link to a row, ran on
+1a's gate copy; its script and its case here retired in phase 1c with the old rows (S10).
 
 S17: ``backend/db/rollback_0044_log_name_links.sql`` drops ``log_name_links``, deletes the
 stubs nothing else references (a work), drops ``link_copy_stubs`` and deletes 0044's
 ``schema_migrations`` row. The old rows stay in ``matches`` throughout (M35).
 
-Each test runs on the database as it was before 0044: the rollback script undoes 0044 inside
-one transaction, the test seeds the old rows and runs the migration's SQL, and the
-transaction is rolled back at the end, so the test database keeps 0044.
+Each test runs on the database as it was before 0044: the rollback scripts undo 0046, 0045 and
+0044, newest first (phase 1c, S10), inside one transaction, the test seeds the old rows and
+runs the migration's SQL, and the transaction is rolled back at the end, so the test database
+keeps them.
 """
 
 from __future__ import annotations
 
-import importlib
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -47,6 +45,11 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = "0044_log_name_links"
 MIGRATION = ROOT / "backend" / "db" / "migrations" / f"{VERSION}.sql"
 ROLLBACK = ROOT / "backend" / "db" / f"rollback_{VERSION}.sql"
+# The rollbacks of the migrations since 0044, newest first (phase 1c, S10).
+LATER_ROLLBACKS = (
+    ROOT / "backend" / "db" / "rollback_0046_drop_artist_rows.sql",
+    ROOT / "backend" / "db" / "rollback_0045_link_demotion.sql",
+)
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
@@ -63,7 +66,8 @@ def before_the_copy(url: str) -> Iterator[Conn]:
     """The test database without 0044, in one transaction that is rolled back at the end."""
     conn = psycopg.connect(url, row_factory=dict_row)
     try:
-        conn.execute(ROLLBACK.read_text(encoding="utf-8"))
+        for script in (*LATER_ROLLBACKS, ROLLBACK):
+            conn.execute(script.read_text(encoding="utf-8"))
         yield conn
     finally:
         conn.rollback()
@@ -72,13 +76,6 @@ def before_the_copy(url: str) -> Iterator[Conn]:
 
 def _migrate(conn: Conn) -> None:
     conn.execute(MIGRATION.read_text(encoding="utf-8"))
-
-
-def _check_script() -> ModuleType:
-    scripts = str(ROOT / "scripts")
-    if scripts not in sys.path:
-        sys.path.insert(0, scripts)
-    return importlib.import_module("check_log_name_links_copy")
 
 
 def _name(conn: Conn, name: str, status: str = "auto_matched") -> UUID:
@@ -330,50 +327,6 @@ def test_unknown_mbids_get_stub_artists(migrated_db: str) -> None:
     assert recorded == stub_ids
     assert known not in recorded
     assert linked[first] == linked[second] == stubs[UNKNOWN]["id"]
-
-
-# --- S13: old and new match one for one ----------------------------------------------------------
-
-
-def test_old_and_new_match_one_for_one(migrated_db: str) -> None:
-    check = _check_script().check
-    with before_the_copy(migrated_db) as conn:
-        jimi = _musicbrainz(conn, "Jimi Hendrix", NIRVANA)
-        local = _local(conn, "Van Halen")
-        hendrix = _name(conn, "JIMI HENDRIX", "manual_matched")
-        rows = [
-            _artist_row(conn, hendrix, jimi, at=T0),
-            _artist_row(conn, hendrix, NIRVANA, tier="manual", score=1.0, at=T0 + HOUR),
-            _artist_row(conn, _name(conn, "VAN HALEN"), local),
-            _artist_row(conn, _name(conn, "RULE BAND"), UNKNOWN, tier="manual"),
-            _artist_row(conn, _name(conn, "SPOT BREAK", "manual_rejected"), local),
-        ]
-
-        _migrate(conn)
-        clean = check(conn)
-
-        dropped = conn.execute(
-            "DELETE FROM log_name_links WHERE broadcast_artist_id = %s RETURNING id", (hendrix,)
-        ).fetchone()
-        stray_name = _name(conn, "NOT IN MATCHES")
-        conn.execute(
-            """INSERT INTO log_name_links
-                   (broadcast_artist_id, artist_id, state, origin, strength, evidence)
-               VALUES (%s, %s, 'active', 'automatic', 90, '{"version": 0}')""",
-            (stray_name, local),
-        )
-        stray = conn.execute(
-            "SELECT id FROM log_name_links WHERE broadcast_artist_id = %s", (stray_name,)
-        ).fetchone()
-        broken = check(conn)
-
-    assert dropped is not None and stray is not None
-    assert clean.ok
-    assert (clean.old_rows, clean.links, clean.collapsed) == (5, 4, 1)
-    assert (clean.unmapped_rows, clean.links_without_rows) == ((), ())
-    assert not broken.ok
-    assert sorted(broken.unmapped_rows) == sorted(str(r) for r in rows[:2])
-    assert broken.links_without_rows == (str(stray["id"]),)
 
 
 # --- S17: the rollback ---------------------------------------------------------------------------

@@ -179,18 +179,6 @@ def test_exists_and_status_of(ports: Ports) -> None:
     assert ports.resolution.status_of(uuid4()) is None
 
 
-def test_set_status_writes_the_status_only(ports: Ports) -> None:
-    name_id = _name(ports, MatchStatus.NEEDS_REVIEW)
-
-    ports.resolution.set_status(name_id, MatchStatus.MANUAL_MATCHED)
-
-    assert _name_state(ports, name_id) == (
-        MatchStatus.MANUAL_MATCHED,
-        ReasonCode.LOW_CONFIDENCE,
-        "why",
-    )
-
-
 def test_a_manual_match_reopens_the_songs_in_review_and_drops_their_matches(ports: Ports) -> None:
     name_id, other = _name(ports, MatchStatus.AUTO_MATCHED), _name(ports, MatchStatus.AUTO_MATCHED)
     review = _song(ports, name_id, MatchStatus.NEEDS_REVIEW)
@@ -243,19 +231,6 @@ def test_the_playlists_playing_the_name(ports: Ports) -> None:
     assert ports.resolution.playlists_playing(uuid4()) == []
 
 
-def test_a_manual_reject_rejects_every_song_but_the_curators(ports: Ports) -> None:
-    name_id = _name(ports, MatchStatus.AUTO_MATCHED)
-    songs = {status: _song(ports, name_id, status) for status in MatchStatus}
-
-    ports.resolution.reject_open_songs(name_id)
-
-    kept = {MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED}
-    for status, song_id in songs.items():
-        expected = status if status in kept else MatchStatus.AUTO_REJECTED
-        song = ports.songs.get_by_id(song_id)
-        assert song is not None and song.match_status == expected, status
-
-
 @pytest.mark.parametrize("status", list(MatchStatus))
 def test_unmatch_takes_only_a_decided_name(ports: Ports, status: MatchStatus) -> None:
     name_id = _name(ports, status)
@@ -272,18 +247,3 @@ def test_unmatch_takes_only_a_decided_name(ports: Ports, status: MatchStatus) ->
     else:
         assert _name_state(ports, name_id) == (status, ReasonCode.LOW_CONFIDENCE, "why")
     assert ports.resolution.unmatch_if_decided(uuid4()) is False
-
-
-def test_unmatch_reopens_every_song_and_drops_every_match(ports: Ports) -> None:
-    name_id, other = _name(ports, MatchStatus.AUTO_MATCHED), _name(ports, MatchStatus.AUTO_MATCHED)
-    songs = [_song(ports, name_id, status) for status in MatchStatus]
-    elsewhere = _song(ports, other, MatchStatus.AUTO_MATCHED)
-    for song_id in (*songs, elsewhere):
-        _suggest(ports, song_id)
-
-    ports.resolution.reopen_every_song(name_id)
-    ports.resolution.delete_song_matches(name_id)
-
-    reopened = (MatchStatus.NEEDS_REVIEW, None, ReasonCode.USER_UNMATCHED, None, False)
-    assert [_state(ports, song_id) for song_id in songs] == [reopened] * len(songs)
-    assert _state(ports, elsewhere) == (MatchStatus.AUTO_MATCHED, *STALE, True)

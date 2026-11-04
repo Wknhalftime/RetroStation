@@ -18,6 +18,12 @@ history, with a "Retired" note at the top. A hit names the row's ruling.
 S1: every name phase 0c retires has a row of phase 0c with a ruling of its own: ACTIVE, saying
 "retired in phase 0c, do not recreate", naming what it retires, with its reason, and no longer
 pending 0c. No 0c row reaches a name 0c keeps. The services and scripts are gone.
+
+Phase 1c (SPEC S10-S12): every name 1c retires has a row of phase 1c with a ruling of its own,
+numbered from AUD-R060 and below master's AUD-R100. No 1c row reaches a name 1c keeps
+(``WorkRepository.get_by_artist`` is another method), a 1c row allows only files from a fixed
+list of mentions that stay true, each of which names that row, the files 1c retires are gone,
+and no ruling waits for a 1c check any more.
 """
 
 from __future__ import annotations
@@ -488,3 +494,119 @@ def test_phase_0c_checks_no_longer_pending() -> None:
     assert {"AUD-R035", "AUD-R045"} <= checked_in_0c
     assert sorted(phase_0c - checked_in_0c) == []
     assert sorted(r for r in checked_in_0c if "0c" in _pending(ledger[r]["ruling"])) == []
+
+
+# --- Phase 1c (SPEC S10-S12): what phase 1c retires and keeps -------------------------------
+
+# Each must be reached by a phase 1c row: the artist column of matches, its constraints, and
+# 1a's copy check and 0b's snapshot query that read it; 0044's stub list;
+# MatchRepository.get_by_artist however it is reached; C34's two columns; FR20's splitter; and
+# the statements 1b left with no production caller, with set_status (Lance, 2026-11-02).
+PHASE_1C_RETIRED = [
+    "matches.artist_id",
+    "xor_match_target",
+    "matches_artist_id_target_id_key",
+    "idx_matches_artist",
+    "scripts/check_log_name_links_copy.py",
+    "_MATCHES_LINKS_SQL",
+    "link_copy_stubs",
+    "MatchRepository.get_by_artist",
+    "PgMatchRepository(conn).get_by_artist(artist.id)",
+    "FakeMatchRepository().get_by_artist(artist)",
+    "repos.matches.get_by_artist(name_id)",
+    "self._match_repo.get_by_artist(artist.id)",
+    "def get_by_artist(self, artist_id: UUID) -> Match | None:",
+    "broadcast_artists.artist_candidates",
+    'artist_candidates=row.get("artist_candidates")',
+    "broadcast_artists.resolved_artist_mbid",
+    "from backend.services.normalization import split_artist_string",
+    "repos.resolution.reject_open_songs(name_id)",
+    "repos.resolution.reopen_every_song(name_id)",
+    "repos.resolution.delete_song_matches(name_id)",
+    "repos.resolution.set_status(name_id, MatchStatus.MANUAL_MATCHED)",
+    "def set_status(self, broadcast_artist_id: UUID, status: MatchStatus) -> None:",
+    "self._links.unlink_all(name_id)",
+    "def unlink_all(self, broadcast_artist_id: UUID) -> None:",
+]
+
+# No phase 1c row may reach any of these: what 1c keeps.
+PHASE_1C_KEPT = [
+    # WorkRepository.get_by_artist is another method (the grouping and works services)
+    "WorkRepository.get_by_artist",
+    "work_repo.get_by_artist(artist_id)",
+    "repos.works.get_by_artist(artist_id)",
+    'repos["work_repo"].get_by_artist(artist_id)',
+    "def get_by_artist(self, artist_id: str) -> list[Work]:",
+    "def get_by_artist_mbid(self, artist_mbid: str) -> list[LibraryFile]:",
+    # the other artist_id columns, and the song columns of matches
+    "works.artist_id",
+    "log_name_links.artist_id",
+    "matches.identity_id",
+    "matches.work_id",
+    "idx_matches_identity",
+    "TargetType.ARTIST",
+    # the song statements and link writes that stay
+    "reopen_songs_in_review",
+    "delete_pending_song_matches",
+    "unmatch_if_decided",
+    "update_match_status",
+    "update_match_status_if_pending",
+    "unlink_keeping_rejected",
+    "delete_links_of_name",
+    "write_status_from_links",
+    "set_link_state",
+    "normalize_artist",
+    # the same words elsewhere: only the resolution port's set_status and the link service's
+    # unlink_all retire
+    "def set_status(self, status: str) -> None:",
+    "player.set_status(status)",
+    "def unlink_all(self) -> None:",
+]
+
+RETIRED_1C_FILES = [
+    "scripts/check_log_name_links_copy.py",
+    "tests/test_no_artist_rows_in_matches.py",
+    "tests/domain/test_match_invariant.py",
+]
+
+# The only files a phase 1c row may allow: the mentions that stay true (SPEC S12; two
+# comments and a docstring on artist_candidates, and the static scan's sample call of
+# set_status), 1a's copy test (0044 still makes link_copy_stubs) and 1c's migration test.
+PHASE_1C_ALLOWED = {
+    "tests/matching_seed.py",
+    "tests/scripts/gate_world.py",
+    "tests/integration/test_curation_scenarios_pg.py",
+    "tests/routers/test_matching.py",
+    "tests/routers/test_queue_suggested_links.py",
+    "tests/services/test_status_from_links.py",
+    "tests/integration/test_log_name_links_copy_pg.py",
+    "tests/integration/test_matches_song_only_pg.py",
+}
+
+
+def test_phase_1c_retirements_have_rows_and_rulings() -> None:
+    phase_1c = [row for row in retired_rows() if row.phase == "1c"]
+
+    assert [name for name in PHASE_1C_RETIRED if not _reached_by(name, phase_1c)] == []
+    overreach = {name: [r.ruling for r in _reached_by(name, phase_1c)] for name in PHASE_1C_KEPT}
+    assert {name: r for name, r in overreach.items() if r} == {}
+    assert sorted({path for row in phase_1c for path in row.allowed} - PHASE_1C_ALLOWED) == []
+    unnamed = [
+        (row.ruling, path)
+        for row in phase_1c
+        for path in row.allowed
+        if not any(re.search(p, (ROOT / path).read_text(encoding="utf-8")) for p in row.patterns)
+    ]
+    assert unnamed == []
+
+    rulings = [row.ruling for row in phase_1c]
+    assert sorted({r for r in rulings if rulings.count(r) > 1}) == []
+    assert all(60 <= int(r.removeprefix("AUD-R")) < 100 for r in rulings), rulings
+
+    assert [path for path in RETIRED_1C_FILES if (ROOT / path).exists()] == []
+
+
+def test_phase_1c_checks_no_longer_pending() -> None:
+    ledger = _ledger()
+
+    assert sorted(r for r, entry in ledger.items() if "1c" in _pending(entry["ruling"])) == []
