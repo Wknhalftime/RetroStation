@@ -84,26 +84,6 @@ _EMBEDDED_REMIX_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(Dub)\s*$", re.IGNORECASE),
 ]
 
-# Artist-string split separators: primary (always split) and secondary
-# Primary pattern notes:
-#   - duet\s+with must precede 'with' (longer match wins in alternation)
-#   - [FW]/ handles F/ and W/ shorthands; w/ is also listed explicitly for
-#     clarity (redundant under IGNORECASE but avoids ordering confusion)
-#   - \s* trailing (not \s+) allows "F/SKRILLEX" with no space after slash
-_PRIMARY_SEP_RE = re.compile(
-    r"\s+(?:feat\.|feat|ft\.|ft|vs\.|vs|w/|duet\s+with|with|duet|[FW]/)\s*"
-    r"|\s+/\s+",
-    re.IGNORECASE,
-)
-_SECONDARY_SEP_RE = re.compile(r"\s+(?:&|and|x)\s+", re.IGNORECASE)
-
-# Digit-aware comma: split on commas that are NOT between two digit characters.
-# (?<!\d)  — the char immediately before the comma is NOT a digit
-# (?!\d)   — the char immediately after comma+spaces is NOT a digit
-# This preserves numeric band names like "10,000 Maniacs" while still
-# splitting "Crosby, Stills, Nash & Young" at the non-numeric commas.
-_DIGIT_COMMA_RE: re.Pattern[str] = re.compile(r"(?<!\d),\s*(?!\d)")
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -172,10 +152,6 @@ def _normalize_special_chars_and_whitespace(text: str) -> str:
     ``[^\\w\\s]`` removal step so the expanded words are preserved in the
     normalized output.  This aligns RetroStation signatures with Airwave
     signatures for cross-system MusicBrainz matching (Epic 3).
-
-    Note: ``split_artist_string`` operates on the *raw* string before calling
-    this function per-token, so ``&`` remains a valid split character at the
-    separator-detection stage.
     """
     # Replace common special chars with space, then collapse
     t = re.sub(r"[\-_/\\|]", " ", text)
@@ -353,73 +329,6 @@ def compute_normalized_signature(normalized_artist: str, normalized_title: str) 
     """
     payload = normalized_artist + "||" + normalized_title
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# FR20: Artist splitting
-# ---------------------------------------------------------------------------
-
-
-def split_artist_string(raw: str) -> list[str]:
-    """Split a compound artist string into individually normalized names (FR20).
-
-    Three-step algorithm:
-    1. Primary separators (feat., ft., vs., w/, with, duet, F/, W/, spaced /)
-       are always applied — unambiguous collaboration markers.
-    2. Digit-aware comma splitting: commas NOT flanked by digit characters
-       trigger a split.  This preserves numeric names like "10,000 Maniacs"
-       while splitting "Crosby, Stills, Nash & Young" at each text comma.
-    3. Secondary separators (&, and, x) applied to each remaining token.
-
-    Each token is passed through normalize_artist() (full pipeline including
-    article stripping), then the list is deduplicated and sorted.
-
-    This function is a standalone utility for the matching engine.  Ingestion
-    still creates one BroadcastArtist per original compound string.
-
-    Args:
-        raw: Raw artist string, possibly containing multiple artist names.
-
-    Returns:
-        Sorted, deduplicated list of normalized artist name strings.
-        Empty list for blank input.
-    """
-    if not raw or not raw.strip():
-        return []
-
-    # Step 1: Split on primary separators (unambiguous collaboration markers)
-    tokens: list[str] = _PRIMARY_SEP_RE.split(raw)
-
-    # Step 2: Digit-aware comma splitting — split on commas NOT between digits.
-    # This replaces the old "if no comma" heuristic with a more precise check:
-    #   "10,000 Maniacs & R.E.M." → comma is between digits → NOT split
-    #   "Crosby, Stills, Nash & Young" → commas are between letters → split
-    # Known limitation: "Earth, Wind & Fire" is split into three tokens here
-    # because the commas are not digit-guarded.  Neither implementation can
-    # avoid this without an allowlist.  See test_split_artist_earth_wind_fire*.
-    comma_expanded: list[str] = []
-    for token in tokens:
-        comma_expanded.extend(_DIGIT_COMMA_RE.split(token))
-    tokens = comma_expanded
-
-    # Step 3: Secondary separators (&, and, x) applied to each token
-    expanded: list[str] = []
-    for token in tokens:
-        expanded.extend(_SECONDARY_SEP_RE.split(token))
-    tokens = expanded
-
-    # Normalise each token; discard blanks
-    normalized = [normalize_artist(token.strip()) for token in tokens if token.strip()]
-
-    # Deduplicate (preserve first occurrence order) then sort
-    seen: set[str] = set()
-    unique: list[str] = []
-    for name in normalized:
-        if name and name not in seen:
-            seen.add(name)
-            unique.append(name)
-
-    return sorted(unique)
 
 
 # ---------------------------------------------------------------------------

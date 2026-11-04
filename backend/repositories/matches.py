@@ -12,14 +12,11 @@ class MatchRepository(ABC):
     def get_by_identity(self, identity_id: UUID) -> Match | None: ...
 
     @abstractmethod
-    def get_by_artist(self, artist_id: UUID) -> Match | None: ...
-
-    @abstractmethod
     def delete_for_identity(self, identity_id: UUID) -> None: ...
 
     @abstractmethod
     def delete_for_file(self, file_id: UUID) -> list[UUID]:
-        """Delete every match naming the file; the identity id of each identity match deleted."""
+        """Delete every match naming the file; the identity id of each match deleted."""
         ...
 
     @abstractmethod
