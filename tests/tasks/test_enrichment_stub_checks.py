@@ -1,10 +1,10 @@
 """Enrichment's stub checks beyond the locked naming tests (artist model phase 1a, PR 2; E3).
 
 The locked ``test_enrichment_names_stubs.py`` runs ``_enhance_artist`` alone. Queued enrichment
-first looks up every pending MBID in one pre-pass (``coalesce_artist_lookups``), so a malformed
-stub MBID must be left out there too: it is never sent to MusicBrainz, only recorded. A stub
-MusicBrainz gives no name for is recorded the same way, so the naming script does not count it
-named and pick it again on every run.
+first looks up every pending MBID in one batch (``search_artists_by_mbids``, AUD-R102), so a
+malformed stub MBID must be left out there too: it is never sent to MusicBrainz, only recorded.
+A stub MusicBrainz gives no name for is recorded the same way, so the naming script does not
+count it named and pick it again on every run.
 
 MusicBrainz is ``FakeMbClient``; the catalog is PostgreSQL, read back on a second connection.
 """
@@ -86,7 +86,7 @@ def test_the_lookup_pre_pass_never_sends_a_malformed_stub_mbid(
 
     _run_artist_phase(pending, ctx, settings)
 
-    assert client.calls == [f"lookup_artist:{GOOD}"]
+    assert client.calls == [f"search_artists_by_mbids:{GOOD}"]
     assert _row(migrated_db, good)["name"] == "Hedder"
     row = _row(migrated_db, malformed)
     assert (row["name"], row["enhancement_error"]) == (MALFORMED, f"malformed MBID: {MALFORMED!r}")
