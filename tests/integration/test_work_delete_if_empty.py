@@ -15,7 +15,7 @@ import psycopg
 import pytest
 from psycopg.rows import DictRow, dict_row
 
-from backend.domain.broadcast import BroadcastArtist
+from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Recording
 from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod, TargetType
@@ -45,13 +45,23 @@ def _match(
     work_id: str | None = None,
     target_id: str | None = None,
 ) -> None:
+    """A song's match naming *file_id* (every match is a song's since 1c's 0046)."""
     artist = repos.broadcast_artists.upsert(
-        BroadcastArtist(id=uuid4(), original_name="Metallica", normalized_name=str(uuid4())),
+        BroadcastArtist(id=uuid4(), original_name="METALLICA", normalized_name=str(uuid4())),
+    )
+    song = repos.broadcast_identities.upsert(
+        BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=artist.id,
+            original_title="Battery",
+            normalized_title="battery",
+            normalized_signature=str(uuid4()),
+        )
     )
     conn.execute(
-        """INSERT INTO matches (artist_id, library_file_id, work_id, target_id, target_type)
+        """INSERT INTO matches (identity_id, library_file_id, work_id, target_id, target_type)
            VALUES (%s, %s, %s, %s, %s)""",
-        (artist.id, file_id, work_id, target_id, TargetType.WORK.value if target_id else None),
+        (song.id, file_id, work_id, target_id, TargetType.WORK.value if target_id else None),
     )
 
 

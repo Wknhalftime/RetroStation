@@ -6,7 +6,9 @@ before 1a finds what it would have written: an active link with no row becomes o
 link tier manual, score 1.0; an automatic one its evidence's tier and score), and a name an
 Unmatch put back in review loses its rows, as Unmatch deleted them before 1a. Rows the copy
 made from are left as they are. The locked ``test_log_name_links_copy_pg.py::test_rollback``
-pins the rest. Everything runs in one transaction, rolled back, so the test database keeps 0044.
+pins the rest. Since phase 1c's 0046 the rollbacks run newest first, so 0046's (which puts the
+artist column of ``matches`` back) and 0045's run before this one, as the runbook has it.
+Everything runs in one transaction, rolled back, so the test database keeps 0044 to 0046.
 """
 
 from __future__ import annotations
@@ -25,9 +27,10 @@ from backend.domain.matching import LogNameLink
 
 Conn = psycopg.Connection[Any]
 
-ROLLBACK = (
-    Path(__file__).resolve().parents[2] / "backend" / "db" / "rollback_0044_log_name_links.sql"
-)
+_DB = Path(__file__).resolve().parents[2] / "backend" / "db"
+ROLLBACK = _DB / "rollback_0044_log_name_links.sql"
+ROLLBACK_0045 = _DB / "rollback_0045_link_demotion.sql"
+ROLLBACK_0046 = _DB / "rollback_0046_drop_artist_rows.sql"
 METALLICA = "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"
 
 
@@ -66,6 +69,7 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
 ) -> None:
     conn = psycopg.connect(migrated_db, row_factory=dict_row)
     try:
+        conn.execute(ROLLBACK_0046.read_text(encoding="utf-8"))
         links = PgLogNameLinkRepository(conn)
         metallica = _artist(conn, "Metallica", METALLICA)
         local = _artist(conn, "Van Halen", None)
@@ -122,6 +126,7 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
             )
         )
 
+        conn.execute(ROLLBACK_0045.read_text(encoding="utf-8"))
         conn.execute(ROLLBACK.read_text(encoding="utf-8"))
 
         after = {
