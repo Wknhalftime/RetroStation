@@ -131,6 +131,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   0044's stub list empty, so 0044's rollback then keeps 0044's stubs as ordinary artists. The
   duplicates 0044 collapsed into one link are gone for good. **The rollbacks run newest
   first:** 0046's, then 0045's, then 0044's (phase 7's runbook); nothing enforces the order.
+  0044's clears `LINK_REJECTED`, which the code before 1b cannot read, and leaves the name in
+  review: at pending the old matcher could link again a rejected pair, since those go with the
+  links.
 - Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
   artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
   work for it under the stub. The dev database had none of either at the copy (2026-11-01

@@ -9,8 +9,12 @@
 -- - each active link with no row (written by the matcher or Resolve since 0044) becomes one:
 --   its target the artist's MBID, else its id; a manual link tier manual, score 1.0; an
 --   automatic one the tier and score of its evidence. Suggested and rejected links are lost.
--- Then the links go, and the stubs 0044 made, unless a work points at one now. Stubs made
--- since by the matcher or the Resolve route stay: they are ordinary artists with an MBID.
+-- Then the links go, and the stubs 0044 made, unless a work points at one now (none after 0046's
+-- rollback, which recreates their list empty). Stubs made since by the matcher or the Resolve
+-- route stay: they are ordinary artists with an MBID.
+-- Last, the reason the code before 1b cannot read (LINK_REJECTED) goes. Its name stays in review
+-- with its detail, unlike 0045's reasons, which go back to pending: its rejected pairs go with
+-- log_name_links, so at pending the old matcher could link again a pair Lance rejected.
 DELETE FROM matches m
  USING broadcast_artists ba
  WHERE m.artist_id = ba.id
@@ -39,4 +43,5 @@ DELETE FROM artists a
  WHERE a.id = s.artist_id
    AND NOT EXISTS (SELECT 1 FROM works w WHERE w.artist_id = a.id);
 DROP TABLE IF EXISTS link_copy_stubs;
+UPDATE broadcast_artists SET reason_code = NULL WHERE reason_code = 'LINK_REJECTED';
 DELETE FROM schema_migrations WHERE version = '0044_log_name_links';
