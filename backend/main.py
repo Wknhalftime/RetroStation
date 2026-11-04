@@ -145,20 +145,20 @@ def _log_script_cache_failure(error: BaseException) -> None:
 async def _prepared_engine(
     ffmpeg: str, exe: Path, work: Path, base_env: dict[str, str]
 ) -> tuple[EngineConfig, ScriptCache] | None:
-    """The engine, its filler and intro made, and its script cache, warm; None (logged) if
-    either cannot be prepared (spec: Engine "the app must warm it at startup"; D34). The
-    cache is warmed again before a session starts if the script changed since (D113)."""
+    """The engine, its filler made, and its script cache, warm; None (logged) if either
+    cannot be prepared (spec: Engine "the app must warm it at startup"; D34). The cache
+    is warmed again before a session starts if the script changed since (D113)."""
     try:
         assets = ensure_stream_assets(ffmpeg, work / "assets")
     except (subprocess.SubprocessError, OSError) as error:
-        _engine_unavailable("the filler and intro could not be generated", str(error))
+        _engine_unavailable("the filler could not be generated", str(error))
         return None
     engine = EngineConfig(
         exe=exe,
         script=SESSION_SCRIPT,
         cache_dir=work / "cache",
         filler=assets.filler,
-        intro_sfx=assets.static_intro,
+        intro_sfx=None,  # no tune-in sound: the song starts at once (D114)
     )
     cache = ScriptCache(
         partial(warm_script_cache, base_env, engine), engine.script, _log_script_cache_failure

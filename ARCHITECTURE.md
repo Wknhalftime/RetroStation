@@ -9,7 +9,7 @@ writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links"
 with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b, "Status from
 links and suggestions" and "Placeholders are never artists" 2026-11-03 with its phase 1c.
 Rulings cited
-here are in `audit/rulings.jsonl` (AUD-R015..R070, R100 and R101 ACTIVE). If the code and this
+here are in `audit/rulings.jsonl` (AUD-R015..R070, R100, R101 and R102 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -403,7 +403,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
-| `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment |
+| `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment (pass 4 takes the `pending` files with no MBID tags whose work's artist has one, `list_untagged_with_linked_artist`; a file it cannot decide stays `pending`) |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a) | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names, the artist's own and its active log-name links' (AUD-R026, in part superseded by AUD-R036) |
@@ -465,6 +465,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
+- **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
+  `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
+  cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
+  enrichment's recording search are batched 100 per request; the recordings phase's
+  `lookup_recording` stays one call per recording because only it carries work relations.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, the local-artist linking and the matching re-check, `task_failure_telemetry`,
   the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016). A matching
@@ -494,7 +499,7 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R102.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R103.
 
 ## Retired (C70, AUD-R045)
 

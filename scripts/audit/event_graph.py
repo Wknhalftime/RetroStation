@@ -24,7 +24,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-EXCLUDED_DIRS = frozenset({"__pycache__", "frontend", "htmlcov", "node_modules", "tests"})
+# results/ and var/ are gitignored (bench output and the streaming work dir).
+EXCLUDED_DIRS = frozenset(
+    {"__pycache__", "frontend", "htmlcov", "node_modules", "results", "tests", "var"}
+)
 DEFAULT_GUARD = "backend.tasks._enqueue_chain:enqueue_or_log"
 EDGE_KINDS = ("ENQUEUE", "ENQUEUE_DEFERRED", "INLINE", "PUBLISH", "SUBSCRIBE", "POLL")
 ENQUEUE_KINDS = frozenset({"ENQUEUE", "ENQUEUE_DEFERRED"})
