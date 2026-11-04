@@ -47,7 +47,7 @@ from psycopg.rows import dict_row, tuple_row
 from backend.domain.matching import MusicBrainzUnavailableError
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
-from backend.services import artist_matching_service, identity_matching_service, mb_client
+from backend.services import artist_matching_service, identity_matching_service, mb_client, mb_clock
 from backend.services.recording_search import RecordingSearch
 from tests.integration import stream_seed as seed
 from tests.integration.missing_file_seed import full_scan
@@ -297,7 +297,7 @@ def network_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
 
     with monkeypatch.context() as patch:
         patch.setattr(httpx.Client, "send", send)
-        patch.setattr(mb_client, "_rate_limit", wait)
+        patch.setattr(mb_clock, "wait_turn", wait)
         yield touched
 
 
