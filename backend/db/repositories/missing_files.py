@@ -12,8 +12,7 @@ from backend.repositories.missing_files import MissingFileListingRepository
 _PAGE_SQL = """
     SELECT lf.id, lf.file_path, lf.artist_name, lf.track_title, lf.release_title,
            lf.missing_since, lf.work_id, w.title AS work_title,
-           (SELECT count(*) FROM matches m
-             WHERE m.library_file_id = lf.id AND m.identity_id IS NOT NULL) AS match_count,
+           (SELECT count(*) FROM matches m WHERE m.library_file_id = lf.id) AS match_count,
            EXISTS (SELECT 1 FROM library_files p
                     WHERE p.work_id = lf.work_id AND p.file_status = 'present')
              AS work_has_present_file
@@ -28,7 +27,7 @@ _TOTALS_SQL = """
     SELECT (SELECT count(*) FROM library_files WHERE file_status = 'missing') AS total,
            (SELECT count(*) FROM matches m
               JOIN library_files f ON f.id = m.library_file_id
-             WHERE f.file_status = 'missing' AND m.identity_id IS NOT NULL)
+             WHERE f.file_status = 'missing')
              AS total_match_count
 """
 

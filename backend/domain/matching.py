@@ -86,26 +86,19 @@ SONG_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
 
 @dataclass
 class Match:
+    """A song's match: a broadcast line to a file or a work. Since phase 1c's 0046 every match
+    is a song's; a log name's artists are its links (M35, AUD-R035)."""
+
     id: UUID
     confidence_score: float
     match_tier: MatchTier
-    identity_id: UUID | None = None
-    artist_id: UUID | None = None
+    identity_id: UUID
     library_file_id: UUID | None = None
     target_id: str | None = None
     target_type: TargetType | None = None
     work_id: str | None = None
     trace_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-    def __post_init__(self) -> None:
-        has_identity = self.identity_id is not None
-        has_artist = self.artist_id is not None
-        if has_identity == has_artist:
-            raise ValueError(
-                "Match must have exactly one of identity_id or artist_id set; "
-                f"got identity_id={self.identity_id!r}, artist_id={self.artist_id!r}"
-            )
 
 
 def _now() -> datetime:

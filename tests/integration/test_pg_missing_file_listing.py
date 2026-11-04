@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.domain.broadcast import BroadcastArtist
 from backend.domain.library import AudioMetadata
 from backend.services.repository_factory import RepositoryFactory
 from tests.integration.missing_file_seed import identity, library_file, match, work
@@ -64,18 +61,14 @@ def test_list_page_pages_but_totals_cover_every_missing_row(migrated_db: str) ->
     assert page.total == 4
 
 
-def test_match_count_counts_identity_matches_only(migrated_db: str) -> None:
+def test_match_count_counts_only_the_rows_own_matches(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        gone = library_file(repos, "/m/gone.flac", work(repos), missing=True).id
+        work_id = work(repos)
+        gone = library_file(repos, "/m/gone.flac", work_id, missing=True).id
+        here = library_file(repos, "/m/here.flac", work_id, missing=False).id
         match(conn, identity(repos), gone)
-        artist = repos.broadcast_artists.upsert(
-            BroadcastArtist(id=uuid4(), original_name="PRINCE", normalized_name=str(uuid4()))
-        )
-        conn.execute(  # an artist-level match naming the row: a delete releases nothing (R10)
-            "INSERT INTO matches (artist_id, library_file_id) VALUES (%s, %s)",
-            (artist.id, gone),
-        )
+        match(conn, identity(repos), here)  # a present file's match, not the missing row's
 
         page = repos.missing_files.list_page(0, 10)
 

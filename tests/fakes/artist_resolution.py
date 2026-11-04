@@ -22,7 +22,6 @@ from tests.fakes.matches import FakeMatchRepository
 # Songs a manual match sends back to the matcher: pending and the re-check's undecided set
 # (master's #222, merged in).
 _LINK_REWIND = {MatchStatus.PENDING, *SONG_UNDECIDED_STATUSES}
-_PROTECTED = {MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED}
 _UNMATCHABLE = {
     MatchStatus.AUTO_MATCHED,
     MatchStatus.MANUAL_MATCHED,
@@ -61,10 +60,6 @@ class FakeArtistResolutionRepository(ArtistResolutionRepository):
         name = self._names.get(broadcast_artist_id)
         return None if name is None else name.match_status
 
-    def set_status(self, broadcast_artist_id: UUID, status: MatchStatus) -> None:
-        if (name := self._names.get(broadcast_artist_id)) is not None:
-            self._names[broadcast_artist_id] = replace(name, match_status=status)
-
     def reopen_songs_in_review(self, broadcast_artist_id: UUID) -> None:
         for song_id in self._song_ids(broadcast_artist_id):
             song = self._songs[song_id]
@@ -88,12 +83,6 @@ class FakeArtistResolutionRepository(ArtistResolutionRepository):
         song_ids = self._song_ids(broadcast_artist_id)
         return [playlist for playlist, played in self._playlists.items() if played & song_ids]
 
-    def reject_open_songs(self, broadcast_artist_id: UUID) -> None:
-        for song_id in self._song_ids(broadcast_artist_id):
-            song = self._songs[song_id]
-            if song.match_status not in _PROTECTED:
-                self._songs[song_id] = replace(song, match_status=MatchStatus.AUTO_REJECTED)
-
     def unmatch_if_decided(self, broadcast_artist_id: UUID) -> bool:
         name = self._names.get(broadcast_artist_id)
         if name is None or name.match_status not in _UNMATCHABLE:
@@ -105,16 +94,3 @@ class FakeArtistResolutionRepository(ArtistResolutionRepository):
             reason_detail=None,
         )
         return True
-
-    def reopen_every_song(self, broadcast_artist_id: UUID) -> None:
-        for song_id in self._song_ids(broadcast_artist_id):
-            self._songs[song_id] = replace(
-                self._songs[song_id],
-                match_status=MatchStatus.NEEDS_REVIEW,
-                match_tier=None,
-                reason_code=ReasonCode.USER_UNMATCHED,
-                reason_detail=None,
-            )
-
-    def delete_song_matches(self, broadcast_artist_id: UUID) -> None:
-        self._delete_matches_of(self._song_ids(broadcast_artist_id))

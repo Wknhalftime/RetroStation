@@ -111,7 +111,7 @@ def _pg_ports(conn: psycopg.Connection[dict[str, object]]) -> Ports:
     factory = RepositoryFactory(conn)
 
     def add_match(match: Match) -> None:
-        name_id = match.artist_id or uuid4()
+        name_id = uuid4()  # every match is a song's since 1c's 0046
         conn.execute(
             "INSERT INTO broadcast_artists (id, original_name, normalized_name)"
             " VALUES (%s, %s, %s)",

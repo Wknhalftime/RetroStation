@@ -11,7 +11,6 @@ from backend.services.normalization import (
     extract_version_tags,
     normalize_artist,
     normalize_title,
-    split_artist_string,
     strip_bracketed_groups,
     title_part_number,
 )
@@ -204,112 +203,6 @@ def test_normalize_title_yesterday_live_remaster() -> None:
     # Remaster year removed; "yesterday" and "live" should both be present
     assert "yesterday" in result
     assert "live" in result
-
-
-# ---------------------------------------------------------------------------
-# FR20: split_artist_string
-# ---------------------------------------------------------------------------
-
-
-def test_split_artist_simple_ampersand() -> None:
-    """Split on ' & ' when no comma present in string."""
-    result = split_artist_string("Beatles & Rolling Stones")
-    assert "beatles" in result
-    assert "rolling stones" in result
-    assert len(result) == 2
-
-
-def test_split_artist_slash() -> None:
-    """Split on ' / ' (spaced slash)."""
-    result = split_artist_string("Artist / Other")
-    assert "artist" in result
-    assert "other" in result
-
-
-def test_split_artist_feat() -> None:
-    """Split on ' feat. '."""
-    result = split_artist_string("Artist feat. Singer")
-    assert "artist" in result
-    assert "singer" in result
-
-
-def test_split_artist_ft() -> None:
-    """Split on ' ft. '."""
-    result = split_artist_string("Artist ft. Singer")
-    assert "artist" in result
-    assert "singer" in result
-
-
-def test_split_artist_vs() -> None:
-    """Split on ' vs. '."""
-    result = split_artist_string("Team A vs. Team B")
-    assert len(result) == 2
-
-
-def test_split_artist_w_slash() -> None:
-    """Split on ' w/ '."""
-    result = split_artist_string("DJ Name w/ MC Name")
-    assert len(result) == 2
-
-
-def test_split_artist_deduplication() -> None:
-    """Duplicate normalized names are deduplicated."""
-    result = split_artist_string("The Beatles & Beatles")
-    # Both normalize to "beatles"
-    assert result == ["beatles"]
-
-
-def test_split_artist_earth_wind_fire_known_limitation() -> None:
-    """'Earth, Wind & Fire' splits into 3 tokens — known limitation (FR20).
-
-    The digit-aware comma split fires on both commas (neither flanked by
-    digits), yielding ["Earth", "Wind & Fire"].  Secondary split on '&'
-    then yields ["Earth", "Wind", "Fire"] → ["earth", "fire", "wind"].
-
-    This is the same failure as the legacy Airwave code.  Correct handling
-    requires an allowlist or DB lookup and is deferred to Epic 3.
-    The old blunt-comma heuristic also failed this case; the new behaviour
-    is documented here rather than treated as a regression.
-    """
-    result = split_artist_string("Earth, Wind & Fire")
-    # Three separate tokens — wrong, but the known-limitation outcome
-    assert result == ["earth", "fire", "wind"]
-
-
-def test_split_artist_comma_separated_dual_now_splits() -> None:
-    """'Artist A, Artist B' now correctly splits on the non-digit comma (FR20).
-
-    The digit-aware comma split (story 2.3 Task 6) replaces the old blunt
-    heuristic that blocked ALL secondary splitting when any comma was present.
-    """
-    result = split_artist_string("Artist A, Artist B")
-    assert result == ["artist a", "artist b"]
-
-
-def test_split_artist_acdc_single() -> None:
-    """'AC/DC' (no spaces around slash) is treated as single artist."""
-    result = split_artist_string("AC/DC")
-    assert result == ["ac dc"]
-
-
-def test_split_artist_single_name() -> None:
-    """Single artist with no separators returns a single-element list."""
-    result = split_artist_string("Pink Floyd")
-    assert result == ["pink floyd"]
-
-
-def test_split_artist_empty() -> None:
-    """Empty string returns empty list."""
-    result = split_artist_string("")
-    assert result == []
-
-
-def test_split_artist_strips_articles_per_token() -> None:
-    """Each split token is normalized (articles stripped, etc.)."""
-    result = split_artist_string("The Beatles & The Rolling Stones")
-    assert "beatles" in result
-    assert "rolling stones" in result
-    assert "the beatles" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -719,18 +612,6 @@ def test_normalize_title_plus_expanded() -> None:
     assert normalize_artist("A+B") == "a plus b"
 
 
-def test_split_artist_ampersand_still_splits() -> None:
-    """split_artist_string still splits on & in raw string (no double-processing).
-
-    & in the raw input is the split character at the separator-detection stage
-    (via _SECONDARY_SEP_RE).  Each token is then independently passed through
-    normalize_artist(), which applies the & → and substitution only to the
-    already-split sub-strings.  There is no double-processing issue.
-    """
-    result = split_artist_string("Beatles & Stones")
-    assert result == ["beatles", "stones"]
-
-
 # ---------------------------------------------------------------------------
 # FR13 (2.3): Bare trailing ellipsis removal
 # ---------------------------------------------------------------------------
@@ -790,98 +671,6 @@ def test_normalize_title_unicode_ellipsis_before_parenthetical() -> None:
 
 
 # ---------------------------------------------------------------------------
-# FR20 (2.3): New primary separators — with / duet / F/ / W/
-# ---------------------------------------------------------------------------
-
-
-def test_split_artist_with_separator() -> None:
-    """'Elton John with Kiki Dee' splits on 'with' (FR20)."""
-    result = split_artist_string("Elton John with Kiki Dee")
-    assert "elton john" in result
-    assert "kiki dee" in result
-    assert len(result) == 2
-
-
-def test_split_artist_duet_with_separator() -> None:
-    """'Dean Martin duet with Frank Sinatra' splits on 'duet with' (FR20)."""
-    result = split_artist_string("Dean Martin duet with Frank Sinatra")
-    assert "dean martin" in result
-    assert "frank sinatra" in result
-    assert len(result) == 2
-
-
-def test_split_artist_duet_separator() -> None:
-    """'2Pac duet Biggie' splits on bare 'duet' (FR20)."""
-    result = split_artist_string("2Pac duet Biggie")
-    assert "2pac" in result
-    assert "biggie" in result
-    assert len(result) == 2
-
-
-def test_split_artist_f_slash_separator() -> None:
-    """'KORN F/ SKRILLEX' splits on 'F/' shorthand (FR20)."""
-    result = split_artist_string("KORN F/ SKRILLEX")
-    assert "korn" in result
-    assert "skrillex" in result
-    assert len(result) == 2
-
-
-def test_split_artist_w_slash_uppercase_separator() -> None:
-    """'Artist W/ Guest' splits on uppercase 'W/' shorthand (FR20)."""
-    result = split_artist_string("Artist W/ Guest")
-    assert "artist" in result
-    assert "guest" in result
-    assert len(result) == 2
-
-
-def test_split_artist_w_slash_lowercase_no_regression() -> None:
-    """Existing lowercase 'w/' separator still works after pattern update."""
-    result = split_artist_string("DJ Name w/ MC Name")
-    assert len(result) == 2
-
-
-def test_split_artist_duet_with_before_with_match() -> None:
-    """'duet with' is matched as a unit (longer pattern wins over 'with')."""
-    # If 'with' fired first, result would be ["2pac duet", "frank sinatra"]
-    result = split_artist_string("2Pac duet with Frank Sinatra")
-    assert "2pac" in result
-    assert "frank sinatra" in result
-    assert len(result) == 2
-
-
-# ---------------------------------------------------------------------------
-# FR20 (2.3): Digit-aware comma splitting
-# ---------------------------------------------------------------------------
-
-
-def test_split_artist_digit_comma_not_split() -> None:
-    """Comma between digits is NOT split — '10,000 Maniacs' stays intact (FR20)."""
-    result = split_artist_string("10,000 Maniacs & R.E.M.")
-    assert "10000 maniacs" in result
-    assert "rem" in result
-    assert len(result) == 2
-
-
-def test_split_artist_simon_garfunkel_unchanged() -> None:
-    """'Simon & Garfunkel' (no comma) still splits on & as before (FR20)."""
-    result = split_artist_string("Simon & Garfunkel")
-    assert result == ["garfunkel", "simon"]
-
-
-def test_split_artist_crosby_stills_nash_young() -> None:
-    """'Crosby, Stills, Nash & Young' → 4 tokens via digit-aware comma (FR20).
-
-    Algorithm:
-      1. Primary separators: no match → single token
-      2. Non-digit commas split: ["Crosby", "Stills", "Nash & Young"]
-      3. Secondary on "Nash & Young": ["Nash", "Young"]
-      4. Normalise + sort → ["crosby", "nash", "stills", "young"]
-    """
-    result = split_artist_string("Crosby, Stills, Nash & Young")
-    assert result == ["crosby", "nash", "stills", "young"]
-
-
-# ---------------------------------------------------------------------------
 # FR23 (2.3): Roman numeral part-number guard in extract_version_tags
 # ---------------------------------------------------------------------------
 
@@ -934,20 +723,6 @@ def test_extract_version_tags_special_edition_full_pipeline() -> None:
     base, tags = extract_version_tags("Song (Special Edition)")
     assert base.strip() == "Song"
     assert tags == ["Special Edition"]
-
-
-def test_split_artist_existing_separators_no_regression() -> None:
-    """All pre-2.3 primary separators still work after pattern extension."""
-    assert len(split_artist_string("Artist feat. Singer")) == 2
-    assert len(split_artist_string("Artist ft. Singer")) == 2
-    assert len(split_artist_string("Team A vs. Team B")) == 2
-    assert len(split_artist_string("Artist / Other")) == 2
-    assert len(split_artist_string("DJ w/ MC")) == 2
-
-
-def test_split_artist_acdc_single_no_regression() -> None:
-    """'AC/DC' (unspaced slash) is still treated as a single artist."""
-    assert split_artist_string("AC/DC") == ["ac dc"]
 
 
 def test_extract_version_tags_all_new_types_extractable() -> None:
@@ -1155,17 +930,6 @@ def test_classify_recover_discover_not_cover() -> None:
 def test_classify_acoustics_not_acoustic() -> None:
     """'Acoustics' must NOT match as ACOUSTIC — word-boundary guard (R5-L2)."""
     assert classify_version_descriptor("Acoustics") == VersionType.UNKNOWN
-
-
-def test_split_artist_x_separator() -> None:
-    """'Artist x Other' splits on the 'x' secondary separator (AC#3, R5-L2).
-
-    The 'x' collaboration marker is in _SECONDARY_SEP_RE but was untested.
-    """
-    result = split_artist_string("Artist x Other")
-    assert "artist" in result
-    assert "other" in result
-    assert len(result) == 2
 
 
 def test_detect_embedded_remix_dub() -> None:

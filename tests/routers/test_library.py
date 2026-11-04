@@ -1211,10 +1211,17 @@ def _seed_match_for_file(
         "INSERT INTO broadcast_artists (id, original_name, normalized_name) VALUES (%s, %s, %s)",
         (ba_id, f"Seed Artist {suffix}", f"seed_artist_{suffix}"),
     )
+    ti_id = uuid4()
+    conn.execute(
+        "INSERT INTO track_identities"
+        " (id, broadcast_artist_id, original_title, normalized_title, normalized_signature)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (ti_id, ba_id, f"Seed Track {suffix}", f"seed_track_{suffix}", f"seed_sig_{suffix}"),
+    )
     match_id = uuid4()
     conn.execute(
-        "INSERT INTO matches (id, artist_id, library_file_id, work_id) VALUES (%s, %s, %s, %s)",
-        (match_id, ba_id, file_id, work_id),
+        "INSERT INTO matches (id, identity_id, library_file_id, work_id) VALUES (%s, %s, %s, %s)",
+        (match_id, ti_id, file_id, work_id),
     )
     conn.commit()
     return str(match_id)

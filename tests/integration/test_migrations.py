@@ -174,22 +174,15 @@ def test_migrations_idempotent(migrated_db: str) -> None:
         run_migrations(conn)  # second run — must not raise
 
 
-def test_xor_constraint_on_matches(migrated_db: str) -> None:
-    """The XOR constraint on matches must reject rows with both FKs set."""
-    import uuid
-
+def test_identity_id_not_null_on_matches(migrated_db: str) -> None:
+    """Every match is a song's since phase 1c's 0046 (M35): a row without ``identity_id`` is
+    refused, as the old XOR check refused a row with neither key."""
     with (
         psycopg.connect(migrated_db) as conn,
-        pytest.raises(psycopg.errors.CheckViolation),
+        pytest.raises(psycopg.errors.NotNullViolation),
         conn.transaction(),
     ):
-        conn.execute(
-            """
-                INSERT INTO matches (identity_id, artist_id, confidence_score, match_tier)
-                VALUES (%s, %s, 0.9, 'MANUAL')
-            """,
-            (uuid.uuid4(), uuid.uuid4()),
-        )
+        conn.execute("INSERT INTO matches (confidence_score, match_tier) VALUES (0.9, 'manual')")
 
 
 def test_runner_persists_even_when_caller_rolls_back_afterwards(

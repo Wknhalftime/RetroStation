@@ -20,8 +20,6 @@ _LINK_REWIND_STATUSES = [
     MatchStatus.PENDING.value,
     *(status.value for status in SONG_UNDECIDED_STATUSES),
 ]
-# Songs a manual reject of their artist leaves alone.
-_PROTECTED_STATUSES = [MatchStatus.MANUAL_MATCHED.value, MatchStatus.MANUAL_REJECTED.value]
 # Artist statuses Unmatch reverts; pending and needs_review have nothing to revert.
 _UNMATCHABLE_STATUSES = [
     MatchStatus.AUTO_MATCHED.value,
@@ -47,12 +45,6 @@ class PgArtistResolutionRepository(ArtistResolutionRepository):
             "SELECT match_status FROM broadcast_artists WHERE id = %s", (broadcast_artist_id,)
         ).fetchone()
         return None if row is None else MatchStatus(row["match_status"])
-
-    def set_status(self, broadcast_artist_id: UUID, status: MatchStatus) -> None:
-        self._conn.execute(
-            "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
-            (status.value, broadcast_artist_id),
-        )
 
     def reopen_songs_in_review(self, broadcast_artist_id: UUID) -> None:
         self._conn.execute(
@@ -93,17 +85,6 @@ class PgArtistResolutionRepository(ArtistResolutionRepository):
         ).fetchall()
         return [row["playlist_id"] for row in rows]
 
-    def reject_open_songs(self, broadcast_artist_id: UUID) -> None:
-        self._conn.execute(
-            """
-            UPDATE track_identities
-            SET match_status = %s
-            WHERE broadcast_artist_id = %s
-              AND match_status != ALL(%s)
-            """,
-            (MatchStatus.AUTO_REJECTED.value, broadcast_artist_id, _PROTECTED_STATUSES),
-        )
-
     def unmatch_if_decided(self, broadcast_artist_id: UUID) -> bool:
         # One UPDATE ... WHERE id AND match_status closes the SELECT-then-UPDATE window in
         # which a concurrent Resolve could change the row between a read and this write.
@@ -125,28 +106,3 @@ class PgArtistResolutionRepository(ArtistResolutionRepository):
             ),
         ).fetchone()
         return row is not None
-
-    def reopen_every_song(self, broadcast_artist_id: UUID) -> None:
-        self._conn.execute(
-            """
-            UPDATE track_identities
-               SET match_status  = %s,
-                   match_tier    = NULL,
-                   reason_code   = %s,
-                   reason_detail = NULL
-             WHERE broadcast_artist_id = %s
-            """,
-            (MatchStatus.NEEDS_REVIEW.value, ReasonCode.USER_UNMATCHED.value, broadcast_artist_id),
-        )
-
-    def delete_song_matches(self, broadcast_artist_id: UUID) -> None:
-        self._conn.execute(
-            """
-            DELETE FROM matches
-             WHERE identity_id IN (
-                 SELECT id FROM track_identities
-                  WHERE broadcast_artist_id = %s
-             )
-            """,
-            (broadcast_artist_id,),
-        )

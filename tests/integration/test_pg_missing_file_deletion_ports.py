@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.domain.broadcast import BroadcastArtist
 from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.services.repository_factory import RepositoryFactory
@@ -58,13 +57,6 @@ def test_match_delete_for_file_removes_every_match_naming_it(migrated_db: str) -
         match(conn, first, gone.id)
         match(conn, second, gone.id)
         match(conn, second, other.id)
-        artist = repos.broadcast_artists.upsert(
-            BroadcastArtist(id=uuid4(), original_name="PRINCE", normalized_name=str(uuid4()))
-        )
-        conn.execute(  # an artist-level match naming the file: allowed by the XOR check
-            "INSERT INTO matches (artist_id, library_file_id) VALUES (%s, %s)",
-            (artist.id, gone.id),
-        )
 
         released = repos.matches.delete_for_file(gone.id)
         left = conn.execute("SELECT identity_id, library_file_id FROM matches").fetchall()

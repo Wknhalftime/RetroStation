@@ -21,11 +21,6 @@ class ArtistResolutionRepository(ABC):
         ...
 
     @abstractmethod
-    def set_status(self, broadcast_artist_id: UUID, status: MatchStatus) -> None:
-        """Set the log name's status, and nothing else (its reason stays)."""
-        ...
-
-    @abstractmethod
     def reopen_songs_in_review(self, broadcast_artist_id: UUID) -> None:
         """Put the name's pending and undecided songs (needs_review, auto_rejected,
         manual_rejected: SONG_UNDECIDED_STATUSES, #222) back to pending, tier and reason
@@ -43,22 +38,7 @@ class ArtistResolutionRepository(ABC):
         ...
 
     @abstractmethod
-    def reject_open_songs(self, broadcast_artist_id: UUID) -> None:
-        """Set every song of the name the curator has not decided to auto_rejected."""
-        ...
-
-    @abstractmethod
     def unmatch_if_decided(self, broadcast_artist_id: UUID) -> bool:
         """Put a matched or rejected log name back in review (USER_UNMATCHED), in one
         statement; whether it was in such a state."""
-        ...
-
-    @abstractmethod
-    def reopen_every_song(self, broadcast_artist_id: UUID) -> None:
-        """Put every song of the name back in review (USER_UNMATCHED), whatever its status."""
-        ...
-
-    @abstractmethod
-    def delete_song_matches(self, broadcast_artist_id: UUID) -> None:
-        """Delete the match rows of every song of the name."""
         ...

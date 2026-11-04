@@ -6,7 +6,10 @@ before 1a finds what it would have written: an active link with no row becomes o
 link tier manual, score 1.0; an automatic one its evidence's tier and score), and a name an
 Unmatch put back in review loses its rows, as Unmatch deleted them before 1a. Rows the copy
 made from are left as they are. The locked ``test_log_name_links_copy_pg.py::test_rollback``
-pins the rest. Everything runs in one transaction, rolled back, so the test database keeps 0044.
+pins the rest. Since phase 1c's 0046 the rollbacks run newest first, so 0046's (which puts the
+artist column of ``matches`` back) and 0045's run before this one, as the runbook has it. A
+reason the code before 1b cannot read (``LINK_REJECTED``) goes, and its name stays in review.
+Everything runs in one transaction, rolled back, so the test database keeps 0044 to 0046.
 """
 
 from __future__ import annotations
@@ -25,9 +28,10 @@ from backend.domain.matching import LogNameLink
 
 Conn = psycopg.Connection[Any]
 
-ROLLBACK = (
-    Path(__file__).resolve().parents[2] / "backend" / "db" / "rollback_0044_log_name_links.sql"
-)
+_DB = Path(__file__).resolve().parents[2] / "backend" / "db"
+ROLLBACK = _DB / "rollback_0044_log_name_links.sql"
+ROLLBACK_0045 = _DB / "rollback_0045_link_demotion.sql"
+ROLLBACK_0046 = _DB / "rollback_0046_drop_artist_rows.sql"
 METALLICA = "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"
 
 
@@ -66,6 +70,7 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
 ) -> None:
     conn = psycopg.connect(migrated_db, row_factory=dict_row)
     try:
+        conn.execute(ROLLBACK_0046.read_text(encoding="utf-8"))
         links = PgLogNameLinkRepository(conn)
         metallica = _artist(conn, "Metallica", METALLICA)
         local = _artist(conn, "Van Halen", None)
@@ -122,6 +127,7 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
             )
         )
 
+        conn.execute(ROLLBACK_0045.read_text(encoding="utf-8"))
         conn.execute(ROLLBACK.read_text(encoding="utf-8"))
 
         after = {
@@ -135,3 +141,38 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
     assert after[matched] == [(local, "artist", "normalization", 87.5)]  # the suggestion is lost
     assert after[unmatched] == []
     assert after[copied] == [(METALLICA, "artist", "normalization", 100.0)]  # left as it was
+
+
+@pytest.mark.integration
+def test_a_name_held_back_by_a_rejected_pair_stays_in_review_with_no_reason(
+    migrated_db: str,
+) -> None:
+    """The code before 1b cannot read ``LINK_REJECTED``, so the rollback clears it. The name
+    stays in review and keeps its detail: its rejected pairs go with ``log_name_links``, so
+    back at pending the old matcher could link again a pair Lance rejected."""
+    conn = psycopg.connect(migrated_db, row_factory=dict_row)
+    try:
+        conn.execute(ROLLBACK_0046.read_text(encoding="utf-8"))
+        held_back = _name(conn, "CHASE", "needs_review")
+        conn.execute(
+            "UPDATE broadcast_artists SET reason_code = 'LINK_REJECTED', reason_detail = %s"
+            " WHERE id = %s",
+            ("Rejected pair: Case", held_back),
+        )
+
+        conn.execute(ROLLBACK_0045.read_text(encoding="utf-8"))
+        conn.execute(ROLLBACK.read_text(encoding="utf-8"))
+
+        state = conn.execute(
+            "SELECT match_status, reason_code, reason_detail FROM broadcast_artists WHERE id = %s",
+            (held_back,),
+        ).fetchone()
+    finally:
+        conn.rollback()
+        conn.close()
+
+    assert state == {
+        "match_status": "needs_review",
+        "reason_code": None,
+        "reason_detail": "Rejected pair: Case",
+    }

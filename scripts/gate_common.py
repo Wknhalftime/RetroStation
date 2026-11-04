@@ -189,28 +189,8 @@ def snapshot_read(dsn: str) -> Iterator[psycopg.Connection[Any]]:
 
 # --- log name links ------------------------------------------------------------------------------
 
-# Before phase 1a a link is a matches artist row. Read as 1a S2 copies it: the target is a
-# catalog id or an MBID; the key is the artist's MBID, else its artists.id (an MBID with no
-# catalog row is its own key: 1a gives it a stub of that MBID); origin manual for a manual-tier
-# row on a manual_matched name, else legacy; a rejected name's links are not active.
-_MATCHES_LINKS_SQL = """
-SELECT m.artist_id::text, COALESCE(a.mbid, a.id, m.target_id),
-       CASE WHEN m.match_tier = 'manual' AND ba.match_status = 'manual_matched'
-            THEN 'manual' ELSE 'legacy' END,
-       m.created_at, m.id::text
-FROM matches m
-JOIN broadcast_artists ba ON ba.id = m.artist_id
-LEFT JOIN LATERAL (
-    SELECT c.id, c.mbid FROM artists c
-    WHERE c.id = m.target_id OR c.mbid = m.target_id
-    ORDER BY (c.id = m.target_id) DESC
-    LIMIT 1
-) a ON true
-WHERE m.artist_id IS NOT NULL AND COALESCE(m.target_id, '') <> ''
-  AND ba.match_status NOT IN ('manual_rejected', 'auto_rejected')
-"""
-
-# From phase 1a on (S1, S2): log_name_links' active rows, with the origin they hold.
+# log_name_links' active rows, with the origin they hold (phase 1a S1, S2). The read of the
+# artist rows of matches, for a database before 1a, retired in phase 1c with the rows (S10).
 _TABLE_LINKS_SQL = """
 SELECT l.broadcast_artist_id::text, COALESCE(a.mbid, a.id), l.origin, l.created_at, l.id::text
 FROM log_name_links l
@@ -225,9 +205,7 @@ def active_links(conn: psycopg.Connection[Any]) -> dict[str, dict[str, str]]:
     A pair held twice collapses as 1a S2 collapses it: manual first, then the earliest.
     """
     with conn.cursor(row_factory=tuple_row) as cur:
-        table = cur.execute("SELECT to_regclass('public.log_name_links')").fetchone()
-        sql = _TABLE_LINKS_SQL if table and table[0] else _MATCHES_LINKS_SQL
-        rows = cur.execute(sql).fetchall()
+        rows = cur.execute(_TABLE_LINKS_SQL).fetchall()
     links: dict[str, dict[str, str]] = {}
     for name, key, origin, _created, _id in sorted(
         rows, key=lambda r: (r[2] != "manual", r[3], r[4])

@@ -482,14 +482,6 @@ class LogNameLinkService:
             if link.state == LogNameLinkState.REJECTED
         }
 
-    def unlink_all(self, broadcast_artist_id: UUID) -> None:
-        """Remove every link of the log name, in every state (SPEC 1a S10).
-
-        No caller since phase 1b, whose Unmatch rejects the links instead (C19), and 1c's Not an
-        artist keeps the rejected pairs (``unlink_keeping_rejected``); it retires in phase 1c's
-        S12."""
-        self._links.delete_links_of_name(broadcast_artist_id)
-
     def tier1_link(self, broadcast_artist_id: UUID) -> LogNameLink | None:
         """The link song matching's Tier 1 uses: the first active one, manual first, then the
         strongest, then the oldest (SPEC 1a S7); None when the name has no active link."""

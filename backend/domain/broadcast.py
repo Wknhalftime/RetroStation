@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any
 from uuid import UUID
 
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
@@ -78,7 +77,6 @@ class BroadcastArtist:
     original_name: str
     normalized_name: str
     match_status: MatchStatus = MatchStatus.PENDING
-    artist_candidates: list[dict[str, Any]] | None = None
     error_message: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     embedding: list[float] | None = None

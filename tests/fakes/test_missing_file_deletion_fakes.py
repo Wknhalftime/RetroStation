@@ -26,7 +26,7 @@ def test_fake_delete_missing_mirrors_pg() -> None:
 
 def test_fake_match_delete_for_file_mirrors_pg() -> None:
     repo = FakeMatchRepository()
-    gone, other, identity, artist = uuid4(), uuid4(), uuid4(), uuid4()
+    gone, other, identity = uuid4(), uuid4(), uuid4()
     for file_id in (gone, other):
         repo.create(
             Match(
@@ -37,19 +37,9 @@ def test_fake_match_delete_for_file_mirrors_pg() -> None:
                 library_file_id=file_id,
             )
         )
-    repo.create(
-        Match(
-            id=uuid4(),
-            confidence_score=1.0,
-            match_tier=MatchTier.MANUAL,
-            artist_id=artist,
-            library_file_id=gone,
-        )
-    )
 
     assert repo.delete_for_file(gone) == [identity]
     assert repo.get_by_identity(identity) is not None
-    assert repo.get_by_artist(artist) is None
 
 
 def test_fake_master_delete_for_file_mirrors_pg() -> None:

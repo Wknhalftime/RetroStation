@@ -21,8 +21,7 @@ class PgMatchRepository(MatchRepository):
             id=row["id"],
             confidence_score=row["confidence_score"],
             match_tier=MatchTier(row["match_tier"]),
-            identity_id=row.get("identity_id"),
-            artist_id=row.get("artist_id"),
+            identity_id=row["identity_id"],
             library_file_id=row.get("library_file_id"),
             target_id=row.get("target_id"),
             target_type=TargetType(row["target_type"]) if row.get("target_type") else None,
@@ -38,16 +37,15 @@ class PgMatchRepository(MatchRepository):
         work_id = match.work_id or None
         self._conn.execute(
             """INSERT INTO matches
-               (id, confidence_score, match_tier, identity_id, artist_id,
+               (id, confidence_score, match_tier, identity_id,
                 library_file_id, target_id, target_type, work_id, trace_id,
                 created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 match.id,
                 match.confidence_score,
                 match.match_tier.value,
                 match.identity_id,
-                match.artist_id,
                 match.library_file_id,
                 match.target_id,
                 match.target_type.value if match.target_type else None,
@@ -67,12 +65,6 @@ class PgMatchRepository(MatchRepository):
         ).fetchone()
         return self._row_to_model(row) if row else None
 
-    def get_by_artist(self, artist_id: UUID) -> Match | None:
-        row = self._conn.execute(
-            "SELECT * FROM matches WHERE artist_id = %s", (artist_id,)
-        ).fetchone()
-        return self._row_to_model(row) if row else None
-
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         self._conn.execute(
             "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
@@ -87,4 +79,4 @@ class PgMatchRepository(MatchRepository):
             "DELETE FROM matches WHERE library_file_id = %s RETURNING identity_id",
             (str(file_id),),
         ).fetchall()
-        return [r["identity_id"] for r in rows if r["identity_id"] is not None]
+        return [r["identity_id"] for r in rows]

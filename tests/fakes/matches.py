@@ -16,9 +16,6 @@ class FakeMatchRepository(MatchRepository):
     def get_by_identity(self, identity_id: UUID) -> Match | None:
         return next((m for m in self._data.values() if m.identity_id == identity_id), None)
 
-    def get_by_artist(self, artist_id: UUID) -> Match | None:
-        return next((m for m in self._data.values() if m.artist_id == artist_id), None)
-
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         for match_id, match in list(self._data.items()):
             if match.library_file_id == file_id:
@@ -33,4 +30,4 @@ class FakeMatchRepository(MatchRepository):
         doomed = [m for m in self._data.values() if m.library_file_id == file_id]
         for m in doomed:
             del self._data[m.id]
-        return [m.identity_id for m in doomed if m.identity_id is not None]
+        return [m.identity_id for m in doomed]

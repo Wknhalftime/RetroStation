@@ -32,7 +32,6 @@ class PgBroadcastArtistRepository(BroadcastArtistRepository):
             original_name=row["original_name"],
             normalized_name=row["normalized_name"],
             match_status=MatchStatus(row["match_status"]),
-            artist_candidates=row.get("artist_candidates"),
             error_message=row.get("error_message"),
             created_at=row["created_at"],
             embedding=parse_embedding(row.get("embedding")),
