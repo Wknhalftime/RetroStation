@@ -452,7 +452,7 @@ class PgLibraryFileRepository(
         # matches has UNIQUE (identity_id, library_file_id).
         self._conn.execute(
             """DELETE FROM matches s
-               WHERE s.library_file_id = %s AND s.identity_id IS NOT NULL
+               WHERE s.library_file_id = %s
                  AND EXISTS (SELECT 1 FROM matches t
                              WHERE t.library_file_id = %s AND t.identity_id = s.identity_id)""",
             (source, target),

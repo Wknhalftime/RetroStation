@@ -1,4 +1,6 @@
--- Rollback for 0044_log_name_links.sql. Run by hand, with the app stopped, in one transaction:
+-- Rollback for 0044_log_name_links.sql. Run by hand, with the app stopped, in one transaction,
+-- last: after phase 1c's 0046 and 0045 rollbacks (newest first), since it reads the artist
+-- column of matches and link_copy_stubs, which 0046's puts back:
 --   psql -1 -f backend/db/rollback_0044_log_name_links.sql <database>
 -- The artist rows of matches, which 0044 copied and phase 1a never writes, are the links again
 -- for the code before 1a (M35), brought up to date first:

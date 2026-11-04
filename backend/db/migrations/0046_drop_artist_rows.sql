@@ -8,9 +8,10 @@
 -- and 0044's (newest first).
 SET LOCAL lock_timeout = '5s';
 
--- E5: the tables changed here, locked first, ingest's one (broadcast_artists) before matches,
--- which the matcher writes after the names. A timeout fails the deploy loudly.
-LOCK TABLE broadcast_artists, matches IN ACCESS EXCLUSIVE MODE;
+-- E5: the tables changed here, locked first, in the order the matcher writes them: the names
+-- (ingest's table), the catalog artists (dropping link_copy_stubs drops its foreign key's
+-- triggers on artists), then matches. A timeout fails the deploy loudly.
+LOCK TABLE broadcast_artists, artists, matches IN ACCESS EXCLUSIVE MODE;
 
 DELETE FROM matches WHERE artist_id IS NOT NULL;
 ALTER TABLE matches DROP CONSTRAINT IF EXISTS xor_match_target;

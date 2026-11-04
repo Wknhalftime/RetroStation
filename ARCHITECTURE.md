@@ -129,8 +129,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   v0 copy (`evidence.legacy`): each link's, in any state, and each link 0045 deleted, from
   `link_demotion_backup`, so that table must stay while 0046's rollback may run. It recreates
   0044's stub list empty, so 0044's rollback then keeps 0044's stubs as ordinary artists. The
-  duplicates 0044 collapsed into one link are gone for good. **Phase 1c's rollbacks run newest
-  first:** 0046's, then 0045's, then 0044's (phase 7's runbook).
+  duplicates 0044 collapsed into one link are gone for good. **The rollbacks run newest
+  first:** 0046's, then 0045's, then 0044's (phase 7's runbook); nothing enforces the order.
 - Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
   artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
   work for it under the stub. The dev database had none of either at the copy (2026-11-01
