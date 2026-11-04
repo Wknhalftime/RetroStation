@@ -16,10 +16,12 @@ from backend.domain.library import (
     LibraryFile,
     LibraryFileRejectedError,
     LibraryStorageError,
+    UntaggedCandidate,
 )
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recording_search_reach import RecordingSearchReachRepository
+from backend.repositories.untagged_enrichment import UntaggedEnrichmentRepository
 
 # Shared by `upsert` and `upsert_write_only`; they differ only in whether
 # the row is read back afterwards.
@@ -149,7 +151,10 @@ def _audio_hash_of(value: str | None) -> AudioHash | None:
 
 @translate_lost_connection(LibraryStorageError)
 class PgLibraryFileRepository(
-    LibraryFileRepository, LibraryFileEnrichmentRepository, RecordingSearchReachRepository
+    LibraryFileRepository,
+    LibraryFileEnrichmentRepository,
+    RecordingSearchReachRepository,
+    UntaggedEnrichmentRepository,
 ):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn
@@ -301,6 +306,27 @@ class PgLibraryFileRepository(
             (normalized_artist_name, artist_mbid, artist_mbid),
         ).fetchone()
         return bool(row["reach"]) if row else False
+
+    def list_untagged_with_linked_artist(self) -> list[UntaggedCandidate]:
+        # `lf.*` carries the file's own artist_mbid tag (NULL or not); the artist row's
+        # MBID, the one the search needs, comes under its own name.
+        rows = self._conn.execute(
+            """SELECT lf.*, a.mbid AS linked_artist_mbid
+               FROM library_files lf
+               JOIN works w ON w.id = lf.work_id
+               JOIN artists a ON a.id = w.artist_id
+               WHERE lf.enrichment_status = %s
+                 AND lf.file_status = 'present'
+                 AND lf.recording_mbid IS NULL
+                 AND lf.release_mbid IS NULL
+                 AND a.mbid IS NOT NULL
+               ORDER BY lf.file_path""",
+            (EnrichmentStatus.PENDING.value,),
+        ).fetchall()
+        return [
+            UntaggedCandidate(file=self._row_to_model(r), artist_mbid=r["linked_artist_mbid"])
+            for r in rows
+        ]
 
     def get_pending_enrichment_by_release(self, release_mbid: str) -> list[LibraryFile]:
         rows = self._conn.execute(

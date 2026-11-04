@@ -13,60 +13,10 @@ interactions:
       user-agent:
       - RetroStation/0.1.0 (https://github.com/retrostation)
     method: GET
-    uri: https://musicbrainz.org/ws/2/artist/not-a-uuid?fmt=json&inc=aliases%2Btags
+    uri: https://musicbrainz.org/ws/2/artist/not-a-uuid?fmt=json
   response:
     body:
-      string: '{"error": "Your requests are exceeding the allowable rate limit. Please
-        see http://wiki.musicbrainz.org/XMLWebService for more information."}
-
-        '
-    headers:
-      access-control-allow-origin:
-      - '*'
-      connection:
-      - keep-alive
-      content-type:
-      - application/json
-      date:
-      - Sat, 26 Sep 2026 16:27:26 GMT
-      keep-alive:
-      - timeout=15
-      retry-after:
-      - '1'
-      server:
-      - openresty
-      transfer-encoding:
-      - chunked
-      x-mb-gateway:
-      - rudi
-      x-mb-rate-limiter:
-      - lua
-      x-ratelimit-who:
-      - per-ip
-      x-ratelimit-zone:
-      - per-ip
-    status:
-      code: 503
-      message: Service Temporarily Unavailable
-- request:
-    body: ''
-    headers:
-      accept:
-      - application/json
-      accept-encoding:
-      - gzip, deflate
-      connection:
-      - keep-alive
-      host:
-      - musicbrainz.org
-      user-agent:
-      - RetroStation/0.1.0 (https://github.com/retrostation)
-    method: GET
-    uri: https://musicbrainz.org/ws/2/artist/not-a-uuid?fmt=json&inc=aliases%2Btags
-  response:
-    body:
-      string: '{"help":"For usage, please see: https://musicbrainz.org/development/mmd","error":"Invalid
-        mbid."}'
+      string: '{"error":"Invalid mbid.","help":"For usage, please see: https://musicbrainz.org/development/mmd"}'
     headers:
       access-control-allow-origin:
       - '*'
@@ -77,9 +27,9 @@ interactions:
       content-type:
       - application/json; charset=utf-8
       date:
-      - Sat, 26 Sep 2026 16:27:29 GMT
+      - Mon, 02 Nov 2026 15:11:18 GMT
       etag:
-      - '"326ef3f5b9aabae00194a1623cdb3810"'
+      - '"3dfd9a96b34e7d04b918ad79bf429369"'
       keep-alive:
       - timeout=15
       server:
@@ -89,11 +39,11 @@ interactions:
       x-ratelimit-limit:
       - '1900'
       x-ratelimit-remaining:
-      - '1884'
+      - '458'
       x-ratelimit-reset:
-      - '1790440051'
+      - '1793632278'
       x-runtime:
-      - '0.029079'
+      - '0.001820'
     status:
       code: 400
       message: Bad Request

@@ -92,6 +92,42 @@ class PgRecordingRepository(RecordingRepository):
             (mbid,),
         )
 
+    def update_duration(self, mbid: str, duration_ms: int) -> None:
+        self._conn.execute(
+            "UPDATE recordings SET duration_ms = %s WHERE id = %s",
+            (duration_ms, mbid),
+        )
+
+    def update_version_type(self, mbid: str, version_type: VersionType) -> bool:
+        # The slot check compares against the recording's own work; with no
+        # work the subquery's equality is NULL, so nothing clashes.
+        cur = self._conn.execute(
+            """UPDATE recordings r SET version_type = %(version)s
+               WHERE r.id = %(id)s
+                 AND NOT EXISTS (
+                     SELECT 1 FROM recordings o
+                     WHERE o.work_id = r.work_id
+                       AND o.version_type = %(version)s
+                       AND o.id <> r.id
+                 )""",
+            {"id": mbid, "version": version_type.value},
+        )
+        return cur.rowcount == 1
+
+    def link_work(self, mbid: str, work_id: str) -> bool:
+        cur = self._conn.execute(
+            """UPDATE recordings r SET work_id = %(work)s
+               WHERE r.id = %(id)s
+                 AND NOT EXISTS (
+                     SELECT 1 FROM recordings o
+                     WHERE o.work_id = %(work)s
+                       AND o.version_type = r.version_type
+                       AND o.id <> r.id
+                 )""",
+            {"id": mbid, "work": work_id},
+        )
+        return cur.rowcount == 1
+
     def get_or_create_local(
         self,
         work_id: str,

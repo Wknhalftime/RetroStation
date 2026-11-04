@@ -12,7 +12,6 @@ from typing import Any
 import httpx
 import pytest
 
-import backend.services.mb_client as mb_mod
 from backend.services.mb_client import MusicBrainzApiClient
 from tests.fakes.musicbrainz_cache import FakeMusicBrainzCacheRepository
 
@@ -37,11 +36,6 @@ def _redirecting_server(entity: str) -> tuple[Any, list[str]]:
     return handler, seen
 
 
-@pytest.fixture(autouse=True)
-def _no_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mb_mod, "_rate_limit", lambda: None)
-
-
 @pytest.fixture
 def cache() -> FakeMusicBrainzCacheRepository:
     return FakeMusicBrainzCacheRepository()
@@ -61,7 +55,9 @@ def test_lookup_follows_a_merged_mbid_to_the_survivor(
     method: str,
 ) -> None:
     handler, seen = _redirecting_server(entity)
-    with MusicBrainzApiClient(cache, transport=httpx.MockTransport(handler)) as client:
+    with MusicBrainzApiClient(
+        cache, transport=httpx.MockTransport(handler), wait_turn=lambda: None
+    ) as client:
         payload = getattr(client, method)(OLD)
 
     assert payload is not None

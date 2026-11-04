@@ -114,11 +114,11 @@ def queue_in_memory() -> Iterator[MemoryStorage]:
 
 @pytest.fixture
 def no_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The production client's 1.1 s wait between calls, skipped while a seed fills the cache
-    through a MockTransport."""
-    from backend.services import mb_client
+    """The production client's 1.1 s wait on the machine-wide clock (AUD-R102), skipped while
+    a seed fills the cache through a MockTransport."""
+    from backend.services import mb_clock
 
-    monkeypatch.setattr(mb_client, "_rate_limit", lambda: None)
+    monkeypatch.setattr(mb_clock, "wait_turn", lambda: None)
 
 
 @pytest.fixture

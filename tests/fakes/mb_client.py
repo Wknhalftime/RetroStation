@@ -5,13 +5,15 @@ from typing import Any
 
 import httpx
 
+from backend.services.mb_client import Progress
+
 
 class FakeMbClient:
     """In-memory MusicBrainz client for testing. Returns canned responses.
 
     `error_mbids` makes `lookup_artist` / `lookup_recording` raise
     `httpx.ConnectError` for selected MBIDs — useful for exercising the
-    coalescing helpers' "omit on transient error" paths without hand-rolling
+    batch lookups' "omit on transient error" paths without hand-rolling
     an inline test double.
 
     `bad_request_mbids` makes the three lookups raise the `HTTPStatusError`
@@ -84,3 +86,30 @@ class FakeMbClient:
         if mbid in self._error_mbids:
             raise httpx.ConnectError("simulated transient failure")
         return self._artists.get(mbid)
+
+    def search_artists_by_mbids(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, dict[str, Any]]:
+        self.calls.append("search_artists_by_mbids:" + ",".join(mbids))
+        for mbid in mbids:
+            if mbid in self._error_mbids:
+                raise httpx.ConnectError("simulated transient failure")
+        found = {m: self._artists[m] for m in mbids if m in self._artists}
+        if on_progress is not None:
+            asked = list(dict.fromkeys(mbids))
+            for index, mbid in enumerate(asked, start=1):
+                on_progress(index, len(asked), mbid)
+        return found
+
+    def lookup_recordings(
+        self, mbids: Sequence[str], *, on_progress: Progress | None = None
+    ) -> dict[str, dict[str, Any] | None]:
+        self.calls.append("lookup_recordings:" + ",".join(mbids))
+        distinct = list(dict.fromkeys(mbids))
+        result: dict[str, dict[str, Any] | None] = {}
+        for index, mbid in enumerate(distinct, start=1):
+            if mbid not in self._error_mbids:
+                result[mbid] = self._recordings.get(mbid)
+            if on_progress is not None:
+                on_progress(index, len(distinct), mbid)
+        return result

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 from uuid import uuid4
 
@@ -117,6 +118,15 @@ class PgWorkRepository(WorkRepository):
             (work_id, title, artist_id, mbid),
         )
         return work_id
+
+    def list_musicbrainz_ids(self, work_ids: Sequence[str]) -> set[str]:
+        if not work_ids:
+            return set()
+        rows = self._conn.execute(
+            "SELECT id FROM works WHERE id = ANY(%s) AND origin = %s",
+            (list(work_ids), CatalogSource.MUSICBRAINZ.value),
+        ).fetchall()
+        return {cast(str, row["id"]) for row in rows}
 
     def delete_if_empty(self, work_id: str) -> bool:
         # Every table with a FK to works except song_masters, which goes

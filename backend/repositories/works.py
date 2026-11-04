@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 from backend.domain.catalog import Work
 
@@ -30,6 +31,11 @@ class WorkRepository(ABC):
     @abstractmethod
     def upsert_from_mb(self, mbid: str, title: str, artist_id: str) -> str:
         """Collision check with FOR UPDATE. Merge or create. Returns work id."""
+        ...
+
+    @abstractmethod
+    def list_musicbrainz_ids(self, work_ids: Sequence[str]) -> set[str]:
+        """Of ``work_ids``, those that are MusicBrainz works (``origin = 'musicbrainz'``)."""
         ...
 
     @abstractmethod
