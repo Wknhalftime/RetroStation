@@ -520,14 +520,14 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `list_work_ids_with_master_off_work` | none | 0c | #212 | AUD-R056 | none |
 | `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |
 | `artist_has_match` | `LogNameLinkService.is_linked`: a log-name link in any state keeps a local artist | 1a | #214 | AUD-R058 | none |
-| `matches\.artist_id` `xor_match_target` `matches_artist_id_target_id_key` `idx_matches_artist\b` `check_log_name_links_copy` `_MATCHES_LINKS_SQL` | `log_name_links`; a match is a song's (`identity_id` NOT NULL, 0046) | 1c | #PR3 | AUD-R060 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_curation_scenarios_pg.py` `tests/scripts/gate_world.py` |
-| `MatchRepository(?:\([^)]*\))?\.get_by_artist` `match(?:_repo\|es)\.get_by_artist` `get_by_artist\(.*\) -> Match\b` | the name's links, through `LogNameLinkService`; `WorkRepository.get_by_artist` is another method and stays | 1c | #PR3 | AUD-R061 | `tests/matching_seed.py` |
-| `artist_candidates` | the name's suggested links (the queue's `candidates`, 1c S8) | 1c | #PR3 | AUD-R062 | `tests/integration/test_matches_song_only_pg.py` `tests/routers/test_matching.py` `tests/routers/test_queue_suggested_links.py` |
-| `resolved_artist_mbid` | none: read by nothing; a name's MBID is its linked artist's | 1c | #PR3 | AUD-R063 | `tests/integration/test_matches_song_only_pg.py` |
-| `split_artist_string` | none: a name holding several performers gets one link each (M9), from evidence in phase 4 | 1c | #PR3 | AUD-R064 | none |
-| `\breject_open_songs\b` | Reject's cascade (`plan_cascade`, phase 1b) | 1c | #PR3 | AUD-R065 | none |
-| `\breopen_every_song\b` | Unmatch's cascade (`plan_cascade`, phase 1b) | 1c | #PR3 | AUD-R066 | none |
-| `\bdelete_song_matches\b` | Unmatch's cascade, which deletes the changed lines' matches (phase 1b) | 1c | #PR3 | AUD-R067 | none |
-| `resolution\.set_status\b` `ArtistResolutionRepository\.set_status\b` `def set_status\(self, broadcast_artist_id\b` | `LogNameLinkService` writes the status from the links (`status_from_links`, 1c S3) | 1c | #PR3 | AUD-R068 | `tests/services/test_status_from_links.py` |
-| `links\.unlink_all\b` `LogNameLinkService\.unlink_all\b` `def unlink_all\(self, broadcast_artist_id\b` | `unlink_keeping_rejected` (Not an artist keeps the rejected pairs) | 1c | #PR3 | AUD-R069 | none |
-| `link_copy_stubs` | none: 0046's rollback recreates it empty for 0044's rollback | 1c | #PR3 | AUD-R070 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_log_name_links_copy_pg.py` |
+| `matches\.artist_id` `xor_match_target` `matches_artist_id_target_id_key` `idx_matches_artist\b` `check_log_name_links_copy` `_MATCHES_LINKS_SQL` | `log_name_links`; a match is a song's (`identity_id` NOT NULL, 0046) | 1c | #235 | AUD-R060 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_curation_scenarios_pg.py` `tests/scripts/gate_world.py` |
+| `MatchRepository(?:\([^)]*\))?\.get_by_artist` `match(?:_repo\|es)\.get_by_artist` `get_by_artist\(.*\) -> Match\b` | the name's links, through `LogNameLinkService`; `WorkRepository.get_by_artist` is another method and stays | 1c | #235 | AUD-R061 | `tests/matching_seed.py` |
+| `artist_candidates` | the name's suggested links (the queue's `candidates`, 1c S8) | 1c | #235 | AUD-R062 | `tests/integration/test_matches_song_only_pg.py` `tests/routers/test_matching.py` `tests/routers/test_queue_suggested_links.py` |
+| `resolved_artist_mbid` | none: read by nothing; a name's MBID is its linked artist's | 1c | #235 | AUD-R063 | `tests/integration/test_matches_song_only_pg.py` |
+| `split_artist_string` | none: a name holding several performers gets one link each (M9), from evidence in phase 4 | 1c | #235 | AUD-R064 | none |
+| `\breject_open_songs\b` | Reject's cascade (`plan_cascade`, phase 1b) | 1c | #235 | AUD-R065 | none |
+| `\breopen_every_song\b` | Unmatch's cascade (`plan_cascade`, phase 1b) | 1c | #235 | AUD-R066 | none |
+| `\bdelete_song_matches\b` | Unmatch's cascade, which deletes the changed lines' matches (phase 1b) | 1c | #235 | AUD-R067 | none |
+| `resolution\.set_status\b` `ArtistResolutionRepository\.set_status\b` `def set_status\(self, broadcast_artist_id\b` | `LogNameLinkService` writes the status from the links (`status_from_links`, 1c S3) | 1c | #235 | AUD-R068 | `tests/services/test_status_from_links.py` |
+| `links\.unlink_all\b` `LogNameLinkService\.unlink_all\b` `def unlink_all\(self, broadcast_artist_id\b` | `unlink_keeping_rejected` (Not an artist keeps the rejected pairs) | 1c | #235 | AUD-R069 | none |
+| `link_copy_stubs` | none: 0046's rollback recreates it empty for 0044's rollback | 1c | #235 | AUD-R070 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_log_name_links_copy_pg.py` |
