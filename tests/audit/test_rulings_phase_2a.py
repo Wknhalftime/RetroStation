@@ -1,9 +1,9 @@
-"""The rulings phase 2a PR 1 changes (SPEC S12, D1, D3, D6).
+"""The rulings phase 2a PR 1 changes (SPEC S12, D1, D3, D6, D7).
 
 AUD-R071 amends AUD-R042: the MusicBrainz limiter is AUD-R102's machine-wide clock (D1), so
 AUD-R042 no longer speaks of a database row, its Check names ``tests/services/test_mb_clock.py``,
-and 2a has left its pending list. AUD-R072 amends AUD-R041 (S5, D3, D6). AUD-R041's own 2a marker
-stays until PR 3, whose test files it names, so nothing here pins it.
+and 2a has left its pending list. AUD-R072 amends AUD-R041 (S5, D3, D6, D7). AUD-R041's own 2a
+marker stays until PR 3, whose test files it names, so nothing here pins it.
 """
 
 from __future__ import annotations
@@ -41,3 +41,4 @@ def test_r072_amends_r041() -> None:
     assert amending["status"] == "ACTIVE"
     assert any(text.startswith("AUD-R041") for text in amending["supersedes"])
     assert "tests/integration/test_artist_name_index_pg.py (2a)" in amending["ruling"]
+    assert "suggestion" in amending["ruling"]  # D7: a match on a name the log name rejected

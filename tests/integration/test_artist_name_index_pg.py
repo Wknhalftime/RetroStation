@@ -1,5 +1,5 @@
 """Artist names, phase 2a PR 1 (SPEC S5, S6, S7, S13, S14's names half, S9 on the real tables; C41,
-M18, M33, D2, D5, D6; AUD-R041, AUD-R072), on PostgreSQL with real scans.
+M18, M33, D2, D5, D6, D7; AUD-R041, AUD-R072), on PostgreSQL with real scans.
 
 S5: names are unique only without an MBID. 0047 makes ``idx_artists_norm_name`` partial, adds a
 plain index for the readers of a name, and creates ``library_suggestions``.
@@ -9,6 +9,10 @@ S6: ``upsert_musicbrainz_artist``. Found by MBID, that artist. Otherwise the nam
 (the lowercased, well-formed, non-placeholder values of present files whose ``artist_mbid`` holds
 exactly one MBID): none or only this one promotes the name-only artist in place, anything else
 inserts. It never returns another MBID's artist, and ``_resolve`` reads ahead by the same rule.
+
+D7: a match that would promote a rejected artist stays refused. An automatic match to a different
+artist with the normalized name of an artist the log name rejected, name-only or holding an MBID,
+becomes a suggestion in ``plan_answer``, and the name stays in review.
 
 S7: ``upsert_local_artist`` counts the artists of the name first. None, a new name-only artist.
 One on a name holding at most one MBID, that artist. Several, or a name holding several MBIDs,
@@ -27,6 +31,7 @@ all reach it. Works stay where grouping put them until 3b. A repeat updates a ro
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from uuid import uuid4
@@ -43,25 +48,52 @@ from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.library_suggestions import PgLibrarySuggestionRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.works import PgWorkRepository
-from backend.domain.broadcast import BroadcastArtist
+from backend.domain.broadcast import (
+    BroadcastArtist,
+    BroadcastPlayEvent,
+    BroadcastPlaylist,
+    BroadcastStation,
+    BroadcastTrackIdentity,
+)
 from backend.domain.enums import (
     ArtistLinkOutcome,
     LogNameLinkOrigin,
     LogNameLinkState,
     MatchStatus,
     MatchTier,
+    ReasonCode,
 )
 from backend.domain.library import PURGE_MISSING_SETTING
-from backend.domain.log_name_status import NameState
+from backend.domain.log_name_status import NameState, suggestion_detail
+from backend.domain.matching import LogNameLink
 from backend.domain.system import UserSetting
 from backend.services.artist_linking_service import link_artist
-from backend.services.log_name_link_service import LinkTarget, LogNameLinkService, MatcherAnswer
-from backend.services.normalization import normalize_artist, normalize_title
+from backend.services.artist_matching_service import (
+    ArtistMatchingRepos,
+    ArtistMatchResult,
+    hold_back_refused_link,
+    match_artists_for_playlist,
+    matcher_answer,
+)
+from backend.services.log_name_link_service import (
+    AnswerPlan,
+    LinkTarget,
+    LogNameLinkService,
+    MatcherAnswer,
+)
+from backend.services.matching_constants import MAX_ARTIST_SUGGESTIONS
+from backend.services.mb_types import MbArtistResult
+from backend.services.normalization import (
+    compute_normalized_signature,
+    normalize_artist,
+    normalize_title,
+)
 from backend.services.repository_factory import RepositoryFactory
 from backend.tasks import huey_app, library_scan_tasks
 from backend.tasks.artist_identity_tasks import artist_identity_sweep_task, sweep_artist_identities
 from backend.tasks.library_watcher_tasks import library_scan_files_task
 from backend.tasks.mb_enrichment_tasks import ArtistEnhanceOutcome, _enhance_artist
+from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.mb_client import FakeMbClient
 from tests.integration.missing_file_seed import full_scan, put
 from tests.matching_seed import seed_pg_link
@@ -396,6 +428,523 @@ def test_resolve_reads_ahead_as_the_upsert_will(
 
     assert set(service.rejected_in(name.id, answer)) == ({SOLO} if promotes else set())
     assert (_upsert(conn, SOLO, "Ozzy Osbourne") == holder) is promotes
+
+
+# --- S6, D7: a match on a name the log name rejected ----------------------------------------------
+
+_TRUNCATED = "ALICE COOPER AND HIS FAMOUS BA"  # cut off at the field's width, so it reaches MB
+_REVIEW_100 = NameState(
+    MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, suggestion_detail([100])
+)
+
+
+def _log_name(conn: Conn, spelling: str = _TRUNCATED) -> BroadcastArtist:
+    return RepositoryFactory(conn).broadcast_artists.upsert(
+        BroadcastArtist(
+            id=uuid4(), original_name=spelling, normalized_name=normalize_artist(spelling)
+        )
+    )
+
+
+def _reject(conn: Conn, name: BroadcastArtist, artist_id: str) -> None:
+    seed_pg_link(
+        conn,
+        name.id,
+        artist_id,
+        origin=LogNameLinkOrigin.MANUAL,
+        state=LogNameLinkState.REJECTED,
+    )
+
+
+def _suggest(conn: Conn, name: BroadcastArtist, artist_id: str, strength: int = 60) -> None:
+    seed_pg_link(
+        conn,
+        name.id,
+        artist_id,
+        origin=LogNameLinkOrigin.AUTOMATIC,
+        state=LogNameLinkState.SUGGESTED,
+        strength=strength,
+    )
+
+
+def _service(conn: Conn) -> LogNameLinkService:
+    return LogNameLinkService(
+        PgLogNameLinkRepository(conn),
+        PgArtistRepository(conn),
+        RepositoryFactory(conn).broadcast_artists,
+    )
+
+
+def _hit(name: str = "Alice Cooper", mbid: str = SOLO) -> MbArtistResult:
+    return {"id": mbid, "name": name, "score": 100}
+
+
+def _hit_answer(name: str = "Alice Cooper", mbid: str = SOLO) -> MatcherAnswer:
+    return MatcherAnswer(
+        proposed=NameState(MatchStatus.AUTO_MATCHED),
+        link=LinkTarget(
+            target=mbid,
+            tier=MatchTier.MUSICBRAINZ_API,
+            score=100.0,
+            mb_candidate=_hit(name, mbid),
+        ),
+    )
+
+
+def _catalog_answer(target: str, tier: MatchTier = MatchTier.NORMALIZATION) -> MatcherAnswer:
+    return MatcherAnswer(
+        proposed=NameState(MatchStatus.AUTO_MATCHED),
+        link=LinkTarget(target=target, tier=tier, score=100.0),
+    )
+
+
+def _status(conn: Conn, name: BroadcastArtist) -> NameState:
+    found = RepositoryFactory(conn).broadcast_artists.get_by_id(name.id)
+    assert found is not None
+    return NameState(found.match_status, found.reason_code, found.reason_detail)
+
+
+def _link_states(conn: Conn, name: BroadcastArtist) -> dict[str | None, str]:
+    """Each link of the log name: its artist's MBID (None for a name-only artist), its state."""
+    rows = conn.execute(
+        """SELECT a.mbid, l.state
+             FROM log_name_links l JOIN artists a ON a.id = l.artist_id
+            WHERE l.broadcast_artist_id = %s""",
+        (name.id,),
+    ).fetchall()
+    return {r["mbid"]: r["state"] for r in rows}
+
+
+def _rejected_links(conn: Conn, name: BroadcastArtist) -> list[LogNameLink]:
+    return [
+        link
+        for link in PgLogNameLinkRepository(conn).list_by_name(name.id)
+        if link.state == LogNameLinkState.REJECTED
+    ]
+
+
+def _artist_row(conn: Conn, artist_id: str) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM artists WHERE id = %s", (artist_id,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def _writes(plan: AnswerPlan) -> list[tuple[str, LogNameLinkState]]:
+    return [(target.target, state) for target, state in plan.writes]
+
+
+@pytest.mark.parametrize(
+    ("rejected_mbid", "name_only_beside_it", "tags"),
+    [
+        (None, False, (OTHER,)),
+        (None, False, (SOLO, OTHER)),
+        (BAND, False, ()),
+        (BAND, False, (BAND,)),
+        (BAND, False, (BAND, SOLO)),
+        (BAND, True, ()),
+    ],
+    ids=[
+        "name-only, another MBID",
+        "name-only, several",
+        "holds an MBID, no tags",
+        "holds an MBID, its own tag",
+        "holds an MBID, several",
+        "holds an MBID, beside the name-only artist the upsert would promote",
+    ],
+)
+def test_match_on_a_rejected_name_is_a_suggestion(
+    conn: Conn, rejected_mbid: str | None, name_only_beside_it: bool, tags: tuple[str, ...]
+) -> None:
+    """D7. The log name rejected an artist of this name, and a 95+ MusicBrainz hit names a
+    different one. Nothing refuses it, because the pair isn't rejected. To Lance an auto-link
+    would read as the name linked again after he rejected it, so the plan writes a suggestion and
+    the name stays in review. The rejected pair and every artist of the name stay as they were:
+    an unconfirmed suggestion never gives a local artist an MBID."""
+    rejected = _insert_artist(conn, "Alice Cooper", rejected_mbid)
+    others = [_insert_artist(conn, "Alice Cooper", None)] if name_only_beside_it else []
+    for tag in tags:
+        _file(conn, "Alice Cooper", tag=tag)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    conn.commit()
+    service = _service(conn)
+    answer = _hit_answer()
+    pairs = _rejected_links(conn, name)
+    artists = [_artist_row(conn, artist) for artist in (rejected, *others)]
+
+    assert service.rejected_in(name.id, answer) == {}
+    plan = service.plan_answer(name.id, answer)
+
+    assert plan.state == _REVIEW_100
+    assert _writes(plan) == [(SOLO, LogNameLinkState.SUGGESTED)]
+
+    assert service.write_plan(name.id, plan)
+
+    assert _status(conn, name) == _REVIEW_100
+    assert _link_states(conn, name) == {rejected_mbid: "rejected", SOLO: "suggested"}
+    assert _rejected_links(conn, name) == pairs
+    assert [_artist_row(conn, artist) for artist in (rejected, *others)] == artists
+    [suggested] = [
+        link
+        for link in PgLogNameLinkRepository(conn).list_by_name(name.id)
+        if link.state == LogNameLinkState.SUGGESTED
+    ]
+    assert (suggested.origin, suggested.strength) == (LogNameLinkOrigin.AUTOMATIC, 100)
+    assert suggested.evidence["target_name"] == "Alice Cooper"
+
+
+@pytest.mark.parametrize(
+    ("reject", "spelling", "seed_mbid", "rejected_mbid", "tags", "score"),
+    [
+        (True, "ALICE COOPER", SOLO, None, (), 100),
+        (True, "ALICE COOPERS", SOLO, BAND, (), 96),
+        (True, _TRUNCATED, None, None, (OTHER,), 100),
+        (False, "ALICE COOPER", SOLO, None, (), 100),
+        (False, "ALICE COOPERS", SOLO, BAND, (), 96),
+        (False, _TRUNCATED, None, None, (OTHER,), 100),
+    ],
+    ids=[
+        "exact name, one MBID artist beside the name-only one",
+        "fuzzy, two MBID artists tied",
+        "MusicBrainz hit",
+        "no rejected pair: exact name",
+        "no rejected pair: fuzzy",
+        "no rejected pair: MusicBrainz hit",
+    ],
+)
+def test_a_matcher_run_suggests_on_a_rejected_name(
+    conn: Conn,
+    reject: bool,
+    spelling: str,
+    seed_mbid: str | None,
+    rejected_mbid: str | None,
+    tags: tuple[str, ...],
+    score: int,
+) -> None:
+    """The whole run. S5 makes a catalog target with no MusicBrainz hit reachable: two artists of
+    a name, where the exact pass links the one MBID artist, and a fuzzy tie goes to the lowest
+    MBID (SOLO's here). Pass 2 can't reach the rule, because its one name-only artist would be
+    the rejected artist itself. Without a rejected pair each of these links, as it does today."""
+    holder = _insert_artist(conn, "Alice Cooper", rejected_mbid)
+    if seed_mbid is not None:
+        _insert_artist(conn, "Alice Cooper", seed_mbid)
+    for tag in tags:
+        _file(conn, "Alice Cooper", tag=tag)
+    factory = RepositoryFactory(conn)
+    station = factory.broadcast_stations.create(BroadcastStation(id=uuid4(), call_letters="KRSC"))
+    playlist = factory.broadcast_playlists.create(
+        BroadcastPlaylist(
+            id=uuid4(), name="show.csv", content_hash=uuid4().hex, station_id=station.id
+        )
+    )
+    name = _log_name(conn, spelling)
+    song = factory.broadcast_identities.upsert(
+        BroadcastTrackIdentity(
+            id=uuid4(),
+            broadcast_artist_id=name.id,
+            original_title="Song",
+            normalized_title="song",
+            normalized_signature=compute_normalized_signature(name.normalized_name, "song"),
+        )
+    )
+    factory.broadcast_events.create(
+        BroadcastPlayEvent(
+            id=uuid4(),
+            identity_id=song.id,
+            playlist_id=playlist.id,
+            played_at=datetime(2026, 10, 1, tzinfo=UTC),
+        )
+    )
+    if reject:
+        _reject(conn, name, holder)
+    holder_before = _artist_row(conn, holder)
+
+    match_artists_for_playlist(
+        playlist_id=playlist.id,
+        repos=ArtistMatchingRepos(
+            broadcast_artist_repo=factory.broadcast_artists,
+            track_identity_repo=factory.broadcast_identities,
+            artist_repo=factory.artists,
+            match_repo=factory.matches,
+            rules_repo=FakeMappingRuleRepository(),
+            link_repo=PgLogNameLinkRepository(conn),
+        ),
+        mb_client=FakeMbClient(responses={_TRUNCATED: [dict(_hit())]}),
+    )
+
+    assert _artist_row(conn, holder) == holder_before
+    if reject:
+        assert _status(conn, name) == NameState(
+            MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, suggestion_detail([score])
+        )
+        assert _link_states(conn, name) == {rejected_mbid: "rejected", SOLO: "suggested"}
+    else:
+        assert _status(conn, name) == NameState(MatchStatus.AUTO_MATCHED)
+        assert _link_states(conn, name) == {SOLO: "active"}
+
+
+@pytest.mark.parametrize(
+    "target_seed",
+    ["its artist", "its stub", "another spelling"],
+)
+def test_a_hit_is_compared_by_its_normalized_name(conn: Conn, target_seed: str) -> None:
+    """The hit's MBID may already have an artist, or a stub with no name yet, which only the hit
+    can name. A hit spelled otherwise normalizes to the rejected name."""
+    holder = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    if target_seed == "its artist":
+        _insert_artist(conn, "Alice Cooper", SOLO)
+    if target_seed == "its stub":
+        PgArtistRepository(conn).create_stub(SOLO)
+    name = _log_name(conn)
+    _reject(conn, name, holder)
+    service = _service(conn)
+    spelling = "The Alice Cooper" if target_seed == "another spelling" else "Alice Cooper"
+
+    plan = service.plan_answer(name.id, _hit_answer(spelling))
+
+    assert plan.state == _REVIEW_100
+    assert _writes(plan) == [(SOLO, LogNameLinkState.SUGGESTED)]
+    assert service.write_plan(name.id, plan)
+    assert _link_states(conn, name) == {None: "rejected", SOLO: "suggested"}
+
+
+@pytest.mark.parametrize("target_by", ["MBID", "artist id"])
+def test_a_catalog_target_is_compared_by_its_name(conn: Conn, target_by: str) -> None:
+    """No hit, so the catalog artist's own name decides, whichever way the answer names it."""
+    rejected = _insert_artist(conn, "Alice Cooper", None)
+    target = _insert_artist(conn, "Alice Cooper", SOLO)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    service = _service(conn)
+    answer = _catalog_answer(SOLO if target_by == "MBID" else target)
+
+    plan = service.plan_answer(name.id, answer)
+
+    assert plan.state == _REVIEW_100
+    assert [state for _, state in plan.writes] == [LogNameLinkState.SUGGESTED]
+    assert service.write_plan(name.id, plan)
+    assert _link_states(conn, name) == {None: "rejected", SOLO: "suggested"}
+
+
+def test_a_mapping_rule_on_a_rejected_name_is_a_suggestion_too(conn: Conn) -> None:
+    """A rule is an automatic answer in the plan's eyes (origin automatic, tier manual). The name
+    goes to review, which is the side Lance's rule allows: it widens his review window."""
+    rejected = _insert_artist(conn, "Alice Cooper", None)
+    target = _insert_artist(conn, "Alice Cooper", SOLO)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+
+    plan = _service(conn).plan_answer(name.id, _catalog_answer(target, MatchTier.MANUAL))
+
+    assert plan.state == _REVIEW_100
+    assert [state for _, state in plan.writes] == [LogNameLinkState.SUGGESTED]
+
+
+def test_any_rejected_pair_protects_its_name(conn: Conn) -> None:
+    """The name's second rejected pair counts as its first does."""
+    someone = _insert_artist(conn, "Someone Else", None)
+    alice = _insert_artist(conn, "Alice Cooper", None)
+    zappa = _insert_artist(conn, "Zappa", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    for artist in (someone, alice, zappa):
+        _reject(conn, name, artist)
+
+    plan = _service(conn).plan_answer(name.id, _hit_answer())
+
+    assert plan.state == _REVIEW_100
+    assert _writes(plan) == [(SOLO, LogNameLinkState.SUGGESTED)]
+
+
+def test_a_pair_already_suggested_stays_suggested(conn: Conn) -> None:
+    """The hit would lift a suggestion to active. On a rejected name it writes nothing, the
+    suggestion keeps its strength, and the name stays in review."""
+    rejected = _insert_artist(conn, "Alice Cooper", None)
+    target = _insert_artist(conn, "Alice Cooper", SOLO)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    _suggest(conn, name, target, strength=60)
+
+    plan = _service(conn).plan_answer(name.id, _hit_answer())
+
+    assert plan.writes == ()
+    assert plan.state == NameState(
+        MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, suggestion_detail([60])
+    )
+
+
+def test_a_full_list_of_suggestions_still_gets_no_active_link(conn: Conn) -> None:
+    """AUD-R038's cap holds: with no room the hit is dropped, never linked, and the name stays in
+    review on the suggestions it holds."""
+    rejected = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    for number in range(MAX_ARTIST_SUGGESTIONS):
+        _suggest(conn, name, _insert_artist(conn, f"Act {number}", None))
+
+    plan = _service(conn).plan_answer(name.id, _hit_answer())
+
+    assert plan.writes == ()
+    assert plan.state == NameState(
+        MatchStatus.NEEDS_REVIEW,
+        ReasonCode.LINK_SUGGESTED,
+        suggestion_detail([60] * MAX_ARTIST_SUGGESTIONS),
+    )
+
+
+@pytest.mark.parametrize(
+    ("rejected_mbid", "tags", "with_hit"),
+    [(None, (), True), (None, (SOLO,), True), (SOLO, (), True), (SOLO, (), False)],
+    ids=[
+        "the upsert would promote it, no tags",
+        "the upsert would promote it, only this MBID",
+        "it holds the hit's MBID",
+        "it is the catalog target",
+    ],
+)
+def test_a_match_to_the_rejected_artist_itself_stays_refused(
+    conn: Conn, rejected_mbid: str | None, tags: tuple[str, ...], with_hit: bool
+) -> None:
+    """D7 leaves this as it was: the rejected artist is never suggested back. The matcher's
+    answer is held back with LINK_REJECTED, no plan writes a link, nothing is promoted and no
+    artist or stub is made for the MBID."""
+    rejected = _insert_artist(conn, "Alice Cooper", rejected_mbid)
+    for tag in tags:
+        _file(conn, "Alice Cooper", tag=tag)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    conn.commit()
+    service = _service(conn)
+    result = ArtistMatchResult(
+        status=MatchStatus.AUTO_MATCHED,
+        tier=MatchTier.MUSICBRAINZ_API if with_hit else MatchTier.NORMALIZATION,
+        confidence_score=100.0,
+        target_id=SOLO,
+        mb_candidate=_hit() if with_hit else None,
+    )
+    artist = _artist_row(conn, rejected)
+
+    assert service.plan_answer(name.id, matcher_answer(result)).writes == ()
+
+    held = hold_back_refused_link(name, result, service)
+    assert (held.status, held.reason_code) == (MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_REJECTED)
+    plan = service.plan_answer(name.id, matcher_answer(held))
+    assert plan.writes == ()
+    assert service.write_plan(name.id, plan)
+
+    assert _status(conn, name).reason_code == ReasonCode.LINK_REJECTED
+    assert _link_states(conn, name) == {rejected_mbid: "rejected"}
+    assert _artist_row(conn, rejected) == artist
+    assert len(_artists(conn)) == 1
+
+
+# The controls: each of these is a hit no rejected pair of its name stands against.
+
+
+def _assert_links_automatically(conn: Conn, name: BroadcastArtist, answer: MatcherAnswer) -> None:
+    service = _service(conn)
+
+    plan = service.plan_answer(name.id, answer)
+
+    assert plan.state == NameState(MatchStatus.AUTO_MATCHED)
+    assert _writes(plan) == [(SOLO, LogNameLinkState.ACTIVE)]
+    assert service.write_plan(name.id, plan)
+    assert _status(conn, name) == NameState(MatchStatus.AUTO_MATCHED)
+    assert _link_states(conn, name)[SOLO] == "active"
+
+
+@pytest.mark.parametrize(
+    ("tags", "promotes"),
+    [((), True), ((SOLO,), True), ((OTHER,), False), ((SOLO, OTHER), False)],
+    ids=["no tags", "only this MBID", "another MBID", "several"],
+)
+def test_with_no_rejected_pair_a_hit_links_as_s6_reads(
+    conn: Conn, tags: tuple[str, ...], promotes: bool
+) -> None:
+    holder = _insert_artist(conn, "Alice Cooper", None)
+    for tag in tags:
+        _file(conn, "Alice Cooper", tag=tag)
+    name = _log_name(conn)
+
+    _assert_links_automatically(conn, name, _hit_answer())
+
+    assert _link_states(conn, name) == {SOLO: "active"}
+    assert (_artist_row(conn, holder)["mbid"] == SOLO) is promotes
+
+
+def test_a_rejected_artist_of_another_name_protects_nothing(conn: Conn) -> None:
+    holder = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    _reject(conn, name, _insert_artist(conn, "Someone Else", None))
+
+    _assert_links_automatically(conn, name, _hit_answer())
+
+    assert _artist_row(conn, holder)["mbid"] is None
+
+
+def test_another_log_names_rejection_protects_nothing(conn: Conn) -> None:
+    holder = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    _reject(conn, _log_name(conn, "ALICE COOPER BAND"), holder)
+
+    _assert_links_automatically(conn, name, _hit_answer())
+
+
+def test_a_suggested_pair_with_the_holder_is_no_rejection(conn: Conn) -> None:
+    holder = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    _suggest(conn, name, holder)
+
+    _assert_links_automatically(conn, name, _hit_answer())
+
+    assert _link_states(conn, name) == {None: "suggested", SOLO: "active"}
+
+
+def test_a_name_that_normalizes_to_nothing_protects_nothing(conn: Conn) -> None:
+    """Two symbol-only names both normalize to nothing, which is no name they share."""
+    name = _log_name(conn)
+    _reject(conn, name, _insert_artist(conn, "???", BAND))
+
+    _assert_links_automatically(conn, name, _hit_answer("!!!"))
+
+
+def test_stubs_with_no_name_yet_protect_nothing(conn: Conn) -> None:
+    """A rejected stub has no normalized name until enrichment names it, and neither has the
+    target: no name is no name they share."""
+    catalog = PgArtistRepository(conn)
+    name = _log_name(conn)
+    _reject(conn, name, catalog.create_stub(BAND).id)
+    catalog.create_stub(SOLO)
+
+    _assert_links_automatically(conn, name, _catalog_answer(SOLO))
+
+
+def test_a_suggestion_of_the_matchers_stays_one(conn: Conn) -> None:
+    """Below the auto-link score the answer was a suggestion before D7, on any name."""
+    rejected = _insert_artist(conn, "Alice Cooper", None)
+    _file(conn, "Alice Cooper", tag=OTHER)
+    name = _log_name(conn)
+    _reject(conn, name, rejected)
+    answer = MatcherAnswer(
+        proposed=NameState(MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, "from the matcher"),
+        suggestions=(
+            LinkTarget(
+                target=SOLO, tier=MatchTier.MUSICBRAINZ_API, score=80.0, mb_candidate=_hit()
+            ),
+        ),
+    )
+
+    plan = _service(conn).plan_answer(name.id, answer)
+
+    assert _writes(plan) == [(SOLO, LogNameLinkState.SUGGESTED)]
+    assert plan.state == NameState(
+        MatchStatus.NEEDS_REVIEW, ReasonCode.LINK_SUGGESTED, suggestion_detail([80])
+    )
 
 
 # --- S7: the local upsert -------------------------------------------------------------------------
