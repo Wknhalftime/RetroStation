@@ -8,11 +8,12 @@ name. ``scripts/name_stubs.py`` names every artist whose name still equals its M
 not enrichment has marked it enhanced, commits each, and queues nothing; enrichment names the
 later stubs as it runs.
 
-E1: when another artist already holds the name's normalized form, found by
-``get_by_normalized_name`` before the write, the stub keeps its normalized name NULL and a
-warning names it. E2: a stub MusicBrainz did not answer for stays a stub, the run returns, and
-the next run names it. E3: a 404 or a malformed MBID is recorded in ``enhancement_error`` once
-and never looked up again. E1 and E3 run through both the script and enrichment.
+E1, as phase 2a's S13 changed it (D2, AUD-R041): a stub takes the name's normalized form
+whoever holds it. A name-only holder, found by ``get_by_normalized_name``, stays as it is, and
+the name gets one ``different_acts`` suggestion. E2: a stub MusicBrainz did not answer for stays
+a stub, the run returns, and the next run names it. E3: a 404 or a malformed MBID is recorded in
+``enhancement_error`` once and never looked up again. E1 and E3 run through both the script and
+enrichment.
 
 MusicBrainz is ``FakeMbClient``; the catalog is PostgreSQL, read back on a second connection,
 so only what was committed counts.
@@ -30,7 +31,6 @@ from typing import Any
 import psycopg
 import pytest
 from psycopg.rows import DictRow, dict_row
-from structlog.testing import capture_logs
 
 from backend.db.repositories.artists import PgArtistRepository
 from backend.domain.catalog import Artist
@@ -222,13 +222,13 @@ def test_enrichment_names_a_stub(conn: Conn, reader: Conn) -> None:
     assert (after["name"], after["normalized_name"]) == ("Rush (band)", "rush band")
 
 
-def test_name_clash_keeps_normalized_null(
+def test_name_clash_takes_the_name(
     namer: Namer, conn: Conn, reader: Conn, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """E1: a name whose normalized form another artist holds (here a local artist, and the
-    first of two stubs MusicBrainz names alike) is taken, with the normalized name left NULL;
-    the holder is asked for by ``get_by_normalized_name`` first, a warning names the stub, and
-    the holder is untouched."""
+    """E1, phase 2a S13: a stub takes a normalized form another artist holds (here a local
+    artist, and the other of two stubs MusicBrainz names alike). The name-only holder is asked
+    for by ``get_by_normalized_name``, stays untouched, and the name gets one ``different_acts``
+    row. Two stubs named alike have no name-only holder, so they get none."""
     holder = PgArtistRepository(conn).upsert_local_artist("Metallica", "metallica")
     clash = _stub(conn, METALLICA)
     twins = {_stub(conn, NIRVANA_US): NIRVANA_US, _stub(conn, NIRVANA_UK): NIRVANA_UK}
@@ -243,21 +243,28 @@ def test_name_clash_keeps_normalized_null(
 
     monkeypatch.setattr(PgArtistRepository, "get_by_normalized_name", _asking)
 
-    with capture_logs() as events:
-        namer(conn, FakeMbClient(artists=MB))
+    namer(conn, FakeMbClient(artists=MB))
 
-    assert _row(reader, clash) == {**_named(METALLICA), "normalized_name": None}
+    assert _row(reader, clash) == _named(METALLICA)
     assert _row(reader, holder) == holder_before
     rows = {stub_id: _row(reader, stub_id) for stub_id in twins}
-    assert sorted(row["normalized_name"] or "" for row in rows.values()) == ["", "nirvana"]
+    assert [row["normalized_name"] for row in rows.values()] == ["nirvana", "nirvana"]
     for stub_id, mbid in twins.items():
         assert rows[stub_id] == {
             **_named(mbid),
             "normalized_name": rows[stub_id]["normalized_name"],
         }
-    (second,) = [stub_id for stub_id, row in rows.items() if row["normalized_name"] is None]
-    warned = {e.get("artist_id") for e in events if e["log_level"] in ("warning", "error")}
-    assert {clash, second} <= warned
+    suggestions = reader.execute(
+        "SELECT normalized_name, reason, state, candidates FROM library_suggestions"
+    ).fetchall()
+    assert [dict(row) for row in suggestions] == [
+        {
+            "normalized_name": "metallica",
+            "reason": "different_acts",
+            "state": "open",
+            "candidates": [METALLICA],
+        }
+    ]
     assert {"metallica", "nirvana"} <= set(asked)
 
 

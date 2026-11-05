@@ -207,7 +207,7 @@ CHECK_FILES: dict[str, list[tuple[str, str]]] = {
         ("tests/scripts/test_link_harness_library.py", "6"),
     ],
     "AUD-R042": [
-        ("tests/integration/test_shared_mb_limiter_pg.py", "2a"),
+        ("tests/services/test_mb_clock.py", "2a"),
         ("tests/integration/test_mb_cache_logged_pg.py", "4.1"),
         ("tests/tasks/test_cache_fill.py", "4.1"),
     ],
