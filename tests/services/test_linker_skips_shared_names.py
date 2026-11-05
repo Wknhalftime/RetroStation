@@ -68,10 +68,21 @@ def test_both_named_as_the_artist_stays_ambiguous() -> None:
 
 def test_an_mbid_past_the_lookup_cap_still_makes_the_name_shared() -> None:
     """Only three MBIDs are looked up, and all four count."""
-    mb = FakeMbClient(artists={_mbid(n): _answer(n, f"Act {n}") for n in (2, 3, 4)})
-    mb.artists[_mbid(1)] = _answer(1, "Prodigy")
+    answers = {_mbid(n): _answer(n, f"Act {n}") for n in (2, 3, 4)}
+    mb = FakeMbClient(artists={**answers, _mbid(1): _answer(1, "Prodigy")})
 
     assert _decide("Prodigy", mb, _tags(*[_mbid(n) for n in (1, 2, 3, 4)])) == AMBIGUOUS
+    assert mb.calls == _lookups(1, 2, 3)
+
+
+def test_the_single_values_count_though_none_of_them_is_looked_up() -> None:
+    """A joined value's members fill the three lookups, and one names the artist. The name still
+    holds the two single values, so the decision is ambiguous."""
+    answers = {_mbid(n): _answer(n, f"Act {n}") for n in (2, 3)}
+    mb = FakeMbClient(artists={**answers, _mbid(1): _answer(1, "Prodigy")})
+    joined = f"{_mbid(1)}, {_mbid(2)}, {_mbid(3)}"
+
+    assert _decide("Prodigy", mb, _tags(joined, _mbid(4), _mbid(5))) == AMBIGUOUS
     assert mb.calls == _lookups(1, 2, 3)
 
 

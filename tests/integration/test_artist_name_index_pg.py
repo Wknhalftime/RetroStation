@@ -1,5 +1,5 @@
-"""Artist names, phase 2a PR 1 (SPEC S5, S6, S7, S13, S14's names half; C41, M18, M33, D2, D5, D6;
-AUD-R041, AUD-R072), on PostgreSQL with real scans.
+"""Artist names, phase 2a PR 1 (SPEC S5, S6, S7, S13, S14's names half, S9 on the real tables; C41,
+M18, M33, D2, D5, D6; AUD-R041, AUD-R072), on PostgreSQL with real scans.
 
 S5: names are unique only without an MBID. 0047 makes ``idx_artists_norm_name`` partial, adds a
 plain index for the readers of a name, and creates ``library_suggestions``.
@@ -70,13 +70,7 @@ pytestmark = pytest.mark.integration
 
 type Conn = psycopg.Connection[DictRow]
 
-_MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "backend"
-    / "db"
-    / "migrations"
-    / "0047_artist_name_index.sql"
-)
+_MIGRATIONS = Path(__file__).resolve().parents[2] / "backend" / "db" / "migrations"
 
 BAND = "4d7928cd-7ed2-4282-8c29-c0c9f966f1bd"
 SINGER = "ee58c59f-8e7f-4430-b8ca-236c4d3745ae"
@@ -128,7 +122,7 @@ def _file(
     artist_name: str,
     *,
     tag: str | None = None,
-    title: str = "Some Song",
+    title: str | None = "Some Song",
     present: bool = True,
 ) -> None:
     """A ``library_files`` row with no work, for the rules a real tag can't reach."""
@@ -215,11 +209,19 @@ def _insert_artist(conn: Conn, name: str, mbid: str | None) -> str:
 def test_the_schema_after_0047(conn: Conn) -> None:
     """One partial unique index for name-only artists, and one plain index, which ``works.py``'s
     candidate join and S7's count need because a partial index can't serve them. The swap sets
-    a lock timeout (test_migration_lint.py) and analyzes the table."""
+    its lock timeout first and analyzes the table (C45)."""
     applied = conn.execute(
-        "SELECT 1 FROM schema_migrations WHERE version = '0047_artist_name_index'"
+        "SELECT 1 FROM schema_migrations WHERE version LIKE '0047\\_%'"
     ).fetchone()
     assert applied is not None
+    [migration] = _MIGRATIONS.glob("0047_*.sql")
+    statements = [
+        line
+        for line in migration.read_text(encoding="utf-8").upper().splitlines()
+        if not line.lstrip().startswith("--")
+    ]
+    assert statements[0].startswith("SET LOCAL LOCK_TIMEOUT")
+    assert any(line.startswith("ANALYZE ARTISTS") for line in statements)
     rows = conn.execute(
         "SELECT indexdef FROM pg_indexes WHERE tablename = 'artists'"
         " AND indexdef LIKE '%(normalized_name)%'"
@@ -230,7 +232,6 @@ def test_the_schema_after_0047(conn: Conn) -> None:
     assert "idx_artists_norm_name" in unique
     assert unique.endswith("WHERE (mbid IS NULL)")
     assert "WHERE" not in plain
-    assert "ANALYZE artists" in _MIGRATION.read_text(encoding="utf-8")
 
 
 def test_names_are_unique_only_without_an_mbid(conn: Conn) -> None:
@@ -246,7 +247,7 @@ def test_names_are_unique_only_without_an_mbid(conn: Conn) -> None:
         _insert_artist(conn, "Alice Cooper", BAND)
 
 
-def test_the_local_upsert_arbitrates_on_the_partial_index(conn: Conn) -> None:
+def test_the_local_upsert_finds_its_own_artist(conn: Conn) -> None:
     repo = PgArtistRepository(conn)
 
     first = repo.upsert_local_artist("Alice Cooper", ALICE)
@@ -308,6 +309,32 @@ def test_two_alice_coopers_stay_two(conn: Conn) -> None:
     assert [mbid for mbid, _, _ in _artists(conn)] == [None, BAND, SINGER]
 
 
+def test_a_writer_that_gets_there_first_is_returned(
+    conn: Conn, reader: Conn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S5: ``INSERT ... ON CONFLICT (mbid) DO NOTHING``, then the artist that holds it. Another
+    connection commits the same MBID after this upsert has looked for it."""
+    won: list[str] = []
+
+    def another_writer_wins(_self: PgArtistRepository, _name: str) -> set[str]:
+        won.append(_insert_artist(reader, "Alice Cooper", BAND))
+        return {OTHER}
+
+    monkeypatch.setattr(PgArtistRepository, "name_mbids", another_writer_wins)
+
+    assert _upsert(conn, BAND) == won[0]
+
+
+def test_no_tag_promotes_though_another_mbid_artist_holds_the_name(conn: Conn) -> None:
+    """S6 and D5 as written: only the name's MBIDs decide, and an artist of the name is no tag.
+    So the name-only artist beside an MBID artist takes the hit's MBID."""
+    name_only = _insert_artist(conn, "Alice Cooper", None)
+    _insert_artist(conn, "Alice Cooper", BAND)
+
+    assert _upsert(conn, SINGER) == name_only
+    assert [mbid for mbid, _, _ in _artists(conn)] == [BAND, SINGER]
+
+
 def test_the_names_mbids_are_the_single_values_of_present_files(conn: Conn) -> None:
     """S6's reading, the count behind M33's 17: lowercased and well-formed. A joined value, a
     placeholder, a malformed value, a missing file and an untagged file don't count."""
@@ -324,10 +351,18 @@ def test_the_names_mbids_are_the_single_values_of_present_files(conn: Conn) -> N
     assert PgArtistRepository(conn).name_mbids("nobody") == set()
 
 
-def test_resolve_reads_ahead_as_the_upsert_will(conn: Conn) -> None:
+@pytest.mark.parametrize(
+    ("tags", "promotes"),
+    [((), True), ((SOLO,), True), ((OTHER,), False), ((SOLO, OTHER), False)],
+    ids=["no tags", "only this MBID", "another MBID", "several"],
+)
+def test_resolve_reads_ahead_as_the_upsert_will(
+    conn: Conn, tags: tuple[str, ...], promotes: bool
+) -> None:
     """A MusicBrainz hit for a name-only artist's name, with the pair rejected. While the upsert
-    would promote that artist the pair is refused. Once the name's MBIDs say the upsert will
-    insert, the hit is a new artist and no rejected pair (S6)."""
+    would promote that artist the pair is refused. When the name's MBIDs say the upsert will
+    insert, the hit is a new artist and no rejected pair (S6). Then the upsert does what was
+    read."""
     catalog = PgArtistRepository(conn)
     holder = catalog.upsert_local_artist("Ozzy Osbourne", "ozzy osbourne")
     names = RepositoryFactory(conn).broadcast_artists
@@ -356,13 +391,11 @@ def test_resolve_reads_ahead_as_the_upsert_will(conn: Conn) -> None:
         ),
     )
 
-    assert set(service.rejected_in(name.id, answer)) == {SOLO}  # no tags: promotes (D5)
+    for tag in tags:
+        _file(conn, "Ozzy Osbourne", tag=tag)
 
-    _file(conn, "Ozzy Osbourne", tag=SOLO)
-    assert set(service.rejected_in(name.id, answer)) == {SOLO}  # only this MBID: promotes
-
-    _file(conn, "Ozzy Osbourne", tag=OTHER)
-    assert service.rejected_in(name.id, answer) == {}  # several: inserts
+    assert set(service.rejected_in(name.id, answer)) == ({SOLO} if promotes else set())
+    assert (_upsert(conn, SOLO, "Ozzy Osbourne") == holder) is promotes
 
 
 # --- S7: the local upsert -------------------------------------------------------------------------
@@ -375,17 +408,31 @@ def _alice_tags(conn: Conn, *mbids: str) -> None:
 
 @pytest.mark.parametrize(
     "tags",
-    [(), (BAND,), (OTHER,)],
-    ids=["no tags", "its own MBID", "another MBID"],
+    [(), (BAND,), (OTHER,), (BAND, f"{BAND}, {SINGER}", UNKNOWN, BAND.upper())],
+    ids=["no tags", "its own MBID", "another MBID", "S6's reading of the tags"],
 )
 def test_one_artist_on_a_name_holding_at_most_one_mbid_takes_the_file(
     conn: Conn, tags: tuple[str, ...]
 ) -> None:
     held = _insert_artist(conn, "Alice Cooper", BAND)
     _alice_tags(conn, *tags)
+    _file(conn, "Alice Cooper", tag=SINGER, present=False)
 
     assert PgArtistRepository(conn).upsert_local_artist("Alice Cooper", ALICE) == held
     assert [mbid for mbid, _, _ in _artists(conn)] == [BAND]
+
+
+@pytest.mark.parametrize("tags", [(), (BAND,)], ids=["no tags", "its MBID"])
+def test_a_name_only_artist_beside_an_mbid_artist_takes_the_file(
+    conn: Conn, tags: tuple[str, ...]
+) -> None:
+    """Two artists of the name, as S13's holder and named stub are, count as several whatever
+    the tags say, and an MBID-only count would put the file on the stub."""
+    name_only = _insert_artist(conn, "Alice Cooper", None)
+    _insert_artist(conn, "Alice Cooper", BAND)
+    _alice_tags(conn, *tags)
+
+    assert PgArtistRepository(conn).upsert_local_artist("Alice Cooper", ALICE) == name_only
 
 
 @pytest.mark.parametrize(
@@ -416,6 +463,7 @@ def test_several_go_to_the_single_name_only_artist_created_if_absent(
 
 
 def test_a_name_only_artist_is_kept_on_a_name_holding_several(conn: Conn) -> None:
+    """S5: the upsert's ``ON CONFLICT`` meets the partial index here, and finds this artist."""
     name_only = _insert_artist(conn, "Alice Cooper", None)
     _alice_tags(conn, BAND, SINGER)
 
@@ -479,6 +527,34 @@ def test_the_result_does_not_depend_on_which_file_the_scan_reaches_first(
     ]
 
 
+@pytest.mark.parametrize(
+    "names",
+    [("a-untagged.mp3", "z-singer.mp3"), ("z-untagged.mp3", "a-singer.mp3")],
+    ids=["untagged first", "untagged last"],
+)
+def test_after_a_promotion_the_new_files_go_name_only_in_either_order(
+    conn: Conn, tmp_path: Path, names: tuple[str, str]
+) -> None:
+    """An upsert promoted the name while it held one MBID. Once a scan brings a second, neither
+    new file joins the promoted artist, whichever comes first."""
+    root = tmp_path / "library"
+    tagged(root / "m-band.mp3", "Alice Cooper", "School's Out", BAND)
+    full_scan(conn, root)
+    _upsert(conn, BAND)
+    conn.commit()
+    untagged, with_singer = names
+    tagged(root / untagged, "Alice Cooper", "Elected")
+    tagged(root / with_singer, "Alice Cooper", "Poison", SINGER)
+
+    full_scan(conn, root)
+
+    assert _artists(conn) == [
+        (None, "local", 2),
+        (BAND, "musicbrainz", 1),
+        (SINGER, "musicbrainz", 0),
+    ]
+
+
 # --- S13: a stub MusicBrainz names ----------------------------------------------------------------
 
 
@@ -503,19 +579,25 @@ def _named_row(conn: Conn, artist_id: str) -> tuple[str, str | None]:
 
 def test_stub_takes_a_held_name(conn: Conn) -> None:
     """D2: both stay, each with the name. The name gets one ``different_acts`` row, which a
-    second stub of the name joins. The holder is untouched and no link moves."""
+    second stub of the name joins. The holder is untouched, no link moves whichever artist it
+    points at, and nothing warns: two acts may share a name."""
     repo = PgArtistRepository(conn)
     holder = repo.upsert_local_artist("Metallica", "metallica")
     log_name = RepositoryFactory(conn).broadcast_artists.upsert(
         BroadcastArtist(id=uuid4(), original_name="METALLICA", normalized_name="metallica")
     )
     seed_pg_link(conn, log_name.id, holder, origin=LogNameLinkOrigin.MANUAL)
+    repo.create_stub(BAND)
+    seed_pg_link(conn, log_name.id, BAND, origin=LogNameLinkOrigin.AUTOMATIC)
     before = repo.get_by_id(holder)
     links_before = PgLogNameLinkRepository(conn).list_by_name(log_name.id)
+    assert len(links_before) == 2
 
-    first = _name_a_stub(conn, BAND, "Metallica")
-    second = _name_a_stub(conn, SINGER, "METALLICA")
+    with capture_logs() as events:
+        first = _name_a_stub(conn, BAND, "Metallica")
+        second = _name_a_stub(conn, SINGER, "METALLICA")
 
+    assert [e for e in events if e["log_level"] in ("warning", "error")] == []
     assert _named_row(conn, first) == ("Metallica", "metallica")
     assert _named_row(conn, second) == ("METALLICA", "metallica")
     assert repo.get_by_id(holder) == before
@@ -559,16 +641,18 @@ def test_shared_name_makes_each_artist(conn: Conn, tmp_path: Path) -> None:
     works stay on the name-only artist (until 3b). One row holds the MBIDs and the titles files
     under two or more of them share, compared by ``normalize_title``."""
     root = tmp_path / "library"
-    tagged(root / "1.mp3", "Alice Cooper", "School's Out", BAND)
-    tagged(root / "2.mp3", "Alice Cooper", "Under My Wheels", BAND)
-    tagged(root / "3.mp3", "ALICE COOPER", "Elected", BAND)
-    tagged(root / "4.mp3", "ALICE COOPER", "UNDER MY WHEELS", SINGER)
-    tagged(root / "5.mp3", "Alice Cooper", "Hey Stoopid")
+    tagged(root / "1.mp3", "ALICE COOPER", "Elected", BAND)
+    tagged(root / "2.mp3", "Alice Cooper", "School's Out", BAND)
+    tagged(root / "3.mp3", "Alice Cooper", "Under My Wheels", BAND)
+    tagged(root / "4.mp3", "Alice Cooper", "Poison", SINGER)
+    tagged(root / "5.mp3", "ALICE COOPER", "UNDER MY WHEELS", SINGER)
+    tagged(root / "6.mp3", "ALICE COOPER", "Bed Of Nails", SINGER)
+    tagged(root / "7.mp3", "Alice Cooper", "Hey Stoopid")
 
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 3),
+        (None, "local", 6),
         (BAND, "musicbrainz", 0),
         (SINGER, "musicbrainz", 0),
     ]
@@ -582,6 +666,41 @@ def test_shared_name_makes_each_artist(conn: Conn, tmp_path: Path) -> None:
     assert sorted(row["candidates"]) == sorted([BAND, SINGER])
     titles = row["evidence"]["shared_titles"]
     assert [normalize_title(title) for title in titles] == ["under my wheels"]
+
+
+def test_only_the_real_mbids_of_a_shared_name_get_an_artist(conn: Conn) -> None:
+    """S6's reading decides what gets an artist and what the row lists, not only whether a name
+    is shared: no artist for a placeholder (C7), a second case of an MBID, a joined value or a
+    missing file. A title is shared only between real MBIDs, and a file with no title holds
+    none."""
+    _file(conn, "Alice Cooper", tag=BAND, title="Poison")
+    _file(conn, "Alice Cooper", tag=BAND.upper(), title="Poison")
+    _file(conn, "Alice Cooper", tag=SINGER, title="Elected")
+    _file(conn, "Alice Cooper", tag=SINGER, title=None)
+    _file(conn, "Alice Cooper", tag=UNKNOWN, title="Elected")
+    _file(conn, "Alice Cooper", tag=f"{THIRD}, {OTHER}", title="Elected")
+    _file(conn, "Alice Cooper", tag=SOLO, title="Elected", present=False)
+    conn.commit()
+
+    sweep_artist_identities(conn, RepositoryFactory(conn))
+
+    assert [mbid for mbid, _, _ in _artists(conn)] == [BAND, SINGER]
+    for mbid in (UNKNOWN, THIRD, OTHER, SOLO, BAND.upper()):
+        assert PgArtistRepository(conn).get_by_mbid(mbid) is None
+    row = _shared_name_row(conn)
+    assert sorted(row["candidates"]) == sorted([BAND, SINGER])
+    assert row["evidence"]["shared_titles"] == []
+
+
+def test_files_with_no_title_share_nothing(conn: Conn) -> None:
+    """And they don't fail the sweep."""
+    _file(conn, "Alice Cooper", tag=BAND, title=None)
+    _file(conn, "Alice Cooper", tag=SINGER, title=None)
+    conn.commit()
+
+    sweep_artist_identities(conn, RepositoryFactory(conn))
+
+    assert _shared_name_row(conn)["evidence"]["shared_titles"] == []
 
 
 def test_tag_in_a_later_scan(conn: Conn, tmp_path: Path) -> None:
@@ -659,7 +778,7 @@ def test_fuzzy_join_still_writes_the_row(
 
 def test_repeat_keeps_state(conn: Conn, tmp_path: Path) -> None:
     """A name Lance kept separate never reopens: a repeat updates the candidates and the evidence
-    and leaves ``state`` alone (phase 5's E5). It stays one row."""
+    and leaves ``state`` alone (phase 5's E5), even for an MBID new since. It stays one row."""
     root = tmp_path / "library"
     tagged(root / "band.mp3", "Alice Cooper", "School's Out", BAND)
     tagged(root / "singer.mp3", "Alice Cooper", "Poison", SINGER)
@@ -729,13 +848,14 @@ def test_a_known_mbid_is_left_as_it_is(conn: Conn, tmp_path: Path) -> None:
 
 
 def test_a_later_mbid_leaves_a_promoted_artist_its_works(conn: Conn, tmp_path: Path) -> None:
-    """The linker promoted the name while it held one MBID. A second MBID gets its own artist
+    """An upsert promoted the name while it held one MBID. A second MBID gets its own artist
     beside it, the promoted artist keeps its works, and the new file goes name-only (S7)."""
     root = tmp_path / "library"
     tagged(root / "first.mp3", "Alice Cooper", "School's Out", BAND)
     full_scan(conn, root)
-    assert _upsert(conn, BAND) == _works_artist(conn, "first.mp3")
+    promoted = _upsert(conn, BAND)
     conn.commit()
+    assert _artist_of_work(conn, _works_by_file(conn)["first.mp3"]) == promoted
 
     tagged(root / "later.mp3", "Alice Cooper", "Poison", SINGER)
     full_scan(conn, root)
@@ -745,10 +865,6 @@ def test_a_later_mbid_leaves_a_promoted_artist_its_works(conn: Conn, tmp_path: P
         (BAND, "musicbrainz", 1),
         (SINGER, "musicbrainz", 0),
     ]
-
-
-def _works_artist(conn: Conn, file_name: str) -> str:
-    return _artist_of_work(conn, _works_by_file(conn)[file_name])
 
 
 def test_a_blank_name_is_skipped(conn: Conn) -> None:
@@ -808,28 +924,30 @@ def _two_shared_names(conn: Conn) -> None:
         _file(conn, name, tag=second)
 
 
+@pytest.mark.parametrize(
+    ("failing", "landing"), [("alpha", "beta"), ("beta", "alpha")], ids=["first", "last"]
+)
 def test_a_failure_on_one_name_leaves_the_others_and_the_next_sweep_retries(
-    conn: Conn, monkeypatch: pytest.MonkeyPatch
+    conn: Conn, reader: Conn, monkeypatch: pytest.MonkeyPatch, failing: str, landing: str
 ) -> None:
     """Each name is its own transaction: a ``psycopg.Error`` rolls back that name whole, is
-    logged, and the next name still lands. The next sweep writes it."""
+    logged with the name, and every other name lands, committed. The next sweep writes it."""
     _two_shared_names(conn)
     conn.commit()
     with monkeypatch.context() as patch:
-        _fail_the_row_of(patch, "alpha")
+        _fail_the_row_of(patch, failing)
         with capture_logs() as events:
             sweep_artist_identities(conn, RepositoryFactory(conn))
 
-    assert _artists(conn, "alpha") == []
-    assert [r["normalized_name"] for r in _suggestions(conn)] == ["beta"]
-    assert [mbid for mbid, _, _ in _artists(conn, "beta")] == sorted([OTHER, THIRD])
-    [failed] = [e for e in events if e["event"] == "artist_identity_sweep_name_failed"]
-    assert failed["normalized_name"] == "alpha"
+    assert _artists(reader, failing) == []
+    assert [r["normalized_name"] for r in _suggestions(reader)] == [landing]
+    assert len(_artists(reader, landing)) == 2
+    assert any(e["log_level"] == "warning" and e.get("normalized_name") == failing for e in events)
 
     sweep_artist_identities(conn, RepositoryFactory(conn))
 
-    assert [r["normalized_name"] for r in _suggestions(conn)] == ["alpha", "beta"]
-    assert [mbid for mbid, _, _ in _artists(conn, "alpha")] == [BAND, SINGER]
+    assert [r["normalized_name"] for r in _suggestions(reader)] == ["alpha", "beta"]
+    assert len(_artists(reader, failing)) == 2
 
 
 def test_what_is_pending_is_committed_first(
@@ -863,7 +981,7 @@ def test_a_failed_read_does_not_fail_the_scan(
         with capture_logs() as events:
             full_scan(conn, root)
 
-    assert "artist_identity_sweep_failed" in [e["event"] for e in events]
+    assert any(e["log_level"] == "warning" for e in events)
     assert _artists(conn) == [(None, "local", 2)]
 
     full_scan(conn, root)

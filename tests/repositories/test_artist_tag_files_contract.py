@@ -102,15 +102,24 @@ def test_the_values_come_back_raw(ports: _Ports) -> None:
     assert {group.tag_value for group in groups} == {BAND, joined}
 
 
-def test_a_missing_file_is_not_read(ports: _Ports) -> None:
+def test_a_missing_file_makes_no_name_shared(ports: _Ports) -> None:
     ports.add(_file(BAND))
     ports.add(_file(SINGER, present=False))
 
     assert ports.files.list_tag_groups() == []
 
 
-@pytest.mark.parametrize("blank", ["", "   "])
-def test_a_blank_name_is_skipped(ports: _Ports, blank: str) -> None:
+def test_a_missing_file_is_not_read_on_a_shared_name(ports: _Ports) -> None:
+    third = "0a000000-0000-4000-8000-0000000000c3"
+    ports.add(_file(BAND))
+    ports.add(_file(SINGER))
+    ports.add(_file(third, present=False))
+
+    assert {group.tag_value for group in ports.files.list_tag_groups()} == {BAND, SINGER}
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_a_blank_name_is_skipped(ports: _Ports, blank: str | None) -> None:
     ports.add(_file(BAND, normalized_name=blank))
     ports.add(_file(SINGER, normalized_name=blank))
 
