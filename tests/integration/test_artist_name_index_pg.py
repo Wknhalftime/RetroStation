@@ -964,6 +964,21 @@ def test_what_is_pending_is_committed_first(
     assert PgArtistRepository(reader).get_by_id(pending) is not None
 
 
+def _refused_read(_self: PgArtistTagFilesRepository) -> list[Any]:
+    raise psycopg.OperationalError("the read was refused")
+
+
+def test_what_is_pending_survives_a_failed_read(
+    conn: Conn, reader: Conn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pending = PgArtistRepository(conn).upsert_local_artist("Pending", "pending")  # not committed
+    monkeypatch.setattr(PgArtistTagFilesRepository, "list_tag_groups", _refused_read)
+
+    sweep_artist_identities(conn, RepositoryFactory(conn))
+
+    assert PgArtistRepository(reader).get_by_id(pending) is not None
+
+
 def test_a_failed_read_does_not_fail_the_scan(
     conn: Conn, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -973,11 +988,8 @@ def test_a_failed_read_does_not_fail_the_scan(
     tagged(root / "band.mp3", "Alice Cooper", "School's Out", BAND)
     tagged(root / "singer.mp3", "Alice Cooper", "Poison", SINGER)
 
-    def refused(_self: PgArtistTagFilesRepository) -> list[Any]:
-        raise psycopg.OperationalError("the read was refused")
-
     with monkeypatch.context() as patch:
-        patch.setattr(PgArtistTagFilesRepository, "list_tag_groups", refused)
+        patch.setattr(PgArtistTagFilesRepository, "list_tag_groups", _refused_read)
         with capture_logs() as events:
             full_scan(conn, root)
 
