@@ -18,6 +18,7 @@ not-an-artist list is never linked by hand.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -105,6 +106,20 @@ def _suggested(links: dict[str, LogNameLink]) -> int:
     return sum(1 for link in links.values() if link.state == LogNameLinkState.SUGGESTED)
 
 
+def _on_a_rejected_name(
+    target: LinkTarget, artist: Artist | None, rejected_names: dict[str, str]
+) -> bool:
+    """Whether *target* resolves to a different artist with the normalized name of one the log
+    name rejected (phase 2a D7): whichever row was rejected, the curator rejected that name. The
+    rejected artist itself is no such target: its pair stays refused, never suggested back."""
+    if artist is not None and artist.id in rejected_names:
+        return False
+    names: set[str | None] = {artist.normalized_name} if artist is not None else set()
+    if target.mb_candidate is not None:
+        names.add(normalize_artist(target.mb_candidate["name"]))
+    return not names.isdisjoint(rejected_names.values())
+
+
 class _NoLinkStore(LogNameLinkRepository):
     """Holds no link and keeps none: a matcher run built without a link store (tests only; the
     tasks always pass one, tests/services/test_matching_repos_wiring.py)."""
@@ -186,18 +201,22 @@ class LogNameLinkService:
 
     def _resolve(self, target: LinkTarget, state: LogNameLinkState) -> Artist | None:
         """The catalog artist the write will link, read before anything is written; None for a
-        new pair. A MusicBrainz hit of an automatic match is resolved as its upsert will: its
-        MBID's artist, else a local-only artist of its name, which the upsert gives the MBID. A
-        suggestion's hit never gives a local artist its MBID (``_upsert_suggested``), so only
-        its MBID's artist counts."""
+        new pair. A MusicBrainz hit of an automatic match is resolved as its upsert will (phase
+        2a S6): its MBID's artist, else the name-only artist of its name when the name's MBIDs
+        are none or only this one, which the upsert gives the MBID. A suggestion's hit never
+        gives a local artist its MBID (``_upsert_suggested``), so only its MBID's artist
+        counts."""
         hit = target.mb_candidate
         if hit is None:
             return self._known(target.target)
         found = self._catalog.get_by_mbid(target.target)
         if found is not None or state != LogNameLinkState.ACTIVE:
             return found
-        holder = self._catalog.get_by_normalized_name(normalize_artist(hit["name"]))
-        return holder if holder is not None and holder.mbid is None else None
+        normalized = normalize_artist(hit["name"])
+        holder = self._catalog.get_by_normalized_name(normalized)
+        if holder is None or not self._catalog.name_mbids(normalized) <= {hit["id"]}:
+            return None
+        return holder
 
     def rejected_in(self, broadcast_artist_id: UUID, answer: MatcherAnswer) -> dict[str, Artist]:
         """The rejected catalog artist each target of *answer* names, by target (SPEC 1b S4, 1c
@@ -219,7 +238,8 @@ class LogNameLinkService:
         C19), a suggestion never demotes or rewrites a pair the name holds, and a name holds at
         most MAX_ARTIST_SUGGESTIONS suggestions (AUD-R038). A special-purpose artist is never
         planned (C7, S5): when the answer named only such artists, the name waits in review
-        with NO_CANDIDATES, never matched with no link."""
+        with NO_CANDIDATES, never matched with no link. An automatic match on a name the log name
+        rejected is planned as a suggestion, so the name stays in review (phase 2a D7)."""
         refused = self.placeholders_in(answer)
         wanted = [(t, s) for t, s in _wanted(answer) if t.target not in refused]
         proposed = answer.proposed
@@ -232,8 +252,12 @@ class LogNameLinkService:
         held = {link.artist_id: link for link in self._links.list_by_name(broadcast_artist_id)}
         after: dict[str, LogNameLink] = dict(held)
         writes: list[tuple[LinkTarget, LogNameLinkState]] = []
+        rejected = self._rejected_names(held.values())
         for target, state in wanted:
             artist = self._resolve(target, state)
+            if state == LogNameLinkState.ACTIVE and _on_a_rejected_name(target, artist, rejected):
+                state = LogNameLinkState.SUGGESTED
+                artist = self._resolve(target, state)
             key = artist.id if artist is not None else f"new:{target.target}"
             pair = after.get(key)
             if pair is not None and (
@@ -255,6 +279,21 @@ class LogNameLinkService:
             writes.append((target, state))
         state_after = status_from_links(_PENDING, after.values(), proposed)
         return AnswerPlan(state=state_after, writes=tuple(writes))
+
+    def _rejected_names(self, links: Iterable[LogNameLink]) -> dict[str, str]:
+        """The normalized name of each artist the log name rejected, by artist id (D7). A stub
+        with no name yet has none to protect until enrichment names it. Reads the catalog only
+        for a rejected pair: most names hold none."""
+        rejected = (
+            self._catalog.get_by_id(link.artist_id)
+            for link in links
+            if link.state == LogNameLinkState.REJECTED
+        )
+        return {
+            artist.id: artist.normalized_name
+            for artist in rejected
+            if artist is not None and artist.normalized_name
+        }
 
     def write_plan(self, broadcast_artist_id: UUID, plan: AnswerPlan) -> bool:
         """Write a matcher answer's *plan*: the name's status first, guarded on the pending
@@ -297,10 +336,11 @@ class LogNameLinkService:
         """A suggested MusicBrainz hit's artist, upserted unless the upsert would give its MBID
         to a local-only artist of its name: an unconfirmed suggestion never changes a local
         artist (the suggestion then names a stub, and its evidence keeps the hit's name)."""
-        if self._catalog.get_by_mbid(hit["id"]) is None:
-            holder = self._catalog.get_by_normalized_name(normalize_artist(hit["name"]))
-            if holder is not None and holder.mbid is None:
-                return
+        if (
+            self._catalog.get_by_mbid(hit["id"]) is None
+            and self._catalog.get_by_normalized_name(normalize_artist(hit["name"])) is not None
+        ):
+            return
         self._upsert_musicbrainz_artist(hit)
 
     def _suggest(self, broadcast_artist_id: UUID, target: LinkTarget) -> None:

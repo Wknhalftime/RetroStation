@@ -52,6 +52,7 @@ from backend.services.missing_file_reconciliation_service import (
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
 from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
+from backend.tasks.artist_identity_tasks import sweep_artist_identities
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
@@ -422,6 +423,9 @@ def _run_scan(
         purge = purge_missing_after_scan(library_conn, repos, root, walk_saw_files=bool(seen_paths))
         if purge is not None:
             last_progress.update(purge_counts(purge))
+
+    # Last, so it reads the library as this scan left it (phase 2a S14).
+    sweep_artist_identities(library_conn, repos)
 
     return files_written, quarantine_written, last_progress
 

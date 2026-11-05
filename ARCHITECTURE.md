@@ -7,9 +7,10 @@ feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue edit
 feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Library works
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
 with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b, "Status from
-links and suggestions" and "Placeholders are never artists" 2026-11-03 with its phase 1c.
+links and suggestions" and "Placeholders are never artists" 2026-11-03 with its phase 1c,
+"Artist identity" 2026-11-05 with its phase 2a.
 Rulings cited
-here are in `audit/rulings.jsonl` (AUD-R015..R070, R100, R101 and R102 ACTIVE). If the code and this
+here are in `audit/rulings.jsonl` (AUD-R015..R072, R100, R101 and R102 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -100,9 +101,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - Enrichment names a stub (`_enhance_artist`, phase 1a PR 2, AUD-R059): its MBID is checked
   first (a malformed one, which Resolve lets through, is recorded in `enhancement_error` and
   never sent to MusicBrainz, not even by the lookup pre-pass), then it takes
-  MusicBrainz's name, sort name and disambiguation, and the normalized name unless another
-  artist already holds it (asked first; it stays NULL until 2a's C41). An answer with no name
-  is recorded the same way. An artist that is no stub keeps its name.
+  MusicBrainz's name, sort name and disambiguation, and the normalized name whoever holds it
+  (phase 2a, AUD-R072, "Artist identity" below). An answer with no name is recorded the same
+  way. An artist that is no stub keeps its name.
   `scripts/name_stubs.py --dsn` names, on a gate copy, every artist whose name is still its MBID
   and has no recorded error (0044's stubs and any made since), one transaction each, with every
   hand-off stubbed.
@@ -133,11 +134,12 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   first:** 0046's, then 0045's, then 0044's (phase 7's runbook); nothing enforces the order.
   0044's clears `LINK_REJECTED`, which the code before 1b cannot read, and leaves the name in
   review: at pending the old matcher could link again a rejected pair, since those go with the
-  links.
-- Known gap until 2a: a stub holds its MBID, so the local-artist linker records a local
-  artist tagged with that MBID as `duplicate` instead of linking it, and enrichment files a
-  work for it under the stub. The dev database had none of either at the copy (2026-11-01
-  gate copy).
+  links. These three stop at 0047, which has no script (phase 2a D4, "Artist identity" below).
+- Known gap: a stub holds its MBID, so the local-artist linker records a local artist tagged
+  with that MBID as `duplicate` instead of linking it, and enrichment files a work for it under
+  the stub. 2a doesn't close this: both artists stay, and the name gets a `different_acts`
+  suggestion when the stub is named. Merge, later in 2a, joins them. The dev database had none
+  of either at the copy (2026-11-01 gate copy).
 - The checks are `tests/test_log_name_links_single_writer.py`,
   `tests/integration/test_matches_song_only_pg.py` (0046 and its rollback),
   `tests/test_retired_names.py` (phase 1c's rows), `tests/services/test_tier1_link_read.py`,
@@ -282,6 +284,65 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   `tests/scripts/test_listed_names_not_song_matched.py`, and the panel's and page's cases in
   `ArtistPanel.test.tsx` and `MatcherBrowser.test.tsx`.
 
+## Artist identity: an artist per MBID, a name shared (phase 2a, C41, M33, AUD-R041, AUD-R072)
+
+Every MBID can be its own artist, so two acts called Alice Cooper stay two. Air play and the
+grouping of existing works don't change: works stay on the name-only artist until 3b.
+
+- **The index (C41, migration 0047):** `idx_artists_norm_name` is
+  `UNIQUE (normalized_name) WHERE mbid IS NULL`: one name-only artist per name, and any number
+  with an MBID. `idx_artists_normalized_name` is a plain index, for what a partial one can't
+  serve: `works.py`'s candidate join, which now sees the works of every artist of the name
+  (M18), and the local upsert's count. `get_by_normalized_name` answers for the name-only artist.
+- **The name's MBIDs (`name_mbids`):** the lowercased, well-formed, non-placeholder values of
+  present files whose `artist_mbid` holds exactly one MBID. A joined value, a placeholder, a
+  malformed value, a missing file and an untagged file don't count.
+- **`upsert_musicbrainz_artist` (S6):** found by MBID, that artist. Otherwise, when the name's
+  MBIDs are none or only this one (D5), the name-only artist takes the MBID in place. Otherwise
+  a new artist, `ON CONFLICT (mbid)`. It never returns another MBID's artist.
+- **`upsert_local_artist` (S7), for every file the scan groups:** none of the name, a new
+  name-only artist. One, on a name holding at most one MBID, that artist. Several, or a name
+  holding several MBIDs, the single name-only artist, created if absent, so the result doesn't
+  depend on which file the scan reaches first. `_fuzzy_match_work` runs first, and a fuzzy match
+  still joins its work.
+- **The local-artist linker (S9):** a decision that would be `linked` on a name holding several
+  MBIDs records `ambiguous`, and the name stays name-only. Its lookups run as before.
+- **Stubs (S13, D2):** a stub MusicBrainz names takes its normalized name whoever holds it. A
+  name-only holder stays as it is, the name gets one `different_acts` suggestion, and no link
+  moves. A symbol-only name normalizes to nothing and stays NULL.
+- **A log name's rejected name (D7):** `_resolve` reads ahead by S6's rule, so a match that
+  would promote a rejected artist stays refused (`LINK_REJECTED`). `plan_answer` turns an
+  automatic match to a different artist with the normalized name of an artist the log name
+  rejected, name-only or holding an MBID, into a suggestion, and the name stays in review. A
+  mapping rule's answer counts as automatic here. A rejected stub with no name yet protects
+  nothing until enrichment names it. `scripts/dry_run_matching.py` asks
+  `hold_back_refused_link`, never `plan_answer`, so it shows such a name as matched.
+- **The sweep (S14, D6, `tasks/artist_identity_tasks.py`):** each real MBID of a name holding
+  several gets an artist, with the spelling most of its files carry, and the name gets one
+  `shared_name` suggestion listing the MBIDs and the titles two or more of them share. Any other
+  single-MBID file gets none: the linker and enrichment promote as before. It reads
+  `library_files` (`ArtistTagFilesRepository`, one grouped read), because a file with a work is
+  never grouped again, and a fuzzy or shortcut join never reaches the upsert. It runs last in
+  `_run_scan` and in the watcher's scan, and as `artist_identity_sweep_task`, which the gate
+  runs. It commits what is pending, then each name alone: a `psycopg.Error` on one name is logged
+  and rolled back, and the next sweep retries it. A failed read is logged and the scan succeeds.
+  These artists list with 0 works until 3b, and the artist page's fallback shows their files.
+- **`library_suggestions` (C21, design 6.10; `LibrarySuggestionRepository`):** one row per name
+  and reason where no file is named. A repeat updates candidates and evidence, never `state`, so
+  a name the curator kept separate never reopens, and the same write again writes nothing. A
+  name that stops holding several keeps its row. Its page comes in phase 5; nothing merges
+  automatically (M33).
+- **Rollback (D4):** there is no script from 0047 on. The index can't go back while two artists
+  share a name, and the code before 2a fails on every scan without it (`ON CONFLICT
+  (normalized_name)` has no unique index), so the older scripts can't run past it. The rollback
+  is the dump (phase 7 S5).
+- The checks are `tests/integration/test_artist_name_index_pg.py`,
+  `tests/services/test_linker_skips_shared_names.py`,
+  `tests/repositories/test_artists_mbid_conflict.py`,
+  `tests/repositories/test_library_suggestions_contract.py`,
+  `tests/repositories/test_artist_tag_files_contract.py` and
+  `tests/tasks/test_enrichment_names_stubs.py`.
+
 ## Derived counts kept by triggers
 
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
@@ -407,6 +468,7 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a) | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names, the artist's own and its active log-name links' (AUD-R026, in part superseded by AUD-R036) |
+| `library_files.artist_mbid` of a name holding two or more real MBIDs, one with no artist or no `shared_name` row (phase 2a S14) | scan / watcher upsert | the artist identity sweep, last in a scan, in the scan's own task (no hand-off) |
 | no `stream_cues` row for the file's hash (`stream_cue_work.NEEDS_ANALYSIS`), or for a station liner's hash (LR4) | cue upserts | cue analysis (liners first) |
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration `0039_stream_cues_audio_silent` deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports; the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |

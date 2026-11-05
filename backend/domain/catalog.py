@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -71,6 +72,20 @@ class MusicBrainzId:
         if _MBID_PATTERN.fullmatch(raw) is None:
             return None
         return cls(raw)
+
+
+def real_mbid(tag_value: str) -> str | None:
+    """The lowercased MBID of a tag value holding exactly one well-formed, non-placeholder MBID
+    (phase 2a S6); None otherwise, so a joined value ("a, b") never counts."""
+    found = MusicBrainzId.parse(tag_value.strip().lower())
+    if found is None or found.value in SPECIAL_PURPOSE_MBIDS:
+        return None
+    return found.value
+
+
+def name_mbids_of(tag_values: Iterable[str]) -> set[str]:
+    """The MBIDs a name holds (phase 2a S6), given its present files' artist MBID tag values."""
+    return {mbid for mbid in map(real_mbid, tag_values) if mbid is not None}
 
 
 @dataclass

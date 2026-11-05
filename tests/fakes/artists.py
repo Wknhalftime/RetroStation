@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from backend.domain.catalog import Artist
+from backend.domain.catalog import Artist, name_mbids_of
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
@@ -12,6 +12,9 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         # Test observability: every upsert_musicbrainz_artist call is recorded
         # so orchestration tests can assert the SRP-relocated upsert path.
         self.musicbrainz_upserts: list[dict[str, str | None]] = []
+        # Phase 2a S6: this fake holds no files, so a test sets a name's artist MBID tag values
+        # here to reach a shared name. S6, S7 and S14's rules are proved on PostgreSQL.
+        self.file_mbids: dict[str, set[str]] = {}
 
     def upsert(self, artist: Artist) -> Artist:
         self._data[artist.id] = artist
@@ -53,10 +56,16 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         if artist := self._data.get(artist_id):
             artist.enhancement_error = error
 
+    def name_mbids(self, normalized_name: str) -> set[str]:
+        return name_mbids_of(self.file_mbids.get(normalized_name, set()))
+
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:
-        for artist in self._data.values():
-            if artist.normalized_name == normalized_name:
-                return artist.id
+        held = [a for a in self._data.values() if a.normalized_name == normalized_name]
+        if len(held) == 1 and len(self.name_mbids(normalized_name)) <= 1:
+            return held[0].id
+        name_only = next((a for a in held if a.mbid is None), None)
+        if name_only is not None:
+            return name_only.id
         artist_id = str(uuid4())
         self._data[artist_id] = Artist(
             id=artist_id,
@@ -89,19 +98,18 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         for artist in self._data.values():
             if artist.mbid == mbid:
                 return artist.id
-        # Check by normalized_name (promote local). As PgArtistRepository: a name another MBID
-        # holds is left alone, and that artist's id comes back.
-        for artist in self._data.values():
-            if artist.normalized_name == normalized_name:
-                if artist.mbid is not None and artist.mbid != mbid:
+        # As PgArtistRepository (phase 2a S6): the name's MBIDs are none or only this one, so the
+        # name-only artist takes it; otherwise a new artist, never another MBID's.
+        if self.name_mbids(normalized_name) <= {mbid}:
+            for artist in self._data.values():
+                if artist.normalized_name == normalized_name and artist.mbid is None:
+                    artist.mbid = mbid
+                    artist.origin = CatalogSource.MUSICBRAINZ
+                    artist.name = name
+                    artist.sort_name = sort_name
+                    artist.disambiguation = disambiguation
+                    artist.needs_enhancement = True
                     return artist.id
-                artist.mbid = mbid
-                artist.origin = CatalogSource.MUSICBRAINZ
-                artist.name = name
-                artist.sort_name = sort_name
-                artist.disambiguation = disambiguation
-                artist.needs_enhancement = True
-                return artist.id
         # Create new MB artist
         artist_id = mbid
         self._data[artist_id] = Artist(
@@ -117,7 +125,8 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         return artist_id
 
     def get_by_normalized_name(self, normalized_name: str) -> Artist | None:
+        # As PgArtistRepository (phase 2a S5): it answers for the name-only artist.
         for artist in self._data.values():
-            if artist.normalized_name == normalized_name:
+            if artist.normalized_name == normalized_name and artist.mbid is None:
                 return artist
         return None

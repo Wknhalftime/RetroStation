@@ -4,14 +4,11 @@ from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
-import structlog
 
-from backend.domain.catalog import Artist
+from backend.domain.catalog import Artist, name_mbids_of
 from backend.domain.enums import ArtistLinkOutcome, CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
-
-logger = structlog.get_logger(__name__)
 
 
 def artist_from_row(row: dict[str, Any]) -> Artist:
@@ -110,24 +107,44 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         )
 
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:
+        held = self._conn.execute(
+            "SELECT id FROM artists WHERE normalized_name = %s",
+            (normalized_name,),
+        ).fetchall()
+        if len(held) == 1 and len(self.name_mbids(normalized_name)) <= 1:
+            return cast(str, held[0]["id"])
+        return self._name_only_artist(name, normalized_name)
+
+    def _name_only_artist(self, name: str, normalized_name: str) -> str:
+        """The one name-only artist of the name (C41), created if absent."""
         row = self._conn.execute(
             """INSERT INTO artists
                    (id, name, sort_name, normalized_name,
                     origin, needs_enhancement)
                VALUES (%s, %s, %s, %s, 'local', FALSE)
-               ON CONFLICT (normalized_name) DO NOTHING
+               ON CONFLICT (normalized_name) WHERE mbid IS NULL DO NOTHING
                RETURNING id""",
             (str(uuid4()), name, name, normalized_name),
         ).fetchone()
         if row is not None:
             return cast(str, row["id"])
         row = self._conn.execute(
-            "SELECT id FROM artists WHERE normalized_name = %s",
+            "SELECT id FROM artists WHERE normalized_name = %s AND mbid IS NULL",
             (normalized_name,),
         ).fetchone()
         if row is None:
             raise RuntimeError(f"Artist not found after ON CONFLICT: {normalized_name}")
         return cast(str, row["id"])
+
+    def name_mbids(self, normalized_name: str) -> set[str]:
+        rows = self._conn.execute(
+            """SELECT DISTINCT artist_mbid FROM library_files
+               WHERE normalized_artist_name = %s
+                 AND file_status = 'present'
+                 AND artist_mbid IS NOT NULL""",
+            (normalized_name,),
+        ).fetchall()
+        return name_mbids_of(cast(str, row["artist_mbid"]) for row in rows)
 
     def upsert_musicbrainz_artist(
         self,
@@ -142,36 +159,36 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         if row is not None:
             return cast(str, row["id"])
 
-        # 2. normalized_name collision with a DIFFERENT MBID — do not overwrite.
-        existing = self._conn.execute(
-            "SELECT id, mbid FROM artists WHERE normalized_name = %s",
-            (normalized_name,),
-        ).fetchone()
-        if existing is not None and existing["mbid"] is not None and existing["mbid"] != mbid:
-            logger.warning(
-                "mb_artist_mbid_conflict",
-                normalized_name=normalized_name,
-                existing_mbid=existing["mbid"],
-                incoming_mbid=mbid,
-            )
-            return cast(str, existing["id"])
+        # 2. The name's MBIDs are none, or only this one (D5): the name-only artist takes it.
+        row = None
+        if self.name_mbids(normalized_name) <= {mbid}:
+            row = self._conn.execute(
+                """UPDATE artists SET
+                     mbid = %s,
+                     origin = 'musicbrainz',
+                     name = %s,
+                     sort_name = %s,
+                     disambiguation = %s,
+                     needs_enhancement = TRUE
+                   WHERE normalized_name = %s AND mbid IS NULL
+                   RETURNING id""",
+                (mbid, name, sort_name, disambiguation, normalized_name),
+            ).fetchone()
 
-        # 3. Safe upsert.
-        row = self._conn.execute(
-            """INSERT INTO artists
-                   (id, name, sort_name, normalized_name, mbid,
-                    origin, needs_enhancement, disambiguation)
-               VALUES (%s, %s, %s, %s, %s, 'musicbrainz', TRUE, %s)
-               ON CONFLICT (normalized_name) DO UPDATE SET
-                 mbid = EXCLUDED.mbid,
-                 origin = 'musicbrainz',
-                 name = EXCLUDED.name,
-                 sort_name = EXCLUDED.sort_name,
-                 disambiguation = EXCLUDED.disambiguation,
-                 needs_enhancement = TRUE
-               RETURNING id""",
-            (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
-        ).fetchone()
+        # 3. Otherwise a new artist, never another MBID's. A partial index can't arbitrate a row
+        # that has an MBID, so only the MBID's own index does: a writer that got there first wins.
+        if row is None:
+            row = self._conn.execute(
+                """INSERT INTO artists
+                       (id, name, sort_name, normalized_name, mbid,
+                        origin, needs_enhancement, disambiguation)
+                   VALUES (%s, %s, %s, %s, %s, 'musicbrainz', TRUE, %s)
+                   ON CONFLICT (mbid) DO NOTHING
+                   RETURNING id""",
+                (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
+            ).fetchone()
+        if row is None:
+            row = self._conn.execute("SELECT id FROM artists WHERE mbid = %s", (mbid,)).fetchone()
         if row is None:
             raise RuntimeError(f"Artist upsert_musicbrainz_artist failed: {mbid}")
         _maybe_mark_complete_on_upsert(self._conn, row["id"])
@@ -182,7 +199,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         normalized_name: str,
     ) -> Artist | None:
         row = self._conn.execute(
-            "SELECT * FROM artists WHERE normalized_name = %s",
+            "SELECT * FROM artists WHERE normalized_name = %s AND mbid IS NULL",
             (normalized_name,),
         ).fetchone()
         return self._row_to_model(row) if row else None
@@ -196,7 +213,7 @@ def _maybe_mark_complete_on_upsert(conn: psycopg.Connection[Any], artist_id: str
     echoes `name` is still a bare default and should go through MB lookup to
     pick up the real sort form (e.g., "Madonna" → "Ciccone, Madonna").
 
-    Scope: only called from the INSERT path in `upsert_musicbrainz_artist`.
+    Scope: only called from the promote and INSERT paths in `upsert_musicbrainz_artist`.
     Re-upserts of an already-known MBID short-circuit at the first SELECT
     and never reach this helper — the enhancement task handles those.
     """

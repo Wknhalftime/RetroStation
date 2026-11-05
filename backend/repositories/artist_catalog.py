@@ -31,8 +31,10 @@ class ArtistCatalogRepository(ABC):
 
     @abstractmethod
     def upsert_local_artist(self, name: str, normalized_name: str) -> str:
-        """Create local artist or return existing by normalized_name.
-        INSERT ON CONFLICT (normalized_name) DO NOTHING + retry-SELECT.
+        """The artist a file of this name groups under (phase 2a S7). None of the name: a new
+        name-only artist. One, on a name holding at most one MBID: that artist, with or without
+        an MBID. Several, or a name holding several MBIDs: the single name-only artist, created
+        if absent, so the result doesn't depend on which file the scan reaches first.
         Returns artist id.
         """
         ...
@@ -46,7 +48,9 @@ class ArtistCatalogRepository(ABC):
         normalized_name: str,
         disambiguation: str | None = None,
     ) -> str:
-        """Lookup by mbid or normalized_name, promote/create/reuse.
+        """The artist of this MBID (phase 2a S6): found by MBID, that artist. Otherwise, when the
+        name's MBIDs are none or only this one (``name_mbids``, D5), the name-only artist of the
+        name takes it in place; failing that, a new artist. It never returns another MBID's artist.
 
         The caller is responsible for computing ``normalized_name`` via
         ``backend.services.normalization.normalize_artist`` before calling
@@ -57,4 +61,14 @@ class ArtistCatalogRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_normalized_name(self, normalized_name: str) -> Artist | None: ...
+    def get_by_normalized_name(self, normalized_name: str) -> Artist | None:
+        """The name-only artist of this normalized name, if any (phase 2a S5): names are unique
+        only without an MBID (C41), so MBID artists of the name are not answered for here."""
+        ...
+
+    @abstractmethod
+    def name_mbids(self, normalized_name: str) -> set[str]:
+        """The MBIDs this normalized name holds (phase 2a S6, the count behind M33's 17): the
+        lowercased, well-formed, non-placeholder values of present files whose ``artist_mbid``
+        holds exactly one MBID."""
+        ...

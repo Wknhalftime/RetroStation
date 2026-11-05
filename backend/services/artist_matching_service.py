@@ -623,7 +623,10 @@ def hold_back_refused_link(
     Neither writes a link or a catalog upsert, or starts a cascade (only AUTO_REJECTED and
     DEFERRED_RETRY do). A suggestion of such an artist is dropped; when every suggestion is
     dropped, the result is held back the same way. Every other result is returned as it is.
-    The task and the gate's dry run both ask this, so a dry run decides what the task would.
+    The task and the gate's dry run both ask this, so a dry run decides what the task would,
+    with one exception: an automatic match on a name the log name rejected goes through here and
+    becomes a suggestion in ``plan_answer`` (phase 2a D7), which the dry run doesn't ask, so it
+    shows that name as matched.
     """
     if links is None or (result.status != MatchStatus.AUTO_MATCHED and not result.suggestions):
         return result
