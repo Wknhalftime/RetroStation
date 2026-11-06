@@ -33,7 +33,6 @@ from backend.services.library_scan_service import scan_folder_incrementally
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
-from backend.tasks.artist_identity_tasks import sweep_artist_identities
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
@@ -289,6 +288,8 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
         library_conn.commit()
 
         # Last, so it reads the library as this scan left it (phase 2a S14).
+        from backend.tasks.artist_identity_tasks import sweep_artist_identities
+
         sweep_artist_identities(library_conn, repos)
 
         # Mark completed

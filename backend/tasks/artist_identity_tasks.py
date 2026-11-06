@@ -18,11 +18,16 @@ from psycopg import pq
 
 from backend.config import get_settings
 from backend.db.sync_conn import connect_sync
+from backend.domain.system import StorageUnavailableError
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.shared_name_service import apply_shared_name, plan_shared_names
 from backend.tasks.huey_app import huey
 
 logger = structlog.get_logger()
+
+# A refused statement, or a dropped connection, which some adapters raise as their subdomain's
+# StorageUnavailableError and others leave as psycopg's.
+_DATABASE_FAILURES = (psycopg.Error, StorageUnavailableError)
 
 
 @dataclass(frozen=True)
@@ -40,18 +45,24 @@ def _commit_if_open(conn: psycopg.Connection[Any]) -> None:
         conn.commit()
 
 
+def _rollback_if_connected(conn: psycopg.Connection[Any]) -> None:
+    if not conn.closed:
+        conn.rollback()
+
+
 def sweep_artist_identities(
     conn: psycopg.Connection[Any], repos: RepositoryFactory
 ) -> ArtistIdentitySweep | None:
     """Commit what is pending, read the library, then write each name in its own transaction. A
-    ``psycopg.Error`` on one name is logged and rolled back, and the next sweep retries it. None
-    when the read itself failed, which is logged and costs the scan nothing."""
-    _commit_if_open(conn)
+    failure on one name is logged and rolled back, and the next sweep retries it. None when the
+    read itself failed. Either way it costs the scan nothing, a dropped connection included: the
+    scan's work is committed by now, and its progress and hand-offs don't need this one."""
     try:
+        _commit_if_open(conn)
         names = plan_shared_names(repos.artist_tag_files.list_tag_groups())
         _commit_if_open(conn)
-    except psycopg.Error:
-        conn.rollback()
+    except _DATABASE_FAILURES:
+        _rollback_if_connected(conn)
         logger.warning("artist_identity_sweep_read_failed", exc_info=True)
         return None
     artists_made = rows_written = names_failed = 0
@@ -59,8 +70,8 @@ def sweep_artist_identities(
         try:
             writes = apply_shared_name(shared, repos.artists, repos.library_suggestions)
             conn.commit()
-        except psycopg.Error as exc:
-            conn.rollback()
+        except _DATABASE_FAILURES as exc:
+            _rollback_if_connected(conn)
             names_failed += 1
             logger.warning(
                 "artist_identity_sweep_name_failed",

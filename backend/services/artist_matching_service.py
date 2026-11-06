@@ -228,8 +228,8 @@ class NormalizationStrategy:
         target = broadcast_artist.normalized_name
         # Exact pass 1 — MBID-bearing canonicals: target_id is the MBID so the identity tier's
         # MBID graph path works with no further changes. One artist links; several of the name
-        # (two acts both called Nirvana) are suggested (phase 1c S4, C35). The catalog leaves
-        # a second artist of a name without a normalized name, so the name itself is compared.
+        # (two acts both called Nirvana) are suggested (phase 1c S4, C35). A stub named before
+        # phase 2a may have no normalized name yet, so the name itself is compared.
         exact = [
             c.mbid
             for c in self._all_canonical

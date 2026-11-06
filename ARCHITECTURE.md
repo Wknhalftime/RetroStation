@@ -287,7 +287,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 ## Artist identity: an artist per MBID, a name shared (phase 2a, C41, M33, AUD-R041, AUD-R072)
 
 Every MBID can be its own artist, so two acts called Alice Cooper stay two. Air play and the
-grouping of existing works don't change: works stay on the name-only artist until 3b.
+grouping of existing works don't change: a work keeps its artist until 3b (`upsert_from_mb`
+returns the row it finds).
 
 - **The index (C41, migration 0047):** `idx_artists_norm_name` is
   `UNIQUE (normalized_name) WHERE mbid IS NULL`: one name-only artist per name, and any number
@@ -324,9 +325,11 @@ grouping of existing works don't change: works stay on the name-only artist unti
   `library_files` (`ArtistTagFilesRepository`, one grouped read), because a file with a work is
   never grouped again, and a fuzzy or shortcut join never reaches the upsert. It runs last in
   `_run_scan` and in the watcher's scan, and as `artist_identity_sweep_task`, which the gate
-  runs. It commits what is pending, then each name alone: a `psycopg.Error` on one name is logged
-  and rolled back, and the next sweep retries it. A failed read is logged and the scan succeeds.
-  These artists list with 0 works until 3b, and the artist page's fallback shows their files.
+  runs. It commits what is pending, then each name alone: a failure on one name is logged and
+  rolled back, and the next sweep retries it. A failed read is logged and the scan succeeds, and
+  so does a scan whose connection drops here, since its work is already committed. The sweep moves
+  no work, so a new artist lists with 0 works until enrichment files a new MusicBrainz work under
+  it (`upsert_from_mb`), and the artist page's fallback shows its files.
 - **`library_suggestions` (C21, design 6.10; `LibrarySuggestionRepository`):** one row per name
   and reason where no file is named. A repeat updates candidates and evidence, never `state`, so
   a name the curator kept separate never reopens, and the same write again writes nothing. A
@@ -337,6 +340,8 @@ grouping of existing works don't change: works stay on the name-only artist unti
   (normalized_name)` has no unique index), so the older scripts can't run past it. The rollback
   is the dump (phase 7 S5).
 - The checks are `tests/integration/test_artist_name_index_pg.py`,
+  `tests/integration/test_artist_identity_sweep_lost_connection_pg.py`,
+  `tests/tasks/test_artist_identity_task_import.py`,
   `tests/services/test_linker_skips_shared_names.py`,
   `tests/repositories/test_artists_mbid_conflict.py`,
   `tests/repositories/test_library_suggestions_contract.py`,

@@ -3,7 +3,7 @@ D6; C21, M33).
 
 Every MBID of a name holding several (S6's reading) gets an artist, and the name gets one
 ``shared_name`` suggestion listing the MBIDs and the titles two or more of them share. Works can't
-give those titles, because every work stays on the name-only artist until 3b. Nothing merges
+give those titles, because grouping keeps a name's works on one artist until 3b. Nothing merges
 automatically: the curator decides, on the page phase 5 adds. Writes in the caller's transaction
 and commits nothing (C75).
 """
