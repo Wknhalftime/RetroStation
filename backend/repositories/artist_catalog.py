@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 
 from backend.domain.catalog import Artist
 from backend.domain.enums import ArtistNameSource
@@ -78,6 +79,12 @@ class ArtistCatalogRepository(ABC):
         """As ``upsert_musicbrainz_artist``, for a credit after the first (phase 2a S8, D5): the
         name-only artist takes the MBID only when the name's MBIDs are exactly this one. With none,
         a new artist goes beside it, because a further credit is new and no tag agrees."""
+        ...
+
+    @abstractmethod
+    def artist_ids_by_mbid(self, mbids: Collection[str]) -> dict[str, str]:
+        """The artist id of each of these MBIDs an artist holds, unnamed stubs included (phase 2a
+        S10, S14): one read, where a caller would otherwise ask per MBID."""
         ...
 
     @abstractmethod

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import psycopg
@@ -25,6 +26,11 @@ def credit_json(credit: Sequence[CreditEntry] | None) -> Jsonb | None:
     return Jsonb([{"name": e.name, "mbid": e.mbid, "join": e.join} for e in credit])
 
 
+def _tags_of(raw: dict[str, Any] | str) -> dict[str, Any]:
+    """As ``PgLibraryFileRepository`` reads it: a row can hold its JSON as a string."""
+    return cast(dict[str, Any], json.loads(raw)) if isinstance(raw, str) else raw
+
+
 @translate_lost_connection(LibraryStorageError)
 class PgArtistCreditFilesRepository(ArtistCreditFilesRepository):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
@@ -46,7 +52,7 @@ class PgArtistCreditFilesRepository(ArtistCreditFilesRepository):
                 id=row["id"],
                 file_path=row["file_path"],
                 format=row["format"],
-                raw_metadata=row["raw_metadata"],
+                raw_metadata=_tags_of(row["raw_metadata"]),
                 recording_mbid=row["recording_mbid"],
             )
             for row in rows

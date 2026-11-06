@@ -331,9 +331,9 @@ returns the row it finds).
   A single MBID takes the whole `artist` text. On a file holding several, `artists[i]` goes with
   `mbid[i]`, a value holding no MBID keeps its place, and joining words come from locating each
   name, in order, in the printed `artist`. When the counts differ, the names stay null.
-- **A scan can't name what its tags can't (D9):** it does no lookup, and nothing writes those null
-  names later. Each artist still gets its name, because the sweep stubs the MBID and enrichment
-  names the stub. The file's `credit` stays null until the file changes and its tags can pair, and
+- **A scan can't name what its tags can't (D9):** it does no lookup, and once the backfill has
+  finished, nothing writes those null names. Each artist still gets its name, because the sweep
+  stubs the MBID and enrichment names the stub. The file's `credit` stays null until the file changes and its tags can pair, and
   3a reads a null name from the artist by MBID.
 - **The backfill (S3, E3, E6, `tasks/artist_credit_backfill_tasks.py`):** a run-once task that fills
   both columns of every row with `raw_metadata`, whatever its status. Vorbis values come from
@@ -343,17 +343,20 @@ returns the row it finds).
   `lookup_recordings`, and when MusicBrainz now credits someone else the tags stand (M1). It then
   fills S13's stubs and each artist's own name, runs the sweep, adds aliases and tag spellings, and
   sets the marker `library.artist_credits_backfilled`, after which it does nothing. While a lookup
-  fails, its file stays unwritten, and the sweep and the marker wait (AUD-R028). **It must run before
-  the first full scan after 0048:** that scan's sweep would stub the MBIDs whose names the backfill
-  would have found, so they couldn't reach S6's promotion.
+  fails, its file stays unwritten, and the sweep and the marker wait (AUD-R028, extended by
+  AUD-R042). That run still ends COMPLETED, with `done: false` in its result, and nothing queues
+  the next one. **It must run before scans resume after 0048:** a scan's sweep would stub the MBIDs
+  whose names the backfill would have found, so they couldn't reach S6's promotion. A full scan does
+  that to all of them, and a watcher batch to those of the files it re-reads.
 - **The sweep (S14, D6, D10, `tasks/artist_identity_tasks.py`):** each real MBID of a name holding
   several gets an artist, with the spelling most of its files carry, and the name gets one
   `shared_name` suggestion listing the MBIDs and the titles two or more of them share. Each real
   MBID of a file holding several gets one too, named only by files holding several
   (`ArtistCreditFilesRepository`), through S6, or as a stub when those files don't name it. Any other
   single-MBID file gets none: the linker and enrichment promote as before. It reads
-  `library_files` (`ArtistTagFilesRepository`, one grouped read), because a file with a work is
-  never grouped again, and a fuzzy or shortcut join never reaches the upsert. It runs last in
+  `library_files` (one grouped read per half, then one read of which of those MBIDs have an artist),
+  because a file with a work is never grouped again, and a fuzzy or shortcut join never reaches the
+  upsert. It runs last in
   `_run_scan` and in the watcher's scan, once from the backfill, and as
   `artist_identity_sweep_task`, which the gate can run. It commits what is pending, then each name
   and each file's MBID alone: a failure on one is logged and rolled back, and the next sweep retries
@@ -362,26 +365,28 @@ returns the row it finds).
   until enrichment files a new MusicBrainz work under it (`upsert_from_mb`), and the artist page's
   fallback shows its files.
 - **What D10 costs:** a single-MBID file never names an artist the files half makes, because that
-  would promote a name-only artist from tags alone and skip the linker's name check (AUD-R026). So
-  an MBID its multi-MBID files don't name is a stub, even when a name-only artist's own files carry
-  that MBID. Enrichment names the stub, S13's row says so, and the linker records `duplicate` until
-  Merge joins them.
+  would promote a name-only artist from tags alone and skip the linker's name check (AUD-R026, in
+  part superseded by AUD-R036). So an MBID its multi-MBID files don't name is a stub, even when a
+  name-only artist's own files carry that MBID. Enrichment names the stub, S13's row says so, and
+  the linker records `duplicate` until Merge joins them.
 - **Further credits (S8, D5, AUD-R073):** enrichment upserts every credited artist, not just the
-  first, except a placeholder, and the work keeps the first until 3b. `upsert_further_credit` is
-  narrower than S6: the name-only artist takes the MBID only when the name's MBIDs are exactly this
-  one. With none, a new artist goes beside it, because a further credit is new and no tag agrees.
+  first, and a placeholder further credit gets none. The first credit and the work stay as before
+  until 3b. `upsert_further_credit` is narrower than S6: the name-only artist takes the MBID only
+  when the name's MBIDs are exactly this one. With none, a new artist goes beside it, because a
+  further credit is new and no tag agrees.
 - **Known gap, accepted (D8):** a credit naming the MBID a tag was merged into makes a second artist
   beside the name-only one, because the tag's MBID isn't the credit's. The linker then looks up the
   tag, gets the credit's MBID and records `duplicate` on every run, and no suggestion row says so.
   Phase 5's Artist decisions page lists artists the linker recorded as `duplicate`
   (`artists.mb_lookup_outcome`), and Merge can join them. Air play doesn't change.
 - **`artist_names` (S10, C43, `ArtistNameRepository`):** every name of an artist, with its source:
-  `musicbrainz_name`, `musicbrainz_alias` or `tag`. A log spelling has no source, so the table refuses
-  it. Each write of `artists.name` adds a row: `upsert_local_artist`, `upsert_musicbrainz_artist`
-  (the sweep passes `tag`), `upsert_further_credit`, the linker's link and stub naming. A name goes
-  with its artist. The backfill adds what those writers never saw: existing names, cached aliases and
-  the spellings `credit` holds. A spelling S4 took from the cache counts as a tag spelling there,
-  because `credit` doesn't record where a name came from.
+  `musicbrainz_name`, `musicbrainz_alias` or `tag`. A log spelling has no source, so the table
+  refuses it. Each write of `artists.name` adds a row: `upsert_local_artist`,
+  `upsert_musicbrainz_artist` (the sweep passes `tag`), `upsert_further_credit`, the linker's link
+  and stub naming. A name goes with its artist. The backfill adds what those writers never saw: an
+  artist's own name unless one of them recorded it, cached aliases and the spellings `credit` holds,
+  unnamed stubs included. A spelling S4 took from the cache counts as a tag spelling there, because
+  `credit` doesn't record where a name came from.
 - **`library_suggestions` (C21, design 6.10; `LibrarySuggestionRepository`):** one row per name
   and reason where no file is named. A repeat updates candidates and evidence, never `state`, so
   a name the curator kept separate never reopens, and the same write again writes nothing. A
@@ -397,6 +402,7 @@ returns the row it finds).
   `tests/integration/test_artist_names_pg.py`,
   `tests/tasks/test_artist_identity_task_import.py`,
   `tests/tasks/test_backfill_artist_credits_task.py`,
+  `tests/tasks/test_backfill_artist_credits_repeats.py`,
   `tests/services/test_linker_skips_shared_names.py`,
   `tests/services/test_pair_credit.py`,
   `tests/services/test_read_tags_all_artists.py`,
@@ -406,6 +412,7 @@ returns the row it finds).
   `tests/repositories/test_library_suggestions_contract.py`,
   `tests/repositories/test_artist_tag_files_contract.py`,
   `tests/repositories/test_artist_credit_files_contract.py`,
+  `tests/repositories/test_artist_ids_by_mbid_contract.py`,
   `tests/repositories/test_artist_names_contract.py`,
   `tests/repositories/test_mb_cache_listing_contract.py` and
   `tests/tasks/test_enrichment_names_stubs.py`.

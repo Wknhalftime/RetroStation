@@ -5,9 +5,12 @@ from typing import Any
 
 import psycopg
 
+from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.domain.system import StorageUnavailableError
 from backend.repositories.mb_cache_listing import MusicBrainzCacheListing
 
 
+@translate_lost_connection(StorageUnavailableError)
 class PgMusicBrainzCacheListing(MusicBrainzCacheListing):
     def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self._conn = conn

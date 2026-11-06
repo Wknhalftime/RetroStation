@@ -61,6 +61,14 @@ def _rollback_if_connected(conn: psycopg.Connection[Any]) -> None:
         conn.rollback()
 
 
+def _credit_artists_to_make(repos: RepositoryFactory) -> list[CreditArtist]:
+    """The MBIDs of files holding several with no artist yet. One read of who holds them, because
+    this runs after every watcher batch with changes, and most have an artist by then."""
+    credited = plan_credit_artists(repos.artist_credit_files.list_credit_groups())
+    held = repos.artists.artist_ids_by_mbid([artist.mbid for artist in credited])
+    return [artist for artist in credited if artist.mbid not in held]
+
+
 def _write_shared_names(
     conn: psycopg.Connection[Any], names: list[SharedName], repos: RepositoryFactory
 ) -> ArtistIdentitySweep:
@@ -119,7 +127,7 @@ def sweep_artist_identities(
     try:
         _commit_if_open(conn)
         names = plan_shared_names(repos.artist_tag_files.list_tag_groups())
-        credited = plan_credit_artists(repos.artist_credit_files.list_credit_groups())
+        credited = _credit_artists_to_make(repos)
         _commit_if_open(conn)
     except _DATABASE_FAILURES:
         _rollback_if_connected(conn)

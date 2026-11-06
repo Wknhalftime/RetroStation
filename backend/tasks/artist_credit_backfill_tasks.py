@@ -4,13 +4,15 @@ It fills ``artist_mbids`` and ``credit``, then S13's stubs and S10's names of th
 catalog holds, runs S14's sweep, and adds the aliases and tag spellings of what the catalog now
 holds. A done-marker in ``user_settings`` ends it for good: the scan keeps the columns from then
 on. MusicBrainz down leaves those files for the next run, with the sweep and the marker waiting
-for them (AUD-R028). Nothing queues it: the cutover and the gate run it once, by name, and the
-cutover runs it before the first full scan after 0048, or that scan's sweep stubs the MBIDs whose
-names this would have found.
+for them (AUD-R028), and the result says ``done: false``. Nothing queues it: the cutover and the
+gate run it by name. The cutover runs it before scans resume after 0048, or a scan's sweep stubs
+the MBIDs whose names this would have found: all of them on a full scan, and a watcher batch those
+of the files it re-reads.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
@@ -30,7 +32,7 @@ from backend.services.artist_credit_backfill_service import (
     BackfillTally,
     fill_batch,
 )
-from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
+from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.normalization import normalize_artist
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.shared_name_service import record_different_acts
@@ -44,19 +46,19 @@ BATCH_SIZE = 500
 
 def _fill_columns(
     conn: psycopg.Connection[Any],
-    repos: RepositoryFactory,
-    client: MusicBrainzClientProtocol,
+    ports: BackfillPorts,
     tally: BackfillTally,
+    report_progress: Callable[[], None],
 ) -> None:
     """Every row to fill, a committed batch at a time, so a crash keeps what is done."""
-    ports = BackfillPorts(repos.artist_credit_files, repos.mb_cache_listing, client)
     after: UUID | None = None
     while True:
-        batch = repos.artist_credit_files.list_to_fill(after, BATCH_SIZE)
+        batch = ports.files.list_to_fill(after, BATCH_SIZE)
         if not batch:
             return
         fill_batch(batch, ports, tally)
         conn.commit()
+        report_progress()
         after = batch[-1].id
 
 
@@ -72,9 +74,13 @@ def _fill_stubs(repos: RepositoryFactory) -> None:
 
 
 def _fill_own_names(repos: RepositoryFactory) -> None:
-    """S10: each artist the catalog holds before the sweep, its own name. An artist the sweep makes
-    writes its own, from a tag, so it mustn't be recorded here as MusicBrainz's."""
+    """S10: each artist's own name, unless a writer since 0048 recorded it. A sweep may have got
+    there first (a scan's, or this task's on a run cut short), and its name came from a tag, so it
+    mustn't be recorded here as MusicBrainz's."""
     for artist in repos.artists.list_all():
+        recorded = repos.artist_names.list_for_artist(artist.id)
+        if any(held.name == artist.name for held in recorded):
+            continue
         source = ArtistNameSource.MUSICBRAINZ_NAME if artist.mbid else ArtistNameSource.TAG
         repos.artist_names.add(artist.id, artist.name, normalize_artist(artist.name), source)
 
@@ -99,23 +105,31 @@ def _cached_hits(repos: RepositoryFactory) -> list[dict[str, object]]:
 
 def _fill_other_names(repos: RepositoryFactory) -> None:
     """S10: the cached aliases of an artist the catalog holds, and the tag spellings paired with its
-    MBID, after the sweep, so they reach the artists it made. A log spelling is never read."""
-    by_mbid = {artist.mbid: artist for artist in repos.artists.list_all() if artist.mbid}
+    MBID, after the sweep, so they reach the artists it made. An unnamed stub counts: this reads
+    them once, and enrichment naming it later adds only MusicBrainz's. A log spelling is never
+    read."""
+    hits = _cached_hits(repos)
+    spellings = repos.artist_credit_files.list_tag_spellings()
+    asked = {str(hit.get("id")) for hit in hits} | {mbid for mbid, _ in spellings}
+    held = repos.artists.artist_ids_by_mbid(asked)
     names = repos.artist_names
-    for hit in _cached_hits(repos):
-        held = by_mbid.get(str(hit.get("id")))
-        if held is not None:
+    for hit in hits:
+        artist_id = held.get(str(hit.get("id")))
+        if artist_id is not None:
             for alias in _aliases_of(hit):
                 normalized = normalize_artist(alias)
-                names.add(held.id, alias, normalized, ArtistNameSource.MUSICBRAINZ_ALIAS)
-    for mbid, spelling in repos.artist_credit_files.list_tag_spellings():
-        held = by_mbid.get(mbid)
-        if held is not None:
-            names.add(held.id, spelling, normalize_artist(spelling), ArtistNameSource.TAG)
+                names.add(artist_id, alias, normalized, ArtistNameSource.MUSICBRAINZ_ALIAS)
+    for mbid, spelling in spellings:
+        artist_id = held.get(mbid)
+        if artist_id is not None:
+            names.add(artist_id, spelling, normalize_artist(spelling), ArtistNameSource.TAG)
 
 
 def _run_backfill(
-    conn: psycopg.Connection[Any], tally: BackfillTally, ttl_days: int
+    conn: psycopg.Connection[Any],
+    tally: BackfillTally,
+    ttl_days: int,
+    report_progress: Callable[[], None],
 ) -> dict[str, object]:
     """All of it, on one connection; what it did."""
     # Local import: the sweep's module is imported from huey_app's, like this one.
@@ -123,7 +137,8 @@ def _run_backfill(
 
     repos = RepositoryFactory(conn)
     with MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn), ttl_days=ttl_days) as client:
-        _fill_columns(conn, repos, client, tally)
+        ports = BackfillPorts(repos.artist_credit_files, repos.mb_cache_listing, client)
+        _fill_columns(conn, ports, tally, report_progress)
     logger.info("artist_credits_filled", **asdict(tally))
     _fill_stubs(repos)
     _fill_own_names(repos)
@@ -159,9 +174,18 @@ def backfill_artist_credits_task() -> dict[str, object]:
         read_progress=lambda: (tally.files, tally.files),
     )
     with task_run(settings.database_url, config) as handle:
+
+        def report_progress() -> None:
+            # A total of 0 pulses the bar: a run can't tell how many rows it will fill, because a
+            # lookup that fails leaves its file for the next run.
+            handle.report_running(
+                progress_data={"processed": tally.files, "total": 0, "current_item": ""}
+            )
+
+        report_progress()
         handle.log_started(details={})
         with connect_sync(settings.database_url) as conn:
-            result = _run_backfill(conn, tally, settings.mb_cache_ttl_days)
+            result = _run_backfill(conn, tally, settings.mb_cache_ttl_days, report_progress)
         handle.set_completed(
             progress_data={"processed": tally.files, "total": tally.files, **result},
             details=result,

@@ -62,7 +62,8 @@ def _upsert_artist_from_credits(
     credits: list[MbArtistCredit],
     artist_repo: ArtistCatalogRepository,
 ) -> str | None:
-    """Upsert the artist named by the first usable artist-credit entry; return its id.
+    """Upsert the artist named by the first usable artist-credit entry, and each further credit
+    (phase 2a S8); return the first's id.
 
     Shared by `enrich_by_release`, `enrich_by_recording` and
     `enrich_by_recording_batch` — the block always changed identically across

@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from uuid import uuid4
 
 from backend.domain.catalog import Artist, name_mbids_of
@@ -113,6 +113,10 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
             disambiguation,
             lambda held: held == {mbid},
         )
+
+    def artist_ids_by_mbid(self, mbids: Collection[str]) -> dict[str, str]:
+        wanted = set(mbids)
+        return {a.mbid: a.id for a in self._data.values() if a.mbid in wanted and a.mbid}
 
     def list_named_stubs_without_normalized_name(self) -> list[Artist]:
         return [

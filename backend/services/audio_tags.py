@@ -118,7 +118,8 @@ def _ufid_recording_mbid(tags: object) -> str | None:
         return None
     try:
         data = tags[f"UFID:{_UFID_MUSICBRAINZ_OWNER}"].data  # type: ignore[index]
-        return data.decode("ascii").strip() or None
+        # A tagger can terminate the frame's data with a NUL, which PostgreSQL text refuses.
+        return data.decode("ascii").replace("\x00", "").strip() or None
     except (KeyError, TypeError, UnicodeDecodeError):
         return None
 

@@ -59,6 +59,7 @@ class _ReadFile:
     artist: str | None
     mbids: tuple[str, ...]
     credit: tuple[CreditEntry, ...] | None
+    recording: str | None
 
 
 @dataclass
@@ -71,18 +72,20 @@ class _Answers:
 
 
 def _read_mp3(file: ArtistCreditFile) -> _ReadFile | None:
-    """An MP3's columns from disk; None when it is absent or can't be read (E6)."""
+    """An MP3's columns from disk; None when it is absent or can't be read (E6). Its recording
+    MBID from there too, for a lookup: S2's UFID reaches the row's column only at a full scan."""
     try:
         audio = read_tags(Path(file.file_path)).audio
     except (OSError, MutagenError):
         return None
-    return _ReadFile(file, audio.artist_name, audio.artist_mbids or (), audio.credit)
+    recording = audio.recording_mbid or file.recording_mbid
+    return _ReadFile(file, audio.artist_name, audio.artist_mbids or (), audio.credit, recording)
 
 
 def _read_saved(file: ArtistCreditFile) -> _ReadFile:
     mbids, credit = credit_from_raw_metadata(file.raw_metadata)
     printed = tag_values(file.raw_metadata.get("artist"))
-    return _ReadFile(file, printed[0] if printed else None, mbids, credit)
+    return _ReadFile(file, printed[0] if printed else None, mbids, credit, file.recording_mbid)
 
 
 def _read_files(batch: Sequence[ArtistCreditFile], tally: BackfillTally) -> list[_ReadFile]:
@@ -104,8 +107,7 @@ def _unnamed(entries: Sequence[CreditEntry]) -> list[str]:
 def _recording_to_ask(read: _ReadFile) -> str | None:
     """A recording MBID MusicBrainz could answer for. A malformed one answers 400, which
     ``lookup_recordings`` omits as it does an outage, so the file would wait for good."""
-    recording = read.file.recording_mbid
-    return recording if recording and MusicBrainzId.parse(recording) else None
+    return read.recording if read.recording and MusicBrainzId.parse(read.recording) else None
 
 
 def _payload_credit(payload: Mapping[str, object] | None) -> list[Mapping[str, object]] | None:
