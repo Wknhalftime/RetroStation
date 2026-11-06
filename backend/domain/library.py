@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -12,6 +13,8 @@ from backend.domain.enums import (
     FileStatus,
     ReleaseStatus,
     ReleaseType,
+    SuggestionReason,
+    SuggestionState,
 )
 from backend.domain.system import StorageUnavailableError
 
@@ -337,3 +340,27 @@ class RemapTargetUngroupedError(MissingFileError):
 
 # User setting holding a PurgeMissingPolicy value.
 PURGE_MISSING_SETTING = "library.purge_missing"
+
+
+@dataclass(frozen=True)
+class LibrarySuggestion:
+    """A ``library_suggestions`` row naming no file (phase 2a, C21): one per name and reason.
+    ``candidates`` are MBIDs; ``evidence`` is what the reason shows the curator."""
+
+    normalized_name: str
+    reason: SuggestionReason
+    candidates: tuple[str, ...]
+    evidence: Mapping[str, object]
+    state: SuggestionState
+
+
+@dataclass(frozen=True)
+class ArtistTagGroup:
+    """Present files with one artist name, artist MBID tag value, spelling and title, and how many
+    (phase 2a S14). ``tag_value`` is as stored: it may be joined, a placeholder or malformed."""
+
+    normalized_name: str
+    tag_value: str
+    artist_name: str
+    track_title: str | None
+    files: int

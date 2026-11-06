@@ -162,8 +162,9 @@ class PgWorkRepository(WorkRepository):
         # Join through `artists.normalized_name` so orphan works (no attached
         # library_files yet) still appear as fuzzy-match candidates — this is
         # what prevents a second, byte-identical work from being created when
-        # local grouping can't find the first. `artists.normalized_name` has
-        # a unique index (migration 0011) so the lookup is O(log n).
+        # local grouping can't find the first. Names are unique only without
+        # an MBID (C41), so this sees the works of every artist of the name
+        # (M18); `artists.normalized_name` has a plain index (migration 0047).
         rows = self._conn.execute(
             """SELECT w.id, w.title
                FROM works w

@@ -5,9 +5,9 @@ On an automatic match, ``_persist_artist_result``:
 
 - upserts the catalog artist first, when the result carries a MusicBrainz candidate;
 - then links the artist whose ``mbid`` equals the result's target (a catalog id, which the
-  exact pass gives a local-only artist, links that artist). When the upsert returned another
-  MBID's artist, because that one holds the name, or there is no catalog row at all (a mapping
-  rule's target), a stub of S3's shape is made for the target and linked;
+  exact pass gives a local-only artist, links that artist). When there is no catalog row at
+  all (a mapping rule's target), a stub of S3's shape is made for the target and linked. A name
+  another MBID's artist holds gets the hit its own artist since phase 2a's S6 (C41, AUD-R041);
 - writes the link through the link service, never to ``matches``: origin ``automatic``,
   state ``active``, strength the score, evidence v0 with the tier and the score.
 
@@ -15,8 +15,8 @@ A result that is not an automatic match writes no link. The AUD-R018 guard is un
 it fails nothing is written (the locked ``test_guarded_worker_writes.py``).
 
 The links fake checks its foreign key against the catalog fake, so a link written before its
-artist exists fails, as on PostgreSQL. The name clash also runs on PostgreSQL, whose catalog
-upsert is the one that returns another MBID's artist.
+artist exists fails, as on PostgreSQL. The name clash also runs on PostgreSQL, where the
+upsert's rule reads the name's files.
 """
 
 from __future__ import annotations
@@ -232,22 +232,28 @@ def test_catalog_artist_first() -> None:
     assert dict(link.evidence) == {"version": 0, "tier": "musicbrainz_api", "score": 100.0}
 
 
-def _assert_the_target_got_a_stub(world: _World, name: BroadcastArtist, held_id: str) -> None:
+def _assert_the_target_got_its_own_artist(
+    world: _World, name: BroadcastArtist, held_id: str
+) -> None:
     link = world.only_link(name)
     held = world.catalog.get_by_id(held_id)
-    stub = world.catalog.get_by_id(link.artist_id)
-    assert held is not None and stub is not None
+    target = world.catalog.get_by_id(link.artist_id)
+    assert held is not None and target is not None
     assert (held.mbid, held.name) == (OTHER_OZZY, "Ozzy Osbourne")  # left as it was
     assert link.artist_id != held_id
-    assert stub.id != OZZY  # a stub has its own id
-    assert (stub.mbid, stub.name, stub.sort_name, stub.normalized_name) == (OZZY, OZZY, OZZY, None)
-    assert (stub.origin, stub.needs_enhancement) == (CatalogSource.MUSICBRAINZ, True)
+    assert (target.mbid, target.name, target.sort_name, target.normalized_name) == (
+        OZZY,
+        "Ozzy Osbourne",
+        "Osbourne, Ozzy",
+        "ozzy osbourne",
+    )
+    assert (target.origin, target.needs_enhancement) == (CatalogSource.MUSICBRAINZ, True)
     assert link.mbid == OZZY
 
 
 def test_name_clash_links_the_target() -> None:
-    """The name is held by another MBID's artist, so the upsert returns that artist; the link
-    goes to the artist of the result's own MBID, a stub (db/repositories/artists.py)."""
+    """The name is held by another MBID's artist, which stays as it was. The upsert makes the
+    hit its own artist, named, and the link goes to it (phase 2a S6)."""
     world = _fake_world()
     held = world.catalog.upsert_musicbrainz_artist(
         mbid=OTHER_OZZY,
@@ -259,7 +265,7 @@ def test_name_clash_links_the_target() -> None:
 
     world.run(_ozzy_found(TRUNCATED_ELSEWHERE))
 
-    _assert_the_target_got_a_stub(world, name, held)
+    _assert_the_target_got_its_own_artist(world, name, held)
 
 
 @pytest.mark.integration
@@ -275,7 +281,7 @@ def test_name_clash_links_the_target_on_postgres(pg_conn: psycopg.Connection[Any
 
     world.run(_ozzy_found(TRUNCATED_ELSEWHERE))
 
-    _assert_the_target_got_a_stub(world, name, held)
+    _assert_the_target_got_its_own_artist(world, name, held)
     rows = pg_conn.execute("SELECT count(*) AS n FROM matches WHERE identity_id IS NULL").fetchone()
     assert rows is not None and rows["n"] == 0
 

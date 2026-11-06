@@ -287,6 +287,11 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
         repos.library_folders.commit_staged_hashes(task_id)
         library_conn.commit()
 
+        # Last, so it reads the library as this scan left it (phase 2a S14).
+        from backend.tasks.artist_identity_tasks import sweep_artist_identities
+
+        sweep_artist_identities(library_conn, repos)
+
         # Mark completed
         progress_repo.upsert(
             TaskProgress(

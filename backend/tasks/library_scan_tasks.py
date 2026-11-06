@@ -423,6 +423,11 @@ def _run_scan(
         if purge is not None:
             last_progress.update(purge_counts(purge))
 
+    # Last, so it reads the library as this scan left it (phase 2a S14).
+    from backend.tasks.artist_identity_tasks import sweep_artist_identities
+
+    sweep_artist_identities(library_conn, repos)
+
     return files_written, quarantine_written, last_progress
 
 

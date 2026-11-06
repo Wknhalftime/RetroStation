@@ -228,8 +228,8 @@ class NormalizationStrategy:
         target = broadcast_artist.normalized_name
         # Exact pass 1 — MBID-bearing canonicals: target_id is the MBID so the identity tier's
         # MBID graph path works with no further changes. One artist links; several of the name
-        # (two acts both called Nirvana) are suggested (phase 1c S4, C35). The catalog leaves
-        # a second artist of a name without a normalized name, so the name itself is compared.
+        # (two acts both called Nirvana) are suggested (phase 1c S4, C35). A stub named before
+        # phase 2a may have no normalized name yet, so the name itself is compared.
         exact = [
             c.mbid
             for c in self._all_canonical
@@ -623,7 +623,10 @@ def hold_back_refused_link(
     Neither writes a link or a catalog upsert, or starts a cascade (only AUTO_REJECTED and
     DEFERRED_RETRY do). A suggestion of such an artist is dropped; when every suggestion is
     dropped, the result is held back the same way. Every other result is returned as it is.
-    The task and the gate's dry run both ask this, so a dry run decides what the task would.
+    The task and the gate's dry run both ask this, so a dry run decides what the task would,
+    with one exception: an automatic match on a name the log name rejected goes through here and
+    becomes a suggestion in ``plan_answer`` (phase 2a D7), which the dry run doesn't ask, so it
+    shows that name as matched.
     """
     if links is None or (result.status != MatchStatus.AUTO_MATCHED and not result.suggestions):
         return result

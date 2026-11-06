@@ -87,15 +87,17 @@ class FakeWorkRepository(WorkRepository):
         normalized_artist_name: str,
         limit: int = 100,
     ) -> list[tuple[str, str]]:
-        # Mirrors PgWorkRepository: resolve normalized artist name → artist_id
-        # via the artist repo, then return every work for that artist (including
-        # orphan works with no attached library_files).
+        # Mirrors PgWorkRepository's join on the name: every work of every artist of the name,
+        # with an MBID or not (phase 2a S5), including orphan works with no attached
+        # library_files. `get_by_normalized_name` answers only for the name-only artist.
         if self._artist_repo is None:
             return []
-        artist = self._artist_repo.get_by_normalized_name(normalized_artist_name)
-        if artist is None:
-            return []
-        result = [(w.id, w.title) for w in self._data.values() if w.artist_id == artist.id]
+        artist_ids = {
+            artist.id
+            for artist in self._artist_repo.list_all()
+            if artist.normalized_name == normalized_artist_name
+        }
+        result = [(w.id, w.title) for w in self._data.values() if w.artist_id in artist_ids]
         result.sort(key=lambda x: x[1])
         return result[:limit]
 

@@ -1,13 +1,15 @@
-"""Characterisation, artist model phase 0a (SPEC S2): today's grouping and artist upserts.
+"""Characterisation, artist model phase 0a (SPEC S2): grouping and artist upserts, with the one
+change phase 2a makes on purpose (C41, M33, AUD-R041).
 
 The scan groups a file by its artist name as written plus its base title, and upserts its
-artist by that name alone (``ON CONFLICT (normalized_name)``): an artist MBID tag never makes or
-splits an artist. Phase 2a changes this on purpose (C41, M33, AUD-R041). Each test scans tagged
+artist by that name alone, so a work stays on a name-based artist until 3b. An artist MBID tag
+makes an artist only when the name holds several MBIDs (2a S14). Each test scans tagged
 copies of a fixture file and reads the result only through each file's work and the Library's
 artist routes (the artist list, and an artist's works list), never ``works.artist_id``:
 
 - a tagged file whose name exists as a name-only artist joins that artist;
-- two tagged files with one name and different MBIDs share one artist, and one work per title;
+- two tagged files with one name and different MBIDs: each MBID gets an artist, and the
+  name-only artist keeps one work per title;
 - an untagged file for a name that has an MBID artist joins the MBID artist;
 - a tag holding two MBIDs keeps one artist named by the whole text, and the file keeps only
   the first MBID (the Library's file list finds it by that MBID only).
@@ -137,6 +139,11 @@ def summary(client: TestClient) -> set[tuple[str, str | None, str, int, int]]:
 def works_listed(client: TestClient, name: str) -> list[tuple[str, str]]:
     """The artist route's works list for the one artist called *name*: (work id, title)."""
     [artist_id] = [a["id"] for a in artists(client) if a["name"] == name]
+    return works_of(client, artist_id)
+
+
+def works_of(client: TestClient, artist_id: str) -> list[tuple[str, str]]:
+    """The artist route's works list for one artist: (work id, title)."""
     response = client.get(f"/api/v1/library/artists/{artist_id}")
     assert response.status_code == 200
     return [(w["id"], w["title"]) for w in response.json()["works"]]
@@ -161,9 +168,13 @@ def test_tagged_file_joins_a_name_only_artist(
     ]
 
 
-def test_one_name_two_mbids_is_one_artist(conn: Conn, client: TestClient, tmp_path: Path) -> None:
-    """S2: the Alice Cooper band and singer, told apart only by their MBID tags, are one
-    name-only artist; a title both recorded is one work holding both files."""
+def test_one_name_two_mbids_each_get_an_artist(
+    conn: Conn, client: TestClient, tmp_path: Path
+) -> None:
+    """Phase 2a S14: the Alice Cooper band and singer, told apart only by their MBID tags, each
+    get an artist. The name-only artist keeps the works (until 3b), and a title both recorded
+    is one work holding both files. An MBID artist lists 0 works, and its page falls back on
+    the titles of its files."""
     root = tmp_path / "library"
     tagged(root / "schools-out.mp3", "Alice Cooper", "School's Out", ALICE_BAND)
     tagged(root / "poison.mp3", "Alice Cooper", "Poison", ALICE_SINGER)
@@ -173,11 +184,24 @@ def test_one_name_two_mbids_is_one_artist(conn: Conn, client: TestClient, tmp_pa
 
     work = works_by_file(conn)
     assert work["wheels-band.mp3"] == work["wheels-singer.mp3"]
-    assert summary(client) == {("Alice Cooper", None, "local", 3, 4)}
-    assert works_listed(client, "Alice Cooper") == [
+    assert summary(client) == {
+        ("Alice Cooper", None, "local", 3, 4),
+        ("Alice Cooper", ALICE_BAND, "musicbrainz", 0, 0),
+        ("Alice Cooper", ALICE_SINGER, "musicbrainz", 0, 0),
+    }
+    by_mbid = {a["mbid"]: a["id"] for a in artists(client)}
+    assert works_of(client, by_mbid[None]) == [
         (work["poison.mp3"], "Poison"),
         (work["schools-out.mp3"], "School's Out"),
         (work["wheels-band.mp3"], "Under My Wheels"),
+    ]
+    assert [title for _, title in works_of(client, by_mbid[ALICE_BAND])] == [
+        "School's Out",
+        "Under My Wheels",
+    ]
+    assert [title for _, title in works_of(client, by_mbid[ALICE_SINGER])] == [
+        "Poison",
+        "Under My Wheels",
     ]
 
 

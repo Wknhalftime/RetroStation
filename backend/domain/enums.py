@@ -149,6 +149,21 @@ class TaskType(StrEnum):
     STREAM_RESOURCES = "stream_resources"  # D90: the streaming cost meter's one row
 
 
+class SuggestionReason(StrEnum):
+    """Why the Library asks the curator to look at a name (phase 2a, C21; design 6.10)."""
+
+    SHARED_NAME = "shared_name"  # the name holds several MBIDs (S14)
+    DIFFERENT_ACTS = "different_acts"  # a stub took a name a name-only artist holds (S13, D2)
+
+
+class SuggestionState(StrEnum):
+    """What the curator made of a suggestion. A repeat of the suggestion never changes it (S14)."""
+
+    OPEN = "open"
+    ACCEPTED = "accepted"
+    DISMISSED = "dismissed"
+
+
 class RecheckScope(StrEnum):
     """What one matching re-check covers (AUD-R022 D1; spec 2026-10-05 §4.2)."""
 

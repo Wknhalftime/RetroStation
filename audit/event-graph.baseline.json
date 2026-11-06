@@ -11,15 +11,15 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 5,
     "node.producer": 17,
-    "node.task": 14,
+    "node.task": 15,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
     "rule.EV05": 0,
-    "rule.EV06": 1,
+    "rule.EV06": 2,
     "rule.EV07": 1,
-    "rule.EV08": 19,
+    "rule.EV08": 20,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -76,6 +76,10 @@
         {
           "annotation": "str",
           "name": "playlist_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "run_id"
         }
       ],
       "consumer": "identity_matching_task",
@@ -83,7 +87,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        717
+        834
       ],
       "message_class": "COMMAND",
       "producer": "backend.routers.matching:resolve_artist"
@@ -105,6 +109,10 @@
         {
           "annotation": "str",
           "name": "playlist_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "run_id"
         }
       ],
       "consumer": "identity_matching_task",
@@ -112,7 +120,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        114
+        138
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.artist_matching_tasks:artist_matching_task"
@@ -122,6 +130,10 @@
         {
           "annotation": "str",
           "name": "playlist_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "run_id"
         }
       ],
       "consumer": "artist_matching_task",
@@ -158,7 +170,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        245
+        283
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_enrichment_tasks:library_enrichment_task"
@@ -170,7 +182,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        553
+        557
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -182,7 +194,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        546
+        550
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -194,7 +206,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        338
+        342
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
@@ -215,7 +227,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        114
+        115
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_watcher_poll"
@@ -232,7 +244,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        138
+        150
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
@@ -242,6 +254,10 @@
         {
           "annotation": "str",
           "name": "playlist_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "run_id"
         }
       ],
       "consumer": "artist_matching_task",
@@ -249,7 +265,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        119
+        129
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
@@ -261,7 +277,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        894
+        911
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
@@ -278,7 +294,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        901
+        918
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
@@ -295,7 +311,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        250
+        274
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.stream_cue_tasks:request_cue_analysis"
@@ -319,7 +335,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        258
+        282
       ],
       "message_class": null,
       "producer": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
@@ -331,7 +347,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        468
+        486
       ],
       "message_class": null,
       "producer": "scripts.bench_enrich:cmd_run"
@@ -344,7 +360,9 @@
       "frontend",
       "htmlcov",
       "node_modules",
-      "tests"
+      "results",
+      "tests",
+      "var"
     ],
     "options": {
       "chains": false,
@@ -374,15 +392,24 @@
       "class": "inventory",
       "code": "EV02",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 258,
+      "line": 282,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume -> stream_cue_analysis_task"
     },
     {
       "class": "inventory",
       "code": "EV02",
       "file": "scripts/bench_enrich.py",
-      "line": 468,
+      "line": 486,
       "subject": "scripts.bench_enrich:cmd_run -> library_enrichment_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
+      "file": "backend/tasks/artist_identity_tasks.py",
+      "line": 79,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.artist_identity_tasks:artist_identity_sweep_task"
     },
     {
       "class": "inventory",
@@ -404,6 +431,17 @@
     {
       "class": "metric",
       "code": "EV08",
+      "file": "backend/tasks/artist_identity_tasks.py",
+      "line": 79,
+      "subject": "backend.tasks.artist_identity_tasks:artist_identity_sweep_task",
+      "value": {
+        "body_lines": 4,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
       "file": "backend/tasks/artist_linking_tasks.py",
       "line": 62,
       "subject": "backend.tasks.artist_linking_tasks:link_local_artists_task",
@@ -416,11 +454,11 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/artist_matching_tasks.py",
-      "line": 31,
+      "line": 35,
       "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
       "value": {
-        "body_lines": 89,
-        "service_calls": 1
+        "body_lines": 114,
+        "service_calls": 2
       }
     },
     {
@@ -438,10 +476,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/identity_matching_tasks.py",
-      "line": 34,
+      "line": 38,
       "subject": "backend.tasks.identity_matching_tasks:identity_matching_task",
       "value": {
-        "body_lines": 45,
+        "body_lines": 63,
         "service_calls": 2
       }
     },
@@ -460,11 +498,11 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_enrichment_tasks.py",
-      "line": 63,
+      "line": 64,
       "subject": "backend.tasks.library_enrichment_tasks:library_enrichment_task",
       "value": {
-        "body_lines": 190,
-        "service_calls": 3
+        "body_lines": 227,
+        "service_calls": 5
       }
     },
     {
@@ -493,7 +531,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 430,
+      "line": 434,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "body_lines": 168,
@@ -504,10 +542,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 125,
+      "line": 126,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
-        "body_lines": 262,
+        "body_lines": 265,
         "service_calls": 3
       }
     },
@@ -515,7 +553,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 61,
+      "line": 62,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "body_lines": 60,
@@ -526,10 +564,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/matching_recheck_tasks.py",
-      "line": 40,
+      "line": 42,
       "subject": "backend.tasks.matching_recheck_tasks:rematch_undecided_task",
       "value": {
-        "body_lines": 87,
+        "body_lines": 97,
         "service_calls": 3
       }
     },
@@ -537,7 +575,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 758,
+      "line": 775,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
         "body_lines": 158,
@@ -570,7 +608,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 256,
+      "line": 280,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
       "value": {
         "body_lines": 2,
@@ -581,7 +619,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 208,
+      "line": 232,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_task",
       "value": {
         "body_lines": 17,
@@ -592,7 +630,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 262,
+      "line": 286,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_prune_task",
       "value": {
         "body_lines": 8,
@@ -603,7 +641,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 231,
+      "line": 255,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_request_task",
       "value": {
         "body_lines": 13,
@@ -614,7 +652,7 @@
       "class": "inventory",
       "code": "EV09",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 61,
+      "line": 62,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll"
     },
     {
@@ -641,7 +679,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/routers/matching.py",
-      "line": 560,
+      "line": 749,
       "subject": "backend.routers.matching:resolve_artist",
       "value": {
         "tasks": 1
@@ -661,7 +699,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/artist_matching_tasks.py",
-      "line": 31,
+      "line": 35,
       "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
       "value": {
         "tasks": 1
@@ -681,7 +719,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_enrichment_tasks.py",
-      "line": 63,
+      "line": 64,
       "subject": "backend.tasks.library_enrichment_tasks:library_enrichment_task",
       "value": {
         "tasks": 1
@@ -701,7 +739,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 430,
+      "line": 434,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "tasks": 2
@@ -711,7 +749,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 125,
+      "line": 126,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
         "tasks": 1
@@ -721,7 +759,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 61,
+      "line": 62,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "tasks": 1
@@ -731,7 +769,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/matching_recheck_tasks.py",
-      "line": 130,
+      "line": 142,
       "subject": "backend.tasks.matching_recheck_tasks:queue_recheck_all",
       "value": {
         "tasks": 1
@@ -741,7 +779,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/matching_recheck_tasks.py",
-      "line": 40,
+      "line": 42,
       "subject": "backend.tasks.matching_recheck_tasks:rematch_undecided_task",
       "value": {
         "tasks": 1
@@ -751,7 +789,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 758,
+      "line": 775,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
         "tasks": 2
@@ -761,7 +799,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 247,
+      "line": 271,
       "subject": "backend.tasks.stream_cue_tasks:request_cue_analysis",
       "value": {
         "tasks": 1
@@ -771,7 +809,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 256,
+      "line": 280,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
       "value": {
         "tasks": 1
@@ -781,7 +819,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "scripts/bench_enrich.py",
-      "line": 442,
+      "line": 460,
       "subject": "scripts.bench_enrich:cmd_run",
       "value": {
         "tasks": 1
@@ -805,7 +843,7 @@
       {
         "file": "backend/routers/matching.py",
         "layer": "router",
-        "line": 560,
+        "line": 749,
         "qualname": "backend.routers.matching:resolve_artist"
       },
       {
@@ -817,7 +855,7 @@
       {
         "file": "backend/tasks/artist_matching_tasks.py",
         "layer": "task",
-        "line": 31,
+        "line": 35,
         "qualname": "backend.tasks.artist_matching_tasks:artist_matching_task"
       },
       {
@@ -829,7 +867,7 @@
       {
         "file": "backend/tasks/library_enrichment_tasks.py",
         "layer": "task",
-        "line": 63,
+        "line": 64,
         "qualname": "backend.tasks.library_enrichment_tasks:library_enrichment_task"
       },
       {
@@ -841,59 +879,73 @@
       {
         "file": "backend/tasks/library_scan_tasks.py",
         "layer": "task",
-        "line": 430,
+        "line": 434,
         "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 125,
+        "line": 126,
         "qualname": "backend.tasks.library_watcher_tasks:library_scan_files_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 61,
+        "line": 62,
         "qualname": "backend.tasks.library_watcher_tasks:library_watcher_poll"
       },
       {
         "file": "backend/tasks/matching_recheck_tasks.py",
         "layer": "task",
-        "line": 130,
+        "line": 142,
         "qualname": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
       },
       {
         "file": "backend/tasks/matching_recheck_tasks.py",
         "layer": "task",
-        "line": 40,
+        "line": 42,
         "qualname": "backend.tasks.matching_recheck_tasks:rematch_undecided_task"
       },
       {
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "layer": "task",
-        "line": 758,
+        "line": 775,
         "qualname": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
       },
       {
         "file": "backend/tasks/stream_cue_tasks.py",
         "layer": "task",
-        "line": 247,
+        "line": 271,
         "qualname": "backend.tasks.stream_cue_tasks:request_cue_analysis"
       },
       {
         "file": "backend/tasks/stream_cue_tasks.py",
         "layer": "task",
-        "line": 256,
+        "line": 280,
         "qualname": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
       },
       {
         "file": "scripts/bench_enrich.py",
         "layer": "script",
-        "line": 442,
+        "line": 460,
         "qualname": "scripts.bench_enrich:cmd_run"
       }
     ],
     "tasks": [
+      {
+        "body_lines": 4,
+        "envelope": "none",
+        "file": "backend/tasks/artist_identity_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 79,
+        "module": "backend.tasks.artist_identity_tasks",
+        "name": "artist_identity_sweep_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
       {
         "body_lines": 67,
         "envelope": "task_run",
@@ -909,18 +961,22 @@
         "schedule": null
       },
       {
-        "body_lines": 89,
+        "body_lines": 114,
         "envelope": "task_failure_telemetry",
         "file": "backend/tasks/artist_matching_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 31,
+        "line": 35,
         "module": "backend.tasks.artist_matching_tasks",
         "name": "artist_matching_task",
         "params": [
           {
             "annotation": "str",
             "name": "playlist_id"
+          },
+          {
+            "annotation": "str | None",
+            "name": "run_id"
           }
         ],
         "registered": true,
@@ -947,18 +1003,22 @@
         "schedule": null
       },
       {
-        "body_lines": 45,
+        "body_lines": 63,
         "envelope": "task_failure_telemetry",
         "file": "backend/tasks/identity_matching_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 34,
+        "line": 38,
         "module": "backend.tasks.identity_matching_tasks",
         "name": "identity_matching_task",
         "params": [
           {
             "annotation": "str",
             "name": "playlist_id"
+          },
+          {
+            "annotation": "str | None",
+            "name": "run_id"
           }
         ],
         "registered": true,
@@ -997,12 +1057,12 @@
         "schedule": null
       },
       {
-        "body_lines": 190,
+        "body_lines": 227,
         "envelope": "task_run",
         "file": "backend/tasks/library_enrichment_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 63,
+        "line": 64,
         "module": "backend.tasks.library_enrichment_tasks",
         "name": "library_enrichment_task",
         "params": [],
@@ -1044,7 +1104,7 @@
         "file": "backend/tasks/library_scan_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 430,
+        "line": 434,
         "module": "backend.tasks.library_scan_tasks",
         "name": "library_scan_task",
         "params": [
@@ -1058,12 +1118,12 @@
         "schedule": null
       },
       {
-        "body_lines": 262,
+        "body_lines": 265,
         "envelope": "own",
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 125,
+        "line": 126,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_scan_files_task",
         "params": [
@@ -1086,7 +1146,7 @@
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "periodic",
-        "line": 61,
+        "line": 62,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_watcher_poll",
         "params": [],
@@ -1095,12 +1155,12 @@
         "schedule": "crontab(minute=\"*/4\")"
       },
       {
-        "body_lines": 87,
+        "body_lines": 97,
         "envelope": "task_run",
         "file": "backend/tasks/matching_recheck_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 40,
+        "line": 42,
         "module": "backend.tasks.matching_recheck_tasks",
         "name": "rematch_undecided_task",
         "params": [
@@ -1119,7 +1179,7 @@
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 758,
+        "line": 775,
         "module": "backend.tasks.mb_enrichment_tasks",
         "name": "mb_enrichment_task",
         "params": [],
@@ -1166,7 +1226,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "periodic",
-        "line": 256,
+        "line": 280,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_analysis_resume",
         "params": [],
@@ -1180,7 +1240,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
-        "line": 208,
+        "line": 232,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_analysis_task",
         "params": [],
@@ -1194,7 +1254,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "periodic",
-        "line": 262,
+        "line": 286,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_prune_task",
         "params": [],
@@ -1208,7 +1268,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
-        "line": 231,
+        "line": 255,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_request_task",
         "params": [
@@ -1227,7 +1287,7 @@
   "unresolved_dispatch": [
     {
       "file": "scripts/bench_enrich.py",
-      "line": 224,
+      "line": 228,
       "name": "mb_enrichment_task",
       "producer": "scripts.bench_enrich:follow_on_task",
       "reason": "task_as_value"

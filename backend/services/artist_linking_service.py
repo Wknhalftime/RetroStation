@@ -19,6 +19,7 @@ from backend.domain.catalog import (  # SPECIAL_PURPOSE_MBIDS is also read from 
     LinkDecision,
     LinkEvidence,
     MusicBrainzId,
+    name_mbids_of,
 )
 from backend.domain.enums import ArtistLinkOutcome
 from backend.repositories.artist_linking import ArtistLinkingRepository
@@ -80,6 +81,10 @@ def decide_link(
             _candidate(found.value, name, data.get("sort-name"), data.get("disambiguation")),
         )
     if len(named) == 1:
+        # Phase 2a S9: a name holding several MBIDs is never promoted (S6's rule). The lookups
+        # above run as ever; the name stays name-only for the Artist decisions page.
+        if len(name_mbids_of(value for value, _ in evidence.tag_counts)) > 1:
+            return LinkDecision(ArtistLinkOutcome.AMBIGUOUS)
         return LinkDecision(ArtistLinkOutcome.LINKED, next(iter(named.values())))
     if named:
         return LinkDecision(ArtistLinkOutcome.AMBIGUOUS)

@@ -439,8 +439,7 @@ def test_the_list_holds_exact_names_only() -> None:
 def test_other_names_of_the_run_are_matched_as_before() -> None:
     """One listed name in a run does not stop the others."""
     world = _world("spot break")
-    metallica = world.catalog.get_by_normalized_name("metallica")
-    assert metallica is not None
+    [metallica] = [a for a in world.catalog.list_all() if a.normalized_name == "metallica"]
     listed, listed_song = world.pending("SPOT BREAK")
     other, _ = world.pending("METALLICA")
 

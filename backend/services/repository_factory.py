@@ -10,6 +10,7 @@ from psycopg.rows import DictRow
 from backend.db.repositories.artist_cascade import PgArtistCascadeRepository
 from backend.db.repositories.artist_linking import PgArtistLinkingRepository
 from backend.db.repositories.artist_resolution import PgArtistResolutionRepository
+from backend.db.repositories.artist_tag_files import PgArtistTagFilesRepository
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_days import PgBroadcastDayRepository
@@ -21,6 +22,7 @@ from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
 from backend.db.repositories.library_quarantine import PgLibraryQuarantineRepository
+from backend.db.repositories.library_suggestions import PgLibrarySuggestionRepository
 from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
@@ -201,6 +203,8 @@ class RepositoryFactory:
         self.work_curation = self.catalog.work_curation
         self.log_name_links = self.catalog.log_name_links
         self.library_files = self.library.files
+        self.library_suggestions = PgLibrarySuggestionRepository(conn)
+        self.artist_tag_files = PgArtistTagFilesRepository(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
         self.format_overrides = self.library.format_overrides

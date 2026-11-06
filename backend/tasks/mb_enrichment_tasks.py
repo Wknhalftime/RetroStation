@@ -19,7 +19,6 @@ from backend.db.sync_conn import connect_sync
 from backend.domain.catalog import Artist, MusicBrainzId, Recording, Work
 from backend.domain.enums import LogCategory, RecheckScope, TaskStatus, TaskType
 from backend.domain.system import TaskProgress
-from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.library_enrichment_service import (
     EnrichmentRepos,
@@ -34,6 +33,7 @@ from backend.services.mb_client import (
 from backend.services.mb_types import MbArtist, MbRecording
 from backend.services.normalization import normalize_artist
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.shared_name_service import record_different_acts
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks._task_run import TaskLifecycleMessages, TaskRunConfig, task_run
 from backend.tasks.huey_app import huey
@@ -131,8 +131,8 @@ def _enhance_artist(
 
     A stub (phase 1a S3: its name is still its MBID) is also named here (S4):
     a malformed MBID is recorded first, never looked up (E3,
-    `_is_malformed_stub`); then it takes MusicBrainz's name, and the
-    normalized name unless another artist holds it (E1, `_stub_names`). An
+    `_is_malformed_stub`); then it takes MusicBrainz's name and the
+    normalized name, whoever holds it (phase 2a S13, `_stub_names`). An
     answer with no name is recorded too, so the stub is not picked again.
 
     `mbid_map` is the pre-fetched batch from `search_artists_by_mbids`, keyed
@@ -184,7 +184,7 @@ def _enhance_artist(
                 f"MB lookup gave no name for stub mbid={artist.mbid}",
             )
             return ArtistEnhanceOutcome.FAILED
-        field_updates.update(_stub_names(artist, name, repos.artists))
+        field_updates.update(_stub_names(artist.mbid, name, repos))
     if not artist.disambiguation and data.get("disambiguation"):
         field_updates["disambiguation"] = data["disambiguation"]
     if artist.sort_name in ("", artist.name) and data.get("sort-name"):
@@ -220,23 +220,16 @@ def _is_malformed_stub(artist: Artist) -> bool:
     )
 
 
-def _stub_names(artist: Artist, name: str, artists: ArtistCatalogRepository) -> dict[str, str]:
-    """A stub's name from MusicBrainz, and its normalized name unless another artist already
-    holds that (phase 1a E1): asked first, since `idx_artists_norm_name` is unique on every row
-    until 2a, whose C41 settles the clash. The stub is named either way."""
+def _stub_names(mbid: str, name: str, repos: RepositoryFactory) -> dict[str, str]:
+    """A stub's name from MusicBrainz, and its normalized name whoever holds that (phase 2a S13,
+    C41). A name-only holder stays as it is and no link moves: both remain, with one
+    `different_acts` row, and Merge can join them (D2). A symbol-only name normalizes to nothing
+    and stays NULL."""
     normalized = normalize_artist(name)
     if not normalized:
         return {"name": name}
-    holder = artists.get_by_normalized_name(normalized)
-    if holder is not None:
-        logger.warning(
-            "mb_stub_normalized_name_held",
-            artist_id=artist.id,
-            mbid=artist.mbid,
-            normalized_name=normalized,
-            holder_id=holder.id,
-        )
-        return {"name": name}
+    if repos.artists.get_by_normalized_name(normalized) is not None:
+        record_different_acts(repos.library_suggestions, normalized, mbid)
     return {"name": name, "normalized_name": normalized}
 
 

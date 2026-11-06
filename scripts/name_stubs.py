@@ -104,7 +104,7 @@ def render(conn: psycopg.Connection[DictRow], run: StubNaming) -> str:
     rows: list[dict[str, Any]] = conn.execute(_NAMED_SQL, (list(run.named),)).fetchall()
     unset = sum(1 for row in rows if row["normalized_name"] is None)
     lines = [
-        f"named {len(run.named)} (no normalized name, held by another artist or empty: {unset}), "
+        f"named {len(run.named)} (a name that normalizes to nothing: {unset}), "
         f"recorded {len(run.failed)}, left for the next run {len(run.left)}",
         *(f"  named {row['id']} {row['mbid']} {row['name']}" for row in rows),
         *(f"  recorded {artist_id}" for artist_id in run.failed),
