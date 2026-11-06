@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import structlog
 
-from backend.domain.catalog import MusicBrainzId, Recording
+from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS, MusicBrainzId, Recording
 from backend.domain.enums import EnrichmentStatus, VersionType
 from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
@@ -73,12 +73,32 @@ def _upsert_artist_from_credits(
     if artist_info is None:
         return None
     artist_mbid, artist_name, artist_sort_name = artist_info
-    return artist_repo.upsert_musicbrainz_artist(
+    artist_id = artist_repo.upsert_musicbrainz_artist(
         mbid=artist_mbid,
         name=artist_name,
         sort_name=artist_sort_name,
         normalized_name=normalize_artist(artist_name),
     )
+    _upsert_further_credits(credits, artist_mbid, artist_repo)
+    return artist_id
+
+
+def _upsert_further_credits(
+    credits: list[MbArtistCredit], first_mbid: str, artist_repo: ArtistCatalogRepository
+) -> None:
+    """Each credited artist after the first (phase 2a S8), but a special-purpose one. The work
+    keeps the first until 3b."""
+    for credit in credits:
+        artist = credit.get("artist") or {}
+        mbid, name = artist.get("id"), artist.get("name")
+        if not mbid or not name or mbid == first_mbid or mbid in SPECIAL_PURPOSE_MBIDS:
+            continue
+        artist_repo.upsert_further_credit(
+            mbid=mbid,
+            name=name,
+            sort_name=artist.get("sort-name") or name,
+            normalized_name=normalize_artist(name),
+        )
 
 
 def _extract_work_from_relations(

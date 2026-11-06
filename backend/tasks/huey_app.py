@@ -28,6 +28,7 @@ def configure_consumer_logging() -> None:
 
 # Import all task modules so they register with the Huey consumer.
 # Without these imports, the worker cannot deserialize queued tasks.
+import backend.tasks.artist_credit_backfill_tasks  # noqa: F401, E402
 import backend.tasks.artist_identity_tasks  # noqa: F401, E402
 import backend.tasks.artist_linking_tasks  # noqa: F401, E402
 import backend.tasks.artist_matching_tasks  # noqa: F401, E402

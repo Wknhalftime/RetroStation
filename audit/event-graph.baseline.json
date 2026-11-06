@@ -11,15 +11,15 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 5,
     "node.producer": 17,
-    "node.task": 15,
+    "node.task": 16,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
     "rule.EV05": 0,
-    "rule.EV06": 2,
+    "rule.EV06": 3,
     "rule.EV07": 1,
-    "rule.EV08": 20,
+    "rule.EV08": 21,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -182,7 +182,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        557
+        558
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -194,7 +194,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        550
+        551
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -206,7 +206,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        342
+        343
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
@@ -227,7 +227,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        115
+        114
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_watcher_poll"
@@ -277,7 +277,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        911
+        924
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
@@ -294,7 +294,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        918
+        931
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
@@ -406,8 +406,17 @@
       "class": "inventory",
       "code": "EV06",
       "detail": "no_producer",
+      "file": "backend/tasks/artist_credit_backfill_tasks.py",
+      "line": 143,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.artist_credit_backfill_tasks:backfill_artist_credits_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
       "file": "backend/tasks/artist_identity_tasks.py",
-      "line": 79,
+      "line": 134,
       "referenced_in_unresolved_dispatch": false,
       "subject": "backend.tasks.artist_identity_tasks:artist_identity_sweep_task"
     },
@@ -431,11 +440,22 @@
     {
       "class": "metric",
       "code": "EV08",
+      "file": "backend/tasks/artist_credit_backfill_tasks.py",
+      "line": 143,
+      "subject": "backend.tasks.artist_credit_backfill_tasks:backfill_artist_credits_task",
+      "value": {
+        "body_lines": 27,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
       "file": "backend/tasks/artist_identity_tasks.py",
-      "line": 79,
+      "line": 134,
       "subject": "backend.tasks.artist_identity_tasks:artist_identity_sweep_task",
       "value": {
-        "body_lines": 4,
+        "body_lines": 11,
         "service_calls": 0
       }
     },
@@ -531,7 +551,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 434,
+      "line": 435,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "body_lines": 168,
@@ -542,10 +562,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 126,
+      "line": 125,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
-        "body_lines": 265,
+        "body_lines": 267,
         "service_calls": 3
       }
     },
@@ -553,7 +573,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 62,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "body_lines": 60,
@@ -575,7 +595,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 775,
+      "line": 788,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
         "body_lines": 158,
@@ -652,7 +672,7 @@
       "class": "inventory",
       "code": "EV09",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 62,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll"
     },
     {
@@ -739,7 +759,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 434,
+      "line": 435,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "tasks": 2
@@ -749,7 +769,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 126,
+      "line": 125,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
         "tasks": 1
@@ -759,7 +779,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_watcher_tasks.py",
-      "line": 62,
+      "line": 61,
       "subject": "backend.tasks.library_watcher_tasks:library_watcher_poll",
       "value": {
         "tasks": 1
@@ -789,7 +809,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/mb_enrichment_tasks.py",
-      "line": 775,
+      "line": 788,
       "subject": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task",
       "value": {
         "tasks": 2
@@ -879,19 +899,19 @@
       {
         "file": "backend/tasks/library_scan_tasks.py",
         "layer": "task",
-        "line": 434,
+        "line": 435,
         "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 126,
+        "line": 125,
         "qualname": "backend.tasks.library_watcher_tasks:library_scan_files_task"
       },
       {
         "file": "backend/tasks/library_watcher_tasks.py",
         "layer": "task",
-        "line": 62,
+        "line": 61,
         "qualname": "backend.tasks.library_watcher_tasks:library_watcher_poll"
       },
       {
@@ -909,7 +929,7 @@
       {
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "layer": "task",
-        "line": 775,
+        "line": 788,
         "qualname": "backend.tasks.mb_enrichment_tasks:mb_enrichment_task"
       },
       {
@@ -933,12 +953,26 @@
     ],
     "tasks": [
       {
-        "body_lines": 4,
+        "body_lines": 27,
+        "envelope": "task_run",
+        "file": "backend/tasks/artist_credit_backfill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 143,
+        "module": "backend.tasks.artist_credit_backfill_tasks",
+        "name": "backfill_artist_credits_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 11,
         "envelope": "none",
         "file": "backend/tasks/artist_identity_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 79,
+        "line": 134,
         "module": "backend.tasks.artist_identity_tasks",
         "name": "artist_identity_sweep_task",
         "params": [],
@@ -1104,7 +1138,7 @@
         "file": "backend/tasks/library_scan_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 434,
+        "line": 435,
         "module": "backend.tasks.library_scan_tasks",
         "name": "library_scan_task",
         "params": [
@@ -1118,12 +1152,12 @@
         "schedule": null
       },
       {
-        "body_lines": 265,
+        "body_lines": 267,
         "envelope": "own",
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 126,
+        "line": 125,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_scan_files_task",
         "params": [
@@ -1146,7 +1180,7 @@
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "periodic",
-        "line": 62,
+        "line": 61,
         "module": "backend.tasks.library_watcher_tasks",
         "name": "library_watcher_poll",
         "params": [],
@@ -1179,7 +1213,7 @@
         "file": "backend/tasks/mb_enrichment_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 775,
+        "line": 788,
         "module": "backend.tasks.mb_enrichment_tasks",
         "name": "mb_enrichment_task",
         "params": [],

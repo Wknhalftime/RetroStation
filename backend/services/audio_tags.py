@@ -45,6 +45,7 @@ from backend.domain.streaming import (
     UnreadableClipError,
     UnsupportedClipError,
 )
+from backend.services.artist_credit import pair_credit, split_mbids
 from backend.services.audio_hash import compute_audio_hash
 from backend.services.mpeg_frames import headerless_duration
 from backend.services.normalization import normalize_artist, normalize_title
@@ -70,6 +71,8 @@ _TXXX_ALBUM_ARTIST_MBID = "MusicBrainz Album Artist Id"
 _TXXX_RELEASE_MBID = "MusicBrainz Album Id"
 _TXXX_RELEASE_TYPE = "MusicBrainz Release Type"
 _TXXX_RELEASE_STATUS = "MusicBrainz Release Status"
+_TXXX_ARTISTS = "ARTISTS"
+_UFID_MUSICBRAINZ_OWNER = "http://musicbrainz.org"
 
 # Vorbis comment tag names (FLAC / OGG) — lowercase.
 _VORBIS_RECORDING_MBID = "musicbrainz_trackid"
@@ -95,6 +98,28 @@ def _extract_first_tag_value(tags: object, key: str) -> str | None:
         raw = val[0] if isinstance(val, list | TextFrame) else val
         return str(raw).strip() or None
     except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _all_tag_values(tags: object, key: str) -> list[str]:
+    """Every value of a tag, as a tagger wrote them; [] when it is absent."""
+    if tags is None:
+        return []
+    try:
+        val = tags[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return []
+    return [str(value) for value in val] if isinstance(val, list | TextFrame) else [str(val)]
+
+
+def _ufid_recording_mbid(tags: object) -> str | None:
+    """The recording MBID Picard writes to a UFID frame (phase 2a S2, C26)."""
+    if tags is None:
+        return None
+    try:
+        data = tags[f"UFID:{_UFID_MUSICBRAINZ_OWNER}"].data  # type: ignore[index]
+        return data.decode("ascii").strip() or None
+    except (KeyError, TypeError, UnicodeDecodeError):
         return None
 
 
@@ -179,7 +204,7 @@ def _raw_metadata(audio: MutagenFileType) -> dict[str, str]:
 def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     tags = audio.tags  # mutagen.id3.ID3 or None
 
-    recording_mbid = _txxx(tags, _TXXX_RECORDING_MBID)
+    recording_mbid = _txxx(tags, _TXXX_RECORDING_MBID) or _ufid_recording_mbid(tags)
     artist_mbid = _txxx(tags, _TXXX_ARTIST_MBID)
     album_artist_mbid = _txxx(tags, _TXXX_ALBUM_ARTIST_MBID)
     release_mbid = _txxx(tags, _TXXX_RELEASE_MBID)
@@ -187,6 +212,8 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
     release_status = _to_release_status(_txxx(tags, _TXXX_RELEASE_STATUS))
 
     artist_name = _extract_first_tag_value(tags, "TPE1")
+    mbid_values = _all_tag_values(tags, f"TXXX:{_TXXX_ARTIST_MBID}")
+    artist_names = _all_tag_values(tags, f"TXXX:{_TXXX_ARTISTS}")
     track_title = _extract_first_tag_value(tags, "TIT2")
     release_title = _extract_first_tag_value(tags, "TALB")
     track_number = _parse_slash_int(_extract_first_tag_value(tags, "TRCK"))
@@ -216,6 +243,8 @@ def _extract_id3(audio: MutagenFileType, path: Path) -> LibraryFile:
             artist_name=artist_name,
             normalized_artist_name=(normalize_artist(artist_name) if artist_name else None),
             normalized_title=(normalize_title(track_title) if track_title else None),
+            artist_mbids=split_mbids(mbid_values),
+            credit=pair_credit(artist_name, artist_names, mbid_values),
         ),
     )
 
@@ -236,6 +265,8 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
     release_status = _to_release_status(_extract_first_tag_value(tags, "releasestatus"))
 
     artist_name = _extract_first_tag_value(tags, "artist")
+    mbid_values = _all_tag_values(tags, _VORBIS_ARTIST_MBID)
+    artist_names = _all_tag_values(tags, "artists")
     track_title = _extract_first_tag_value(tags, "title")
     release_title = _extract_first_tag_value(tags, "album")
     track_number = _parse_slash_int(_extract_first_tag_value(tags, "tracknumber"))
@@ -265,6 +296,8 @@ def _extract_vorbis(audio: MutagenFileType, path: Path, fmt: str) -> LibraryFile
             artist_name=artist_name,
             normalized_artist_name=(normalize_artist(artist_name) if artist_name else None),
             normalized_title=(normalize_title(track_title) if track_title else None),
+            artist_mbids=split_mbids(mbid_values),
+            credit=pair_credit(artist_name, artist_names, mbid_values),
         ),
     )
 
@@ -285,6 +318,7 @@ def _extract_wav(audio: MutagenFileType, path: Path) -> LibraryFile:
         audio=AudioMetadata(
             duration_ms=duration_ms,
             raw_metadata=_raw_metadata(audio),
+            artist_mbids=(),
         ),
     )
 
@@ -368,6 +402,7 @@ def _extract_by_format(audio: MutagenFileType, path: Path) -> LibraryFile:
         audio=AudioMetadata(
             duration_ms=duration_ms,
             raw_metadata=_raw_metadata(audio),
+            artist_mbids=(),
         ),
     )
 

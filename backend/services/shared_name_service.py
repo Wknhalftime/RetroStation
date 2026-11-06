@@ -1,11 +1,12 @@
-"""Names that hold several MBIDs, and what the Library records about them (phase 2a S13, S14; D2,
-D6; C21, M33).
+"""Names and files that hold several MBIDs, and what the Library records about them (phase 2a S13,
+S14; D2, D6, D10; C21, M33).
 
 Every MBID of a name holding several (S6's reading) gets an artist, and the name gets one
 ``shared_name`` suggestion listing the MBIDs and the titles two or more of them share. Works can't
-give those titles, because grouping keeps a name's works on one artist until 3b. Nothing merges
-automatically: the curator decides, on the page phase 5 adds. Writes in the caller's transaction
-and commits nothing (C75).
+give those titles, because grouping keeps a name's works on one artist until 3b. Each MBID of a file
+holding several gets an artist too, named by those files only (D10). Nothing merges automatically:
+the curator decides, on the page phase 5 adds. Writes in the caller's transaction and commits
+nothing (C75).
 """
 
 from __future__ import annotations
@@ -15,11 +16,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from backend.domain.catalog import real_mbid
-from backend.domain.enums import SuggestionReason
-from backend.domain.library import ArtistTagGroup
+from backend.domain.enums import ArtistNameSource, SuggestionReason
+from backend.domain.library import ArtistTagGroup, CreditGroup
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_suggestions import LibrarySuggestionRepository
-from backend.services.normalization import normalize_title
+from backend.services.normalization import normalize_artist, normalize_title
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,9 @@ def apply_shared_name(
     missing = [mbid for mbid in sorted(shared.spellings) if catalog.get_by_mbid(mbid) is None]
     for mbid in missing:
         spelling = shared.spellings[mbid]
-        catalog.upsert_musicbrainz_artist(mbid, spelling, spelling, shared.normalized_name)
+        catalog.upsert_musicbrainz_artist(
+            mbid, spelling, spelling, shared.normalized_name, name_source=ArtistNameSource.TAG
+        )
     row_written = suggestions.upsert_for_name(
         shared.normalized_name,
         SuggestionReason.SHARED_NAME,
@@ -100,6 +103,55 @@ def apply_shared_name(
         {"shared_titles": list(shared.shared_titles)},
     )
     return SharedNameWrites(len(missing), row_written)
+
+
+@dataclass(frozen=True)
+class CreditArtist:
+    """A real MBID of a file holding several, with the spelling most of those files carry."""
+
+    mbid: str
+    name: str | None
+
+
+@dataclass(frozen=True)
+class CreditArtistWrites:
+    """What applying one ``CreditArtist`` wrote."""
+
+    artist_made: bool
+    stub: bool
+
+
+def plan_credit_artists(groups: Iterable[CreditGroup]) -> list[CreditArtist]:
+    """Each real MBID the groups hold: a placeholder gets no artist (C7). An MBID those files don't
+    name stays unnamed, even if its single-MBID files carry a name (D10)."""
+    spellings: dict[str, Counter[str]] = {}
+    for group in groups:
+        if real_mbid(group.mbid) is None:
+            continue
+        counts = spellings.setdefault(group.mbid, Counter())
+        if group.name is not None:
+            counts[group.name] += group.files
+    return [
+        CreditArtist(mbid, _most_files(counts) if counts else None)
+        for mbid, counts in sorted(spellings.items())
+    ]
+
+
+def apply_credit_artist(
+    artist: CreditArtist, catalog: ArtistCatalogRepository
+) -> CreditArtistWrites:
+    """An artist for this MBID, if it has none. A known name goes through S6, and an unknown one,
+    or one that normalizes to nothing, is a stub that enrichment names."""
+    if catalog.get_by_mbid(artist.mbid) is not None:
+        return CreditArtistWrites(artist_made=False, stub=False)
+    normalized = normalize_artist(artist.name) if artist.name else ""
+    if artist.name is None or not normalized:
+        catalog.create_stub(artist.mbid)
+        return CreditArtistWrites(artist_made=True, stub=True)
+    catalog.upsert_musicbrainz_artist(
+        artist.mbid, artist.name, artist.name, normalized, name_source=ArtistNameSource.TAG
+    )
+    return CreditArtistWrites(artist_made=True, stub=False)
 
 
 def record_different_acts(

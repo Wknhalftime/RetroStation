@@ -21,6 +21,7 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   scan: "/library",
   library_enrichment: "/library",
   hash_backfill: "/library",
+  artist_credits_backfill: "/library",
   mb_enrichment: "/library",
   artist_linking: "/library",
   ingestion: "/stations",

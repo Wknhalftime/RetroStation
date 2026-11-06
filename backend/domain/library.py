@@ -95,6 +95,20 @@ class AudioMetadata:
     normalized_artist_name: str | None = None
     normalized_title: str | None = None
     raw_metadata: dict[str, Any] | None = None
+    # Phase 2a S1. A row read back from the database doesn't carry these, so its upsert leaves
+    # them alone.
+    artist_mbids: tuple[str, ...] | None = None
+    credit: tuple[CreditEntry, ...] | None = None
+
+
+@dataclass(frozen=True)
+class CreditEntry:
+    """One artist of a file's credit (phase 2a S1, C69): its MBID, its name (None until named),
+    and the words joining it to the next (None when unknown)."""
+
+    mbid: str
+    name: str | None = None
+    join: str | None = None
 
 
 @dataclass
@@ -341,6 +355,9 @@ class RemapTargetUngroupedError(MissingFileError):
 # User setting holding a PurgeMissingPolicy value.
 PURGE_MISSING_SETTING = "library.purge_missing"
 
+# Set once the artist credits backfill has finished (phase 2a S3).
+ARTIST_CREDITS_BACKFILLED_SETTING = "library.artist_credits_backfilled"
+
 
 @dataclass(frozen=True)
 class LibrarySuggestion:
@@ -352,6 +369,26 @@ class LibrarySuggestion:
     candidates: tuple[str, ...]
     evidence: Mapping[str, object]
     state: SuggestionState
+
+
+@dataclass(frozen=True)
+class ArtistCreditFile:
+    """What the artist credits backfill needs of a row (phase 2a S3)."""
+
+    id: UUID
+    file_path: str
+    format: str
+    raw_metadata: dict[str, Any]
+    recording_mbid: str | None
+
+
+@dataclass(frozen=True)
+class CreditGroup:
+    """Present files holding several MBIDs that credit this MBID with this name (phase 2a S14)."""
+
+    mbid: str
+    name: str | None
+    files: int
 
 
 @dataclass(frozen=True)

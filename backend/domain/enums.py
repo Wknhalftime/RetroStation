@@ -147,6 +147,15 @@ class TaskType(StrEnum):
     HASH_BACKFILL = "hash_backfill"
     CUE_ANALYSIS = "cue_analysis"  # D89: the cue run's "cues ready X of Y"
     STREAM_RESOURCES = "stream_resources"  # D90: the streaming cost meter's one row
+    ARTIST_CREDITS_BACKFILL = "artist_credits_backfill"  # phase 2a S3: run once
+
+
+class ArtistNameSource(StrEnum):
+    """Where an artist's name came from (C43). A log spelling has none: it is refused."""
+
+    MUSICBRAINZ_NAME = "musicbrainz_name"
+    MUSICBRAINZ_ALIAS = "musicbrainz_alias"
+    TAG = "tag"
 
 
 class SuggestionReason(StrEnum):
