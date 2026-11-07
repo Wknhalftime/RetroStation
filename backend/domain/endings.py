@@ -185,7 +185,7 @@ def classify_ending(
     return SongEnding(EndingType.OTHER, None, cues.cue_out_ms)
 
 
-def _applies(stored: CuePoints, ending: SongEnding) -> bool:
+def ending_applies(stored: CuePoints, ending: SongEnding) -> bool:
     """A rule applies to a measured ending while autocue's row keeps the Stop it measured."""
     return (
         ending.ending is not EndingType.UNMEASURED
@@ -210,7 +210,7 @@ def _with_eom(cues: CuePoints, eom_ms: int, fade_ms: int) -> CuePoints:
 def ruled_cues(stored: CuePoints, ending: SongEnding, follows: Follows) -> CuePoints:
     """What the radio plays for a song with autocue's ``stored`` points and ``ending``, when
     ``follows`` plays next. ``stored`` itself when the rule does not apply."""
-    if not _applies(stored, ending):
+    if not ending_applies(stored, ending):
         return stored
     autocue = _autocue_eom_ms(stored)
     if ending.ending is EndingType.COLD:
