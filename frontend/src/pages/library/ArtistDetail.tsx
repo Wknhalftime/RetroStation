@@ -1,14 +1,20 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft, Crown, Music } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArtistDetail } from "@/api/artists";
+import {
+  MergedMembers,
+  MergePicker,
+  type MergedFromState,
+} from "@/components/domain/library/ArtistMerge";
 import { FeaturedReleasesSection } from "@/components/domain/library/FeaturedReleasesSection";
 import { VersionBadges } from "@/components/domain/works/VersionBadges";
 
 export function ArtistDetail() {
   const { artist_id } = useParams<{ artist_id: string }>();
   const { data, isLoading, isError } = useArtistDetail(artist_id);
+  const mergedFrom = (useLocation().state as MergedFromState | null)?.mergedFrom;
 
   if (isLoading) {
     return (
@@ -23,6 +29,17 @@ export function ArtistDetail() {
       <p className="rounded-md bg-red-50 p-4 text-sm text-red-700">
         Failed to load artist. Please try again.
       </p>
+    );
+  }
+
+  // A merged artist's page is its primary's (phase 2a S11).
+  if (data.merged_into) {
+    return (
+      <Navigate
+        to={`/library/artists/${data.merged_into}`}
+        replace
+        state={{ mergedFrom: data.name } satisfies MergedFromState}
+      />
     );
   }
 
@@ -43,7 +60,16 @@ export function ArtistDetail() {
         </Link>
       </div>
 
+      {mergedFrom && (
+        <p role="status" className="mb-4 rounded-md bg-indigo-50 p-3 text-sm text-indigo-800">
+          {mergedFrom} was merged into {data.name}, so its page is this one.
+        </p>
+      )}
+
       <PageHeader title={data.name} description={description || undefined} />
+
+      <MergePicker artist={data} />
+      <MergedMembers artist={data} />
 
       {/* Works list */}
       <section>
