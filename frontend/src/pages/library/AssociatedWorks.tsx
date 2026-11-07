@@ -127,9 +127,8 @@ export function AssociatedWorks() {
   const masterBannerText = work.song_master
     ? [
         `Selection: ${work.song_master.selection_method}`,
-        work.song_master.score != null
-          ? `Score: ${Math.round(work.song_master.score * 100)}%`
-          : null,
+        // Points (release status + release type + format), not a fraction.
+        work.song_master.score != null ? `Score: ${work.song_master.score} points` : null,
       ]
         .filter(Boolean)
         .join("  ·  ")
