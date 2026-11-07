@@ -7,6 +7,7 @@ from typing import Any
 
 import psycopg
 
+from backend.db.repositories.artist_names import add_current_name
 from backend.db.repositories.artists import artist_from_row
 from backend.domain.catalog import (
     Artist,
@@ -14,7 +15,7 @@ from backend.domain.catalog import (
     InvalidLinkDecisionError,
     LinkEvidence,
 )
-from backend.domain.enums import ArtistLinkOutcome
+from backend.domain.enums import ArtistLinkOutcome, ArtistNameSource
 from backend.repositories.artist_linking import ArtistLinkingRepository
 
 _DUE_SQL = """
@@ -106,7 +107,10 @@ class PgArtistLinkingRepository(ArtistLinkingRepository):
                 "disambiguation": candidate.disambiguation,
             },
         )
-        return cur.rowcount == 1
+        linked = cur.rowcount == 1
+        if linked:
+            add_current_name(self._conn, artist_id, ArtistNameSource.MUSICBRAINZ_NAME)
+        return linked
 
     def record_outcome(self, artist_id: str, outcome: ArtistLinkOutcome) -> None:
         if outcome == ArtistLinkOutcome.LINKED:

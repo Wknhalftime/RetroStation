@@ -5,7 +5,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.domain.enums import ArtistLinkOutcome, CatalogSource, VersionType
+from backend.domain.enums import (
+    ArtistLinkOutcome,
+    ArtistNameSource,
+    CatalogSource,
+    VersionType,
+)
 from backend.domain.system import StorageUnavailableError
 
 # Exactly the spelling MusicBrainz's lookup endpoints accept: a hyphenated
@@ -74,6 +79,17 @@ class MusicBrainzId:
         return cls(raw)
 
 
+def find_mbids(text: str) -> list[str]:
+    """Every MBID in *text*, lowercased, in order, whatever joins them (C69)."""
+    return [found.lower() for found in _MBID_PATTERN.findall(text)]
+
+
+def holds_several_mbids(mbids: Iterable[str]) -> bool:
+    """Whether a file holds two or more MBIDs that aren't placeholders (phase 2a D6). A placeholder
+    is no performer, so one MBID beside it is a single-MBID file, as S6's reading counts it."""
+    return len({mbid for mbid in mbids if mbid not in SPECIAL_PURPOSE_MBIDS}) > 1
+
+
 def real_mbid(tag_value: str) -> str | None:
     """The lowercased MBID of a tag value holding exactly one well-formed, non-placeholder MBID
     (phase 2a S6); None otherwise, so a joined value ("a, b") never counts."""
@@ -86,6 +102,15 @@ def real_mbid(tag_value: str) -> str | None:
 def name_mbids_of(tag_values: Iterable[str]) -> set[str]:
     """The MBIDs a name holds (phase 2a S6), given its present files' artist MBID tag values."""
     return {mbid for mbid in map(real_mbid, tag_values) if mbid is not None}
+
+
+@dataclass(frozen=True)
+class ArtistName:
+    """One of an artist's names (phase 2a S10, C43)."""
+
+    name: str
+    normalized_name: str
+    source: ArtistNameSource
 
 
 @dataclass

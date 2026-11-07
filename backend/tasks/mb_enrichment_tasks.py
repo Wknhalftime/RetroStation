@@ -17,7 +17,13 @@ from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheReposito
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.sync_conn import connect_sync
 from backend.domain.catalog import Artist, MusicBrainzId, Recording, Work
-from backend.domain.enums import LogCategory, RecheckScope, TaskStatus, TaskType
+from backend.domain.enums import (
+    ArtistNameSource,
+    LogCategory,
+    RecheckScope,
+    TaskStatus,
+    TaskType,
+)
 from backend.domain.system import TaskProgress
 from backend.repositories.task_progress import TaskProgressRepository
 from backend.services.library_enrichment_service import (
@@ -192,6 +198,13 @@ def _enhance_artist(
 
     if field_updates:
         _apply_artist_updates(conn, artist.id, field_updates)
+        if "name" in field_updates:
+            repos.artist_names.add(
+                artist.id,
+                field_updates["name"],
+                field_updates.get("normalized_name", ""),
+                ArtistNameSource.MUSICBRAINZ_NAME,
+            )
         logger.info(
             "mb_artist_enhanced_tier2",
             artist_id=artist.id,

@@ -1,7 +1,8 @@
+from collections.abc import Callable, Collection
 from uuid import uuid4
 
 from backend.domain.catalog import Artist, name_mbids_of
-from backend.domain.enums import CatalogSource
+from backend.domain.enums import ArtistNameSource, CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 
@@ -84,6 +85,57 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
         sort_name: str,
         normalized_name: str,
         disambiguation: str | None = None,
+        *,
+        name_source: ArtistNameSource = ArtistNameSource.MUSICBRAINZ_NAME,
+    ) -> str:
+        return self._upsert_mb(
+            mbid,
+            name,
+            sort_name,
+            normalized_name,
+            disambiguation,
+            lambda held: held <= {mbid},
+        )
+
+    def upsert_further_credit(
+        self,
+        mbid: str,
+        name: str,
+        sort_name: str,
+        normalized_name: str,
+        disambiguation: str | None = None,
+    ) -> str:
+        return self._upsert_mb(
+            mbid,
+            name,
+            sort_name,
+            normalized_name,
+            disambiguation,
+            lambda held: held == {mbid},
+        )
+
+    def artist_ids_by_mbid(self, mbids: Collection[str]) -> dict[str, str]:
+        wanted = set(mbids)
+        return {a.mbid: a.id for a in self._data.values() if a.mbid in wanted and a.mbid}
+
+    def list_named_stubs_without_normalized_name(self) -> list[Artist]:
+        return [
+            a
+            for a in self._data.values()
+            if a.mbid is not None and a.normalized_name is None and a.name != a.mbid
+        ]
+
+    def set_normalized_name(self, artist_id: str, normalized_name: str) -> None:
+        self._data[artist_id].normalized_name = normalized_name
+
+    def _upsert_mb(
+        self,
+        mbid: str,
+        name: str,
+        sort_name: str,
+        normalized_name: str,
+        disambiguation: str | None,
+        promotes: Callable[[set[str]], bool],
     ) -> str:
         self.musicbrainz_upserts.append(
             {
@@ -100,7 +152,7 @@ class FakeArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository)
                 return artist.id
         # As PgArtistRepository (phase 2a S6): the name's MBIDs are none or only this one, so the
         # name-only artist takes it; otherwise a new artist, never another MBID's.
-        if self.name_mbids(normalized_name) <= {mbid}:
+        if promotes(self.name_mbids(normalized_name)):
             for artist in self._data.values():
                 if artist.normalized_name == normalized_name and artist.mbid is None:
                     artist.mbid = mbid

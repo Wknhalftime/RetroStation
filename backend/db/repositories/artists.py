@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
 
+from backend.db.repositories.artist_names import add_current_name
 from backend.domain.catalog import Artist, name_mbids_of
-from backend.domain.enums import ArtistLinkOutcome, CatalogSource
+from backend.domain.enums import ArtistLinkOutcome, ArtistNameSource, CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_enhancement import ArtistEnhancementRepository
 
@@ -28,6 +31,16 @@ def artist_from_row(row: dict[str, Any]) -> Artist:
         mb_lookup_at=row.get("mb_lookup_at"),
         mb_lookup_outcome=ArtistLinkOutcome(outcome) if outcome else None,
     )
+
+
+@dataclass(frozen=True)
+class _MbArtistFields:
+    """What a MusicBrainz upsert writes on a new or promoted artist."""
+
+    name: str
+    sort_name: str
+    normalized_name: str
+    disambiguation: str | None
 
 
 class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
@@ -127,6 +140,7 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
             (str(uuid4()), name, name, normalized_name),
         ).fetchone()
         if row is not None:
+            add_current_name(self._conn, row["id"], ArtistNameSource.TAG)
             return cast(str, row["id"])
         row = self._conn.execute(
             "SELECT id FROM artists WHERE normalized_name = %s AND mbid IS NULL",
@@ -153,15 +167,48 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
         sort_name: str,
         normalized_name: str,
         disambiguation: str | None = None,
+        *,
+        name_source: ArtistNameSource = ArtistNameSource.MUSICBRAINZ_NAME,
     ) -> str:
+        return self._upsert_mb(
+            mbid,
+            _MbArtistFields(name, sort_name, normalized_name, disambiguation),
+            name_source,
+            lambda held: held <= {mbid},
+        )
+
+    def upsert_further_credit(
+        self,
+        mbid: str,
+        name: str,
+        sort_name: str,
+        normalized_name: str,
+        disambiguation: str | None = None,
+    ) -> str:
+        return self._upsert_mb(
+            mbid,
+            _MbArtistFields(name, sort_name, normalized_name, disambiguation),
+            ArtistNameSource.MUSICBRAINZ_NAME,
+            lambda held: held == {mbid},
+        )
+
+    def _upsert_mb(
+        self,
+        mbid: str,
+        fields: _MbArtistFields,
+        name_source: ArtistNameSource,
+        promotes: Callable[[set[str]], bool],
+    ) -> str:
+        """Find by MBID, else promote when *promotes* allows it given the name's MBIDs, else
+        insert."""
         # 1. Return early if this exact MBID is already known.
         row = self._conn.execute("SELECT id FROM artists WHERE mbid = %s", (mbid,)).fetchone()
         if row is not None:
             return cast(str, row["id"])
 
-        # 2. The name's MBIDs are none, or only this one (D5): the name-only artist takes it.
+        # 2. The name's MBIDs allow it (D5): the name-only artist takes it.
         row = None
-        if self.name_mbids(normalized_name) <= {mbid}:
+        if promotes(self.name_mbids(fields.normalized_name)):
             row = self._conn.execute(
                 """UPDATE artists SET
                      mbid = %s,
@@ -172,7 +219,13 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
                      needs_enhancement = TRUE
                    WHERE normalized_name = %s AND mbid IS NULL
                    RETURNING id""",
-                (mbid, name, sort_name, disambiguation, normalized_name),
+                (
+                    mbid,
+                    fields.name,
+                    fields.sort_name,
+                    fields.disambiguation,
+                    fields.normalized_name,
+                ),
             ).fetchone()
 
         # 3. Otherwise a new artist, never another MBID's. A partial index can't arbitrate a row
@@ -185,14 +238,40 @@ class PgArtistRepository(ArtistCatalogRepository, ArtistEnhancementRepository):
                    VALUES (%s, %s, %s, %s, %s, 'musicbrainz', TRUE, %s)
                    ON CONFLICT (mbid) DO NOTHING
                    RETURNING id""",
-                (str(uuid4()), name, sort_name, normalized_name, mbid, disambiguation),
+                (
+                    str(uuid4()),
+                    fields.name,
+                    fields.sort_name,
+                    fields.normalized_name,
+                    mbid,
+                    fields.disambiguation,
+                ),
             ).fetchone()
         if row is None:
             row = self._conn.execute("SELECT id FROM artists WHERE mbid = %s", (mbid,)).fetchone()
         if row is None:
             raise RuntimeError(f"Artist upsert_musicbrainz_artist failed: {mbid}")
         _maybe_mark_complete_on_upsert(self._conn, row["id"])
+        add_current_name(self._conn, row["id"], name_source)
         return cast(str, row["id"])
+
+    def artist_ids_by_mbid(self, mbids: Collection[str]) -> dict[str, str]:
+        rows = self._conn.execute(
+            "SELECT mbid, id FROM artists WHERE mbid = ANY(%s)", (list(mbids),)
+        ).fetchall()
+        return {row["mbid"]: row["id"] for row in rows}
+
+    def list_named_stubs_without_normalized_name(self) -> list[Artist]:
+        rows = self._conn.execute(
+            """SELECT * FROM artists
+                WHERE mbid IS NOT NULL AND normalized_name IS NULL AND name <> mbid"""
+        ).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def set_normalized_name(self, artist_id: str, normalized_name: str) -> None:
+        self._conn.execute(
+            "UPDATE artists SET normalized_name = %s WHERE id = %s", (normalized_name, artist_id)
+        )
 
     def get_by_normalized_name(
         self,
@@ -213,7 +292,8 @@ def _maybe_mark_complete_on_upsert(conn: psycopg.Connection[Any], artist_id: str
     echoes `name` is still a bare default and should go through MB lookup to
     pick up the real sort form (e.g., "Madonna" → "Ciccone, Madonna").
 
-    Scope: only called from the promote and INSERT paths in `upsert_musicbrainz_artist`.
+    Scope: only called from the promote and INSERT paths in `_upsert_mb`, so from
+    `upsert_musicbrainz_artist` and `upsert_further_credit`.
     Re-upserts of an already-known MBID short-circuit at the first SELECT
     and never reach this helper — the enhancement task handles those.
     """

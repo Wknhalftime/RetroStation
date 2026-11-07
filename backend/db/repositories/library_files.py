@@ -8,6 +8,7 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import refused_row_as, translate_lost_connection
+from backend.db.repositories.artist_credit_files import credit_json
 from backend.db.repositories.path_prefix import dir_like_prefix
 from backend.domain.enums import EnrichmentStatus, FileStatus, ReleaseStatus, ReleaseType
 from backend.domain.library import (
@@ -34,6 +35,7 @@ _UPSERT_SQL = """
         track_number, disc_number, duration_ms, bitrate, raw_metadata,
         artist_name, normalized_artist_name, normalized_title,
         work_id, file_size, file_mtime_ns, audio_hash,
+        artist_mbids, credit,
         indexed_at
     ) VALUES (
         %s, %s, %s, %s,
@@ -43,6 +45,7 @@ _UPSERT_SQL = """
         %s, %s, %s, %s, %s,
         %s, %s, %s,
         %s, %s, %s, %s,
+        %s, %s,
         NOW()
     )
     ON CONFLICT (file_path) DO UPDATE SET
@@ -98,6 +101,23 @@ _UPSERT_SQL = """
         artist_name            = COALESCE(
             NULLIF(TRIM(EXCLUDED.artist_name), ''),
             library_files.artist_name),
+        -- Phase 2a S1: only when the stat changed or the columns are unfilled, so a full scan
+        -- never replaces names the backfill looked up. A file back from missing moves
+        -- indexed_at, not its stat. A stored row doesn't carry these, and its stat is unchanged.
+        artist_mbids           = CASE
+            WHEN library_files.artist_mbids IS NULL
+              OR library_files.file_size IS DISTINCT FROM EXCLUDED.file_size
+              OR library_files.file_mtime_ns IS DISTINCT FROM EXCLUDED.file_mtime_ns
+            THEN EXCLUDED.artist_mbids
+            ELSE library_files.artist_mbids
+        END,
+        credit                 = CASE
+            WHEN library_files.artist_mbids IS NULL
+              OR library_files.file_size IS DISTINCT FROM EXCLUDED.file_size
+              OR library_files.file_mtime_ns IS DISTINCT FROM EXCLUDED.file_mtime_ns
+            THEN EXCLUDED.credit
+            ELSE library_files.credit
+        END,
         file_size              = EXCLUDED.file_size,
         file_mtime_ns          = EXCLUDED.file_mtime_ns,
         -- D11: only a new file, a file back from missing, or a size/mtime change moves
@@ -142,6 +162,8 @@ def _upsert_params(file: LibraryFile) -> tuple[Any, ...]:
         file.file_size,
         file.file_mtime_ns,
         str(file.audio_hash) if file.audio_hash is not None else None,
+        None if file.audio.artist_mbids is None else list(file.audio.artist_mbids),
+        credit_json(file.audio.credit),
     )
 
 

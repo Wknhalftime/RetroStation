@@ -8,7 +8,9 @@ import psycopg
 from psycopg.rows import DictRow
 
 from backend.db.repositories.artist_cascade import PgArtistCascadeRepository
+from backend.db.repositories.artist_credit_files import PgArtistCreditFilesRepository
 from backend.db.repositories.artist_linking import PgArtistLinkingRepository
+from backend.db.repositories.artist_names import PgArtistNameRepository
 from backend.db.repositories.artist_resolution import PgArtistResolutionRepository
 from backend.db.repositories.artist_tag_files import PgArtistTagFilesRepository
 from backend.db.repositories.artists import PgArtistRepository
@@ -27,6 +29,7 @@ from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.mb_cache_listing import PgMusicBrainzCacheListing
 from backend.db.repositories.missing_files import PgMissingFileListingRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
@@ -205,6 +208,9 @@ class RepositoryFactory:
         self.library_files = self.library.files
         self.library_suggestions = PgLibrarySuggestionRepository(conn)
         self.artist_tag_files = PgArtistTagFilesRepository(conn)
+        self.artist_credit_files = PgArtistCreditFilesRepository(conn)
+        self.artist_names = PgArtistNameRepository(conn)
+        self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
         self.format_overrides = self.library.format_overrides
