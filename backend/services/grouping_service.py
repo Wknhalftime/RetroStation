@@ -165,6 +165,45 @@ def _create_local_work(
     return work_id
 
 
+def grouping_shortcut(
+    file: LibraryFile,
+    *,
+    library_file_repo: LibraryFileRepository,
+    recording_repo: RecordingRepository,
+) -> GroupingResult | None:
+    """The work and recording grouping gives *file* before it reads a title: its audio's
+    twin's, else its recording MBID's; None when neither applies. Reads only."""
+    shortcut = _try_audio_hash_shortcut(file, library_file_repo)
+    return shortcut if shortcut is not None else _try_mbid_shortcut(file, recording_repo)
+
+
+# planned_work's exact-title check reads every work of a name; the fuzzy match reads 100.
+_EVERY_WORK = 1_000_000
+
+
+def planned_work(base_title: str, artist_name: str, work_repo: WorkRepository) -> str | None:
+    """The existing work :func:`find_or_create_work` puts a file with this (version-stripped)
+    title and artist on, or None when it would create one. Reads only; for dry runs.
+
+    Its fuzzy match, then an exact normalized title among the works of the artist's name: what
+    ``_create_local_work``'s last check finds past the fuzzy match's 100 candidates. That check
+    reads the works of the one artist it upserts for the name, this one every artist's of the
+    name, so they differ only when two artists share a name with over 100 works between them
+    and the exact title is the other one's.
+    """
+    norm_base = normalize_title(base_title)
+    norm_artist = normalize_artist(artist_name)
+    work_id = _fuzzy_match_work(norm_base, norm_artist, work_repo)
+    if work_id is not None or not norm_base:
+        return work_id
+    for candidate_id, candidate_title in work_repo.get_candidates_by_normalized_artist(
+        norm_artist, limit=_EVERY_WORK
+    ):
+        if normalize_title(candidate_title) == norm_base:
+            return candidate_id
+    return None
+
+
 def find_or_create_work(
     file: LibraryFile,
     *,
@@ -206,11 +245,9 @@ def assign_work(
     if not raw_artist.strip() or not raw_title.strip():
         return None
 
-    shortcut = _try_audio_hash_shortcut(file, library_file_repo)
-    if shortcut is not None:
-        return shortcut
-
-    shortcut = _try_mbid_shortcut(file, recording_repo)
+    shortcut = grouping_shortcut(
+        file, library_file_repo=library_file_repo, recording_repo=recording_repo
+    )
     if shortcut is not None:
         return shortcut
 
