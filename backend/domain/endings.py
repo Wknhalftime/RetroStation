@@ -10,9 +10,14 @@ sustained ending from a fade, so stage 1 has three measured types:
 
 - ``cold``: the level drops ``cold_drop_db`` or more within ``cold_window_ms`` after autocue's
   EOM. EOM and Stop stay autocue's; no fade.
-- ``long_tail``: the full-volume part ends ``min_gap_ms`` or more before autocue's EOM. EOM moves
-  to ``after_body_ms`` after the end of the full-volume part; Lance's sustained fade.
+- ``long_tail``: the full-volume part ends ``min_gap_ms`` or more before autocue's EOM. EOM stays
+  autocue's; Lance's sustained fade. The measured EOM (``after_body_ms`` after the full-volume
+  part) is recorded for stage 2 but not played.
 - ``other``: everything else, mostly fades. EOM stays autocue's; Lance's fade.
+
+Lance (2026-11-07, "Fades only, EOM as-is"): moving EOM to the measured body end failed its
+acceptance check on the held-back picks, so every ending keeps autocue's EOM and only the fade
+after it changes.
 
 ``unmeasured`` audio could not be read and plays autocue's points unchanged.
 """
@@ -85,9 +90,10 @@ class LoudnessTail:
 
 @dataclass(frozen=True)
 class SongEnding:
-    """A song's measured ending. ``eom_ms`` is the long tail's EOM, and only a long tail has
-    one. ``measured_cue_out_ms`` is autocue's Stop when it was measured: a rule applies only
-    while autocue's row still has that Stop."""
+    """A song's measured ending. ``eom_ms`` is the long tail's measured EOM, and only a long
+    tail has one; it is recorded, not played (stage 1 keeps autocue's EOM).
+    ``measured_cue_out_ms`` is autocue's Stop when it was measured: a rule applies only while
+    autocue's row still has that Stop."""
 
     ending: EndingType
     eom_ms: int | None
@@ -209,16 +215,16 @@ def ruled_cues(stored: CuePoints, ending: SongEnding, follows: Follows) -> CuePo
     autocue = _autocue_eom_ms(stored)
     if ending.ending is EndingType.COLD:
         return replace(stored, fade_out_ms=0, start_next_ms=stored.cue_out_ms - autocue)
-    eom_ms = ending.eom_ms if ending.eom_ms is not None else autocue
-    return _with_eom(stored, eom_ms, FADE_AFTER_EOM_MS[(ending.ending, follows)])
+    return _with_eom(stored, autocue, FADE_AFTER_EOM_MS[(ending.ending, follows)])
 
 
 def before_liner(cues: CuePoints, ending: SongEnding) -> CuePoints:
-    """A long tail's song-to-song ``cues`` shortened for a liner next. Anything else, or cues
-    the rule did not make (an edit, a stale measurement), comes back unchanged."""
-    if ending.ending is not EndingType.LONG_TAIL or ending.eom_ms is None:
+    """A long tail's song-to-song ``cues`` shortened for a liner next: the same EOM, the
+    liner fade. Anything else, or cues not in the rule's shape (a fade that starts at EOM and
+    ends at Stop, longer than the liner fade), comes back unchanged."""
+    liner_fade = FADE_AFTER_EOM_MS[(EndingType.LONG_TAIL, Follows.LINER)]
+    if ending.ending is not EndingType.LONG_TAIL:
         return cues
-    eom_ms = _autocue_eom_ms(cues)
-    if eom_ms != ending.eom_ms or cues.fade_out_ms != cues.start_next_ms:
+    if cues.fade_out_ms != cues.start_next_ms or cues.fade_out_ms <= liner_fade:
         return cues
-    return _with_eom(cues, eom_ms, FADE_AFTER_EOM_MS[(EndingType.LONG_TAIL, Follows.LINER)])
+    return _with_eom(cues, _autocue_eom_ms(cues), liner_fade)
