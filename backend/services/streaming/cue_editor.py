@@ -1,8 +1,10 @@
 """The cue editor's use cases: open a song's cues, save or reset a manual edit, and serve the
 audio and waveform the editor draws (spec C2, C4, C5; PR 2).
 
-A song opens on what the radio plays for it (autocue's row, else D23), so the editor never
-shows markers the radio would not use. An edit is stored by audio hash, so twins share it.
+A song opens on what the radio plays for it (autocue's row with the ending rule's fade after
+EOM when the song's ending is measured, else autocue's row, else D23), so the editor never
+shows markers the radio would not use. Reset deletes the edit, so the song reopens there.
+An edit is stored by audio hash, so twins share it.
 Commands return nothing; queries write nothing.
 """
 
@@ -14,6 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import UUID
 
+from backend.domain.endings import Follows, ruled_cues
 from backend.domain.enums import FileStatus
 from backend.domain.library import AudioHash, LibraryFile
 from backend.domain.streaming import (
@@ -32,6 +35,7 @@ from backend.playout.peaks import PeakReadError, Peaks
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.stream_cue_edits import StreamCueEditRepository
 from backend.repositories.stream_cues import StreamCueRepository
+from backend.repositories.stream_endings import StreamEndingRepository
 
 NOT_FINGERPRINTED = "This file hasn't been fingerprinted yet, so its cues can't be edited."
 NO_LENGTH = "This file has no known length."
@@ -52,6 +56,7 @@ class CueEditorPorts:
     files: LibraryFileRepository
     cues: StreamCueRepository
     edits: StreamCueEditRepository
+    endings: StreamEndingRepository | None = None  # None: open on autocue's row, as before
 
 
 @dataclass(frozen=True)
@@ -129,11 +134,16 @@ def analysis_state(row: CueAnalysis | None) -> CueAnalysisState:
     return CueAnalysisState.FAILED if row.analysis_failed else CueAnalysisState.MEASURED
 
 
-def _opening_markers(target: _Editable, timing: StreamTiming) -> CueMarkers:
-    """What the radio plays for this audio without an edit: autocue's row, else D23."""
-    if target.row is not None:
+def _opening_markers(ports: CueEditorPorts, target: _Editable, timing: StreamTiming) -> CueMarkers:
+    """What the radio plays for this audio without an edit, as the radio's reader decides it:
+    the ending rule over autocue's row when the ending is measured, else autocue's row, else
+    D23."""
+    if target.row is None:
+        return CueMarkers.from_points(no_cue_points(target.duration_ms, timing))
+    ending = None if ports.endings is None else ports.endings.get(target.audio_hash)
+    if ending is None:
         return CueMarkers.from_points(target.row.cues)
-    return CueMarkers.from_points(no_cue_points(target.duration_ms, timing))
+    return CueMarkers.from_points(ruled_cues(target.row.cues, ending, Follows.SONG))
 
 
 def read_cue_editor(ports: CueEditorPorts, file_id: UUID, timing: StreamTiming) -> CueEditorView:
@@ -145,7 +155,7 @@ def read_cue_editor(ports: CueEditorPorts, file_id: UUID, timing: StreamTiming) 
         format=target.file.format,
         duration_ms=target.duration_ms,
         analysis=analysis_state(target.row),
-        automatic=_opening_markers(target, timing),
+        automatic=_opening_markers(ports, target, timing),
         manual=ports.edits.get(target.audio_hash),
     )
 

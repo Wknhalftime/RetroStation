@@ -279,9 +279,13 @@ def get_cue_coverage() -> CueCoverageRepository:
 
 
 def get_cue_editor_ports(repos: SyncRepos) -> CueEditorPorts:
-    """The cue editor's ports, on the request's connection: files, stored cues and edits."""
+    """The cue editor's ports, on the request's connection: files, stored cues, edits and
+    measured endings."""
     return CueEditorPorts(
-        files=repos.library_files, cues=repos.streaming.cues, edits=repos.streaming.edits
+        files=repos.library_files,
+        cues=repos.streaming.cues,
+        edits=repos.streaming.edits,
+        endings=repos.streaming.endings,
     )
 
 
