@@ -1,15 +1,19 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { ArrowLeft, Combine, RotateCcw } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { WorkFilesTable } from "@/components/domain/works/WorkFilesTable";
 import { FormatOverridePanel } from "@/components/domain/works/FormatOverridePanel";
+import { MergeWorksDialog } from "@/components/domain/works/MergeWorksDialog";
 import {
   useWorkDetail,
   useSetMaster,
   useRevertMaster,
   useCreateFormatOverride,
   useDeleteFormatOverride,
+  useMergeWorks,
+  type MergeWorksResult,
 } from "@/api/works";
 import { useArtistDetail } from "@/api/artists";
 import { ValidationError } from "@/api/client";
@@ -32,6 +36,23 @@ function errorText(error: Error): string {
   return error.message;
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What a finished merge did, in one line. */
+function mergedText(result: MergeWorksResult): string {
+  const parts = [
+    `Merged ${plural(result.deleted_work_count, "work")} into this one: ` +
+      `${plural(result.merged_file_count, "file")} moved.`,
+  ];
+  if (result.dropped_override_count > 0) {
+    parts.push(
+      `${plural(result.dropped_override_count, "format override")} dropped ` +
+        "(this work already had one for the same format)."
+    );
+  }
+  return parts.join(" ");
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -50,6 +71,11 @@ export function AssociatedWorks() {
   const revertMaster = useRevertMaster(work_id ?? "");
   const createOverride = useCreateFormatOverride(work_id ?? "");
   const deleteOverride = useDeleteFormatOverride(work_id ?? "");
+  const mergeWorks = useMergeWorks(work_id ?? "");
+
+  const [mergeOpen, setMergeOpen] = useState(false);
+  // A fresh dialog (no picks, no filter) each time it opens.
+  const [mergeSession, setMergeSession] = useState(0);
 
   // ---------------------------------------------------------------------------
   // Loading / error states
@@ -88,6 +114,16 @@ export function AssociatedWorks() {
   };
   const masterMethod = work.song_master?.selection_method ?? null;
 
+  const mergeCandidates = (artist?.works ?? []).filter((w) => w.id !== work.id);
+  const openMerge = () => {
+    mergeWorks.reset();
+    setMergeSession((n) => n + 1);
+    setMergeOpen(true);
+  };
+  const runMerge = (sourceWorkIds: string[]) => {
+    mergeWorks.mutate(sourceWorkIds, { onSuccess: () => setMergeOpen(false) });
+  };
+
   const masterBannerText = work.song_master
     ? [
         `Selection: ${work.song_master.selection_method}`,
@@ -121,19 +157,47 @@ export function AssociatedWorks() {
         title={work.title}
         description={artist?.name}
         actions={
-          work.song_master ? (
+          <>
             <button
               type="button"
-              onClick={revertToAuto}
-              disabled={revertMaster.isPending}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60"
+              onClick={openMerge}
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             >
-              <RotateCcw className="h-4 w-4" />
-              {revertMaster.isPending ? "Reverting..." : "Revert to Auto"}
+              <Combine className="h-4 w-4" />
+              Merge duplicates
             </button>
-          ) : undefined
+            {work.song_master && (
+              <button
+                type="button"
+                onClick={revertToAuto}
+                disabled={revertMaster.isPending}
+                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {revertMaster.isPending ? "Reverting..." : "Revert to Auto"}
+              </button>
+            )}
+          </>
         }
       />
+
+      <MergeWorksDialog
+        key={mergeSession}
+        open={mergeOpen}
+        onClose={() => setMergeOpen(false)}
+        keepTitle={work.title}
+        candidates={mergeCandidates}
+        onMerge={runMerge}
+        isMerging={mergeWorks.isPending}
+        error={mergeWorks.error ? errorText(mergeWorks.error) : null}
+      />
+
+      {/* What the last merge did */}
+      {mergeWorks.data && (
+        <p role="status" className="rounded-md bg-green-50 px-4 py-2.5 text-sm text-green-800">
+          {mergedText(mergeWorks.data)}
+        </p>
+      )}
 
       {/* Master info banner */}
       {masterBannerText && (
