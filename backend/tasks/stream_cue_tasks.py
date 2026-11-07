@@ -40,6 +40,7 @@ from backend.domain.streaming import CueCandidate, StreamTiming
 from backend.domain.system import StorageUnavailableError
 from backend.playout.cue_analysis import AnalyserConfig, analyse_batch, remove_listings
 from backend.playout.liquidsoap_process import session_base_env
+from backend.playout.loudness import LoudnessSettings, read_tail
 from backend.repositories.stream_cue_coverage import CoverageRead
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.streaming.cue_precompute import (
@@ -53,6 +54,11 @@ from backend.services.streaming.cue_progress import (
     CueProgressPorts,
     CueProgressRows,
     end_leftover_cue_rows_with,
+)
+from backend.services.streaming.ending_analysis import (
+    EndingRunConfig,
+    EndingRunPorts,
+    run_ending_analysis,
 )
 from backend.services.streaming.liners import liner_folder
 from backend.tasks.cue_huey_app import cue_huey
@@ -280,6 +286,32 @@ def request_cue_analysis(file_id: UUID) -> None:
 def stream_cue_analysis_resume() -> None:
     """Continue the backlog in bounded runs (D63)."""
     stream_cue_analysis_task.call_local()
+
+
+def _ending_ports(conn: psycopg.Connection[DictRow], ffmpeg: str) -> EndingRunPorts:
+    """The endings store, the connection's commit and the loudness reader, for one run."""
+    settings = LoudnessSettings(ffmpeg=ffmpeg)
+    return EndingRunPorts(
+        endings=RepositoryFactory(conn).streaming.endings,
+        commit=conn.commit,
+        measure=lambda path, cue_out_ms: read_tail(path, cue_out_ms, settings),
+    )
+
+
+@cue_huey.periodic_task(  # type: ignore[untyped-decorator]
+    crontab(minute="*/5"), expires=RESUME_EXPIRES_S
+)
+def stream_ending_analysis_task() -> None:
+    """One bounded ending analysis run (EOM ending rules), every 5 minutes on the cue worker,
+    after autocue's: endings need autocue's rows. Not gated on LIQUIDSOAP_PATH; it reads with
+    FFmpeg (``settings.ffmpeg_path``), and a missing FFmpeg ends the run with an error."""
+    settings = get_settings()
+    with (
+        reported_failures("stream_ending_analysis_task"),
+        connect_sync(settings.database_url, autocommit=False) as conn,
+    ):
+        ports = _ending_ports(conn, settings.ffmpeg_path)
+        run_ending_analysis(ports, EndingRunConfig(steady=time.monotonic))
 
 
 @cue_huey.periodic_task(crontab(minute="0", hour="4"))  # type: ignore[untyped-decorator]
