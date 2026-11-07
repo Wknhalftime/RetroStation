@@ -59,6 +59,33 @@ export function useRevertMaster(workId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Mutations — merge
+// ---------------------------------------------------------------------------
+
+export interface MergeWorksResult {
+  merged_file_count: number;
+  deleted_work_count: number;
+  dropped_override_count: number;
+}
+
+/** Fold the given works into `targetId`; the sources are deleted. */
+export function useMergeWorks(targetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<MergeWorksResult, Error, string[]>({
+    mutationFn: (sourceWorkIds) =>
+      apiFetch<MergeWorksResult>(`/api/v1/library/works/${targetId}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ source_work_ids: sourceWorkIds }),
+      }),
+    onSuccess: () => {
+      // The target gains files and every source work is gone.
+      void queryClient.invalidateQueries({ queryKey: ["works"] });
+      void queryClient.invalidateQueries({ queryKey: ["artists"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Mutations — format overrides
 // ---------------------------------------------------------------------------
 
