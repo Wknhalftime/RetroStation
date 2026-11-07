@@ -149,13 +149,14 @@ def test_cold_before_liner_is_the_same() -> None:
 
 
 def test_long_tail_song_fade_is_two_seconds() -> None:
+    """Lance (2026-11-07, "Fades only, EOM as-is"): autocue's EOM (195 s), then 2 s of fade."""
     played = ruled_cues(STORED, SongEnding(EndingType.LONG_TAIL, 190_000, 200_000), Follows.SONG)
-    assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (192_000, 2000, 2000)
+    assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (197_000, 2000, 2000)
 
 
 def test_long_tail_liner_fade_is_one_second() -> None:
     played = ruled_cues(STORED, SongEnding(EndingType.LONG_TAIL, 190_000, 200_000), Follows.LINER)
-    assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (191_000, 1000, 1000)
+    assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (196_000, 1000, 1000)
 
 
 def test_other_song_fade_is_one_second() -> None:
@@ -175,17 +176,13 @@ def test_fade_is_clamped_to_stored_stop() -> None:
     assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (200_000, 500, 500)
 
 
-@pytest.mark.parametrize("eom_ms", [0, 200_000, 250_000])
-def test_long_tail_eom_outside_span_falls_back(eom_ms: int) -> None:
+@pytest.mark.parametrize("eom_ms", [0, 190_000, 200_000, 250_000])
+def test_long_tail_plays_autocue_eom_whatever_was_measured(eom_ms: int) -> None:
+    """The measured EOM is recorded, never played (Lance, 2026-11-07)."""
     ending = SongEnding(EndingType.LONG_TAIL, eom_ms, 200_000)
-    assert ruled_cues(STORED, ending, Follows.SONG) == STORED
-
-
-def test_long_tail_eom_at_or_before_start_falls_back() -> None:
-    stored = CuePoints(5_000, 200_000, 0, 4_000, 5_000, -3.0)
-    for eom_ms in (2_000, 5_000):
-        ending = SongEnding(EndingType.LONG_TAIL, eom_ms, 200_000)
-        assert ruled_cues(stored, ending, Follows.SONG) == stored
+    played = ruled_cues(STORED, ending, Follows.SONG)
+    assert played.cue_out_ms - played.start_next_ms == 195_000
+    assert (played.cue_out_ms, played.fade_out_ms) == (197_000, 2000)
 
 
 def test_stale_measurement_falls_back() -> None:
@@ -212,6 +209,14 @@ def test_before_liner_leaves_edit_shaped_cues() -> None:
     ending = SongEnding(EndingType.LONG_TAIL, 190_000, 200_000)
     edited = CuePoints(0, 188_000, 0, 2_000, 3_000, -3.0)  # an edit's EOM at 185 s
     assert before_liner(edited, ending) == edited
+
+
+def test_before_liner_leaves_a_fade_already_short() -> None:
+    """A long tail cut short by autocue's Stop (1 s of fade left) needs no shortening."""
+    ending = SongEnding(EndingType.LONG_TAIL, 190_000, 200_000)
+    short = ruled_cues(cues(200_000, 1_000), ending, Follows.SONG)
+    assert short.fade_out_ms == 1000
+    assert before_liner(short, ending) == short
 
 
 @pytest.mark.parametrize("kind", [EndingType.OTHER, EndingType.COLD, EndingType.UNMEASURED])

@@ -64,7 +64,7 @@ async def test_long_tail_before_due_liner_fades_one_second(tmp_path: Path) -> No
     assert labels[:2] == ["s0", "s1"]
     sent = (await rig.item(sid, 1)).annotations
     assert (sent["liq_cue_out"], sent["liq_fade_out"], sent["sn_rem"]) == (
-        "191.500",
+        "196.000",  # autocue's EOM (195 s), then 1 s (Lance, 2026-11-07)
         "1.000",
         "1.000",
     )
@@ -78,7 +78,7 @@ async def test_long_tail_with_no_liner_due_fades_two_seconds(tmp_path: Path) -> 
     await rig.hand_out(sid, 2)
     sent = (await rig.item(sid, 1)).annotations
     assert (sent["liq_cue_out"], sent["liq_fade_out"], sent["sn_rem"]) == (
-        "192.500",
+        "197.000",
         "2.000",
         "2.000",
     )
@@ -118,7 +118,7 @@ async def test_long_tail_right_after_a_liner_fades_two_seconds(tmp_path: Path) -
     assert labels[3] == "s2"
     sent = (await rig.item(sid, 3)).annotations
     assert (sent["liq_cue_out"], sent["liq_fade_out"], sent["sn_rem"]) == (
-        "192.500",
+        "197.000",
         "2.000",
         "2.000",
     )
@@ -136,11 +136,11 @@ async def test_landing_before_due_liner_fades_one_second(tmp_path: Path) -> None
 
 async def test_liner_slot_span_matches_sent_song(tmp_path: Path) -> None:
     """Review Focus 5: the liner after a shortened long tail is placed from the span the song
-    was sent with (191.5 s), not its song-to-song span (192.5 s). Read from the session's
+    was sent with (196 s), not its song-to-song span (197 s). Read from the session's
     stored slot, as the liner read-error tests do."""
     rig = rig_with_s1(tmp_path, ruled_cues(STORED, LONG_TAIL, Follows.SONG), LONG_TAIL)
     sid = await rig.open()
     await rig.hand_out(sid, 3)
     slot = rig.service._sessions[sid].assigned[2]
     assert isinstance(slot, LinerSlot)
-    assert slot.after_span_ms == 191_500
+    assert slot.after_span_ms == 196_000

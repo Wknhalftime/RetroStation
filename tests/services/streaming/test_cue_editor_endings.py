@@ -73,7 +73,7 @@ def test_opens_on_long_tail_markers(ports: CueEditorPorts) -> None:
     endings(ports).endings[HASH] = SongEnding(EndingType.LONG_TAIL, 190_500, 200_000)
     view = read_cue_editor(ports, FILE_ID, TIMING)
     assert view.automatic == CueMarkers(
-        start_ms=0, eom_ms=190_500, fade_at_ms=190_500, stop_ms=192_500
+        start_ms=0, eom_ms=195_000, fade_at_ms=195_000, stop_ms=197_000
     )
 
 
@@ -110,7 +110,7 @@ def test_manual_edit_still_reported(ports: CueEditorPorts) -> None:
     view = read_cue_editor(ports, FILE_ID, TIMING)
     assert view.manual == edit
     assert view.automatic == CueMarkers(
-        start_ms=0, eom_ms=190_500, fade_at_ms=190_500, stop_ms=192_500
+        start_ms=0, eom_ms=195_000, fade_at_ms=195_000, stop_ms=197_000
     )
 
 

@@ -151,7 +151,7 @@ def test_day_read_applies_long_tail_rule(conn: psycopg.Connection[DictRow]) -> N
     file = _day_file(conn, station_id)
     assert file.cues == ruled_cues(STORED, LONG_TAIL, Follows.SONG)
     assert (file.cues.cue_out_ms, file.cues.fade_out_ms, file.cues.start_next_ms) == (
-        192_500,
+        197_000,  # autocue's EOM (195 s) and 2 s of fade (Lance, 2026-11-07)
         2_000,
         2_000,
     )

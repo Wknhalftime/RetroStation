@@ -1,41 +1,41 @@
-"""Acceptance: the stage 1 ending rules place EOM closer to Lance than autocue does.
+"""Acceptance: the stage 1 ending rules keep autocue's EOM and change only the fade after it.
 
-Spec: docs/superpowers/specs/2026-11-07-eom-ending-rules-design.md ("Acceptance"); plan:
-docs/superpowers/plans/2026-11-07-eom-ending-rules-stage1.md (Task 1). The fixture holds Lance's
-51 labelled picks (2026-11-07), each with the song's stored autocue cues and loudness tail
-(``scripts/extract_ending_fixtures.py``).
+Lance (2026-11-07, "Fades only, EOM as-is"): moving EOM to the measured end of the full-volume
+part failed this file's held-back check (sustained 3000 vs autocue's 2673 ms, fades 570 vs
+211 ms), so every ending keeps autocue's EOM. The fade after EOM follows his table: none after
+a cold ending, 2 s after a long tail, 1 s after anything else (a song next).
 
-The split is fixed before any tuning: a pick is held back when the sha256 of its audio hash is
-odd. Rules are tuned on the other half and judged here on the held-back half, so they cannot
-simply memorize Lance's answers. A pick is judged under Lance's tag, never the classifier's.
+With EOM always autocue's, comparing the rule's EOM with autocue's against Lance's picks can no
+longer fail, so those checks are gone (final review, 2026-11-07). What is graded here is what
+stage 1 plays: autocue's EOM everywhere, no fade after a cold ending, and the table's fade.
+
+Spec: docs/superpowers/specs/2026-11-07-eom-ending-rules-design.md; plan:
+docs/superpowers/plans/2026-11-07-eom-ending-rules-stage1.md. The fixture holds Lance's 51
+labelled picks (2026-11-07), each with the song's stored autocue cues and loudness tail
+(``scripts/extract_ending_fixtures.py``); stage 2 re-uses it.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
-import statistics
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from backend.domain.endings import Follows, LoudnessTail, classify_ending, ruled_cues
+from backend.domain.endings import (
+    FADE_AFTER_EOM_MS,
+    EndingType,
+    Follows,
+    LoudnessTail,
+    classify_ending,
+    ruled_cues,
+)
 from backend.domain.streaming import CuePoints
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "endings" / "lance_picks.json"
 
-SUSTAINED_BAR_MS = 1500
-"""Lance's ruling at the test lock: the design's 1000, or the plan's proposed 1500."""
-
-SUSTAINED_GAIN_MS = 500
-"""The rule must beat autocue on sustained endings by at least this much (plan, Task 1)."""
-
-COLD_SLACK_MS = 50
-COLD_BAR_MS = 300
-WITHIN_MS = 1000
-FALSE_ENDING_SLACK_MS = 500
 HARD_STOP_DB = 15.0
 HARD_STOP_WINDOW_MS = 1000
 
@@ -43,11 +43,6 @@ HARD_STOP_WINDOW_MS = 1000
 def _picks() -> list[dict[str, Any]]:
     loaded: list[dict[str, Any]] = json.loads(FIXTURE.read_text(encoding="utf-8"))
     return loaded
-
-
-def _held_back(pick: dict[str, Any]) -> bool:
-    digest = hashlib.sha256(pick["audio_hash"].encode()).hexdigest()
-    return int(digest, 16) % 2 == 1
 
 
 def _cues(pick: dict[str, Any]) -> CuePoints:
@@ -68,22 +63,6 @@ def _rule_eom(pick: dict[str, Any]) -> int:
     cues = _cues(pick)
     played = ruled_cues(cues, classify_ending(_tail(pick), cues), Follows.SONG)
     return played.cue_out_ms - played.start_next_ms
-
-
-def _error(eom_ms: int, pick: dict[str, Any]) -> int:
-    return abs(eom_ms - pick["lance_eom_ms"])
-
-
-def _held(tag: str | None = None) -> list[dict[str, Any]]:
-    return [p for p in _picks() if _held_back(p) and (tag is None or p["tag"] == tag)]
-
-
-def _medians(picks: list[dict[str, Any]]) -> tuple[float, float]:
-    """(rule, autocue) median error over ``picks``."""
-    assert picks, "the held-back half has no picks with this tag"
-    rule = statistics.median(_error(_rule_eom(p), p) for p in picks)
-    autocue = statistics.median(_error(_autocue_eom(p), p) for p in picks)
-    return rule, autocue
 
 
 def _smoothed_db(levels: tuple[float, ...], frame_ms: int, at: int) -> float:
@@ -114,12 +93,6 @@ def test_fixture_holds_all_51_picks() -> None:
     assert len(_picks()) == 51
 
 
-def test_cold_no_worse_than_autocue() -> None:
-    rule, autocue = _medians(_held("cold"))
-    assert rule <= autocue + COLD_SLACK_MS
-    assert rule <= COLD_BAR_MS
-
-
 @pytest.mark.parametrize(
     "pick", [p for p in _picks() if p["tag"] == "cold"], ids=lambda p: p["title"]
 )
@@ -140,24 +113,26 @@ def test_most_cold_picks_have_a_hard_stop() -> None:
     assert sum(_hard_stop(p) for p in _picks() if p["tag"] == "cold") >= 12
 
 
-def test_fade_no_worse_than_autocue() -> None:
-    rule, autocue = _medians(_held("fade"))
-    assert rule <= autocue
+@pytest.mark.parametrize("pick", _picks(), ids=lambda p: p["title"])
+def test_every_eom_is_autocues(pick: dict[str, Any]) -> None:
+    """Lance (2026-11-07): every pick plays autocue's EOM."""
+    assert _rule_eom(pick) == _autocue_eom(pick)
 
 
-def test_sustained_beats_autocue() -> None:
-    rule, autocue = _medians(_held("sustained"))
-    assert rule <= SUSTAINED_BAR_MS
-    assert rule <= autocue - SUSTAINED_GAIN_MS
-
-
-def test_more_picks_within_a_second() -> None:
-    held = _held()
-    rule = sum(_error(_rule_eom(p), p) <= WITHIN_MS for p in held)
-    autocue = sum(_error(_autocue_eom(p), p) <= WITHIN_MS for p in held)
-    assert rule >= autocue
-
-
-def test_false_ending_not_worse() -> None:
-    (pick,) = [p for p in _picks() if p["tag"] == "false_ending"]
-    assert _error(_rule_eom(pick), pick) <= _error(_autocue_eom(pick), pick) + FALSE_ENDING_SLACK_MS
+@pytest.mark.parametrize("pick", _picks(), ids=lambda p: p["title"])
+def test_fade_after_eom_follows_the_table(pick: dict[str, Any]) -> None:
+    """Lance's fade after EOM, a song next: none after a cold ending (autocue's Stop);
+    otherwise the table's fade from EOM, cut short only by autocue's Stop."""
+    cues = _cues(pick)
+    ending = classify_ending(_tail(pick), cues)
+    played = ruled_cues(cues, ending, Follows.SONG)
+    eom = _autocue_eom(pick)
+    if ending.ending is EndingType.COLD:
+        assert (played.cue_out_ms, played.fade_out_ms) == (cues.cue_out_ms, 0)
+        return
+    fade = min(FADE_AFTER_EOM_MS[(ending.ending, Follows.SONG)], cues.cue_out_ms - eom)
+    assert (played.cue_out_ms, played.fade_out_ms, played.start_next_ms) == (
+        eom + fade,
+        fade,
+        fade,
+    )

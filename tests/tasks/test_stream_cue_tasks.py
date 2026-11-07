@@ -217,14 +217,19 @@ def test_a_failure_still_there_a_day_later_is_logged_again(
 
 
 def test_the_resume_runs_every_5_minutes_and_the_prune_once_a_day() -> None:
-    """D63: a resume every 5 minutes; D56: one prune a day. Huey schedules in UTC, so the
-    counts over one day are pinned, not the hour."""
+    """D63: a resume every 5 minutes; D56: one prune a day; EOM ending rules (2026-11-07): an
+    ending analysis run every 5 minutes. Huey schedules in UTC, so the counts over one day are
+    pinned, not the hour."""
     day = datetime(2026, 9, 30)
     fired: Counter[str] = Counter()
     for minute in range(24 * 60):
         for task in cue_huey.read_periodic(day + timedelta(minutes=minute)):
             fired[task.name] += 1
-    assert fired == {"stream_cue_analysis_resume": 288, "stream_cue_prune_task": 1}
+    assert fired == {
+        "stream_cue_analysis_resume": 288,
+        "stream_cue_prune_task": 1,
+        "stream_ending_analysis_task": 288,
+    }
 
 
 PROBE = """
