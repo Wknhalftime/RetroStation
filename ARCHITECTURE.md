@@ -406,19 +406,25 @@ returns the row it finds).
   changes nothing. A merge into the artist itself, one that would make a cycle, one with a
   special-purpose artist on either side, and one of an artist already merged elsewhere are refused
   (409). A merge into an artist that is itself merged is kept as made, and the group's primary is
-  the root its chain of edges ends at (E4). Only the adapter, `PgArtistMergeRepository`, writes the
-  table, and only its SQL follows an edge: `MERGE_ROOTS_CTE` walks every chain, and
-  `ARTIST_GROUP_SQL` serves `artist_group` and the artist page alike.
+  the root its chain of edges ends at (E4). Each Merge and Unmerge first locks `artist_merges`
+  (`SHARE ROW EXCLUSIVE`, which blocks no read), so two merges never pass their checks at once: two
+  crossing merges can't make a cycle, and a second merge of one artist sees the first's edge. Only
+  the adapter, `PgArtistMergeRepository`, writes the table, and only its SQL follows an edge:
+  `MERGE_ROOTS_CTE` walks every chain to its root, and `ARTIST_GROUP_SQL` serves `artist_group`
+  and the artist page alike. A merge with an artist a work merge has just deleted is a 404.
 - **What a merge shows:** the merged artist leaves the artist list and its search, and its page
   redirects to the root (`merged_into`). The root lists its `members`, each with the artist it was
   merged into directly, and shows the group's works, then each member's files that aren't on one of
-  them, one entry per title by the member's MBID (2a's question A). With no works at all, the
-  primary's own files show too, as for any artist with no works. The list counts the group's works
-  and files, and `?mbid=` finds the root for a member's MBID. Credits, log-name links, works and
+  them, one entry per title by the member's MBID (2a's question A). An entry counts every file of
+  its MBID and title, because it opens them all. The primary's own files show that way while it
+  owns no work, as for any artist with no works. The list counts the group's works and files, and
+  `?mbid=` finds the root for a member's MBID. Credits, log-name links, works and
   MusicBrainz lookups keep the real artist: a merged artist stays in the matcher's pool, and song
   matching reads the group only from 4.3, so neither action queues a re-check. A link to a merged
   artist shows under the primary once a page lists links (phase 5). The work merge never deletes an
-  artist on either side of an edge, and 0049's foreign keys don't cascade.
+  artist on either side of an edge, and 0049's foreign keys don't cascade. Nothing refuses a merge
+  into an unnamed stub, which the page never offers; the group then leaves the list until
+  enrichment names the stub.
 - **Rollback (D4):** there is no script from 0047 on. The index can't go back while two artists
   share a name, and the code before 2a fails on every scan without it (`ON CONFLICT
   (normalized_name)` has no unique index), so the older scripts can't run past it. The rollback
@@ -444,7 +450,8 @@ returns the row it finds).
   `tests/repositories/test_artist_credit_files_contract.py`,
   `tests/repositories/test_artist_ids_by_mbid_contract.py`,
   `tests/repositories/test_artist_names_contract.py`,
-  `tests/repositories/test_mb_cache_listing_contract.py` and
+  `tests/repositories/test_mb_cache_listing_contract.py`,
+  `tests/repositories/test_artist_merges_contract.py` and
   `tests/tasks/test_enrichment_names_stubs.py`.
 
 ## Derived counts kept by triggers

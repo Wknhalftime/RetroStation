@@ -1,8 +1,10 @@
 """Merge and Unmerge on the artist page (phase 2a S11, E4, E5; M33; AUD-R041).
 
 Only the curator merges: a route calls these, in its request's transaction (C75), and nothing
-else does (``tests/test_artist_merge_writers.py``). A merge stores one direct edge, as made, and
-the group's primary is the root its chain of edges ends at. Song matching doesn't read the group
+else does (``tests/test_artist_merge_writers.py``). Each takes the merge lock first, so two
+merges never pass their checks at once: two crossing merges can't make a cycle, and a second
+merge of one artist sees the first's edge. A merge stores one direct edge, as made, and the
+group's primary is the root its chain of edges ends at. Song matching doesn't read the group
 until 4.3, so neither action queues a re-check.
 """
 
@@ -37,16 +39,19 @@ def _refusal(
     if {artist.mbid, primary.mbid} & SPECIAL_PURPOSE_MBIDS:
         return "A special-purpose artist, such as Various Artists, can't be merged"
     if current is not None:
-        return f"This artist is already merged into {current}; unmerge it first"
+        holder = merges.artist(current)
+        into = holder.name if holder is not None else current
+        return f"{artist.name} is already merged into {into}; unmerge it first"
     group = merges.artist_group(primary.id)
     if group is not None and group.primary_id == artist.id:
-        return "Merging these would make a cycle"
+        return f"Merging these would make a cycle: {primary.name} is merged into {artist.name}"
     return None
 
 
 def merge_artist(merge: ArtistMerge, merges: ArtistMergeRepository) -> None:
     """Merge ``merge.artist_id`` into ``merge.primary_id``. A repeat changes nothing, its first
     reason kept; a merge into an artist that is itself merged is kept as made."""
+    merges.lock_merges()
     artist = _artist(merge.artist_id, merges)
     primary = _artist(merge.primary_id, merges)
     current = merges.primary_of(artist.id)
@@ -60,5 +65,6 @@ def merge_artist(merge: ArtistMerge, merges: ArtistMergeRepository) -> None:
 
 def unmerge_artist(artist_id: str, merges: ArtistMergeRepository) -> None:
     """Delete the artist's own edge; an artist with none is left as it is (a repeat)."""
+    merges.lock_merges()
     _artist(artist_id, merges)
     merges.remove_merge(artist_id)

@@ -171,12 +171,11 @@ async def list_artists(
             COUNT(DISTINCT w.id)  AS work_count,
             COUNT(DISTINCT lf.id) AS file_count
         FROM artists a
-        LEFT JOIN LATERAL (
-            SELECT a.id AS member_id
-            UNION ALL
-            SELECT r.artist_id FROM merge_roots r WHERE r.primary_id = a.id
-        ) grp ON TRUE
-        LEFT JOIN works w ON w.artist_id = grp.member_id
+        LEFT JOIN (
+            -- each work under the root of its artist's group: the artist itself, unmerged
+            SELECT gw.id, COALESCE(r.primary_id, gw.artist_id) AS root_id
+              FROM works gw LEFT JOIN merge_roots r ON r.artist_id = gw.artist_id
+        ) w ON w.root_id = a.id
         LEFT JOIN library_files lf ON lf.work_id = w.id
         {where_clause}
         GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
@@ -211,6 +210,7 @@ _GROUP_WORKS_SQL = """
         w.title,
         w.mbid,
         w.origin,
+        w.artist_id,
         COUNT(DISTINCT lf.id) AS recording_count,
         COUNT(DISTINCT sm.id) AS master_count,
         array_agg(DISTINCT r.version_type)
@@ -221,27 +221,32 @@ _GROUP_WORKS_SQL = """
     LEFT JOIN song_masters sm ON sm.work_id = w.id
     LEFT JOIN recordings r ON r.work_id = w.id
     WHERE w.artist_id = ANY(%s)
-    GROUP BY w.id, w.title, w.mbid, w.origin
+    GROUP BY w.id, w.title, w.mbid, w.origin, w.artist_id
     ORDER BY w.title
 """
 
-# Files by MBID, one entry per (MBID, title), leaving out files on the given works: an artist
-# with no works shows its files this way, and so does a merged member (2a's question A).
+# Files by MBID, one entry per (MBID, title) holding a file on none of the given works: an artist
+# with no works shows its files this way, and so does a merged member (2a's question A). An entry
+# counts every file of its MBID and title, because its link opens them all (``works.py``'s
+# synthetic work detail).
 _FILES_BY_MBID_SQL = """
     SELECT m.mbid, lf.track_title AS title, COUNT(DISTINCT lf.id) AS recording_count
       FROM unnest(%(mbids)s::text[]) AS m(mbid)
       JOIN library_files lf ON lf.artist_mbid = m.mbid OR lf.album_artist_mbid = m.mbid
      WHERE lf.track_title IS NOT NULL
-       AND (lf.work_id IS NULL OR NOT lf.work_id = ANY(%(works)s::text[]))
      GROUP BY m.mbid, lf.track_title
+    HAVING bool_or(lf.work_id IS NULL OR NOT lf.work_id = ANY(%(works)s::text[]))
      ORDER BY lf.track_title, m.mbid
 """
 
 
-async def _group_works(conn: AsyncConnection[Any], member_ids: list[str]) -> list[WorkSummary]:
-    """The works of every member of the group, by title."""
+async def _group_works(
+    conn: AsyncConnection[Any], member_ids: list[str]
+) -> tuple[list[WorkSummary], set[str]]:
+    """The works of every member of the group, by title, and the members that own one."""
     cur = await conn.execute(_GROUP_WORKS_SQL, (member_ids,))
-    return [
+    rows = await cur.fetchall()
+    works = [
         WorkSummary(
             id=row["id"],
             title=row["title"],
@@ -251,8 +256,9 @@ async def _group_works(conn: AsyncConnection[Any], member_ids: list[str]) -> lis
             origin=row.get("origin", "local"),
             version_types=row.get("version_types") or [],
         )
-        for row in await cur.fetchall()
+        for row in rows
     ]
+    return works, {str(row["artist_id"]) for row in rows}
 
 
 async def _files_by_mbid(
@@ -267,8 +273,8 @@ async def _files_by_mbid(
     )
     return [
         WorkSummary(
-            id=encode_synthetic_work_id(row["mbid"], row["title"]),
-            title=row["title"],
+            id=encode_synthetic_work_id(row["mbid"], row["title"] or "unknown"),
+            title=row["title"] or "Unknown",
             recording_count=row["recording_count"],
             has_master=False,
         )
@@ -282,8 +288,9 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
 
     Phase 2a S11 (M33): a merged artist names its group's root primary in ``merged_into`` (the
     page redirects there), and a root lists its ``members``. The page shows the whole group's
-    works, then each member's files that aren't on one of them, by the member's MBID. With no
-    works at all, the primary's own files show too, as an artist with no works always has.
+    works, then each member's files that aren't on one of them, by the member's MBID. The
+    primary's own files show that way too while it owns no work, as an artist with no works
+    always has.
     """
     artist_cur = await conn.execute(
         "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",
@@ -298,10 +305,17 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
 
     group_cur = await conn.execute(ARTIST_GROUP_SQL, {"id": artist_id})
     group = await group_cur.fetchall()
-    primary_id = next(str(row["id"]) for row in group if row["is_primary"])
-    works = await _group_works(conn, [str(row["id"]) for row in group])
+    primary_id = next((str(row["id"]) for row in group if row["is_primary"]), None)
+    if primary_id is None:  # deleted since the first read
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artist {artist_id} not found",
+        )
+    works, owners = await _group_works(conn, [str(row["id"]) for row in group])
     by_file = sorted(
-        {str(row["mbid"]) for row in group if row["mbid"] and not (works and row["is_primary"])}
+        str(row["mbid"])
+        for row in group
+        if row["mbid"] and not (row["is_primary"] and str(row["id"]) in owners)
     )
     works += await _files_by_mbid(conn, by_file, works)
 

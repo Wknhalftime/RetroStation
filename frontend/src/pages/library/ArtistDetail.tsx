@@ -38,7 +38,7 @@ export function ArtistDetail() {
       <Navigate
         to={`/library/artists/${data.merged_into}`}
         replace
-        state={{ mergedFrom: data.name } satisfies MergedFromState}
+        state={{ mergedFrom: { id: data.id, name: data.name } } satisfies MergedFromState}
       />
     );
   }
@@ -60,9 +60,9 @@ export function ArtistDetail() {
         </Link>
       </div>
 
-      {mergedFrom && (
+      {mergedFrom && data.members.some((member) => member.id === mergedFrom.id) && (
         <p role="status" className="mb-4 rounded-md bg-indigo-50 p-3 text-sm text-indigo-800">
-          {mergedFrom} was merged into {data.name}, so its page is this one.
+          {mergedFrom.name} was merged into {data.name}, so its page is this one.
         </p>
       )}
 

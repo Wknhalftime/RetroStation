@@ -85,9 +85,11 @@ class ArtistMerge:
 
 @dataclass(frozen=True)
 class MergeArtist:
-    """What a Merge checks of an artist: its id and MBID (None for a name-only artist)."""
+    """What a Merge checks of an artist: its id, its name (for a refusal's message) and its
+    MBID (None for a name-only artist)."""
 
     id: str
+    name: str
     mbid: str | None
 
 
