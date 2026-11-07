@@ -387,16 +387,17 @@ def test_a_work_past_the_fuzzy_matchs_100_candidates_is_found(
 def test_a_rescan_keeps_a_grouped_files_work_and_recording(
     conn: Conn, tool_env: None, tmp_path: Path
 ) -> None:
-    """S13: existing files keep their work and recording. A file today's reader put on a remix
-    recording of its own stays there when it is scanned again, re-read and all."""
+    """S13: existing files keep their work and recording. A file on a recording no reader would
+    give it now (an older reader's, or Lance's) stays there when it is scanned again, re-read
+    and all."""
     music = tmp_path / "music"
     tagged(music / "hole.mp3", "Alice In Chains", "Down In A Hole")
     tagged(music / "hole-album.mp3", "Alice In Chains", "Down In A Hole (Album Version)")
     scan(conn, music)
     album = file_named(conn, "hole-album.mp3")
     work = work_of(conn, album)
-    remix = _mb_recording(conn, work, "Down In A Hole (Album Version)", "remix")
-    conn.execute("UPDATE library_files SET recording_id = %s WHERE id = %s", (remix, album))
+    other = _mb_recording(conn, work, "Down In A Hole (Album Version)", "demo")
+    conn.execute("UPDATE library_files SET recording_id = %s WHERE id = %s", (other, album))
     conn.commit()
     retag(music / "hole-album.mp3")  # a new size and mtime: the scan reads its tags again
 
@@ -406,7 +407,7 @@ def test_a_rescan_keeps_a_grouped_files_work_and_recording(
         "SELECT work_id, recording_id FROM library_files WHERE id = %s", (album,)
     ).fetchone()
     assert row is not None
-    assert (row["work_id"], row["recording_id"]) == (work, remix)
+    assert (row["work_id"], row["recording_id"]) == (work, other)
 
 
 # --- MusicBrainz recordings the next upsert would retype ------------------------------------------
