@@ -154,9 +154,16 @@ def test_studio_recording_stays_original(enrich: Any) -> None:
 
 @pytest.mark.parametrize("enrich", _ALL_PATHS)
 def test_non_live_disambiguation_does_not_change_the_version(enrich: Any) -> None:
-    # "album version" would read as REMIX through the title-suffix rules;
-    # only a live disambiguation is trusted.
-    assert enrich(_recording(disambiguation="album version")) == VersionType.ORIGINAL
+    # "radio edit" would read as RADIO_EDIT through the title-suffix rules;
+    # only a live disambiguation is trusted. (Before C63 the example was
+    # "album version", which the title rules then read as REMIX.)
+    assert enrich(_recording(disambiguation="radio edit")) == VersionType.ORIGINAL
+
+
+@pytest.mark.parametrize("enrich", _ALL_PATHS)
+def test_an_album_version_title_is_stored_as_the_original(enrich: Any) -> None:
+    """C63 (phase 2b S13): MusicBrainz's "(Album Version)" recording is the original."""
+    assert enrich(_recording("Dream On (Album Version)")) == VersionType.ORIGINAL
 
 
 @pytest.mark.parametrize("enrich", _ALL_PATHS)

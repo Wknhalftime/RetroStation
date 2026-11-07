@@ -419,11 +419,12 @@ def test_create_local_work_idempotent_on_normalized_title() -> None:
 
 
 def test_album_version_collapses_to_base_work() -> None:
-    """A file tagged `(Album Version)` lands on the same work as the plain file.
+    """A file tagged `(Album Version)` lands on the same work as the plain file, as the original.
 
-    Before the fix, `_VERSION_RULES` had no rule matching `album version`,
+    Before the first fix, `_VERSION_RULES` had no rule matching `album version`,
     so `Down In A Hole (Album Version)` kept the suffix in its base title
-    and grouping created a second work beside plain `Down In A Hole`.
+    and grouping created a second work beside plain `Down In A Hole`. That
+    fix read it as a remix; C63 (phase 2b S13) reads it as the original.
     """
     repos = _make_repos()
     _plain, plain_work = _seed_file_in_work(
@@ -440,6 +441,10 @@ def test_album_version_collapses_to_base_work() -> None:
     )
     assert result is not None
     assert result.work_id == plain_work
+    assert result.recording_id is not None
+    recording = repos["recording_repo"].get_by_id(result.recording_id)
+    assert recording is not None
+    assert recording.version_type == VersionType.ORIGINAL
 
 
 def test_different_part_numbers_are_different_works() -> None:
