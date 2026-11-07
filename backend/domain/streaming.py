@@ -355,8 +355,12 @@ class PlayableFile:
     def with_stored_cues(self, cues: CuePoints | None, timing: StreamTiming) -> PlayableFile:
         """This file with the cues stored for its audio now (D85): a row makes it cued, no
         row makes it uncued, unless the change would leave it unplayable (D9); then it is
-        returned unchanged, with the values read at tune-in."""
-        candidate = replace(self, cues=cues)
+        returned unchanged, with the values read at tune-in. Changed cues drop ``ending``: the
+        re-read answers cues only, so an ending read at tune-in no longer describes them (an
+        edit saved since, say, which the liner fade must never shorten)."""
+        if cues == self.cues:
+            return self
+        candidate = replace(self, cues=cues, ending=None)
         return candidate if candidate.is_playable(timing) else self
 
 
