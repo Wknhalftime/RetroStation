@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teach EOM</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1d2330; --muted:#6b7280; --wave:#7ba7d6;
+          --dark:#151a22; --eom:#f5a623; --auto:#9aa3ad; --stop:#e5484d; --line:#d9dde3; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width:980px; margin:0 auto; padding:16px; }
+  .top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .top h1 { font-size:18px; margin:0 12px 0 0; }
+  .tab { border:1px solid var(--line); background:var(--card); padding:6px 12px;
+         border-radius:999px; cursor:pointer; font:inherit; }
+  .tab.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .count { margin-left:auto; color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .song { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .song b { font-size:18px; }
+  .muted { color:var(--muted); font-size:13px; }
+  canvas { width:100%; height:220px; display:block; background:var(--dark); border-radius:8px;
+           margin-top:10px; cursor:crosshair; touch-action:none; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  button.b { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line);
+             background:var(--card); cursor:pointer; }
+  button.b:hover { border-color:var(--ink); }
+  button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  button.kind.on { background:var(--eom); border-color:var(--eom); color:#1d2330; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; margin-right:14px; }
+  .sw { width:14px; height:3px; display:inline-block; }
+  .keys { margin-top:14px; color:var(--muted); font-size:13px; }
+  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px;
+        font-size:12px; background:#fff; }
+  #status { min-height:20px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1>Teach EOM <span class="muted">(test)</span></h1>
+    <div id="tabs"></div>
+    <div class="count" id="count"></div>
+  </div>
+
+  <div class="card">
+    <div class="song">
+      <b id="title">Loading…</b><span id="artist" class="muted"></span>
+      <span id="meta" class="muted"></span>
+    </div>
+    <canvas id="wave"></canvas>
+    <div class="row legend muted">
+      <span><i class="sw" style="background:var(--eom)"></i>your EOM <b id="eomAt"></b></span>
+      <span><i class="sw" style="background:var(--auto)"></i>autocue's EOM <b id="autoAt"></b></span>
+      <span><i class="sw" style="background:var(--stop)"></i>song stops</span>
+      <span>zoom
+        <button class="b" id="zoomOut" title="Zoom out (−)">−</button>
+        <button class="b" id="zoomIn" title="Zoom in on EOM (+)">+</button>
+        <b id="span"></b>
+      </span>
+      <span>end
+        <button class="b" data-view="15">15 s</button>
+        <button class="b" data-view="30">30 s</button>
+        <button class="b" data-view="60">60 s</button>
+        <button class="b" id="whole">Whole song</button>
+      </span>
+    </div>
+    <div class="row">
+      <button class="b" id="playEom">▶ Play into EOM</button>
+      <button class="b" id="playSegue">▶ Hear segue into next song</button>
+      <button class="b" id="stop">■ Stop</button>
+      <button class="b" id="reset">Back to autocue</button>
+    </div>
+    <div class="row">
+      <span class="muted">What kind of ending? (optional)</span>
+      <button class="b kind" data-kind="cold">Cold</button>
+      <button class="b kind" data-kind="fade">Fade</button>
+      <button class="b kind" data-kind="chorus">Repeating chorus</button>
+      <button class="b kind" data-kind="live">Live / applause</button>
+      <button class="b kind" data-kind="sustained">Sustained</button>
+      <button class="b kind" data-kind="false_ending">False ending</button>
+      <button class="b kind" data-kind="other">Other</button>
+    </div>
+    <div class="row">
+      <button class="b primary" id="save">Save &amp; next</button>
+      <button class="b" id="skip">Skip</button>
+      <span id="status" class="muted"></span>
+    </div>
+    <div class="keys">
+      Click or drag on the waveform to move EOM. Mouse wheel zooms around the pointer,
+      <kbd>Shift</kbd>+wheel scrolls sideways, <kbd>+</kbd><kbd>−</kbd> zoom around EOM.
+      <kbd>←</kbd><kbd>→</kbd> nudge 50 ms (hold <kbd>Shift</kbd> for 500 ms) ·
+      <kbd>Space</kbd> play into EOM · <kbd>G</kbd> hear segue (pick the ending type first: it sets
+      the fade after EOM, sustained 2 s, chorus 1 s, cold none) · <kbd>Esc</kbd> stop ·
+      <kbd>Enter</kbd> save &amp; next · <kbd>S</kbd> skip
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const LEAD_S = 5;          // play this long before EOM
+const SEGUE_LEAD_S = 6;
+const NUDGE_MS = 50;
+
+const ctx = new AudioContext();
+const canvas = document.getElementById("wave");
+const g = canvas.getContext("2d");
+
+let station = "WZOR";
+let queue = [];
+let index = 0;
+let song = null;        // the queue entry on screen
+let buffer = null;      // its decoded audio
+let eomMs = 0;
+let viewS = 30;
+let kind = null;
+let playing = [];       // AudioBufferSourceNodes now sounding
+let playStartCtx = 0;   // ctx.currentTime when the current song's playback began
+let playFromS = 0;      // song position it began at
+let dragging = false;
+const decoded = new Map();  // file_id -> Promise<AudioBuffer>
+
+function fmt(ms) {
+  const s = ms / 1000, m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(2).padStart(5, "0")}`;
+}
+
+function load(fileId) {
+  if (!decoded.has(fileId)) {
+    decoded.set(fileId, fetch(`/api/audio/${fileId}`)
+      .then(r => { if (!r.ok) throw new Error(`audio ${r.status}`); return r.arrayBuffer(); })
+      .then(bytes => ctx.decodeAudioData(bytes)));
+  }
+  return decoded.get(fileId);
+}
+
+let viewA = 0, viewB = 1;   // the visible window, ms
+const MIN_SPAN_MS = 500;
+
+function songEnd() { return song.duration_ms || song.cue_out_ms + 1500; }
+
+function setWindow(a, b) {
+  const end = songEnd();
+  let span = Math.min(Math.max(b - a, MIN_SPAN_MS), end);
+  a = Math.min(Math.max(0, a), end - span);
+  viewA = a; viewB = a + span;
+  document.getElementById("span").textContent =
+    span >= 10000 ? `${Math.round(span / 1000)} s` : `${(span / 1000).toFixed(1)} s`;
+}
+
+function setEndView(seconds) {
+  const b = Math.min(song.cue_out_ms + 1500, songEnd());
+  setWindow(b - seconds * 1000, b);
+}
+
+function zoom(factor, centerMs) {
+  const frac = (centerMs - viewA) / (viewB - viewA);
+  const span = (viewB - viewA) * factor;
+  setWindow(centerMs - span * frac, centerMs - span * frac + span);
+  draw();
+}
+
+function zoomAroundEom(factor) {
+  const span = (viewB - viewA) * factor;
+  setWindow(eomMs - span / 2, eomMs + span / 2);
+  draw();
+}
+
+function viewWindow() { return [viewA, viewB]; }
+
+function xOf(ms, w) { const [a, b] = viewWindow(); return (ms - a) / (b - a) * w; }
+function msOf(x, w) { const [a, b] = viewWindow(); return a + x / w * (b - a); }
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  if (!song || !buffer) return;
+  const [a, b] = viewWindow();
+  const rate = buffer.sampleRate, chans = buffer.numberOfChannels;
+  const data = Array.from({ length: chans }, (_, c) => buffer.getChannelData(c));
+  const mid = h / 2;
+  g.fillStyle = "#7ba7d6";
+  for (let x = 0; x < w; x++) {
+    const s0 = Math.floor((a + (b - a) * x / w) / 1000 * rate);
+    const s1 = Math.floor((a + (b - a) * (x + 1) / w) / 1000 * rate);
+    let peak = 0;
+    const hop = Math.max(1, Math.floor((s1 - s0) / 256));
+    for (let c = 0; c < chans; c++) {
+      const d = data[c];
+      for (let i = s0; i <= Math.max(s0, s1 - 1) && i < d.length; i += hop) {
+        const v = Math.abs(d[i]); if (v > peak) peak = v;
+      }
+    }
+    const y = peak * (mid - 4);
+    g.fillRect(x, mid - y, 1, y * 2 || 1);
+  }
+  // time grid
+  g.fillStyle = "rgba(255,255,255,.55)"; g.font = "11px system-ui";
+  const steps = [100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000];
+  const step = steps.find(s => (b - a) / s <= w / 70) || 60000;
+  for (let t = Math.ceil(a / step) * step; t < b; t += step) {
+    const x = xOf(t, w);
+    g.fillRect(x, h - 14, 1, 4);
+    const label = step < 1000 ? fmt(t).replace(/(\.\d)\d$/, "$1") : fmt(t).replace(/\.\d+$/, "");
+    g.fillText(label, x + 3, h - 4);
+  }
+  const vline = (ms, color, width, dash) => {
+    const x = xOf(ms, w);
+    g.save(); g.strokeStyle = color; g.lineWidth = width; g.setLineDash(dash || []);
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); g.restore();
+  };
+  vline(song.cue_out_ms, "#e5484d", 2);
+  vline(song.autocue_eom_ms, "#9aa3ad", 2, [5, 4]);
+  vline(eomMs, "#f5a623", 3);
+  g.fillStyle = "#f5a623"; g.font = "bold 12px system-ui";
+  g.fillText("EOM", Math.min(xOf(eomMs, w) + 5, w - 34), 14);
+  // playhead
+  if (playing.length) {
+    const pos = (playFromS + ctx.currentTime - playStartCtx) * 1000;
+    if (pos >= a && pos <= b) vline(pos, "#ffffff", 1);
+  }
+  document.getElementById("eomAt").textContent = fmt(eomMs);
+  document.getElementById("autoAt").textContent = fmt(song.autocue_eom_ms);
+}
+
+function tick() { draw(); if (playing.length) requestAnimationFrame(tick); }
+
+function stop() {
+  for (const node of playing) { try { node.stop(); } catch (_) { /* already stopped */ } }
+  playing = [];
+  draw();
+}
+
+// Fade-out of the old song after EOM when another song follows (Lance, 2026-11-07):
+// sustained 2 s, a repeating-chorus fade 1 s, a cold ending none. Untagged songs get 1 s.
+const FADE_AFTER_EOM_S = {
+  sustained: 2, cold: 0, fade: 1, chorus: 1, live: 1, false_ending: 1, other: 1,
+};
+
+function play(buf, fromS, atCtx, untilS, fade) {
+  const node = ctx.createBufferSource();
+  node.buffer = buf;
+  if (fade) {
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(1, fade.atCtx);
+    gain.gain.linearRampToValueAtTime(0, fade.atCtx + fade.seconds);
+    node.connect(gain).connect(ctx.destination);
+    untilS = Math.min(untilS ?? buf.duration, fromS + (fade.atCtx - atCtx) + fade.seconds);
+  } else {
+    node.connect(ctx.destination);
+  }
+  node.start(atCtx, fromS, untilS === undefined ? undefined : Math.max(0, untilS - fromS));
+  node.onended = () => { playing = playing.filter(n => n !== node); };
+  playing.push(node);
+  return node;
+}
+
+async function playIntoEom() {
+  if (!song || !buffer) return;
+  stop(); await ctx.resume();
+  const from = Math.max(0, eomMs / 1000 - LEAD_S);
+  playStartCtx = ctx.currentTime + 0.05; playFromS = from;
+  play(buffer, from, playStartCtx, song.cue_out_ms / 1000);
+  // a short tick at EOM so you can hear where it sits
+  const osc = ctx.createOscillator(), amp = ctx.createGain();
+  osc.frequency.value = 1500; amp.gain.value = 0.08;
+  osc.connect(amp).connect(ctx.destination);
+  const at = playStartCtx + (eomMs / 1000 - from);
+  osc.start(at); osc.stop(at + 0.04);
+  requestAnimationFrame(tick);
+}
+
+async function playSegue() {
+  if (!song || !buffer) return;
+  const next = queue[index + 1];
+  if (!next) { setStatus("No next song in the queue to segue into."); return; }
+  setStatus("Loading the next song…");
+  const nextBuf = await load(next.file_id);
+  const fadeS = FADE_AFTER_EOM_S[kind] ?? 1;
+  setStatus(fadeS
+    ? `Segue into “${next.title}”, old song fades over ${fadeS} s after EOM`
+    : `Segue into “${next.title}”, cold ending, no fade`);
+  stop(); await ctx.resume();
+  const from = Math.max(0, eomMs / 1000 - SEGUE_LEAD_S);
+  playStartCtx = ctx.currentTime + 0.05; playFromS = from;
+  const eomCtx = playStartCtx + (eomMs / 1000 - from);
+  play(buffer, from, playStartCtx, song.cue_out_ms / 1000,
+       fadeS ? { atCtx: eomCtx, seconds: fadeS } : undefined);
+  play(nextBuf, next.cue_in_ms / 1000, eomCtx);
+  requestAnimationFrame(tick);
+}
+
+function setStatus(text) { document.getElementById("status").textContent = text; }
+
+function setKind(k) {
+  kind = kind === k ? null : k;
+  document.querySelectorAll(".kind").forEach(b => b.classList.toggle("on", b.dataset.kind === kind));
+}
+
+function clampEom(ms) {
+  const lo = (song.cue_in_ms || 0) + 1, hi = song.cue_out_ms;
+  return Math.round(Math.min(hi, Math.max(lo, ms)));
+}
+
+async function show() {
+  stop(); kind = null;
+  document.querySelectorAll(".kind").forEach(b => b.classList.remove("on"));
+  song = queue[index];
+  if (!song) {
+    document.getElementById("title").textContent = "No more songs for this station.";
+    document.getElementById("artist").textContent = "";
+    document.getElementById("meta").textContent = "";
+    buffer = null; draw(); return;
+  }
+  document.getElementById("title").textContent = song.title || "(untitled)";
+  document.getElementById("artist").textContent = song.artist || "";
+  document.getElementById("meta").textContent =
+    `· ${fmt(song.duration_ms)} · ${song.format.toUpperCase()} · ${song.plays} plays`;
+  eomMs = song.autocue_eom_ms; buffer = null; setEndView(viewS); draw();
+  setStatus("Loading audio…");
+  try {
+    buffer = await load(song.file_id);
+    setStatus("");
+  } catch (e) {
+    setStatus(`Could not load this song (${e.message}). Press Skip.`);
+  }
+  draw();
+  if (queue[index + 1]) load(queue[index + 1].file_id).catch(() => {});
+}
+
+async function save() {
+  if (!song || !buffer) return;
+  const label = {
+    station, file_id: song.file_id, audio_hash: song.audio_hash, title: song.title,
+    artist: song.artist, duration_ms: song.duration_ms, cue_in_ms: song.cue_in_ms,
+    cue_out_ms: song.cue_out_ms, fade_out_ms: song.fade_out_ms,
+    autocue_eom_ms: song.autocue_eom_ms, eom_ms: eomMs,
+    moved: eomMs !== song.autocue_eom_ms, ending: kind,
+    view_s: Math.round((viewB - viewA) / 100) / 10,
+  };
+  const r = await fetch("/api/label", { method: "POST", body: JSON.stringify(label) });
+  const out = await r.json();
+  setCount(out.labelled);
+  decoded.delete(song.file_id);
+  index += 1; show();
+}
+
+function skip() { if (song) decoded.delete(song.file_id); index += 1; show(); }
+
+function setCount(n) { document.getElementById("count").textContent = `${n} saved so far`; }
+
+async function chooseStation(call) {
+  station = call;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.call === call));
+  setStatus("Picking songs…");
+  queue = await (await fetch(`/api/queue?station=${call}`)).json();
+  index = 0; decoded.clear(); show();
+}
+
+// --- input ---
+function pointerMs(ev) {
+  const r = canvas.getBoundingClientRect();
+  return clampEom(msOf(ev.clientX - r.left, r.width));
+}
+canvas.addEventListener("pointerdown", ev => {
+  if (!buffer) return;
+  dragging = true; canvas.setPointerCapture(ev.pointerId); eomMs = pointerMs(ev); draw();
+});
+canvas.addEventListener("pointermove", ev => { if (dragging) { eomMs = pointerMs(ev); draw(); } });
+canvas.addEventListener("pointerup", () => { dragging = false; });
+
+document.getElementById("playEom").onclick = playIntoEom;
+document.getElementById("playSegue").onclick = playSegue;
+document.getElementById("stop").onclick = stop;
+document.getElementById("reset").onclick = () => { if (song) { eomMs = song.autocue_eom_ms; draw(); } };
+document.getElementById("save").onclick = save;
+document.getElementById("skip").onclick = skip;
+document.querySelectorAll(".kind").forEach(b => b.onclick = () => setKind(b.dataset.kind));
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => {
+  if (!song) return;
+  viewS = Number(b.dataset.view); setEndView(viewS); draw();
+});
+document.getElementById("whole").onclick = () => { if (song) { setWindow(0, songEnd()); draw(); } };
+document.getElementById("zoomIn").onclick = () => { if (song) zoomAroundEom(0.5); };
+document.getElementById("zoomOut").onclick = () => { if (song) zoomAroundEom(2); };
+canvas.addEventListener("wheel", ev => {
+  if (!song) return;
+  ev.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  if (ev.shiftKey || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
+    const delta = (ev.shiftKey ? ev.deltaY : ev.deltaX) / r.width * (viewB - viewA);
+    setWindow(viewA + delta, viewB + delta); draw();
+  } else {
+    zoom(ev.deltaY < 0 ? 0.8 : 1.25, msOf(ev.clientX - r.left, r.width));
+  }
+}, { passive: false });
+window.addEventListener("resize", draw);
+window.addEventListener("keydown", ev => {
+  if (!song || !buffer) return;
+  const step = ev.shiftKey ? NUDGE_MS * 10 : NUDGE_MS;
+  if (ev.key === "ArrowLeft") { eomMs = clampEom(eomMs - step); draw(); ev.preventDefault(); }
+  else if (ev.key === "ArrowRight") { eomMs = clampEom(eomMs + step); draw(); ev.preventDefault(); }
+  else if (ev.key === " ") { playIntoEom(); ev.preventDefault(); }
+  else if (ev.key === "g" || ev.key === "G") { playSegue(); }
+  else if (ev.key === "+" || ev.key === "=") { zoomAroundEom(0.5); }
+  else if (ev.key === "-" || ev.key === "_") { zoomAroundEom(2); }
+  else if (ev.key === "Escape") { stop(); }
+  else if (ev.key === "Enter") { save(); ev.preventDefault(); }
+  else if (ev.key === "s" || ev.key === "S") { skip(); }
+});
+
+(async () => {
+  const stations = await (await fetch("/api/stations")).json();
+  const tabs = document.getElementById("tabs");
+  for (const [call, label] of Object.entries(stations)) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.dataset.call = call; b.textContent = `${call} · ${label}`;
+    b.onclick = () => chooseStation(call);
+    tabs.appendChild(b);
+  }
+  setCount((await (await fetch("/api/count")).json()).labelled);
+  chooseStation("WZOR");
+})();
+</script>
+</body>
+</html>
