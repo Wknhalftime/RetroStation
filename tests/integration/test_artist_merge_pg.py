@@ -1,16 +1,19 @@
-"""Merge and Unmerge on the artist page, phase 2a PR 3 (SPEC S11, E4, E5; M33, C75; AUD-R041), on
-PostgreSQL through the routes.
+"""Merge and Unmerge on the artist page, phase 2a PR 3 (SPEC S11, E4, E5; M33; AUD-R041), on
+PostgreSQL through the routes. Who may write the table, the one walk and C75 are checked
+statically in ``tests/test_artist_merge_writers.py``.
 
 S11 (M33): every artist is its own, and nothing merges two automatically. ``artist_merges``
-(migration 0049) holds the direct edge: the artist merged away, its primary, ``merged_by`` (the
-constant ``curator``), when, and a reason. ``POST /api/v1/library/artists/{id}/merge`` with a
-``primary_id`` merges ``{id}`` away; ``DELETE`` on the same path deletes its one edge. Both answer
-204.
+(migration 0049) holds one direct edge per merged artist: the artist merged away, its primary,
+``merged_by`` (only ``curator``), when, and a reason. ``POST /api/v1/library/artists/{id}/merge``
+with a ``primary_id`` merges ``{id}`` away; ``DELETE`` on the same path deletes its one edge. Both
+answer 204.
 
 - The merged artist leaves the artist list, its count and its search. Its detail names the
-  group's primary in ``merged_into``, and the page redirects there. The primary's detail lists
-  its ``members`` and shows their works; with no works, the files of every member MBID. The list
-  counts the group's works and files on the primary.
+  group's root primary in ``merged_into``, and the page redirects there. The root's detail lists
+  its ``members``, each with the primary it was merged into directly, and shows their works. A
+  member's files show under the primary too: those on a work of the group through the work, the
+  rest one entry per title by the member's MBID, as an artist with no works shows its files today.
+  Each entry opens. The list counts the group's works and files on the primary.
 - ``GET /api/v1/library/artists?mbid=`` finds the artist holding that MBID, and a merged member's
   MBID finds its primary (M33: lookups by either MBID land there).
 - ``artist_group(id)`` (``PgArtistMergeRepository``) walks to the root and returns an
@@ -22,11 +25,12 @@ constant ``curator``), when, and a reason. ``POST /api/v1/library/artists/{id}/m
 - Credits and MusicBrainz lookups keep the real MBID: ``get_by_mbid`` answers with the merged
   artist itself, the files keep their tags, and each log-name link stays on the artist it names.
   A merged artist stays in the matcher's pool (``list_all``). Song matching doesn't read the
-  group until 4.3, so neither action queues a task or moves a log name's status.
+  group until 4.3, so neither action queues a task, starts a run, or moves a log name's or a
+  line's status, a match or an artist row.
 - ``_delete_unused_local_artists`` keeps an artist on either side of an edge.
-- Both write routes are sync routes on ``SyncRepos`` (C75), and a lost connection answers 503.
-- Nothing merges automatically: only the adapter writes the table, only the merge service calls
-  its writes, and only the artists router imports that service.
+- A lost connection answers 503 on both write routes.
+- 0049 keeps one edge per artist, only the curator's, never an artist's own; its foreign keys
+  don't cascade, so deleting an artist on either side fails rather than lose a merge.
 
 E4: A merged into B, then B into C. Each edge stays as made and ``artist_group`` walks to C.
 Unmerging one edge restores only that edge.
@@ -38,13 +42,9 @@ answers 404. Nothing is written.
 
 from __future__ import annotations
 
-import ast
 import asyncio
-import inspect
-import re
 import sys
 from collections.abc import Callable, Iterator
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -52,8 +52,6 @@ import httpx
 import psycopg
 import pytest
 from fastapi import FastAPI
-from fastapi.dependencies.models import Dependant
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from huey.storage import MemoryStorage
 from psycopg.rows import DictRow, dict_row
@@ -64,11 +62,9 @@ from backend.config import get_settings
 from backend.db.repositories.artist_merges import PgArtistMergeRepository
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.works import PgWorkRepository
-from backend.dependencies import get_current_token, get_db_connection, get_sync_repos
+from backend.dependencies import get_current_token
 from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS, ArtistGroup
 from backend.domain.enums import MatchStatus
-from backend.repositories.artist_merges import ArtistMergeRepository
-from backend.routers.library.artists import router as artists_router
 from backend.routers.v1 import router as v1_router
 from backend.services.normalization import normalize_artist
 from backend.tasks.huey_app import huey
@@ -83,13 +79,12 @@ type Conn = psycopg.Connection[DictRow]
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-ROOT = Path(__file__).resolve().parents[2]
 ARTISTS = "/api/v1/library/artists"
 
 BAND = "4d7928cd-7ed2-4282-8c29-c0c9f966f1bd"  # Alice Cooper, the band
 SINGER = "ee58c59f-8e7f-4430-b8ca-236c4d3745ae"  # Alice Cooper, the singer
 PRINCE = "070d193a-845c-479f-980e-bef15710653e"
-NPG = "0a000000-0000-4000-8000-0000000000d1"  # Prince & The New Power Generation
+REVOLUTION = "0a000000-0000-4000-8000-0000000000d1"  # The Revolution
 NOBODY = "0a000000-0000-4000-8000-0000000000d2"  # an MBID no artist holds
 
 
@@ -126,7 +121,7 @@ def app_client(_migrated_db_url: str) -> Iterator[TestClient]:
 
 @pytest.fixture
 def client(app_client: TestClient, migrated_db: str) -> TestClient:
-    """The module's client; tables are truncated before each test."""
+    """The module's client; tables are truncated and the queue emptied before each test."""
     huey.flush()
     return app_client
 
@@ -172,14 +167,14 @@ def _file(conn: Conn, title: str, *, mbid: str | None = None, work_id: str | Non
         """INSERT INTO library_files
                (file_path, format, track_title, artist_name, artist_mbid, artist_mbids, credit,
                 work_id, file_status)
-           VALUES (%s, 'flac', %s, 'Alice Cooper', %s, %s, %s, %s, 'present')
+           VALUES (%s, 'flac', %s, 'Some Act', %s, %s, %s, %s, 'present')
            RETURNING id""",
         (
             f"/music/{uuid4().hex}.flac",
             title,
             mbid,
             [mbid] if mbid else [],
-            None if mbid is None else Jsonb([{"name": "Alice Cooper", "mbid": mbid, "join": None}]),
+            None if mbid is None else Jsonb([{"name": "Some Act", "mbid": mbid, "join": None}]),
             work_id,
         ),
     ).fetchone()
@@ -223,6 +218,18 @@ def _detail(client: TestClient, artist_id: str) -> dict[str, Any]:
     return dict(response.json())
 
 
+def _members(detail: dict[str, Any]) -> list[tuple[str, str, str | None, str]]:
+    """Each member: (id, name, MBID, the primary it was merged into directly)."""
+    return [(m["id"], m["name"], m["mbid"], m["primary_id"]) for m in detail["members"]]
+
+
+def _opens(client: TestClient, work: dict[str, Any]) -> int:
+    """Open a listed work, as its link does; how many files its page shows."""
+    response = client.get(f"/api/v1/library/works/{work['id']}")
+    assert response.status_code == 200, work
+    return sum(len(recording["files"]) for recording in response.json()["recordings"])
+
+
 def _edges(conn: Conn) -> dict[str, str]:
     """Each merged artist's direct primary."""
     conn.commit()
@@ -245,10 +252,6 @@ def _group_of(primary: str, members: set[str], mbids: set[str]) -> ArtistGroup:
     return ArtistGroup(
         primary_id=primary, member_ids=frozenset(members), member_mbids=frozenset(mbids)
     )
-
-
-def _members(detail: dict[str, Any]) -> list[tuple[str, str, str | None]]:
-    return [(m["id"], m["name"], m["mbid"]) for m in detail["members"]]
 
 
 def _exists(conn: Conn, artist_id: str) -> bool:
@@ -281,7 +284,7 @@ def test_merge_hides_the_artist_and_its_works_show_under_the_primary(
     assert _detail(client, local)["merged_into"] == band
     primary = _detail(client, band)
     assert primary["merged_into"] is None
-    assert _members(primary) == [(local, "Alice Cooper", None)]
+    assert _members(primary) == [(local, "Alice Cooper", None, band)]
     assert {w["id"] for w in primary["works"]} == {schools_out, poison}
     alone = _detail(client, other)
     assert (alone["merged_into"], alone["members"]) == (None, [])
@@ -297,18 +300,66 @@ def test_merge_hides_the_artist_and_its_works_show_under_the_primary(
 
 
 def test_files_show_under_the_primary(client: TestClient, conn: Conn) -> None:
-    """Artists with no works (such as those S14's sweep makes) show their files by MBID: the
-    primary shows the files of every member MBID."""
+    """A group with no works (such as two artists S14's sweep made) shows every member MBID's
+    files, one entry per title and MBID, and each entry opens its files."""
     prince = _artist(conn, "Prince", PRINCE)
-    npg = _artist(conn, "Prince & The New Power Generation", NPG)
+    revolution = _artist(conn, "The Revolution", REVOLUTION)
     _file(conn, "Purple Rain", mbid=PRINCE)
-    _file(conn, "Cream", mbid=NPG)
-    _file(conn, "Diamonds and Pearls", mbid=NPG)
+    _file(conn, "Computer Blue", mbid=REVOLUTION)
+    _file(conn, "Computer Blue", mbid=REVOLUTION)
 
-    assert _merge(client, npg, prince).status_code == 204
+    assert _merge(client, revolution, prince).status_code == 204
 
-    titles = {w["title"] for w in _detail(client, prince)["works"]}
-    assert titles == {"Purple Rain", "Cream", "Diamonds and Pearls"}
+    works = _detail(client, prince)["works"]
+    assert sorted((w["title"], w["recording_count"]) for w in works) == [
+        ("Computer Blue", 2),
+        ("Purple Rain", 1),
+    ]
+    assert [_opens(client, w) for w in works] == [w["recording_count"] for w in works]
+
+
+def test_a_members_files_show_beside_the_primarys_works(client: TestClient, conn: Conn) -> None:
+    """The primary has works (M33's Prince case). The member's files on a work of the group show
+    through that work, once. Its files that aren't show beside the works, one entry per title, by
+    its MBID, even a title the primary holds too; each opens its files."""
+    prince = _artist(conn, "Prince", PRINCE)
+    revolution = _artist(conn, "The Revolution", REVOLUTION)
+    elsewhere = _artist(conn, "The Revolution")  # name-only: grouping put a file's work here
+    purple_rain = _work(conn, prince, "Purple Rain")
+    star = _work(conn, revolution, "Baby I'm a Star")
+    _file(conn, "Purple Rain", mbid=PRINCE, work_id=purple_rain)
+    _file(conn, "Baby I'm a Star", mbid=REVOLUTION, work_id=star)
+    _file(conn, "Let's Go Crazy", mbid=REVOLUTION, work_id=_work(conn, elsewhere, "Let's Go Crazy"))
+    _file(conn, "Computer Blue", mbid=REVOLUTION)
+    _file(conn, "Computer Blue", mbid=REVOLUTION)
+    _file(conn, "Purple Rain", mbid=REVOLUTION)
+
+    assert _merge(client, revolution, prince).status_code == 204
+
+    works = _detail(client, prince)["works"]
+    assert sorted((w["title"], w["recording_count"]) for w in works) == [
+        ("Baby I'm a Star", 1),
+        ("Computer Blue", 2),
+        ("Let's Go Crazy", 1),
+        ("Purple Rain", 1),
+        ("Purple Rain", 1),
+    ]
+    assert {purple_rain, star} <= {w["id"] for w in works}
+    for work in works:
+        assert _opens(client, work) == work["recording_count"], work
+
+
+def test_a_name_only_primary_shows_its_members_files(client: TestClient, conn: Conn) -> None:
+    local = _artist(conn, "Prince")
+    revolution = _artist(conn, "The Revolution", REVOLUTION)
+    _file(conn, "Computer Blue", mbid=REVOLUTION)
+    assert _detail(client, local)["works"] == []
+
+    assert _merge(client, revolution, local).status_code == 204
+
+    [work] = _detail(client, local)["works"]
+    assert (work["title"], work["recording_count"]) == ("Computer Blue", 1)
+    assert _opens(client, work) == 1
 
 
 def test_unmerge_restores_everything(client: TestClient, conn: Conn) -> None:
@@ -321,6 +372,7 @@ def test_unmerge_restores_everything(client: TestClient, conn: Conn) -> None:
     before = (_listed(client), _detail(client, local), _detail(client, band))
 
     assert _merge(client, local, band).status_code == 204
+    assert _listed(client) != before[0]
     assert _unmerge(client, local).status_code == 204
 
     assert (_listed(client), _detail(client, local), _detail(client, band)) == before
@@ -333,6 +385,7 @@ def test_merge_and_unmerge_are_idempotent(client: TestClient, conn: Conn) -> Non
 
     assert _merge(client, singer, band, reason="first").status_code == 204
     first = _rows(conn)
+    assert len(first) == 1
     assert _merge(client, singer, band, reason="again").status_code == 204
     assert _rows(conn) == first
 
@@ -400,6 +453,7 @@ def test_links_credits_and_lookups_keep_the_real_artist(client: TestClient, conn
     band = _artist(conn, "Alice Cooper", BAND)
     name_id = world.name("ALICE COOPER", MatchStatus.AUTO_MATCHED)
     world.link(name_id, singer)
+    world.line(name_id, "Poison", MatchStatus.AUTO_MATCHED, file_artist="Alice Cooper")
     _file(conn, "Poison", mbid=SINGER, work_id=_work(conn, singer, "Poison"))
 
     def kept() -> tuple[list[dict[str, Any]], ...]:
@@ -408,8 +462,13 @@ def test_links_credits_and_lookups_keep_the_real_artist(client: TestClient, conn
             [dict(r) for r in conn.execute(sql).fetchall()]
             for sql in (
                 "SELECT * FROM log_name_links ORDER BY id",
-                "SELECT id, artist_mbid, artist_mbids, credit, work_id FROM library_files",
-                "SELECT id, match_status, reason_code FROM broadcast_artists",
+                "SELECT id, artist_mbid, artist_mbids, credit, work_id FROM library_files"
+                " ORDER BY id",
+                "SELECT id, match_status, reason_code FROM broadcast_artists ORDER BY id",
+                "SELECT id, match_status, reason_code, reason_detail FROM track_identities"
+                " ORDER BY id",
+                "SELECT * FROM matches ORDER BY id",
+                "SELECT * FROM artists ORDER BY id",
                 "SELECT id, artist_id FROM works ORDER BY id",
             )
         )
@@ -424,6 +483,7 @@ def test_links_credits_and_lookups_keep_the_real_artist(client: TestClient, conn
         assert found is not None and found.id == singer
         assert singer in {artist.id for artist in catalog.list_all()}
         assert huey.pending_count() == 0
+        assert conn.execute("SELECT count(*) AS n FROM progress_tracking").fetchone() == {"n": 0}
 
 
 # --- E4 ------------------------------------------------------------------------------------------
@@ -444,7 +504,7 @@ def test_chain_walks_to_the_primary(client: TestClient, conn: Conn, unmerged: st
     assert _detail(client, first)["merged_into"] == third
     assert _detail(client, second)["merged_into"] == third
     primary = _detail(client, third)
-    assert {m["id"] for m in primary["members"]} == {first, second}
+    assert {(m[0], m[3]) for m in _members(primary)} == {(first, second), (second, third)}
     assert {w["id"] for w in primary["works"]} == works
     assert _ids(client)[1] == {third}
     assert _group(conn, str(uuid4())) is None
@@ -498,25 +558,38 @@ def test_placeholder_refused(client: TestClient, conn: Conn, mbid: str, side: st
 # --- the table -----------------------------------------------------------------------------------
 
 
-def test_the_table_refuses_a_bad_edge(conn: Conn) -> None:
+def test_the_table_keeps_one_edge_per_artist_the_curators(conn: Conn) -> None:
     """0049's constraints, under the routes' own checks."""
     singer = _artist(conn, "Alice Cooper", SINGER)
     band = _artist(conn, "Alice Cooper", BAND)
-    insert = "INSERT INTO artist_merges (artist_id, primary_id, merged_by) VALUES (%s, %s, %s)"
+    prince = _artist(conn, "Prince", PRINCE)
+    insert = "INSERT INTO artist_merges (artist_id, primary_id) VALUES (%s, %s)"
+    conn.execute(insert, (singer, band))
+    conn.commit()
+    [row] = _rows(conn)
+    assert (row["merged_by"], row["reason"]) == ("curator", None)
+    assert row["merged_at"] is not None
 
-    for values, refused in (
-        ((singer, singer, "curator"), psycopg.errors.CheckViolation),
-        ((singer, band, "matcher"), psycopg.errors.CheckViolation),
-        ((singer, str(uuid4()), "curator"), psycopg.errors.ForeignKeyViolation),
+    unknown = str(uuid4())
+    delete = "DELETE FROM artists WHERE id = %s"
+    for sql, values, refused in (
+        (insert, (singer, prince), psycopg.errors.UniqueViolation),  # one edge per artist
+        (insert, (band, band), psycopg.errors.CheckViolation),  # never its own primary
+        (
+            "INSERT INTO artist_merges (artist_id, primary_id, merged_by) VALUES (%s, %s, %s)",
+            (band, prince, "matcher"),
+            psycopg.errors.CheckViolation,  # only the curator merges
+        ),
+        (insert, (unknown, band), psycopg.errors.ForeignKeyViolation),
+        (insert, (band, unknown), psycopg.errors.ForeignKeyViolation),
+        (delete, (singer,), psycopg.errors.ForeignKeyViolation),  # no cascade, either side
+        (delete, (band,), psycopg.errors.ForeignKeyViolation),
     ):
         with pytest.raises(refused):
-            conn.execute(insert, values)
+            conn.execute(sql, values)
         conn.rollback()
 
-    conn.execute(insert, (singer, band, "curator"))
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        conn.execute(insert, (singer, band, "curator"))
-    conn.rollback()
+    assert _edges(conn) == {singer: band}
 
 
 # --- _delete_unused_local_artists ----------------------------------------------------------------
@@ -549,36 +622,7 @@ def test_an_artist_on_either_side_of_a_merge_is_kept(
     assert _edges(conn) == edges
 
 
-# --- C75 -----------------------------------------------------------------------------------------
-
-
-def _dependencies(dependant: Dependant) -> Iterator[Dependant]:
-    for dependency in dependant.dependencies:
-        yield dependency
-        yield from _dependencies(dependency)
-
-
-def _calls(dependant: Dependant) -> set[Callable[..., Any]]:
-    return {d.call for d in _dependencies(dependant) if d.call is not None}
-
-
-def test_both_routes_are_sync_routes_on_sync_repos() -> None:
-    routes = {
-        method: route
-        for route in artists_router.routes
-        if isinstance(route, APIRoute) and route.path == "/artists/{artist_id}/merge"
-        for method in route.methods
-    }
-
-    assert set(routes) == {"POST", "DELETE"}
-    for method, route in routes.items():
-        assert not inspect.iscoroutinefunction(route.endpoint), method
-        assert get_sync_repos in _calls(route.dependant), method
-        assert get_db_connection not in _calls(route.dependant), method
-        # One connection, one transaction: the one cached, "function"-scoped SyncRepos.
-        uses = [d for d in _dependencies(route.dependant) if d.call is get_sync_repos]
-        assert len({d.cache_key for d in uses}) == 1, method
-        assert all(d.scope == "function" and d.use_cache for d in uses), method
+# --- a lost connection ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -623,70 +667,3 @@ async def test_a_lost_connection_is_503(
     assert len(connections_die) == 1
     assert response.status_code == 503
     assert response.json() == {"detail": "unavailable"}
-
-
-# --- nothing merges automatically ----------------------------------------------------------------
-
-ADAPTER = "backend/db/repositories/artist_merges.py"
-SERVICE = "backend/services/artist_merge_service.py"
-SERVICE_MODULE = "backend.services.artist_merge_service"
-ROUTER = "backend/routers/library/artists.py"
-WRITES = {"add_merge", "remove_merge"}
-SCANNED = ("backend", "scripts")
-_WRITES_THE_TABLE = re.compile(
-    r"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(?:\s+TABLE)?|COPY)"
-    r"\s+(?:ONLY\s+)?(?:public\.)?\"?artist_merges\b",
-    re.IGNORECASE,
-)
-
-
-def _sources() -> Iterator[tuple[str, str]]:
-    """Every .py and .sql file of backend/ and scripts/, but the migrations and rollbacks."""
-    for top in SCANNED:
-        for path in sorted((ROOT / top).rglob("*")):
-            if path.suffix not in {".py", ".sql"} or "__pycache__" in path.parts:
-                continue
-            relative = path.relative_to(ROOT).as_posix()
-            if relative.startswith("backend/db/migrations/") or re.fullmatch(
-                r"backend/db/rollback_[^/]+\.sql", relative
-            ):
-                continue
-            yield relative, path.read_text(encoding="utf-8")
-
-
-def _imports(tree: ast.AST) -> set[str]:
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            found.add(node.module)
-            found |= {f"{node.module}.{alias.name}" for alias in node.names}
-    return found
-
-
-def test_nothing_merges_automatically() -> None:
-    assert ArtistMergeRepository.__abstractmethods__ >= WRITES
-
-    writers: set[str] = set()
-    callers: set[str] = set()
-    importers: set[str] = set()
-    for relative, source in _sources():
-        if _WRITES_THE_TABLE.search(source):
-            writers.add(relative)
-        if not relative.endswith(".py"):
-            continue
-        tree = ast.parse(source)
-        if any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in WRITES
-            for node in ast.walk(tree)
-        ):
-            callers.add(relative)
-        if SERVICE_MODULE in _imports(tree):
-            importers.add(relative)
-
-    assert writers == {ADAPTER}
-    assert callers == {SERVICE}
-    assert importers == {ROUTER}
