@@ -37,10 +37,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 ```
 
 - `domain/`: dataclasses split by subdomain (broadcast, catalog, library, matching, curation,
-  system, streaming, tune_in). Stdlib only. **Enforced.**
+  system, streaming, tune_in, endings). Stdlib only. **Enforced.**
 - `repositories/`: ABC ports. `db/repositories/`: their Pg adapters. Services never import
   `backend.db`, except `services/repository_factory.py`. **Enforced.**
-- `playout/`: takes primitives and imports nothing else from backend. **Enforced.**
+- `playout/`: takes primitives and imports nothing else from backend. **Enforced.** One named
+  exception: `playout/loudness.py` returns the domain's `LoudnessTail` (see Song endings).
 - `domain.library` never references streaming (D20). **Enforced.**
 
 **Known gaps** (true today, not rules to copy):
@@ -83,6 +84,31 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   The response models both editors share are in `routers/cue_schemas.py`.
 - Its checks are `tests/services/streaming/test_cue_editor.py`,
   `tests/routers/test_cue_editor_routes.py` and `tests/playout/test_peaks.py`.
+
+## Song endings: the fade after EOM, by the shape of the ending
+
+- `stream_endings` (migration 0049) holds one measured ending per audio, keyed by `audio_hash`
+  like `stream_cues`: `cold`, `long_tail`, `other` or `unmeasured`, the autocue Stop it was
+  measured against (`measured_cue_out_ms`), and a long tail's measured EOM (recorded for stage 2,
+  never played). Its own `ENDING_ANALYSER_VERSION`, so an ending change never re-runs autocue.
+- The run is `services/streaming/ending_analysis.py`, a periodic task on the cue worker
+  (`stream_ending_analysis_task`, every 5 minutes): purge other versions, prune endings whose
+  audio lost its cues, then measure (`playout/loudness.py`, FFmpeg) and classify
+  (`domain/endings.py`) batch by batch. An unreadable file is stored `unmeasured`; a missing
+  FFmpeg, or a batch of 4+ files all unreadable, ends the run.
+- Precedence, on both radio cue reads (`db/repositories/playable_schedule.py`) and in the cue
+  editor's opening view: a manual edit, then the ending rule over autocue's row, then autocue's
+  row. The rule applies only while autocue's row keeps the Stop it was measured against.
+- The rule (Lance, 2026-11-07, "Fades only, EOM as-is"): EOM stays autocue's for every song. A
+  cold ending plays to autocue's Stop with no fade; otherwise Stop = EOM + the fade after EOM
+  (2 s after a long tail, 1 s after anything else), cut short only by autocue's Stop. When a
+  liner is due right after a long tail, the stream service shortens its fade to 1 s
+  (`StreamService._before_liner_if_due`); the day read carries the ending on
+  `PlayableFile.ending` for this, and only when the rule was applied.
+- Rollback: `DELETE FROM stream_endings` puts every song back on autocue's points.
+- Its checks are the domain, loudness, run, liner-fade, cue-editor and Pg integration tests
+  named `*ending*`, `*long_tail*` and `test_loudness.py`, and the acceptance test over Lance's 51
+  labelled picks (`tests/fixtures/endings/lance_picks.json`).
 
 ## Station liners: a per-station clip library, analysed like songs
 
