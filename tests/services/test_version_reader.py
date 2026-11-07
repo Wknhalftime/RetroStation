@@ -38,7 +38,7 @@ from tests.fakes.song_masters import FakeSongMasterRepository
 from tests.fakes.works import FakeWorkRepository
 
 _SPECIAL = "Brass in Pocket (I'm Special)"
-_SPECIAL_CURLY = "Brass in Pocket (I’m Special)"
+_SPECIAL_CURLY = "Brass in Pocket (I\u2019m Special)"
 
 # --- the misreads (C63) --------------------------------------------------------------------------
 
@@ -69,7 +69,7 @@ def test_amended_reads_as_clean(descriptor: str) -> None:
     assert classify_version_descriptor(descriptor) == VersionType.CLEAN
 
 
-@pytest.mark.parametrize("descriptor", ["I'm Special", "i'm special", "I’m Special"])
+@pytest.mark.parametrize("descriptor", ["I'm Special", "i'm special", "I\u2019m Special"])
 def test_im_special_is_not_a_version(descriptor: str) -> None:
     assert classify_version_descriptor(descriptor) == VersionType.UNKNOWN
 
@@ -146,9 +146,20 @@ def test_title_scoring_no_longer_strips_a_dash_im_special() -> None:
         ("Original Remix", VersionType.REMIX),
         ("Amended Radio Edit", VersionType.RADIO_EDIT),
         ("Special Edition", VersionType.EDITION),
+        # Nor ahead of the single-word rules between them and the catch-all.
+        ("Mono Album Version", VersionType.FORMAT),
+        ("Deluxe Album Version", VersionType.EDITION),
+        ("Bonus Studio Version", VersionType.EDITION),
+        ("Alternate LP Version", VersionType.ALTERNATE),
+        ("Cover Album Version", VersionType.COVER),
+        ("Live Amended", VersionType.LIVE),
+        ("Amended Remix", VersionType.REMIX),
+        ("Amended Mono", VersionType.FORMAT),
+        ("Original Rough Mix", VersionType.DEMO),
     ],
 )
 def test_a_specific_reading_still_wins(descriptor: str, expected: VersionType) -> None:
+    """Each fix sits just ahead of the rule that misread it, so no rule above it is outranked."""
     assert classify_version_descriptor(descriptor) == expected
 
 
@@ -164,6 +175,7 @@ def test_a_specific_reading_still_wins(descriptor: str, expected: VersionType) -
         ("Single Version", VersionType.RADIO_EDIT),
         ("Special", VersionType.EDITION),
         ("Album", VersionType.UNKNOWN),
+        ("LP", VersionType.UNKNOWN),
     ],
 )
 def test_a_descriptor_off_the_list_keeps_its_reading(

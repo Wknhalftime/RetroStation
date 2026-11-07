@@ -6,58 +6,66 @@ The fix changes how new and re-scanned files group; files already grouped keep t
 recording. Before it merges, Lance sees on the gate's copy (AUD-R044) what it would change. The
 dry run reads the copy once and writes one JSON document:
 
-- ``files``: every present file, by id: its path, title and artist tags, and its reading
-  (``base_title``, ``version_type``) by the reader of the ``--before`` checkout and by this
-  tree's.
-- ``differs``: the files whose work or recording grouping would give them differs between the
-  two readings, by id: for each side, the ``work_id`` (null when grouping would create a work),
-  the ``work_title`` (that work's, or the one it would create) and the recording's
-  ``version_type`` (grouping keys a recording by work and version type). A file grouping places
-  by a shortcut (its recording MBID already on a work, its audio's twin) reads no title, so it
-  is never listed.
-- ``recordings``: the MusicBrainz recordings (a file's recording MBID tag names them) whose
-  stored version is the before reading of their title and whose after reading differs: the next
-  enrichment upsert writes the new version. By id: ``title``, ``work_id``, ``stored``,
-  ``after``, and ``slot_taken``, whether another recording on the work already holds ``after``
-  (``uq_recordings_work_version``: that upsert would fail).
-- ``summary``: the counts, also printed.
+- ``header``: the gate tools' header (tool, format version, the copy's marker).
+- ``files``: every present file, by id: its ``path``, ``title`` and ``artist`` tags, and its
+  reading (``base_title``, ``version_type``) by the reader of the ``--before`` checkout
+  (``before``) and by this tree's (``after``).
+- ``differs``: the files whose work or recording grouping would give them (were they new, or
+  re-scanned without a work) differs between the two readings, by id: for each side, the
+  ``work_id`` (null when grouping would create a work), the ``work_title`` (that work's, or the
+  one it would create) and the recording's ``version_type`` (grouping keys a recording by work
+  and version type). A file grouping places by a shortcut (its audio's twin, its recording MBID
+  already on a work) reads no title, so it is never listed.
+- ``recordings``: the MusicBrainz recordings (a present file's recording MBID tag names them)
+  whose stored version is the before reading of their title and whose after reading differs:
+  the next enrichment upsert writes the new version. By id: ``title``, ``work_id``, ``stored``,
+  ``after``, and ``slot_taken``: another recording on the work holds ``after``, or another
+  listed recording on it is going there too (``uq_recordings_work_version``: an upsert fails).
+- ``summary``: the counts (``files``, ``differs``, ``recordings``, ``slot_taken`` among them).
 
-It refuses a database without "bench" in its name and writes nothing.
+It prints a line for each listed file and recording, refuses a database without "bench" in its
+name, and writes nothing.
 
-The "before" reader here is a stand-in for the reader before the fix: this tree's, except for
+The "before" reader here stands in for the reader before the fix: this tree's, except for
 three of the misreads C63 fixes. The seeds follow the gate tests' rule: the library comes from
 the scan. The MusicBrainz recordings are inserted as today's reader left them, which the fixed
-code no longer writes.
+code no longer writes, and the audio twins get their hash as the hash backfill writes it.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from psycopg import sql as pg_sql
 
-from backend.domain.library import AudioMetadata
+from backend.domain.enums import AudioHashKind
+from backend.domain.library import AudioHash
 from backend.services.repository_factory import RepositoryFactory
 from tests.integration import stream_seed as seed
-from tests.integration.missing_file_seed import library_file
+from tests.integration.missing_file_seed import retag
 from tests.scripts.gate_world import (
     ROOT,
-    SCRIPTS,
     Conn,
     decoy_dsn,
     file_named,
+    load_tool,
     run_guarded,
     scan,
     tagged,
     work_of,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("queue_in_memory")]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+    pytest.mark.usefixtures("queue_in_memory"),
+]
 
 _BEFORE_READER = '''\
 """A stand-in for the reader before C63: this tree's, but with three of its old misreads."""
@@ -97,23 +105,7 @@ def _dry_run(bench: str, before: Path, out: Path) -> tuple[dict[str, Any], str]:
     return doc, done.stdout
 
 
-def _library(conn: Conn, root: Path) -> None:
-    """The plain songs are scanned first, so the labelled copies group onto them, as they did
-    on the dev library."""
-    tagged(root / "a" / "kid.mp3", "The Pretenders", "Kid")
-    tagged(root / "a" / "brass.mp3", "The Pretenders", "Brass In Pocket")
-    tagged(root / "a" / "hole.mp3", "Alice In Chains", "Down In A Hole")
-    tagged(root / "a" / "hey.mp3", "OutKast", "Hey Ya!")
-    scan(conn, root)
-    tagged(root / "b" / "hole-album.mp3", "Alice In Chains", "Down In A Hole (Album Version)")
-    tagged(root / "b" / "hey-amended.mp3", "OutKast", "Hey Ya! (Amended)")
-    tagged(root / "b" / "brass-special.mp3", "The Pretenders", "Brass in Pocket (I'm Special)")
-    tagged(root / "b" / "kid-special.mp3", "The Pretenders", "Kid (I'm Special)")
-    tagged(root / "b" / "hole-live.mp3", "Alice In Chains", "Down In A Hole (Live)")
-    scan(conn, root)
-
-
-def _mb_recording(conn: Conn, work_id: str, title: str, version: str) -> str:
+def _mb_recording(conn: Conn, work_id: str | None, title: str, version: str) -> str:
     """A MusicBrainz recording as enrichment stored it with the reader before C63."""
     recording_id = str(uuid4())
     conn.execute(
@@ -124,18 +116,93 @@ def _mb_recording(conn: Conn, work_id: str, title: str, version: str) -> str:
     return recording_id
 
 
+def _same_audio(conn: Conn, *names: str) -> None:
+    """The files get one audio hash, as the hash backfill records it."""
+    audio = AudioHash(AudioHashKind.AUDIO_SHA256, uuid4().hex * 2)
+    repos = RepositoryFactory(conn)
+    for name in names:
+        file_id = file_named(conn, name)
+        row = conn.execute(
+            "SELECT file_size, file_mtime_ns FROM library_files WHERE id = %s", (file_id,)
+        ).fetchone()
+        assert row is not None
+        assert repos.library_files.set_audio_hash(
+            file_id, audio, int(row["file_size"]), int(row["file_mtime_ns"])
+        )
+    conn.commit()
+
+
+@dataclass(frozen=True)
+class _Library:
+    root: Path
+    gone: UUID
+    listed: dict[str, str]  # file name -> title, the files the dry run must list
+
+
+def _library(conn: Conn, root: Path) -> _Library:
+    """The plain songs are scanned first, so the labelled copies group onto them, as they did
+    on the dev library. gone.mp3 is scanned, deleted and rescanned: a missing file."""
+    tagged(root / "a" / "kid.mp3", "The Pretenders", "Kid")
+    tagged(root / "a" / "brass.mp3", "The Pretenders", "Brass In Pocket")
+    tagged(root / "a" / "hole.mp3", "Alice In Chains", "Down In A Hole")
+    tagged(root / "a" / "would.mp3", "Alice In Chains", "Would?")
+    tagged(root / "a" / "hey.mp3", "OutKast", "Hey Ya!")
+    tagged(root / "a" / "gone.mp3", "Alice In Chains", "Would? (Album Version)")
+    scan(conn, root)
+    gone = file_named(conn, "gone.mp3")
+    (root / "a" / "gone.mp3").unlink()
+    labelled = [
+        ("hole-album.mp3", "Alice In Chains", "Down In A Hole (Album Version)"),
+        ("hey-amended.mp3", "OutKast", "Hey Ya! (Amended)"),
+        ("brass-special.mp3", "The Pretenders", "Brass in Pocket (I'm Special)"),
+        ("kid-special.mp3", "The Pretenders", "Kid (I'm Special)"),
+    ]
+    for name, artist, title in labelled:
+        tagged(root / "b" / name, artist, title)
+    listed = {name: title for name, _, title in labelled}
+    tagged(root / "b" / "hole-live.mp3", "Alice In Chains", "Down In A Hole (Live)")
+    # The hash twin of hole.mp3: grouping takes its twin's work, whatever its title reads.
+    tagged(root / "b" / "twin.mp3", "Alice In Chains", "Down In A Hole (Album Version)")
+    # A recording MBID that is no shortcut: unknown here, or on no work. Grouping reads these
+    # files' titles, so they are listed.
+    tagged(
+        root / "b" / "unknown-mbid.mp3",
+        "Alice In Chains",
+        "Would? (Album Version)",
+        recording_mbid=str(uuid4()),
+    )
+    tagged(
+        root / "b" / "workless.mp3",
+        "OutKast",
+        "Hey Ya! (Amended)",
+        recording_mbid=seed.recording(conn, None),
+    )
+    conn.commit()
+    scan(conn, root)
+    _same_audio(conn, "hole.mp3", "twin.mp3")
+    listed["unknown-mbid.mp3"] = "Would? (Album Version)"
+    listed["workless.mp3"] = "Hey Ya! (Amended)"
+    return _Library(root, gone, listed)
+
+
 def _fingerprint(conn: Conn) -> dict[str, tuple[int, str]]:
-    """Each table the dry run reads: its row count and a digest of its rows."""
-    tables = ("library_files", "works", "recordings", "artists", "song_masters")
+    """Every table's row count and a digest of its rows."""
+    tables = [
+        str(r["tablename"])
+        for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+    ]
     out: dict[str, tuple[int, str]] = {}
     for table in tables:
         row = conn.execute(
-            f"""SELECT count(*) AS n,
-                       md5(coalesce(string_agg(t::text, '|' ORDER BY t::text), '')) AS digest
-                FROM {table} t"""
+            pg_sql.SQL(
+                """SELECT count(*) AS n,
+                          md5(coalesce(string_agg(t::text, '|' ORDER BY t::text), '')) AS digest
+                   FROM {} t"""
+            ).format(pg_sql.Identifier(table))
         ).fetchone()
         assert row is not None
         out[table] = (int(row["n"]), str(row["digest"]))
+    conn.commit()
     return out
 
 
@@ -145,34 +212,40 @@ def _work_title(conn: Conn, work_id: str) -> str:
     return str(row["title"])
 
 
+def _side(entry: dict[str, Any], side: str) -> tuple[Any, Any, Any]:
+    placed = entry[side]
+    return placed["work_id"], placed["work_title"], placed["version_type"]
+
+
+@pytest.fixture
+def library(conn: Conn, tool_env: None, tmp_path: Path) -> Iterator[_Library]:
+    yield _library(conn, tmp_path / "music")
+
+
 # --- every present file's reading -----------------------------------------------------------------
 
 
 def test_every_present_file_has_both_readings(
-    conn: Conn, bench: str, tool_env: None, tmp_path: Path
+    conn: Conn, bench: str, library: _Library, tmp_path: Path
 ) -> None:
-    _library(conn, tmp_path / "music")
-    gone = library_file(
-        RepositoryFactory(conn),
-        str(tmp_path / "music" / "gone.flac"),
-        None,
-        missing=True,
-        audio=AudioMetadata(artist_name="Alice In Chains", track_title="Rooster (Album Version)"),
-    )
-    conn.commit()
+    load_tool("gate").mark_copy(bench, source="retrostation", copied_at="2026-11-07T08:00:00+00:00")
 
     doc, _ = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
 
+    assert doc["header"]["tool"] == "regroup_dry_run"
+    assert doc["header"]["format_version"] == 1
+    assert doc["header"]["copy"]["copied_at"] == "2026-11-07T08:00:00+00:00"
     present = {
         str(r["id"])
         for r in conn.execute("SELECT id FROM library_files WHERE file_status = 'present'")
     }
     assert set(doc["files"]) == present
-    assert str(gone.id) not in doc["files"]
+    assert str(library.gone) not in doc["files"]
+    assert doc["summary"]["files"] == len(present)
     hole_album = doc["files"][str(file_named(conn, "hole-album.mp3"))]
     assert hole_album["title"] == "Down In A Hole (Album Version)"
     assert hole_album["artist"] == "Alice In Chains"
-    assert hole_album["path"].endswith("hole-album.mp3")
+    assert Path(hole_album["path"]).name == "hole-album.mp3"
     assert hole_album["before"] == {"base_title": "Down In A Hole", "version_type": "remix"}
     assert hole_album["after"] == {"base_title": "Down In A Hole", "version_type": "original"}
     special = doc["files"][str(file_named(conn, "brass-special.mp3"))]
@@ -182,9 +255,8 @@ def test_every_present_file_has_both_readings(
         "version_type": "original",
     }
     live = doc["files"][str(file_named(conn, "hole-live.mp3"))]
-    assert (
-        live["before"] == live["after"] == {"base_title": "Down In A Hole", "version_type": "live"}
-    )
+    both = {"base_title": "Down In A Hole", "version_type": "live"}
+    assert live["before"] == live["after"] == both
     plain = doc["files"][str(file_named(conn, "kid.mp3"))]
     assert plain["before"] == plain["after"] == {"base_title": "Kid", "version_type": "original"}
 
@@ -193,10 +265,10 @@ def test_every_present_file_has_both_readings(
 
 
 def test_the_files_whose_work_or_recording_would_differ(
-    conn: Conn, bench: str, tool_env: None, tmp_path: Path
+    conn: Conn, bench: str, library: _Library, tmp_path: Path
 ) -> None:
-    _library(conn, tmp_path / "music")
     hole = work_of(conn, file_named(conn, "hole.mp3"))
+    would = work_of(conn, file_named(conn, "would.mp3"))
     hey = work_of(conn, file_named(conn, "hey.mp3"))
     brass = work_of(conn, file_named(conn, "brass.mp3"))
     kid = work_of(conn, file_named(conn, "kid.mp3"))
@@ -205,42 +277,63 @@ def test_the_files_whose_work_or_recording_would_differ(
     doc, stdout = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
 
     assert _fingerprint(conn) == before_run  # it wrote nothing
-    hole_album = str(file_named(conn, "hole-album.mp3"))
-    hey_amended = str(file_named(conn, "hey-amended.mp3"))
-    brass_special = str(file_named(conn, "brass-special.mp3"))
-    kid_special = str(file_named(conn, "kid-special.mp3"))
-    assert set(doc["differs"]) == {hole_album, hey_amended, brass_special, kid_special}
+    ids = {name: str(file_named(conn, name)) for name in library.listed}
+    # Not twin.mp3 (its audio's twin places it), not the missing gone.mp3, not the files whose
+    # two readings agree.
+    assert set(doc["differs"]) == set(ids.values())
+    differs = {name: doc["differs"][file_id] for name, file_id in ids.items()}
     # Retyped: the same work, the recording of the new version.
-    assert doc["differs"][hole_album] == {
-        "before": {"work_id": hole, "work_title": "Down In A Hole", "version_type": "remix"},
-        "after": {"work_id": hole, "work_title": "Down In A Hole", "version_type": "original"},
-    }
-    assert doc["differs"][hey_amended] == {
-        "before": {"work_id": hey, "work_title": "Hey Ya!", "version_type": "remix"},
-        "after": {"work_id": hey, "work_title": "Hey Ya!", "version_type": "clean"},
-    }
+    assert _side(differs["hole-album.mp3"], "before") == (hole, "Down In A Hole", "remix")
+    assert _side(differs["hole-album.mp3"], "after") == (hole, "Down In A Hole", "original")
+    assert _side(differs["hey-amended.mp3"], "before") == (hey, "Hey Ya!", "remix")
+    assert _side(differs["hey-amended.mp3"], "after") == (hey, "Hey Ya!", "clean")
+    assert _side(differs["unknown-mbid.mp3"], "before") == (would, "Would?", "remix")
+    assert _side(differs["unknown-mbid.mp3"], "after") == (would, "Would?", "original")
+    assert _side(differs["workless.mp3"], "before") == (hey, "Hey Ya!", "remix")
+    assert _side(differs["workless.mp3"], "after") == (hey, "Hey Ya!", "clean")
     # Read as a title: "brass in pocket im special" still finds the plain work.
-    assert doc["differs"][brass_special] == {
-        "before": {"work_id": brass, "work_title": "Brass In Pocket", "version_type": "edition"},
-        "after": {"work_id": brass, "work_title": "Brass In Pocket", "version_type": "original"},
-    }
+    assert _side(differs["brass-special.mp3"], "before") == (brass, "Brass In Pocket", "edition")
+    assert _side(differs["brass-special.mp3"], "after") == (brass, "Brass In Pocket", "original")
     # "kid im special" does not find "Kid": a work of its own, the one the scan made for it or
     # one grouping would create.
-    kid_entry = doc["differs"][kid_special]
-    assert kid_entry["before"] == {"work_id": kid, "work_title": "Kid", "version_type": "edition"}
-    assert kid_entry["after"]["work_id"] != kid
-    assert kid_entry["after"]["work_title"] == "Kid (I'm Special)"
-    assert kid_entry["after"]["version_type"] == "original"
-    if kid_entry["after"]["work_id"] is not None:
-        assert _work_title(conn, kid_entry["after"]["work_id"]) == "Kid (I'm Special)"
-    for title in (
-        "Down In A Hole (Album Version)",
-        "Hey Ya! (Amended)",
-        "Brass in Pocket (I'm Special)",
-        "Kid (I'm Special)",
-    ):
+    kid_special = differs["kid-special.mp3"]
+    assert _side(kid_special, "before") == (kid, "Kid", "edition")
+    after_work, after_title, after_version = _side(kid_special, "after")
+    assert after_work != kid
+    assert (after_title, after_version) == ("Kid (I'm Special)", "original")
+    if after_work is not None:
+        assert _work_title(conn, after_work) == "Kid (I'm Special)"
+    assert doc["summary"]["differs"] == len(ids)
+    for title in set(library.listed.values()):
         assert title in stdout
-    assert doc["summary"]["differs"] == 4
+
+
+def test_a_new_copy_lands_where_the_dry_run_said(
+    conn: Conn, bench: str, library: _Library, tmp_path: Path
+) -> None:
+    """The prediction is grouping's own: a new copy of each listed file, scanned, takes the
+    work and the recording version the ``after`` side named."""
+    doc, _ = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
+    copies = {}
+    for name, title in library.listed.items():
+        file_id = str(file_named(conn, name))
+        artist = doc["files"][file_id]["artist"]
+        copies[name] = (tagged(library.root / "c" / f"copy-{name}", artist, title), file_id)
+    scan(conn, library.root)
+
+    for name, (path, file_id) in copies.items():
+        row = conn.execute(
+            """SELECT f.work_id, w.title, r.version_type FROM library_files f
+               JOIN works w ON w.id = f.work_id JOIN recordings r ON r.id = f.recording_id
+               WHERE f.id = %s""",
+            (file_named(conn, path.name),),
+        ).fetchone()
+        assert row is not None, name
+        work_id, work_title, version = _side(doc["differs"][file_id], "after")
+        assert row["version_type"] == version, name
+        assert row["title"] == work_title, name
+        if work_id is not None:
+            assert row["work_id"] == work_id, name
 
 
 def test_a_file_placed_by_its_recording_mbid_is_not_listed(
@@ -265,6 +358,31 @@ def test_a_file_placed_by_its_recording_mbid_is_not_listed(
     assert doc["differs"] == {}
 
 
+def test_a_rescan_keeps_a_grouped_files_work_and_recording(
+    conn: Conn, tool_env: None, tmp_path: Path
+) -> None:
+    """S13: existing files keep their work and recording. A file today's reader put on a remix
+    recording of its own stays there when it is scanned again, re-read and all."""
+    music = tmp_path / "music"
+    tagged(music / "hole.mp3", "Alice In Chains", "Down In A Hole")
+    tagged(music / "hole-album.mp3", "Alice In Chains", "Down In A Hole (Album Version)")
+    scan(conn, music)
+    album = file_named(conn, "hole-album.mp3")
+    work = work_of(conn, album)
+    remix = _mb_recording(conn, work, "Down In A Hole (Album Version)", "remix")
+    conn.execute("UPDATE library_files SET recording_id = %s WHERE id = %s", (remix, album))
+    conn.commit()
+    retag(music / "hole-album.mp3")  # a new size and mtime: the scan reads its tags again
+
+    scan(conn, music)
+
+    row = conn.execute(
+        "SELECT work_id, recording_id FROM library_files WHERE id = %s", (album,)
+    ).fetchone()
+    assert row is not None
+    assert (row["work_id"], row["recording_id"]) == (work, remix)
+
+
 # --- MusicBrainz recordings the next upsert would retype ------------------------------------------
 
 
@@ -274,98 +392,97 @@ def test_the_recordings_the_next_upsert_would_retype(
     taken = seed.work(conn)
     plain = _mb_recording(conn, taken, "Down In A Hole", "original")
     album = _mb_recording(conn, taken, "Down In A Hole (Album Version)", "remix")
+    # The slot's holder is named by no file: it is still there.
+    unnamed = seed.work(conn)
+    _mb_recording(conn, unnamed, "Would?", "original")
+    lp = _mb_recording(conn, unnamed, "Would? (Album Version)", "remix")
     alone = seed.work(conn)
-    free = _mb_recording(conn, alone, "Would? (Album Version)", "remix")
-    # MusicBrainz said live: enrichment writes live again, whatever the title reads.
-    live = _mb_recording(conn, seed.work(conn), "Rooster (Album Version)", "live")
+    free = _mb_recording(conn, alone, "Them Bones (Album Version)", "remix")
     clean = seed.work(conn)
     amended = _mb_recording(conn, clean, "Hey Ya! (Amended)", "remix")
-    # No file names it, so no enrichment writes it again.
-    _mb_recording(conn, seed.work(conn), "Them Bones (Album Version)", "remix")
+    # Two going to one empty slot: whichever upsert comes second fails.
+    contested = seed.work(conn)
+    nutshell = _mb_recording(conn, contested, "Nutshell (Album Version)", "remix")
+    special = _mb_recording(conn, contested, "Nutshell (I'm Special)", "edition")
+    # MusicBrainz said live: enrichment writes live again, whatever the title reads.
+    live = _mb_recording(conn, seed.work(conn), "Rooster (Album Version)", "live")
+    # Named only by a missing file, or by no file: no enrichment writes them again.
+    gone = _mb_recording(conn, seed.work(conn), "Grind (Album Version)", "remix")
+    _mb_recording(conn, seed.work(conn), "Angry Chair (Album Version)", "remix")
     music = tmp_path / "music"
-    for name, recording in [
-        ("plain", plain),
-        ("album", album),
-        ("free", free),
-        ("live", live),
-        ("amended", amended),
-    ]:
+    named = {
+        "plain": plain,
+        "album": album,
+        "lp": lp,
+        "free": free,
+        "amended": amended,
+        "nutshell": nutshell,
+        "special": special,
+        "live": live,
+        "gone": gone,
+    }
+    for name, recording in named.items():
         tagged(music / f"{name}.mp3", "Alice In Chains", name, recording_mbid=recording)
     scan(conn, music)
+    (music / "gone.mp3").unlink()
+    scan(conn, music)
 
-    doc, _ = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
+    doc, stdout = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
 
-    assert doc["recordings"] == {
-        album: {
-            "title": "Down In A Hole (Album Version)",
-            "work_id": taken,
-            "stored": "remix",
-            "after": "original",
-            "slot_taken": True,
-        },
-        free: {
-            "title": "Would? (Album Version)",
-            "work_id": alone,
-            "stored": "remix",
-            "after": "original",
-            "slot_taken": False,
-        },
-        amended: {
-            "title": "Hey Ya! (Amended)",
-            "work_id": clean,
-            "stored": "remix",
-            "after": "clean",
-            "slot_taken": False,
-        },
+    expected = {
+        album: ("Down In A Hole (Album Version)", taken, "remix", "original", True),
+        lp: ("Would? (Album Version)", unnamed, "remix", "original", True),
+        free: ("Them Bones (Album Version)", alone, "remix", "original", False),
+        amended: ("Hey Ya! (Amended)", clean, "remix", "clean", False),
+        nutshell: ("Nutshell (Album Version)", contested, "remix", "original", True),
+        special: ("Nutshell (I'm Special)", contested, "edition", "original", True),
     }
-    assert doc["summary"]["recordings"] == 3
-    assert doc["summary"]["slot_taken"] == 1
+    assert set(doc["recordings"]) == set(expected)
+    for recording_id, (title, work_id, stored, after, slot_taken) in expected.items():
+        entry = doc["recordings"][recording_id]
+        assert (entry["title"], entry["work_id"], entry["stored"]) == (title, work_id, stored)
+        assert (entry["after"], entry["slot_taken"]) == (after, slot_taken), title
+        assert title in stdout
+    assert doc["summary"]["recordings"] == 6
+    assert doc["summary"]["slot_taken"] == 4
 
 
 # --- the same reader on both sides, and the guards ------------------------------------------------
 
 
 def test_this_trees_reader_on_both_sides_changes_nothing(
-    conn: Conn, bench: str, tool_env: None, tmp_path: Path
+    conn: Conn, bench: str, library: _Library, tmp_path: Path
 ) -> None:
-    _library(conn, tmp_path / "music")
-
     doc, _ = _dry_run(bench, ROOT, tmp_path / "regroup.json")
 
     assert doc["files"]
     assert all(entry["before"] == entry["after"] for entry in doc["files"].values())
     assert doc["differs"] == {}
     assert doc["recordings"] == {}
-    assert doc["summary"]["files"] == len(doc["files"])
     assert doc["summary"]["differs"] == 0
 
 
 def test_it_refuses_a_database_without_bench(bench: str, tmp_path: Path) -> None:
-    decoy = decoy_dsn(bench)
-    done = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPTS / "regroup_dry_run.py"),
-            "--dsn",
-            decoy,
-            "--before",
-            str(ROOT),
-            "--out",
-            str(tmp_path / "regroup.json"),
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
+    out = tmp_path / "regroup.json"
+    done = run_guarded(
+        bench,
+        "regroup_dry_run.py",
+        "--dsn",
+        decoy_dsn(bench),
+        "--before",
+        str(ROOT),
+        "--out",
+        str(out),
     )
 
     assert done.returncode != 0
     assert "refusing to touch non-bench database" in done.stdout + done.stderr
-    assert not (tmp_path / "regroup.json").exists()
+    assert "Traceback" not in done.stdout + done.stderr
+    assert not out.exists()
 
 
 def test_a_checkout_without_a_reader_is_refused(bench: str, tmp_path: Path) -> None:
+    out = tmp_path / "regroup.json"
     done = run_guarded(
         bench,
         "regroup_dry_run.py",
@@ -374,9 +491,10 @@ def test_a_checkout_without_a_reader_is_refused(bench: str, tmp_path: Path) -> N
         "--before",
         str(tmp_path / "empty"),
         "--out",
-        str(tmp_path / "regroup.json"),
+        str(out),
     )
 
     assert done.returncode != 0
     assert "normalization.py" in done.stdout + done.stderr
-    assert not (tmp_path / "regroup.json").exists()
+    assert "Traceback" not in done.stdout + done.stderr
+    assert not out.exists()
