@@ -177,6 +177,8 @@ def _library(conn: Conn, root: Path) -> _Library:
         "Hey Ya! (Amended)",
         recording_mbid=seed.recording(conn, None),
     )
+    # No artist tag: grouping leaves it ungrouped whatever its title reads.
+    tagged(root / "b" / "no-artist.mp3", "", "Would? (Album Version)")
     conn.commit()
     scan(conn, root)
     _same_audio(conn, "hole.mp3", "twin.mp3")
@@ -278,8 +280,9 @@ def test_the_files_whose_work_or_recording_would_differ(
 
     assert _fingerprint(conn) == before_run  # it wrote nothing
     ids = {name: str(file_named(conn, name)) for name in library.listed}
-    # Not twin.mp3 (its audio's twin places it), not the missing gone.mp3, not the files whose
-    # two readings agree.
+    # Not twin.mp3 (its audio's twin places it), not no-artist.mp3 (grouping skips it), not
+    # the missing gone.mp3, not the files whose two readings agree.
+    assert str(file_named(conn, "no-artist.mp3")) in doc["files"]
     assert set(doc["differs"]) == set(ids.values())
     differs = {name: doc["differs"][file_id] for name, file_id in ids.items()}
     # Retyped: the same work, the recording of the new version.
@@ -356,6 +359,29 @@ def test_a_file_placed_by_its_recording_mbid_is_not_listed(
     assert doc["files"][rooster]["before"]["version_type"] == "remix"
     assert doc["files"][rooster]["after"]["version_type"] == "original"
     assert doc["differs"] == {}
+
+
+def test_a_work_past_the_fuzzy_matchs_100_candidates_is_found(
+    conn: Conn, bench: str, tool_env: None, tmp_path: Path
+) -> None:
+    """Grouping's fuzzy match sees an artist name's first 100 works by title; its last check
+    finds an exact title past them. The dry run finds it there too, rather than a new work."""
+    music = tmp_path / "music"
+    for n in range(100):
+        # Titles no two of which fuzzy-match, all sorting before "Zebra".
+        tagged(music / "a" / f"n{n:03}.mp3", "The Prolific", f"Song {uuid4().hex[:10].upper()}")
+    tagged(music / "a" / "zebra.mp3", "The Prolific", "Zebra Crossing")
+    scan(conn, music)
+    zebra = work_of(conn, file_named(conn, "zebra.mp3"))
+    tagged(music / "b" / "zebra-album.mp3", "The Prolific", "Zebra Crossing (Album Version)")
+    scan(conn, music)
+    album = str(file_named(conn, "zebra-album.mp3"))
+    assert work_of(conn, file_named(conn, "zebra-album.mp3")) == zebra  # as grouping placed it
+
+    doc, _ = _dry_run(bench, _before_checkout(tmp_path), tmp_path / "regroup.json")
+
+    assert _side(doc["differs"][album], "before") == (zebra, "Zebra Crossing", "remix")
+    assert _side(doc["differs"][album], "after") == (zebra, "Zebra Crossing", "original")
 
 
 def test_a_rescan_keeps_a_grouped_files_work_and_recording(
