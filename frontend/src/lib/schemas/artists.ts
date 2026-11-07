@@ -24,6 +24,15 @@ export const WorkSummarySchema = z.object({
   version_types: z.array(z.string()).default([]),
 });
 
+// An artist merged into a primary's group (phase 2a S11); primary_id is the one it was merged
+// into directly.
+export const MergedMemberSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mbid: z.string().nullable().default(null),
+  primary_id: z.string(),
+});
+
 export const ArtistDetailSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -32,12 +41,15 @@ export const ArtistDetailSchema = z.object({
   works: z.array(WorkSummarySchema),
   mbid: z.string().nullable().default(null),
   origin: z.enum(["local", "musicbrainz"]).default("local"),
+  merged_into: z.string().nullable().default(null),
+  members: z.array(MergedMemberSchema).default([]),
 });
 
 export type ArtistSummary = z.infer<typeof ArtistSummarySchema>;
 export type PaginatedArtists = z.infer<typeof PaginatedArtistsSchema>;
 export type WorkSummary = z.infer<typeof WorkSummarySchema>;
 export type ArtistDetail = z.infer<typeof ArtistDetailSchema>;
+export type MergedMember = z.infer<typeof MergedMemberSchema>;
 
 // Legacy exports preserved for any existing consumers
 export const ArtistSchema = ArtistSummarySchema;

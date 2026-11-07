@@ -6,33 +6,48 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
-from backend.dependencies import get_current_token, get_db_connection
-from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS
+from backend.db.repositories.artist_merges import ARTIST_GROUP_SQL, MERGE_ROOTS_CTE
+from backend.dependencies import SyncRepos, get_current_token, get_db_connection
+from backend.domain.catalog import (
+    SPECIAL_PURPOSE_MBIDS,
+    ArtistMerge,
+    MergeArtistNotFoundError,
+    MergeRefusedError,
+)
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
+from backend.domain.system import StorageUnavailableError
+from backend.services.artist_merge_service import merge_artist, unmerge_artist
 
 router = APIRouter()
 
 # Trusted constants, never user input.
 _PLACEHOLDER_MBIDS_SQL = ", ".join(f"'{mbid}'" for mbid in sorted(SPECIAL_PURPOSE_MBIDS))
-# A listed artist: named (an unnamed stub's name is its MBID, phase 1a S15) and no
-# special-purpose artist (phase 1c S7, C7). ``IS DISTINCT FROM``, because a local artist's
-# ``mbid`` is NULL.
+# A listed artist: named (an unnamed stub's name is its MBID, phase 1a S15), no special-purpose
+# artist (phase 1c S7, C7), and not merged into another (phase 2a S11, M33). ``IS DISTINCT FROM``,
+# because a local artist's ``mbid`` is NULL.
 _NAMED = (
     "a.name IS DISTINCT FROM a.mbid"
     f" AND (a.mbid IS NULL OR a.mbid NOT IN ({_PLACEHOLDER_MBIDS_SQL}))"
+    " AND NOT EXISTS (SELECT 1 FROM artist_merges merged WHERE merged.artist_id = a.id)"
 )
+# The artist an MBID finds: the artist holding it, or the primary that artist is merged into
+# (M33: lookups by either MBID land there). Reads ``merge_roots``, from MERGE_ROOTS_CTE.
+_BY_MBID = """a.id IN (
+    SELECT COALESCE(r.primary_id, h.id)
+      FROM artists h LEFT JOIN merge_roots r ON r.artist_id = h.id
+     WHERE h.mbid = %s)"""
 
 
 def _artist_search_fragments(
-    search: str,
+    search: str, mbid: str = ""
 ) -> tuple[str, str, tuple[Any, ...], tuple[Any, ...]]:
-    """Build the SQL fragments and parameter lists for an artist name search.
+    """Build the SQL fragments and parameter lists for an artist name or MBID search.
 
     Returns ``(where_clause, order_clause, where_params, order_params)`` so
     that both the count and items queries always use the identical predicate —
     making drift between the two impossible.
 
-    ``where_params`` feeds the WHERE clause (2 binds when searching, 0 otherwise).
+    ``where_params`` feeds the WHERE clause (1 bind for an MBID, 2 more when searching).
     ``order_params`` feeds the similarity() call in ORDER BY (1 bind when
     searching, 0 otherwise) and is only needed by the items query.
 
@@ -44,16 +59,20 @@ def _artist_search_fragments(
     filtering via the ``%%`` arm.
 
     An unnamed stub (phase 1a S15: its name is still its MBID) is never listed, and neither
-    is one of MusicBrainz's special-purpose artists (phase 1c S7), by its MBID (``_NAMED``).
+    is one of MusicBrainz's special-purpose artists (phase 1c S7), by its MBID, nor an artist
+    merged into another (phase 2a S11) (``_NAMED``). Both queries read ``merge_roots``.
     """
+    where = f"WHERE {_NAMED}"
+    where_params: tuple[Any, ...] = ()
+    if mbid:
+        where += f" AND {_BY_MBID}"
+        where_params = (mbid.lower(),)
     if not search:
-        return f"WHERE {_NAMED}", "ORDER BY a.sort_name, a.id", (), ()
+        return where, "ORDER BY a.sort_name, a.id", where_params, ()
 
-    where = (
-        f"WHERE {_NAMED} AND (LOWER(a.name) %% LOWER(%s) OR LOWER(a.name) LIKE LOWER(%s) || '%%')"
-    )
+    where += " AND (LOWER(a.name) %% LOWER(%s) OR LOWER(a.name) LIKE LOWER(%s) || '%%')"
     order = "ORDER BY similarity(LOWER(a.name), LOWER(%s)) DESC, a.sort_name, a.id"
-    return where, order, (search, search), (search,)
+    return where, order, (*where_params, search, search), (search,)
 
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
@@ -86,12 +105,29 @@ class WorkSummary(BaseModel):
     version_types: list[str] = []
 
 
+class MergedMember(BaseModel):
+    """An artist merged into a primary's group; ``primary_id`` is the one it was merged into
+    directly, so the page can say who leaves with it on Unmerge."""
+
+    id: str
+    name: str
+    mbid: str | None
+    primary_id: str
+
+
 class ArtistDetail(BaseModel):
     id: str
     name: str
     sort_name: str
     disambiguation: str | None
     works: list[WorkSummary]
+    merged_into: str | None = None
+    members: list[MergedMember] = []
+
+
+class MergeIn(BaseModel):
+    primary_id: str
+    reason: str | None = None
 
 
 @router.get("/artists", response_model=PaginatedArtists)
@@ -101,16 +137,19 @@ async def list_artists(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     search: str = Query(default=""),
+    mbid: str = Query(default=""),
 ) -> PaginatedArtists:
     """Return a paginated list of artists with work and file counts.
 
     When ``search`` is non-empty, results are filtered and ranked by trigram
     similarity; see :func:`_artist_search_fragments` for the SQL construction
-    details and the migration-0022 GIN index that makes it efficient.
+    details and the migration-0022 GIN index that makes it efficient. ``mbid`` finds the
+    artist holding it, or its primary. A primary counts its merge group's works and files.
     """
-    where_clause, order_clause, where_params, order_params = _artist_search_fragments(search)
+    where_clause, order_clause, where_params, order_params = _artist_search_fragments(search, mbid)
 
     count_sql = f"""
+        WITH RECURSIVE {MERGE_ROOTS_CTE}
         SELECT COUNT(*) AS total
         FROM artists a
         {where_clause}
@@ -121,6 +160,7 @@ async def list_artists(
     total: int = cnt_row["total"] if cnt_row else 0
 
     items_sql = f"""
+        WITH RECURSIVE {MERGE_ROOTS_CTE}
         SELECT
             a.id,
             a.name,
@@ -131,7 +171,11 @@ async def list_artists(
             COUNT(DISTINCT w.id)  AS work_count,
             COUNT(DISTINCT lf.id) AS file_count
         FROM artists a
-        LEFT JOIN works w ON w.artist_id = a.id
+        LEFT JOIN (
+            -- each work under the root of its artist's group: the artist itself, unmerged
+            SELECT gw.id, COALESCE(r.primary_id, gw.artist_id) AS root_id
+              FROM works gw LEFT JOIN merge_roots r ON r.artist_id = gw.artist_id
+        ) w ON w.root_id = a.id
         LEFT JOIN library_files lf ON lf.work_id = w.id
         {where_clause}
         GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
@@ -160,11 +204,96 @@ async def list_artists(
     return PaginatedArtists(items=items, total=total)
 
 
+_GROUP_WORKS_SQL = """
+    SELECT
+        w.id,
+        w.title,
+        w.mbid,
+        w.origin,
+        w.artist_id,
+        COUNT(DISTINCT lf.id) AS recording_count,
+        COUNT(DISTINCT sm.id) AS master_count,
+        array_agg(DISTINCT r.version_type)
+            FILTER (WHERE r.version_type IS NOT NULL)
+            AS version_types
+    FROM works w
+    LEFT JOIN library_files lf ON lf.work_id = w.id
+    LEFT JOIN song_masters sm ON sm.work_id = w.id
+    LEFT JOIN recordings r ON r.work_id = w.id
+    WHERE w.artist_id = ANY(%s)
+    GROUP BY w.id, w.title, w.mbid, w.origin, w.artist_id
+    ORDER BY w.title
+"""
+
+# Files by MBID, one entry per (MBID, title) holding a file on none of the given works: an artist
+# with no works shows its files this way, and so does a merged member (2a's question A). An entry
+# counts every file of its MBID and title, because its link opens them all (``works.py``'s
+# synthetic work detail).
+_FILES_BY_MBID_SQL = """
+    SELECT m.mbid, lf.track_title AS title, COUNT(DISTINCT lf.id) AS recording_count
+      FROM unnest(%(mbids)s::text[]) AS m(mbid)
+      JOIN library_files lf ON lf.artist_mbid = m.mbid OR lf.album_artist_mbid = m.mbid
+     WHERE lf.track_title IS NOT NULL
+     GROUP BY m.mbid, lf.track_title
+    HAVING bool_or(lf.work_id IS NULL OR NOT lf.work_id = ANY(%(works)s::text[]))
+     ORDER BY lf.track_title, m.mbid
+"""
+
+
+async def _group_works(
+    conn: AsyncConnection[Any], member_ids: list[str]
+) -> tuple[list[WorkSummary], set[str]]:
+    """The works of every member of the group, by title, and the members that own one."""
+    cur = await conn.execute(_GROUP_WORKS_SQL, (member_ids,))
+    rows = await cur.fetchall()
+    works = [
+        WorkSummary(
+            id=row["id"],
+            title=row["title"],
+            recording_count=row["recording_count"],
+            has_master=row["master_count"] > 0,
+            mbid=row.get("mbid"),
+            origin=row.get("origin", "local"),
+            version_types=row.get("version_types") or [],
+        )
+        for row in rows
+    ]
+    return works, {str(row["artist_id"]) for row in rows}
+
+
+async def _files_by_mbid(
+    conn: AsyncConnection[Any], mbids: list[str], works: list[WorkSummary]
+) -> list[WorkSummary]:
+    """One synthetic work per (MBID, title) of the files carrying *mbids* and on none of
+    *works*; its id opens those files (``works.py``'s synthetic work detail)."""
+    if not mbids:
+        return []
+    cur = await conn.execute(
+        _FILES_BY_MBID_SQL, {"mbids": mbids, "works": [work.id for work in works]}
+    )
+    return [
+        WorkSummary(
+            id=encode_synthetic_work_id(row["mbid"], row["title"] or "unknown"),
+            title=row["title"] or "Unknown",
+            recording_count=row["recording_count"],
+            has_master=False,
+        )
+        for row in await cur.fetchall()
+    ]
+
+
 @router.get("/artists/{artist_id}", response_model=ArtistDetail)
 async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> ArtistDetail:
-    """Return an artist with a summary of their works."""
+    """Return an artist with a summary of its works.
+
+    Phase 2a S11 (M33): a merged artist names its group's root primary in ``merged_into`` (the
+    page redirects there), and a root lists its ``members``. The page shows the whole group's
+    works, then each member's files that aren't on one of them, by the member's MBID. The
+    primary's own files show that way too while it owns no work, as an artist with no works
+    always has.
+    """
     artist_cur = await conn.execute(
-        "SELECT id, name, sort_name, disambiguation, mbid FROM artists WHERE id = %s",
+        "SELECT id, name, sort_name, disambiguation FROM artists WHERE id = %s",
         (artist_id,),
     )
     artist_row = await artist_cur.fetchone()
@@ -174,74 +303,66 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
             detail=f"Artist {artist_id} not found",
         )
 
-    works_cur = await conn.execute(
-        """
-        SELECT
-            w.id,
-            w.title,
-            w.mbid,
-            w.origin,
-            COUNT(DISTINCT lf.id) AS recording_count,
-            COUNT(DISTINCT sm.id) AS master_count,
-            array_agg(DISTINCT r.version_type)
-                FILTER (WHERE r.version_type IS NOT NULL)
-                AS version_types
-        FROM works w
-        LEFT JOIN library_files lf ON lf.work_id = w.id
-        LEFT JOIN song_masters sm ON sm.work_id = w.id
-        LEFT JOIN recordings r ON r.work_id = w.id
-        WHERE w.artist_id = %s
-        GROUP BY w.id, w.title, w.mbid, w.origin
-        ORDER BY w.title
-        """,
-        (artist_id,),
+    group_cur = await conn.execute(ARTIST_GROUP_SQL, {"id": artist_id})
+    group = await group_cur.fetchall()
+    primary_id = next((str(row["id"]) for row in group if row["is_primary"]), None)
+    if primary_id is None:  # deleted since the first read
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artist {artist_id} not found",
+        )
+    works, owners = await _group_works(conn, [str(row["id"]) for row in group])
+    by_file = sorted(
+        str(row["mbid"])
+        for row in group
+        if row["mbid"] and not (row["is_primary"] and str(row["id"]) in owners)
     )
-    work_rows = await works_cur.fetchall()
+    works += await _files_by_mbid(conn, by_file, works)
 
-    if not work_rows:
-        artist_mbid = artist_row.get("mbid")
-        if artist_mbid:
-            works_cur = await conn.execute(
-                """
-                SELECT
-                    lf.track_title AS title,
-                    COUNT(*) AS recording_count
-                FROM library_files lf
-                WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
-                  AND lf.track_title IS NOT NULL
-                GROUP BY lf.track_title
-                ORDER BY lf.track_title
-                """,
-                (artist_mbid, artist_mbid),
-            )
-            work_rows = await works_cur.fetchall()
-        works = [
-            WorkSummary(
-                id=encode_synthetic_work_id(artist_mbid or artist_id, row["title"] or "unknown"),
-                title=row["title"] or "Unknown",
-                recording_count=row["recording_count"],
-                has_master=False,
-            )
-            for row in work_rows
-        ]
-    else:
-        works = [
-            WorkSummary(
-                id=row["id"],
-                title=row["title"],
-                recording_count=row["recording_count"],
-                has_master=row["master_count"] > 0,
-                mbid=row.get("mbid"),
-                origin=row.get("origin", "local"),
-                version_types=row.get("version_types") or [],
-            )
-            for row in work_rows
-        ]
-
+    is_primary = primary_id == artist_id
     return ArtistDetail(
         id=artist_row["id"],
         name=artist_row["name"],
         sort_name=artist_row["sort_name"],
         disambiguation=artist_row.get("disambiguation"),
         works=works,
+        merged_into=None if is_primary else primary_id,
+        members=[
+            MergedMember(
+                id=row["id"], name=row["name"], mbid=row["mbid"], primary_id=row["primary_id"]
+            )
+            for row in group
+            if is_primary and not row["is_primary"]
+        ],
     )
+
+
+# ---------------------------------------------------------------------------
+# Routes — writes: sync routes on the request's one connection (SyncRepos, C75), the curator's
+# Merge and Unmerge (phase 2a S11, M33); nothing else merges
+# ---------------------------------------------------------------------------
+
+
+@router.post("/artists/{artist_id}/merge", status_code=status.HTTP_204_NO_CONTENT)
+def merge_artist_into(_token: Token, artist_id: str, body: MergeIn, repos: SyncRepos) -> None:
+    """Merge the artist into ``primary_id``; a repeat changes nothing."""
+    merge = ArtistMerge(artist_id=artist_id, primary_id=body.primary_id, reason=body.reason)
+    try:
+        merge_artist(merge, repos.artist_merges)
+    except MergeArtistNotFoundError as missing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(missing)) from missing
+    except MergeRefusedError as refused:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(refused)) from refused
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+
+
+@router.delete("/artists/{artist_id}/merge", status_code=status.HTTP_204_NO_CONTENT)
+def unmerge_artist_from(_token: Token, artist_id: str, repos: SyncRepos) -> None:
+    """Unmerge the artist: delete its one edge; an artist with none is left as it is."""
+    try:
+        unmerge_artist(artist_id, repos.artist_merges)
+    except MergeArtistNotFoundError as missing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(missing)) from missing
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost

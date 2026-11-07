@@ -61,6 +61,48 @@ class InvalidLinkDecisionError(CatalogError):
     """A link decision whose outcome and candidate disagree (AUD-R026)."""
 
 
+class ArtistMergeError(CatalogError):
+    """A Merge or Unmerge the curator asked for that can't be done (phase 2a S11)."""
+
+
+class MergeArtistNotFoundError(ArtistMergeError):
+    """An artist named by a Merge or Unmerge doesn't exist."""
+
+
+class MergeRefusedError(ArtistMergeError):
+    """A Merge that would join an artist to itself, make a cycle, touch a special-purpose
+    artist, or move an artist already merged into another (E5)."""
+
+
+@dataclass(frozen=True)
+class ArtistMerge:
+    """One direct edge: *artist_id* merged away into *primary_id*, by the curator (M33)."""
+
+    artist_id: str
+    primary_id: str
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class MergeArtist:
+    """What a Merge checks of an artist: its id, its name (for a refusal's message) and its
+    MBID (None for a name-only artist)."""
+
+    id: str
+    name: str
+    mbid: str | None
+
+
+@dataclass(frozen=True)
+class ArtistGroup:
+    """An artist's merge group (S11): the root primary, every member id (the primary among
+    them) and every member MBID (a name-only member has none)."""
+
+    primary_id: str
+    member_ids: frozenset[str]
+    member_mbids: frozenset[str]
+
+
 @dataclass(frozen=True)
 class MusicBrainzId:
     """A well-formed MusicBrainz identifier (it may still not exist upstream)."""

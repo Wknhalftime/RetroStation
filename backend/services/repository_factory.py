@@ -10,6 +10,7 @@ from psycopg.rows import DictRow
 from backend.db.repositories.artist_cascade import PgArtistCascadeRepository
 from backend.db.repositories.artist_credit_files import PgArtistCreditFilesRepository
 from backend.db.repositories.artist_linking import PgArtistLinkingRepository
+from backend.db.repositories.artist_merges import PgArtistMergeRepository
 from backend.db.repositories.artist_names import PgArtistNameRepository
 from backend.db.repositories.artist_resolution import PgArtistResolutionRepository
 from backend.db.repositories.artist_tag_files import PgArtistTagFilesRepository
@@ -210,6 +211,7 @@ class RepositoryFactory:
         self.artist_tag_files = PgArtistTagFilesRepository(conn)
         self.artist_credit_files = PgArtistCreditFilesRepository(conn)
         self.artist_names = PgArtistNameRepository(conn)
+        self.artist_merges = PgArtistMergeRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -291,6 +293,7 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         matches=repos.matches,
         artists=repos.artists,
         links=repos.log_name_links,
+        merges=repos.artist_merges,
     )
 
 

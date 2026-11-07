@@ -8,7 +8,8 @@ feat/liner-cues (comment audit: `audit/comment-audit.md`); "Retired" and "Librar
 writes" were added 2026-10-31 with the artist model's phase 0c, "Log-name links" 2026-11-01
 with its phase 1a, "Whole-name Reject and Unmatch" 2026-11-01 with its phase 1b, "Status from
 links and suggestions" and "Placeholders are never artists" 2026-11-03 with its phase 1c,
-"Artist identity" 2026-11-05 with its phase 2a, whose second PR extended it 2026-11-06.
+"Artist identity" 2026-11-05 with its phase 2a, whose second PR extended it 2026-11-06 and its
+third (Merge) 2026-11-07.
 Rulings cited
 here are in `audit/rulings.jsonl` (AUD-R015..R073, R100, R101 and R102 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
@@ -76,6 +77,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   and the master recalculation replaces a manual pick that is no longer a present file of the
   work (phase 3b changes both). Each refusal is a `WorkCurationError` whose message is the
   route's detail.
+- A merge deletes a source's local artist only when it is left with no work, no log-name link in
+  any state (AUD-R035, which changes AUD-R004) and no artist merge on either side (phase 2a S11,
+  "Artist identity" below). AUD-R035's "may be deleted only when" still holds; this is one more
+  condition, so no ruling changes.
 - The router's read route (the work detail) keeps its SQL on the async connection until 3b
   rebuilds the Library pages (AUD-R010 noted).
 - The checks are `tests/test_works_router_writes_have_no_sql.py` (no write route reaches an
@@ -138,7 +143,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - Known gap: a stub holds its MBID, so the local-artist linker records a local artist tagged
   with that MBID as `duplicate` instead of linking it, and enrichment files a work for it under
   the stub. 2a doesn't close this: both artists stay, and the name gets a `different_acts`
-  suggestion when the stub is named. Merge, later in 2a, joins them. The dev database had none
+  suggestion when the stub is named. Merge (phase 2a S11, "Artist identity" below) joins them on
+  the curator's request. The dev database had none
   of either at the copy (2026-11-01 gate copy).
 - The checks are `tests/test_log_name_links_single_writer.py`,
   `tests/integration/test_matches_song_only_pg.py` (0046 and its rollback),
@@ -392,11 +398,41 @@ returns the row it finds).
   a name the curator kept separate never reopens, and the same write again writes nothing. A
   name that stops holding several keeps its row. Its page comes in phase 5; nothing merges
   automatically (M33).
+- **Merge and Unmerge (S11, E4, E5, M33; `services/artist_merge_service.py`):** only the curator
+  merges, from the artist page. `artist_merges` (migration 0049) holds one direct edge per merged
+  artist: its primary, `merged_by` (only `curator`), when, and a reason. `POST
+  /library/artists/{id}/merge` merges `{id}` into `primary_id`, and `DELETE` on the same path
+  deletes its one edge. Both are sync routes on `SyncRepos` (C75) and answer 204, and a repeat
+  changes nothing. A merge into the artist itself, one that would make a cycle, one with a
+  special-purpose artist on either side, and one of an artist already merged elsewhere are refused
+  (409). A merge into an artist that is itself merged is kept as made, and the group's primary is
+  the root its chain of edges ends at (E4). Each Merge and Unmerge first locks `artist_merges`
+  (`SHARE ROW EXCLUSIVE`, which blocks no read), so two merges never pass their checks at once: two
+  crossing merges can't make a cycle, and a second merge of one artist sees the first's edge. Only
+  the adapter, `PgArtistMergeRepository`, writes the table, and only its SQL follows an edge:
+  `MERGE_ROOTS_CTE` walks every chain to its root, and `ARTIST_GROUP_SQL` serves `artist_group`
+  and the artist page alike. A merge with an artist a work merge has just deleted is a 404.
+- **What a merge shows:** the merged artist leaves the artist list and its search, and its page
+  redirects to the root (`merged_into`). The root lists its `members`, each with the artist it was
+  merged into directly, and shows the group's works, then each member's files that aren't on one of
+  them, one entry per title by the member's MBID (2a's question A). An entry counts every file of
+  its MBID and title, because it opens them all. The primary's own files show that way while it
+  owns no work, as for any artist with no works. The list counts the group's works and files, and
+  `?mbid=` finds the root for a member's MBID. Credits, log-name links, works and
+  MusicBrainz lookups keep the real artist: a merged artist stays in the matcher's pool, and song
+  matching reads the group only from 4.3, so neither action queues a re-check. A link to a merged
+  artist shows under the primary once a page lists links (phase 5). The work merge never deletes an
+  artist on either side of an edge, and 0049's foreign keys don't cascade. Nothing refuses a merge
+  into an unnamed stub, which the page never offers; the group then leaves the list until
+  enrichment names the stub.
 - **Rollback (D4):** there is no script from 0047 on. The index can't go back while two artists
   share a name, and the code before 2a fails on every scan without it (`ON CONFLICT
   (normalized_name)` has no unique index), so the older scripts can't run past it. The rollback
   is the dump (phase 7 S5).
 - The checks are `tests/integration/test_artist_name_index_pg.py`,
+  `tests/integration/test_artist_merge_pg.py`,
+  `tests/test_artist_merge_writers.py`,
+  `frontend/src/pages/library/ArtistDetail.test.tsx`,
   `tests/integration/test_artist_identity_sweep_lost_connection_pg.py`,
   `tests/integration/test_artist_credit_writes_pg.py`,
   `tests/integration/test_artist_names_pg.py`,
@@ -414,7 +450,8 @@ returns the row it finds).
   `tests/repositories/test_artist_credit_files_contract.py`,
   `tests/repositories/test_artist_ids_by_mbid_contract.py`,
   `tests/repositories/test_artist_names_contract.py`,
-  `tests/repositories/test_mb_cache_listing_contract.py` and
+  `tests/repositories/test_mb_cache_listing_contract.py`,
+  `tests/repositories/test_artist_merges_contract.py` and
   `tests/tasks/test_enrichment_names_stubs.py`.
 
 ## Derived counts kept by triggers

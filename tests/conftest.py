@@ -20,7 +20,7 @@ _TRUNCATE_SQL = """
              mb_cache, progress_tracking, user_settings,
              system_logs,
              library_folder_staged_hashes, library_folders,
-             stream_cues, library_suggestions, artist_names
+             stream_cues, library_suggestions, artist_names, artist_merges
     CASCADE
 """
 
