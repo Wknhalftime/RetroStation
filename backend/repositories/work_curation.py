@@ -22,8 +22,16 @@ class WorkCurationRepository(ABC):
 
     @abstractmethod
     def drop_colliding_overrides(self, work_ids: list[str], target_id: str) -> int:
-        """Delete each override of *work_ids* whose format the target has (the target's
-        wins), or that another of them holds with an earlier (created_at, id); how many."""
+        """Delete each override of *work_ids* whose format, or version entry whose version
+        text, the target has (the target's wins), or that another of them holds with an
+        earlier (created_at, id); how many. Each kind collides only with its own (E7)."""
+        ...
+
+    @abstractmethod
+    def move_version_states_of_works(self, work_ids: list[str], target_id: str) -> None:
+        """Copy every version-entry state of *work_ids* to *target_id* (D6): where states
+        for one text meet, the target's own or another source's, the result is dismissed if
+        either was, seen at the later time. The sources' own go with them when deleted."""
         ...
 
     @abstractmethod

@@ -16,6 +16,14 @@ class FakeMatchRepository(MatchRepository):
     def get_by_identity(self, identity_id: UUID) -> Match | None:
         return next((m for m in self._data.values() if m.identity_id == identity_id), None)
 
+    def copy_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        # Version-entry states live in PostgreSQL only; the integration tests check them.
+        return None
+
+    def see_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        # Version-entry states live in PostgreSQL only; the integration tests check them.
+        return None
+
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         for match_id, match in list(self._data.items()):
             if match.library_file_id == file_id:

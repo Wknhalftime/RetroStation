@@ -144,8 +144,9 @@ class FormatOverride:
 class PlayFileResolution:
     """Which file plays for one logged play: curation's view ``play_file_resolution`` (D17).
 
-    ``file_id`` is the station-format override or the song master of the work, or ``None``
-    when the play has neither (D22). ``file_status`` is that file's status as the view reports
+    ``file_id`` is the version entry for the line's version text, else the station-format
+    override, else the song master of the work (phase 2b, C61), or ``None`` when the play
+    has none of them (D22). ``file_status`` is that file's status as the view reports
     it; the consumer decides what is playable (D21). ``audio_silent`` is whether the final
     file's audio was measured silent (D111), as streaming stores it on the audio's cue
     row; false with no row. The M3U export leaves a silent play out (S7).

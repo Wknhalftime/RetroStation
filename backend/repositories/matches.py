@@ -19,6 +19,26 @@ class MatchRepository(ABC):
         """Delete every match naming the file; the identity id of each match deleted."""
         ...
 
+    # Version-entry states follow a file's matched lines (phase 2b, D6). They live on this port
+    # because the lines are found through matches, and every path that moves a file's lines
+    # (fold, split, reassign, move_file_to_work) already holds it. A line matched to a file is
+    # the view's: auto or manual matched, with that file as its best match.
+
+    @abstractmethod
+    def copy_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        """Copy *from_work_id*'s state of each version text on a line matched to *file_id* to
+        *to_work_id* (the fold: one song). Where *to_work_id* has one: dismissed if either
+        was, seen at the later time. *from_work_id* keeps its own."""
+        ...
+
+    @abstractmethod
+    def see_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        """Give *to_work_id* each version text on a line matched to *file_id* that
+        *from_work_id* has a state for, as seen at that ``seen_at``, never a dismissal (split,
+        reassign, ``move_file_to_work``: another song). A state *to_work_id* has keeps its own
+        dismissal or none, seen at the later time. *from_work_id* keeps its own."""
+        ...
+
     @abstractmethod
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         """Point every match on the file at the work the file now belongs to.

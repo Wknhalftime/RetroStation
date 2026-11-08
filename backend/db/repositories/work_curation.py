@@ -37,29 +37,28 @@ class PgWorkCurationRepository(WorkCurationRepository):
     def drop_colliding_overrides(self, work_ids: list[str], target_id: str) -> int:
         src = _placeholders(work_ids)
         # Drop source overrides that collide with an existing target override
-        # (target wins) OR collide with another source override for the same
-        # format_name (oldest source wins, id tie-break) so the subsequent bulk
-        # UPDATE cannot violate the UNIQUE (work_id, format_name) constraint.
+        # (target wins) OR collide with another source override for the same key
+        # (oldest source wins, id tie-break) so the subsequent bulk UPDATE cannot
+        # violate UNIQUE (work_id, format_name) or UNIQUE (work_id, version_text).
+        # Each kind collides on its own key: a NULL never equals, so a format row
+        # never meets a version entry (S3: no IN / NOT IN, no DISTINCT ON).
         drop_rows = self._conn.execute(
             f"""
-            SELECT id FROM format_overrides
-            WHERE work_id IN ({src})
+            SELECT s.id FROM format_overrides s
+            WHERE s.work_id IN ({src})
               AND (
-                format_name IN (
-                  SELECT format_name FROM format_overrides WHERE work_id = %s
-                )
-                OR id NOT IN (
-                  SELECT DISTINCT ON (format_name) id
-                  FROM format_overrides
-                  WHERE work_id IN ({src})
-                    AND format_name NOT IN (
-                      SELECT format_name FROM format_overrides WHERE work_id = %s
-                    )
-                  ORDER BY format_name, created_at ASC, id ASC
-                )
+                EXISTS (SELECT 1 FROM format_overrides t
+                        WHERE t.work_id = %s
+                          AND (t.format_name = s.format_name
+                               OR t.version_text = s.version_text))
+                OR EXISTS (SELECT 1 FROM format_overrides o
+                           WHERE o.work_id IN ({src}) AND o.id <> s.id
+                             AND (o.format_name = s.format_name
+                                  OR o.version_text = s.version_text)
+                             AND (o.created_at, o.id) < (s.created_at, s.id))
               )
             """,
-            [*work_ids, target_id, *work_ids, target_id],
+            [*work_ids, target_id, *work_ids],
         ).fetchall()
         if drop_rows:
             drop_ids = [r["id"] for r in drop_rows]
@@ -73,6 +72,21 @@ class PgWorkCurationRepository(WorkCurationRepository):
         src = _placeholders(work_ids)
         self._conn.execute(
             f"UPDATE format_overrides SET work_id = %s WHERE work_id IN ({src})",
+            [target_id, *work_ids],
+        )
+
+    def move_version_states_of_works(self, work_ids: list[str], target_id: str) -> None:
+        self._conn.execute(
+            f"""
+            INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
+            SELECT %s, version_text, max(state), max(seen_at)
+            FROM version_entry_states
+            WHERE work_id IN ({_placeholders(work_ids)})
+            GROUP BY version_text
+            ON CONFLICT (work_id, version_text) DO UPDATE SET
+                state = COALESCE(version_entry_states.state, EXCLUDED.state),
+                seen_at = GREATEST(version_entry_states.seen_at, EXCLUDED.seen_at)
+            """,
             [target_id, *work_ids],
         )
 

@@ -281,16 +281,19 @@ def settle_fold_across_works(
 
     ``merge_into`` re-points the folded row's matches, format overrides and
     master at the survivor but leaves them on the work the folded row was in.
-    The matches and overrides take the survivor's work, and the work the folded
-    row left re-picks its master from its own present files (so it never points
-    at the survivor) and is deleted once nothing references it. Rows on the
-    same work need nothing.
+    The matches and overrides (format overrides and version entries) take the
+    survivor's work, which also gets the left work's version-entry state of each
+    text on the survivor's lines, combined as for one song (D6). The work the
+    folded row left re-picks its master from its own present files (so it never
+    points at the survivor) and is deleted once nothing references it. Rows on
+    the same work need nothing.
     """
     if left_work_id == survivor_work_id:
         return
     repos.matches.move_to_work(survivor_id, survivor_work_id)
     if left_work_id is not None and survivor_work_id is not None:
         repos.format_overrides.move_to_work(survivor_id, left_work_id, survivor_work_id)
+        repos.matches.copy_version_states(survivor_id, left_work_id, survivor_work_id)
     if left_work_id is not None:
         reselect_master_from_files(left_work_id, repos.song_masters, repos.files)
         repos.works.delete_if_empty(left_work_id)

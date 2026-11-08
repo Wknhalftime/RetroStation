@@ -46,10 +46,11 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
     """Attach a file to another work; its matches follow it.
 
     The work the file joins gets (or re-picks) an auto song master from the
-    files on it. The work the file left is deleted with its master once
-    nothing references it; otherwise its master is re-picked from its own
-    present files, so it never points at the moved file (see
-    :func:`_settle_previous_work`).
+    files on it, and each version text on the file's lines as seen, never a
+    dismissal (phase 2b, D6). Its overrides of both kinds stay behind (D1).
+    The work the file left is deleted with its master once nothing references
+    it; otherwise its master is re-picked from its own present files, so it
+    never points at the moved file (see :func:`_settle_previous_work`).
     """
     previous_work_id = library_file.work_id
     if previous_work_id == work_id:
@@ -58,6 +59,7 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
     repos.matches.move_to_work(library_file.id, work_id)
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     if previous_work_id is not None:
+        repos.matches.see_version_states(library_file.id, previous_work_id, work_id)
         _settle_previous_work(previous_work_id, library_file.id, work_id, repos)
 
 
