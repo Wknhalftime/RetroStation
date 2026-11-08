@@ -33,10 +33,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import subprocess
 import sys
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -65,7 +66,12 @@ type Reader = Callable[[str], tuple[str, VersionType]]
 
 def load_reader(checkout: Path) -> Reader:
     """``extract_version_info`` of *checkout*'s reader, loaded as a module of its own name, so
-    this tree's ``backend.services.normalization`` is untouched."""
+    this tree's ``backend.services.normalization`` is untouched.
+
+    The module isn't registered in ``sys.modules``, and its own imports resolve in this tree
+    (``backend.domain.enums``, ``unidecode``): enough for a reader of plain functions and
+    regexes, as the base's is.
+    """
     path = checkout / "backend" / "services" / "normalization.py"
     if not path.is_file():
         raise SystemExit(f"--before {checkout}: no backend/services/normalization.py there")
@@ -108,18 +114,19 @@ def _reading_json(reading: _Reading) -> dict[str, str]:
     return {"base_title": reading[0], "version_type": reading[1].value}
 
 
-def _present_files(conn: psycopg.Connection[Any], repos: RepositoryFactory) -> list[LibraryFile]:
-    """Every present file, through the library-files repository (its row mapping)."""
+def _present_files(
+    conn: psycopg.Connection[Any], repos: RepositoryFactory
+) -> Iterator[LibraryFile]:
+    """Every present file, through the library-files repository (its row mapping), a chunk
+    at a time, so a whole library's tags are never held at once."""
     ids = [
         UUID(str(row["id"]))
         for row in conn.execute(
             "SELECT id FROM library_files WHERE file_status = 'present' ORDER BY file_path, id"
         ).fetchall()
     ]
-    files: list[LibraryFile] = []
     for start in range(0, len(ids), _CHUNK):
-        files.extend(repos.library_files.get_by_ids(ids[start : start + _CHUNK]))
-    return files
+        yield from repos.library_files.get_by_ids(ids[start : start + _CHUNK])
 
 
 def _place(file: LibraryFile, reading: _Reading, repos: RepositoryFactory) -> _Placement:
@@ -175,10 +182,12 @@ def _file_sections(
 
 
 _TAGGED_RECORDINGS_SQL = """
-SELECT r.id, r.title, r.work_id, r.version_type FROM recordings r
+SELECT r.id, r.title, r.work_id, r.version_type,
+       count(*) FILTER (WHERE f.enrichment_status = 'pending') AS pending_files
+FROM recordings r
+JOIN library_files f ON f.recording_mbid = r.id AND f.file_status = 'present'
 WHERE r.work_id IS NOT NULL
-  AND EXISTS (SELECT 1 FROM library_files f
-              WHERE f.recording_mbid = r.id AND f.file_status = 'present')
+GROUP BY r.id
 ORDER BY r.id
 """
 
@@ -193,10 +202,12 @@ def _retyped_recordings(
 ) -> dict[str, dict[str, Any]]:
     """``recordings``: the MusicBrainz recordings a present file's tag names, on a work, whose
     stored version is *before*'s reading of their title and *after*'s differs, so the next
-    enrichment upsert (``version_type = EXCLUDED.version_type``) writes the new one.
+    enrichment upsert (``version_type = EXCLUDED.version_type``) writes the new one. That
+    upsert comes when a pending file names the recording: ``pending_files`` counts them now.
 
     A stored version that isn't the before reading (MusicBrainz's live flag, an older reader)
-    is not this fix's to change, so it isn't listed.
+    is not this fix's to change, so it isn't listed. Neither is a recording on no work, though
+    a per-release upsert can give it one.
     """
     out: dict[str, dict[str, Any]] = {}
     for row in conn.execute(_TAGGED_RECORDINGS_SQL).fetchall():
@@ -211,13 +222,19 @@ def _retyped_recordings(
             "stored": stored,
             "after": now,
             "slot_taken": bool(taken is not None and taken["taken"]),
+            "pending_files": int(row["pending_files"]),
         }
-    # Two going to one slot: whichever upsert comes second fails.
-    slots = Counter((entry["work_id"], entry["after"]) for entry in out.values())
-    for entry in out.values():
+    _mark_contested(out)
+    return out
+
+
+def _mark_contested(recordings: dict[str, dict[str, Any]]) -> None:
+    """Two or more headed for one empty slot: whichever upsert comes second fails, so each is
+    marked ``slot_taken`` (the order isn't known here)."""
+    slots = Counter((entry["work_id"], entry["after"]) for entry in recordings.values())
+    for entry in recordings.values():
         if slots[(entry["work_id"], entry["after"])] > 1:
             entry["slot_taken"] = True
-    return out
 
 
 def _work_moves(entry: dict[str, Any]) -> bool:
@@ -231,20 +248,37 @@ def _summary(
     differs: dict[str, dict[str, Any]],
     recordings: dict[str, dict[str, Any]],
 ) -> dict[str, int]:
+    taken = [r for r in recordings.values() if r["slot_taken"]]
     return {
         "files": len(files),
         "readings_changed": sum(1 for f in files.values() if f["before"] != f["after"]),
         "differs": len(differs),
         "work_differs": sum(1 for entry in differs.values() if _work_moves(entry)),
         "recordings": len(recordings),
-        "slot_taken": sum(1 for r in recordings.values() if r["slot_taken"]),
+        "slot_taken": len(taken),
+        "slot_taken_pending": sum(1 for r in taken if r["pending_files"]),
     }
+
+
+def _checkout_commit(checkout: Path) -> str | None:
+    """The commit *checkout* is at, or None when it is no git checkout."""
+    done = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    commit = done.stdout.strip()
+    return commit if done.returncode == 0 and commit else None
 
 
 def record(dsn: str, before: Reader, before_root: Path) -> dict[str, Any]:
     """The document, from one read-only snapshot of *dsn*."""
+    root = before_root.resolve()
     with gate_common.snapshot_read(dsn) as conn, gate_common.quiet_logging():
-        head = gate_common.header(TOOL, FORMAT_VERSION, conn, before=str(before_root))
+        head = gate_common.header(
+            TOOL, FORMAT_VERSION, conn, before=str(root), before_commit=_checkout_commit(root)
+        )
         files, differs = _file_sections(conn, RepositoryFactory(conn), before)
         recordings = _retyped_recordings(conn, before, extract_version_info)
     return {
@@ -256,6 +290,11 @@ def record(dsn: str, before: Reader, before_root: Path) -> dict[str, Any]:
     }
 
 
+def _work_label(placed: dict[str, Any]) -> str:
+    kind = "new work" if placed["work_id"] is None else "work"
+    return f"{kind} {placed['work_title']!r}"
+
+
 def _report(doc: dict[str, Any]) -> list[str]:
     """One line per listed file (by path) and per retyped recording, for the console."""
     lines = []
@@ -265,20 +304,20 @@ def _report(doc: dict[str, Any]) -> list[str]:
         was, now = entry["before"], entry["after"]
         parts = []
         if _work_moves(entry):
-            new = "new work " if now["work_id"] is None else "work "
-            parts.append(f"work {was['work_title']!r} -> {new}{now['work_title']!r}")
+            parts.append(f"{_work_label(was)} -> {_work_label(now)}")
         if was["version_type"] != now["version_type"]:
             parts.append(f"recording {was['version_type']} -> {now['version_type']}")
-        lines.append(f"  file {f['artist']} - {f['title']}: {'; '.join(parts)}")
+        name = Path(f["path"]).name
+        lines.append(f"  file {f['artist']} - {f['title']} ({name}): {'; '.join(parts)}")
     for rec_id, rec in sorted(doc["recordings"].items()):
-        taken = " (slot taken: its next upsert fails)" if rec["slot_taken"] else ""
-        change = f"{rec['stored']} -> {rec['after']}{taken}"
+        taken = " (slot taken or contested: an upsert fails)" if rec["slot_taken"] else ""
+        change = f"{rec['stored']} -> {rec['after']}{taken}, {rec['pending_files']} pending"
         lines.append(f"  recording {rec_id} {rec['title']}: {change}")
     return lines
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or TOOL).splitlines()[0])
     parser.add_argument("--dsn", required=True, help="the gate copy (a bench database)")
     parser.add_argument("--before", required=True, type=Path, help="a checkout of the base")
     parser.add_argument("--out", required=True, type=Path, help="the JSON file to write")
@@ -296,7 +335,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"{TOOL}: files {s['files']}, readings changed {s['readings_changed']}, "
         f"would group differently {s['differs']} (work {s['work_differs']}), "
-        f"recordings retyped {s['recordings']} (slot taken {s['slot_taken']}); "
+        f"recordings retyped {s['recordings']} (slot taken {s['slot_taken']}, "
+        f"{s['slot_taken_pending']} with a pending file); "
         f"{time.perf_counter() - started:.1f} s -> {args.out}"
     )
     for line in _report(doc):
@@ -305,4 +345,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # titles aren't cp1252
     sys.exit(main())

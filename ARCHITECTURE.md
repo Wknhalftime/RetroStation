@@ -461,14 +461,18 @@ returns the row it finds).
   recording's version (after MusicBrainz's own live flag), the untagged-file search its query
   title and version check, song matching's title scoring a dash suffix (`extract_dash_version`
   strips one only when it reads as a version), and `scripts/retitle_works.py` its base titles.
-  It classifies only a title's first bracket tag.
+  It classifies only the first bracket tag that reads as a version (a group read as title
+  words is skipped, so "(I'm Special) (Live)" reads live).
 - Since C63 (D4) it reads album, LP and studio versions and "Original Mix" as the original,
   "Amended" as clean, and "(I'm Special)" as title words. Each rule sits just ahead of the one
   that misread it, so every reading above it still wins ("Live Album Version" is live).
-- A fix to it changes only new and re-scanned files: a grouped file keeps its work and
-  recording, and no writer re-types a stored local recording. A stored MusicBrainz recording
-  takes the new reading on its next enrichment upsert, which has no version-slot check; the
-  regroup dry run counts the ones whose slot is taken.
+- For grouping, a fix to it changes only new files and files re-scanned without a work: a
+  grouped file keeps its work and recording, and no writer re-types a stored local recording.
+  A stored MusicBrainz recording takes the new reading on its next enrichment upsert (when a
+  pending file names it), which has no version-slot check; the regroup dry run counts the ones
+  whose slot is taken. Title scoring and the untagged-file search read every title afresh, so
+  they see a fix at once, on existing files too (an untagged "(I'm Special)" file no longer
+  equals MusicBrainz's plain title).
 - The log's abbreviations and venues (Lv, Unplgd, S&M2) stay off this reader: the log side gets
   its own (phase 2b S10), which never feeds grouping, matching or air play.
 
@@ -637,12 +641,13 @@ returns the row it finds).
     (`tests/scripts/test_gate.py::test_never_opens_another_dsn`). The recorders only read
     (READ ONLY transactions; the dry runs answer MusicBrainz from its cache alone), and
     `staging.py` runs the branch's API (port 8020) and worker (no periodic tasks) on a copy.
-    `regroup_dry_run.py --dsn <copy> --before <base checkout>` (phase 2b S13) reads the copy
-    the round trip leaves: every present file's base title and version by the base checkout's
-    version reader and by this tree's, the files grouping would then place on another work or
-    recording (predicted with grouping's own read-only `grouping_shortcut` and `planned_work`),
-    and the MusicBrainz recordings whose next enrichment upsert would retype into a version
-    slot their work already holds (`uq_recordings_work_version`), which fails that upsert
+    `regroup_dry_run.py --dsn <copy> --before <base checkout> --out <file>` (phase 2b S13)
+    reads the copy the round trip leaves: every present file's base title and version by the
+    base checkout's version reader and by this tree's; the files grouping would then place on
+    another work or recording (predicted with grouping's own read-only `grouping_shortcut` and
+    `planned_work`); and the MusicBrainz recordings whose next enrichment upsert would retype
+    them into a version slot their work already holds, or that two of them are headed for
+    (`uq_recordings_work_version`), which fails that upsert.
 - **Hand-offs:** every task-to-task hand-off goes through `tasks/_enqueue_chain.enqueue_or_log`
   (AUD-R012 (1), AUD-R014). The watcher poll also passes `on_failure` to release its staged
   folders, so a failed hand-off is retried on the next poll.

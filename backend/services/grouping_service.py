@@ -187,14 +187,16 @@ def planned_work(base_title: str, artist_name: str, work_repo: WorkRepository) -
 
     Its fuzzy match, then an exact normalized title among the works of the artist's name: what
     ``_create_local_work``'s last check finds past the fuzzy match's 100 candidates. That check
-    reads the works of the one artist it upserts for the name, this one every artist's of the
-    name, so they differ only when two artists share a name with over 100 works between them
-    and the exact title is the other one's.
+    reads the works of the one artist ``upsert_local_artist`` picks for the name, this one the
+    works of every artist of the name, so the two can differ only past 100 works: when the
+    exact title is another artist's of the name (or the name is held by files of several
+    MBIDs, and grouping makes a new name-only artist), or when two works share the title and
+    each picks a different one.
     """
     norm_base = normalize_title(base_title)
     norm_artist = normalize_artist(artist_name)
     work_id = _fuzzy_match_work(norm_base, norm_artist, work_repo)
-    if work_id is not None or not norm_base:
+    if work_id is not None:
         return work_id
     for candidate_id, candidate_title in work_repo.get_candidates_by_normalized_artist(
         norm_artist, limit=_EVERY_WORK
