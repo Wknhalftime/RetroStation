@@ -68,11 +68,16 @@ export interface MergeWorksResult {
   dropped_override_count: number;
 }
 
-/** Fold the given works into `targetId`; the sources are deleted. */
-export function useMergeWorks(targetId: string) {
+export interface MergeWorksVariables {
+  targetId: string;
+  sourceWorkIds: string[];
+}
+
+/** Fold the source works into the target; the sources are deleted. */
+export function useMergeWorks() {
   const queryClient = useQueryClient();
-  return useMutation<MergeWorksResult, Error, string[]>({
-    mutationFn: (sourceWorkIds) =>
+  return useMutation<MergeWorksResult, Error, MergeWorksVariables>({
+    mutationFn: ({ targetId, sourceWorkIds }) =>
       apiFetch<MergeWorksResult>(`/api/v1/library/works/${targetId}/merge`, {
         method: "POST",
         body: JSON.stringify({ source_work_ids: sourceWorkIds }),
