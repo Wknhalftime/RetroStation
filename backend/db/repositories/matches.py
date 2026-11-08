@@ -6,6 +6,10 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._version_entry_states import (
+    ON_CONFLICT_COMBINE,
+    ON_CONFLICT_KEEP_STATE,
+)
 from backend.domain.enums import MatchTier, TargetType
 from backend.domain.matching import Match, MatchingStorageError
 from backend.repositories.matches import MatchRepository
@@ -87,9 +91,7 @@ class PgMatchRepository(MatchRepository):
                SELECT %(to)s, st.version_text, st.state, st.seen_at
                FROM version_entry_states st
                WHERE st.work_id = %(from)s AND st.version_text IN ({_FILE_LINE_TEXTS})
-               ON CONFLICT (work_id, version_text) DO UPDATE SET
-                   state = COALESCE(version_entry_states.state, EXCLUDED.state),
-                   seen_at = GREATEST(version_entry_states.seen_at, EXCLUDED.seen_at)""",
+               {ON_CONFLICT_COMBINE}""",
             {"to": to_work_id, "from": from_work_id, "file": str(file_id)},
         )
 
@@ -99,8 +101,7 @@ class PgMatchRepository(MatchRepository):
                SELECT %(to)s, st.version_text, NULL, st.seen_at
                FROM version_entry_states st
                WHERE st.work_id = %(from)s AND st.version_text IN ({_FILE_LINE_TEXTS})
-               ON CONFLICT (work_id, version_text) DO UPDATE SET
-                   seen_at = GREATEST(version_entry_states.seen_at, EXCLUDED.seen_at)""",
+               {ON_CONFLICT_KEEP_STATE}""",
             {"to": to_work_id, "from": from_work_id, "file": str(file_id)},
         )
 

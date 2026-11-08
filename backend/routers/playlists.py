@@ -316,8 +316,9 @@ async def export_m3u(
 ) -> Response:
     """Generate and return an M3U file for the given playlist.
 
-    Each play's file is its ``play_file_resolution`` row: the override for the format of the
-    playlist's station, else the song master; plays with no present file are left out.
+    Each play's file is its ``play_file_resolution`` row: the version entry for the line's
+    version text, else the override for the format of the playlist's station, else the song
+    master; plays with no present file are left out.
 
     Args:
         playlist_id: UUID of the playlist to export.

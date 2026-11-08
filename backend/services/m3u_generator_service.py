@@ -1,10 +1,11 @@
 """M3U playlist export service.
 
 Which file plays for each play event is curation's view ``play_file_resolution`` (spec D17):
-the override for the station's format, else the song master of the matched file's work, else
-no file (D22). The export adds no resolution rules of its own. It writes a play only when
-that final file is ``present`` (D21) and its audio is not silent (D111, S7), in the order
-the caller gives the events.
+the version entry for the line's version text (phase 2b, C61), else the override for the
+station's format, else the song master of the matched file's work, else no file (D22). The
+export adds no resolution rules of its own. It writes a play only when that final file is
+``present`` (D21) and its audio is not silent (D111, S7), in the order the caller gives the
+events.
 """
 
 from __future__ import annotations

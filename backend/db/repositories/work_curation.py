@@ -9,6 +9,7 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._version_entry_states import ON_CONFLICT_COMBINE
 from backend.domain.catalog import Recording, RecordingVersion
 from backend.domain.curation import CurationStorageError, FormatOverride, MasterCandidate
 from backend.domain.enums import TargetType, VersionType
@@ -76,6 +77,8 @@ class PgWorkCurationRepository(WorkCurationRepository):
         )
 
     def move_version_states_of_works(self, work_ids: list[str], target_id: str) -> None:
+        # Two sources meeting first: max(state) is 'dismissed' if either was (the CHECK
+        # allows nothing else), max(seen_at) the later; then the target's own combines.
         self._conn.execute(
             f"""
             INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
@@ -83,9 +86,7 @@ class PgWorkCurationRepository(WorkCurationRepository):
             FROM version_entry_states
             WHERE work_id IN ({_placeholders(work_ids)})
             GROUP BY version_text
-            ON CONFLICT (work_id, version_text) DO UPDATE SET
-                state = COALESCE(version_entry_states.state, EXCLUDED.state),
-                seen_at = GREATEST(version_entry_states.seen_at, EXCLUDED.seen_at)
+            {ON_CONFLICT_COMBINE}
             """,
             [target_id, *work_ids],
         )

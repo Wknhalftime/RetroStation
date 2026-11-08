@@ -6,6 +6,7 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._version_entry_states import ON_CONFLICT_COMBINE
 from backend.domain.curation import CurationStorageError, FormatOverride
 from backend.repositories.format_overrides import FormatOverrideRepository
 
@@ -66,9 +67,12 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
 
         Returns:
             The matching :class:`FormatOverride`, or ``None`` if absent.
+            Never a version entry: the equality alone excludes a NULL
+            ``format_name``; the explicit filter is S3's, as in every reader.
         """
         row = self._conn.execute(
-            "SELECT * FROM format_overrides WHERE work_id = %s AND format_name = %s",
+            "SELECT * FROM format_overrides"
+            " WHERE work_id = %s AND format_name = %s AND format_name IS NOT NULL",
             (work_id, format_name),
         ).fetchone()
         return self._row_to_model(row) if row else None
@@ -127,15 +131,13 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
             keys,
         )
         self._conn.execute(
-            """INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
+            f"""INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
                SELECT %(to)s, st.version_text, st.state, st.seen_at
                FROM version_entry_states st
                JOIN format_overrides s
                  ON s.work_id = st.work_id AND s.version_text = st.version_text
                WHERE s.work_id = %(from)s AND s.preferred_file_id = %(file)s
-               ON CONFLICT (work_id, version_text) DO UPDATE SET
-                   state = COALESCE(version_entry_states.state, EXCLUDED.state),
-                   seen_at = GREATEST(version_entry_states.seen_at, EXCLUDED.seen_at)""",
+               {ON_CONFLICT_COMBINE}""",
             keys,
         )
         self._conn.execute(

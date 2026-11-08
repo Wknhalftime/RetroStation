@@ -130,8 +130,9 @@ class PgWorkRepository(WorkRepository):
 
     def delete_if_empty(self, work_id: str) -> bool:
         # Every table with a FK to works except song_masters, which goes
-        # with the work: a work anything else (files, recordings, matches,
-        # format overrides) still points at stays.
+        # with the work, and version_entry_states, which cascades (phase 2b
+        # D3): a work anything else (files, recordings, matches, format
+        # overrides and version entries) still points at stays.
         referenced = self._conn.execute(
             """SELECT EXISTS (SELECT 1 FROM library_files WHERE work_id = %(id)s)
                    OR EXISTS (SELECT 1 FROM recordings WHERE work_id = %(id)s)

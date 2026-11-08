@@ -493,11 +493,12 @@ returns the row it finds).
   sets it.
 - A version entry (C60) is a `format_overrides` row with a `version_text` and a NULL
   `format_name` (a CHECK allows exactly one; `UNIQUE (work_id, version_text)` beside
-  `UNIQUE (work_id, format_name)`). Every format reader adds `format_name IS NOT NULL`, so a
-  `FormatOverride` is never a version entry, and every upkeep path keys each kind on its own
-  column (a NULL never equals, so no `IN`, `NOT IN` or `DISTINCT ON` over `format_name`): the
-  merge's `drop_colliding_overrides` and the fold's `format_overrides.move_to_work`.
-  `delete_for_file` and `delete_if_empty` count both kinds.
+  `UNIQUE (work_id, format_name)`). Every format reader (`list_by_work`, `get`, the work page's
+  `_work_format_overrides`) adds `format_name IS NOT NULL`, so a `FormatOverride` is never a
+  version entry, and every upkeep path keys each kind on its own column (a NULL never equals,
+  so no `IN`, `NOT IN` or `DISTINCT ON` over `format_name`): the merge's
+  `drop_colliding_overrides` and the fold's `format_overrides.move_to_work`. `delete_for_file`
+  deletes both kinds, and `delete_if_empty` keeps a work that has either.
 - `version_entry_states` (work, version text, `dismissed` or none, `seen_at`) holds what a
   mapping can't. Its `work_id` cascades (D3), so a state never keeps a work alive. Migration
   0050 marked every (work, version text) on a matched line seen (S9). States follow the lines
@@ -505,7 +506,9 @@ returns the row it finds).
   was, seen at the later time); split, reassign and `move_file_to_work` carry lines to another
   song, so the target gets each text as seen only, never a dismissal, and keeps its own. The
   old work keeps all of its own. The line copies are on `MatchRepository`, which every path
-  that moves a file's lines already holds.
+  that moves a file's lines already holds; the fold reads the folded row's lines before
+  `merge_into` gives them to the survivor. The two conflict rules are written once, in
+  `db/repositories/_version_entry_states.py`.
 - **A gap kept on purpose, both kinds (D1):** split and reassign (when the old work survives)
   and `move_file_to_work` (enrichment, Set master) move a file without its overrides, so a
   format override or a version entry can name a file now on another work, and the view still
