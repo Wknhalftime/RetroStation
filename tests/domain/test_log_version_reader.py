@@ -5,9 +5,10 @@ lowercased and joined, C59) as a :class:`VersionType`, ``UNKNOWN`` for title wor
 own reader, beside the file side's ``classify_version_descriptor``, because log abbreviations and
 file tags change for different reasons (D4):
 
-- it learns the log's abbreviations and venues: "Lv", "Lv. Ac." and "S&M2", "BBC", "Telethon"
-  and "Ed Sullivan" read as live, "Unplgd", "Acous" and "Stripped" as acoustic. "Lv. Ac." is a
-  live acoustic take and reads live, as "Live Acoustic" does on either side;
+- it learns the log's abbreviations and venues: "Lv", "Lv. Ac.", "S&M2" (and a bare "S&M",
+  Metallica's 1999 live album), "BBC", "Telethon" and "Ed Sullivan" read as live, "Unplgd",
+  "Acous" and "Stripped" as acoustic. "Lv. Ac." is a live acoustic take and reads live, as
+  "Live Acoustic" does on either side;
 - it reads "Album Version", "LP Version", "Studio Version" and "Original Mix" as the original,
   "Amended" as clean and "(I'm Special)" as title words, as PR 1 taught the file side, and each
   sits where it does there, so every reading above it still wins;
@@ -44,6 +45,8 @@ UNKNOWN = VersionType.UNKNOWN
         ("lv ac", LIVE),
         ("live acoustic", LIVE),
         ("s&m2", LIVE),
+        ("s&m 2", LIVE),
+        ("s&m", LIVE),
         ("live s&m", LIVE),
         ("bbc", LIVE),
         ("bbc session", LIVE),
@@ -132,8 +135,8 @@ def test_every_other_descriptor_reads_as_the_file_side_reads_it(
     [
         "war is over",
         "part 1",
-        "i'm special",
         "silver lining",
+        "acoustics",
         "stayin' alive",
         "",
         "   ",
@@ -169,6 +172,8 @@ _NOT_READERS = [
     "backend/db/repositories/playable_schedule.py",
     "backend/db/repositories/stream_cue_work.py",
     "backend/tasks/*match*.py",
+    "backend/services/master_*.py",
+    "scripts/airplay_snapshot.py",
 ]
 
 

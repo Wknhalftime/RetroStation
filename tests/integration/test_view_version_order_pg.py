@@ -160,6 +160,20 @@ def test_the_entry_of_the_recordings_work(conn: Conn, world: World) -> None:
     assert plays(conn, event) == (world.live, "version")
 
 
+def test_the_files_own_work_before_its_recordings(conn: Conn, world: World) -> None:
+    """A matched file with a work of its own and a recording on another reads its own work's
+    entry, as the view finds its work."""
+    other = seed.work(conn)
+    version_entry(conn, world.work, "live", world.live)
+    version_entry(conn, other, "live", file_on(conn, other))
+    two_works = seed.library_file(conn, recording_id=seed.recording(conn, other))
+    conn.execute("UPDATE library_files SET work_id = %s WHERE id = %s", (world.work, two_works))
+
+    event = line(conn, "Enter Sandman (Live)", two_works, format_name=None)
+
+    assert plays(conn, event) == (world.live, "version")
+
+
 def test_a_version_entry_with_no_master_plays(conn: Conn) -> None:
     """The version step needs no master: a work with only an entry plays it for its line, and
     nothing for a plain line."""

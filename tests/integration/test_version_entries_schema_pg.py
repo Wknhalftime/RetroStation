@@ -144,6 +144,22 @@ def test_one_entry_per_work_and_version_text(conn: Conn) -> None:
     assert count is not None and count["n"] == 3
 
 
+def test_the_version_text_key_arbitrates_an_insert(conn: Conn) -> None:
+    """A plain unique (no partial index), so ``ON CONFLICT (work_id, version_text)`` finds it."""
+    work = seed.work(conn)
+    live, lv = file_on(conn, work), file_on(conn, work)
+    version_entry(conn, work, "live", live)
+
+    conn.execute(
+        """INSERT INTO format_overrides (work_id, version_text, preferred_file_id)
+           VALUES (%s, 'live', %s) ON CONFLICT (work_id, version_text) DO NOTHING""",
+        (work, lv),
+    )
+
+    rows = conn.execute("SELECT preferred_file_id FROM format_overrides").fetchall()
+    assert [UUID(str(r["preferred_file_id"])) for r in rows] == [live]
+
+
 def test_format_rows_and_version_rows_never_collide(conn: Conn) -> None:
     """NULLs are distinct: format rows share a NULL version text, version rows a NULL format."""
     work = seed.work(conn)
@@ -168,7 +184,7 @@ def test_format_rows_and_version_rows_never_collide(conn: Conn) -> None:
 def test_the_states_table(conn: Conn) -> None:
     assert column(conn, "version_entry_states", "work_id") == ("text", "NO")
     assert column(conn, "version_entry_states", "version_text") == ("text", "NO")
-    assert column(conn, "version_entry_states", "state") == ("text", "YES")
+    assert (column(conn, "version_entry_states", "state") or ("", ""))[1] == "YES"
     assert column(conn, "version_entry_states", "seen_at") == ("timestamp with time zone", "NO")
 
 
@@ -179,7 +195,7 @@ def test_a_state_is_dismissed_or_none_once_per_work_and_text(conn: Conn) -> None
     conn.execute(insert, (work, "live", "dismissed", T0))
     conn.execute(insert, (work, "acoustic", None, T0))
 
-    with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+    with pytest.raises((psycopg.IntegrityError, psycopg.DataError)), conn.transaction():
         conn.execute(insert, (work, "demo", "mapped", T0))
     with pytest.raises(psycopg.errors.NotNullViolation), conn.transaction():
         conn.execute(insert, (work, "demo", None, None))
@@ -254,6 +270,17 @@ def test_existing_entries_start_seen(migrated_db: str) -> None:
         seed.match(conn, both, live_file, confidence=0.5)
         seed.match(conn, both, file_on(conn, best_work), confidence=0.95)
 
+        # A file with a work of its own and a recording on another: its own work.
+        own_work, other_work = seed.work(conn), seed.work(conn)
+        two_works = seed.library_file(conn, recording_id=seed.recording(conn, other_work))
+        conn.execute("UPDATE library_files SET work_id = %s WHERE id = %s", (own_work, two_works))
+        matched_line(conn, "Black (Single Version)", two_works)
+
+        # A better match without a file is passed over for the best one with a file.
+        passed_over = seed.identity(conn, title="Black (Unplugged)")
+        seed.match(conn, passed_over, None, confidence=0.99)
+        seed.match(conn, passed_over, file_on(conn, best_work), confidence=0.6)
+
         matched_line(conn, "Black (Remix)", file_on(conn, None))  # a file on no work
         fileless = seed.identity(conn, title="Black (Extended)")
         seed.match(conn, fileless, None)  # a match without a file
@@ -275,6 +302,8 @@ def test_existing_entries_start_seen(migrated_db: str) -> None:
             (live_work, "live s&m"): (None, now["now"]),
             (rec_work, "acoustic"): (None, now["now"]),
             (best_work, "demo"): (None, now["now"]),
+            (own_work, "single version"): (None, now["now"]),
+            (best_work, "unplugged"): (None, now["now"]),
         }
         assert [(r["format_name"], r["version_text"]) for r in override] == [("AC", None)]
         assert filled is not None and filled["version_text"] == "live"

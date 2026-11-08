@@ -14,22 +14,28 @@ per path, through the services as the routes and tasks call them:
   survivor and its work; one the survivor's work already has for the same key wins;
 - the works merge (E2): the sources' overrides of both kinds move to the target; the target's
   wins a shared key, then the oldest source's, and each dropped row is counted;
-- split, reassign and ``move_file_to_work`` leave both kinds where they were when the old work
-  survives (D1); an emptied work's go with it;
+- split, reassign and ``move_file_to_work`` leave both kinds where they were (D1). Split and
+  reassign delete an emptied work's with it; ``move_file_to_work`` keeps an emptied work while
+  an override names it, as ``delete_if_empty`` does;
 - ``delete_if_empty`` keeps a work any override row names, version entries included, and never
   for a state alone (D3);
 - the readers (E7): ``list_by_work``, ``get`` and the work page's format overrides return format
   rows only, each with a format name.
 
 ``::test_null_format_name_traps`` pins the SQL a NULL ``format_name`` would break: the merge's
-``NOT IN`` over the target's formats, its ``DISTINCT ON (format_name)``, and the fold's
+``IN`` and ``NOT IN`` over the target's formats, its ``DISTINCT ON (format_name)``, and the fold's
 ``t.format_name = s.format_name``.
 
-``version_entry_states`` follow (S3, D3): a works merge moves the sources' states to the target
-(the target's wins a shared text, then the earliest seen); a fold copies the moved entries'
-states to the survivor's work unless it has its own, and the work the file left keeps its own;
-split, reassign and ``move_file_to_work`` leave them, as they leave the entries; a deleted work's
-go with it.
+``version_entry_states`` follow the lines (S3, D3; question A of the lock request), so no move
+makes a seen or dismissed text read as new on its new work:
+
+- a works merge copies every source state to the target;
+- split, reassign, ``move_file_to_work`` and the fold copy, to the work the file's lines move to,
+  the old work's state of each version text on a line matched to the file; the fold also copies
+  the state of each entry it moves. The old work keeps its own;
+- where two states for one text meet, the result is dismissed if either was, seen at the later
+  time;
+- a deleted work's states go with it.
 
 E1, missing: an entry whose file goes missing stays, and its lines report the unavailable file
 without falling back, as the view does for format overrides and masters.
@@ -81,6 +87,8 @@ if sys.platform == "win32":
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 T1 = T0 + timedelta(days=1)
 T2 = T0 + timedelta(days=2)
+SEEN = None
+DISMISSED = "dismissed"
 
 type Key = tuple[str | None, str | None]
 """(format_name, version_text) of one override row."""
@@ -140,12 +148,12 @@ def override(
 
 
 def state(
-    conn: Conn, work_id: str, text: str, *, dismissed: bool = False, seen_at: datetime = T0
+    conn: Conn, work_id: str, text: str, kind: str | None = SEEN, seen_at: datetime = T0
 ) -> None:
     conn.execute(
         """INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
            VALUES (%s, %s, %s, %s)""",
-        (work_id, text, "dismissed" if dismissed else None, seen_at),
+        (work_id, text, kind, seen_at),
     )
 
 
@@ -195,7 +203,8 @@ def curation_repos(conn: Conn) -> curation.WorkCurationRepos:
 
 
 def test_create_a_format_override_beside_version_entries(conn: Conn) -> None:
-    """The create's ``ON CONFLICT (work_id, format_name)`` arbitrates format rows only."""
+    """A work's version entries don't stop a format override, nor make a second one for the
+    same format possible."""
     work, master = mastered_work(conn)
     live = file_on(conn, work)
     entry(conn, work, "live", live)
@@ -225,8 +234,8 @@ def test_delete_a_format_override_never_deletes_a_version_entry(conn: Conn) -> N
 # --- the readers (E7) -----------------------------------------------------------------------------
 
 
-def test_mixed_kinds_readers(conn: Conn) -> None:
-    """E7: no reader returns a version row as a format override."""
+def test_mixed_kinds(conn: Conn) -> None:
+    """E7: no repository reader returns a version row as a format override."""
     work, master = mastered_work(conn)
     live = file_on(conn, work)
     entry(conn, work, "live", live)
@@ -273,7 +282,7 @@ def app_client(_migrated_db_url: str, queue_in_memory: None) -> Iterator[TestCli
         patch.undo()
 
 
-def test_mixed_kinds_work_page(app_client: TestClient, conn: Conn) -> None:
+def test_mixed_kinds_on_the_work_page(app_client: TestClient, conn: Conn) -> None:
     """E7: the work page's format overrides are the format rows only."""
     work, master = mastered_work(conn)
     entry(conn, work, "live", file_on(conn, work))
@@ -328,43 +337,56 @@ def test_missing(conn: Conn) -> None:
 
 
 def test_folded(conn: Conn) -> None:
-    """The folded file's entry and format override follow it to the survivor's work; the
-    entry's state is copied there; the work the file left keeps its other entry and its own
-    states. Its line, now matched to the survivor, plays the survivor as its version."""
+    """The folded file's entry and format override follow it to the survivor's work. The
+    survivor's work gets the states of the moved entry and of the folded file's lines' texts;
+    the work the file left keeps its other entry and all its states. The line, now matched to
+    the survivor, plays the survivor as its version."""
     left, left_master = mastered_work(conn)
     folded = file_on(conn, left, status="missing")
     entry(conn, left, "live", folded)
     override(conn, left, "AC", folded)
     entry(conn, left, "acoustic", left_master)
-    state(conn, left, "live", seen_at=T0)
-    state(conn, left, "acoustic", dismissed=True, seen_at=T1)
+    state(conn, left, "live", SEEN, T0)
+    state(conn, left, "lv", DISMISSED, T1)
+    state(conn, left, "acoustic", DISMISSED, T1)
+    state(conn, left, "demo", SEEN, T0)
     kept, survivor = mastered_work(conn)
     event = line(conn, "Black (Live)", folded)
+    line(conn, "Black (Lv)", folded)
+    line(conn, "Black (Demo)", left_master)
 
     remap_missing_file(folded, survivor, reconciliation_repos(RepositoryFactory(conn)))
 
     assert overrides_of(conn, kept) == {(None, "live"): survivor, ("AC", None): survivor}
     assert overrides_of(conn, left) == {(None, "acoustic"): left_master}
-    assert states_of(conn, kept) == {"live": (None, T0)}
-    assert states_of(conn, left) == {"live": (None, T0), "acoustic": ("dismissed", T1)}
+    assert states_of(conn, kept) == {"live": (SEEN, T0), "lv": (DISMISSED, T1)}
+    assert states_of(conn, left) == {
+        "live": (SEEN, T0),
+        "lv": (DISMISSED, T1),
+        "acoustic": (DISMISSED, T1),
+        "demo": (SEEN, T0),
+    }
     assert plays(conn, event) == (survivor, "present", "version")
 
 
 def test_fold_collision(conn: Conn) -> None:
-    """The survivor's work wins a shared key of either kind, and keeps its own state; the fold
-    raises nothing. The work the file left, emptied, goes with its states."""
+    """The survivor's work wins a shared key of either kind, and the fold raises nothing. Where
+    its state and a moved one meet: dismissed if either was, seen at the later time. The work
+    the file left, emptied, goes with its states."""
     left = seed.work(conn)
     folded = file_on(conn, left, status="missing")
     entry(conn, left, "live", folded)
     entry(conn, left, "lv", folded)
     override(conn, left, "AC", folded)
-    state(conn, left, "live", seen_at=T0)
-    state(conn, left, "lv", seen_at=T0)
+    state(conn, left, "live", SEEN, T2)
+    state(conn, left, "lv", DISMISSED, T0)
     kept, survivor = mastered_work(conn)
     theirs = file_on(conn, kept)
     entry(conn, kept, "live", theirs)
     override(conn, kept, "AC", theirs)
-    state(conn, kept, "live", dismissed=True, seen_at=T1)
+    state(conn, kept, "live", DISMISSED, T1)
+    state(conn, kept, "lv", SEEN, T2)
+    line(conn, "Black (Live)", folded)
 
     remap_missing_file(folded, survivor, reconciliation_repos(RepositoryFactory(conn)))
 
@@ -373,7 +395,7 @@ def test_fold_collision(conn: Conn) -> None:
         (None, "lv"): survivor,
         ("AC", None): theirs,
     }
-    assert states_of(conn, kept) == {"live": ("dismissed", T1), "lv": (None, T0)}
+    assert states_of(conn, kept) == {"live": (DISMISSED, T2), "lv": (DISMISSED, T2)}
     assert not work_exists(conn, left)
     assert states_of(conn, left) == {}
 
@@ -382,19 +404,22 @@ def test_fold_collision(conn: Conn) -> None:
 
 
 def test_merge(conn: Conn) -> None:
-    """Both kinds move to the target; the sources' states follow, the target's winning."""
+    """Both kinds move to the target, the target's winning a shared key. Every source state is
+    copied to the target; where two meet, dismissed if either was, seen at the later time."""
     target, target_master = mastered_work(conn)
     entry(conn, target, "live", target_master)
     override(conn, target, "Rock", target_master)
-    state(conn, target, "live", seen_at=T2)
+    state(conn, target, "live", SEEN, T2)
+    state(conn, target, "unplugged", DISMISSED, T0)
     source, source_master = mastered_work(conn)
     acoustic = file_on(conn, source)
     entry(conn, source, "live", source_master)
     entry(conn, source, "acoustic", acoustic)
     override(conn, source, "AC", source_master)
-    state(conn, source, "live", dismissed=True, seen_at=T0)
-    state(conn, source, "acoustic", seen_at=T0)
-    state(conn, source, "demo", dismissed=True, seen_at=T0)
+    state(conn, source, "live", DISMISSED, T0)
+    state(conn, source, "acoustic", SEEN, T0)
+    state(conn, source, "demo", DISMISSED, T0)
+    state(conn, source, "unplugged", SEEN, T1)
     event = line(conn, "Black (Acoustic)", source_master)
 
     merged = curation.merge_works(target, [source], curation_repos(conn))
@@ -407,128 +432,154 @@ def test_merge(conn: Conn) -> None:
         ("AC", None): source_master,
     }
     assert states_of(conn, target) == {
-        "live": (None, T2),
-        "acoustic": (None, T0),
-        "demo": ("dismissed", T0),
+        "live": (DISMISSED, T2),
+        "acoustic": (SEEN, T0),
+        "demo": (DISMISSED, T0),
+        "unplugged": (DISMISSED, T1),
     }
     assert plays(conn, event) == (acoustic, "present", "version")
 
 
 def test_merge_collision(conn: Conn) -> None:
-    """E2: both works map the same text; the target's entry wins, the drop is counted, and the
-    source's line now plays the target's file."""
-    target, target_master = mastered_work(conn)
+    """E2: both works map the same text; the target's entry wins, the drop is counted, the
+    source's other entry moves, and the source's line now plays the target's file."""
+    target, _ = mastered_work(conn)
     theirs = file_on(conn, target)
     entry(conn, target, "live", theirs)
     source, source_master = mastered_work(conn)
+    acoustic = file_on(conn, source)
     entry(conn, source, "live", file_on(conn, source))
+    entry(conn, source, "acoustic", acoustic)
     event = line(conn, "Black (Live)", source_master)
 
     merged = curation.merge_works(target, [source], curation_repos(conn))
 
     assert merged.dropped_override_count == 1
-    assert overrides_of(conn, target) == {(None, "live"): theirs}
+    assert overrides_of(conn, target) == {(None, "live"): theirs, (None, "acoustic"): acoustic}
     assert plays(conn, event) == (theirs, "present", "version")
 
 
 def test_null_format_name_traps(conn: Conn) -> None:
     """The SQL a NULL ``format_name`` breaks, in one merge:
 
-    - the target holds a version entry, so its formats include NULL, and ``NOT IN`` over them
-      would drop every source row: the sources' formats still move;
+    - the target holds a version entry, so its formats include NULL: ``IN`` over them must still
+      drop the source's format the target has, and ``NOT IN`` must not drop every other row;
     - ``DISTINCT ON (format_name)`` would fold the sources' version entries into one: each text
       moves;
     - two sources sharing a key: the oldest source's row wins, for a text as for a format.
     """
     target, target_master = mastered_work(conn)
     entry(conn, target, "unplugged", target_master)
+    override(conn, target, "Rock", target_master)
     older, older_master = mastered_work(conn)
     newer, newer_master = mastered_work(conn)
     for text in ("live", "acoustic", "demo"):
         entry(conn, older, text, older_master, created_at=T0)
     override(conn, older, "AC", older_master, created_at=T0)
     override(conn, older, "Rock", older_master, created_at=T0)
+    override(conn, older, "Jazz", older_master, created_at=T0)
     entry(conn, newer, "live", newer_master, created_at=T1)
     override(conn, newer, "AC", newer_master, created_at=T1)
 
     merged = curation.merge_works(target, [newer, older], curation_repos(conn))
 
-    assert merged.dropped_override_count == 2
+    assert merged.dropped_override_count == 3
     assert overrides_of(conn, target) == {
         (None, "unplugged"): target_master,
+        ("Rock", None): target_master,
         (None, "live"): older_master,
         (None, "acoustic"): older_master,
         (None, "demo"): older_master,
         ("AC", None): older_master,
-        ("Rock", None): older_master,
+        ("Jazz", None): older_master,
     }
 
 
 def test_merge_states_of_two_sources(conn: Conn) -> None:
-    """Two sources hold a state for one text and the target none: the earliest seen wins."""
+    """Two sources hold a state for one text and the target none: dismissed if either was,
+    seen at the later time."""
     target, _ = mastered_work(conn)
     first, _ = mastered_work(conn)
     second, _ = mastered_work(conn)
-    state(conn, second, "live", dismissed=True, seen_at=T1)
-    state(conn, first, "live", seen_at=T0)
+    state(conn, first, "live", DISMISSED, T0)
+    state(conn, second, "live", SEEN, T1)
+    state(conn, first, "lv", SEEN, T0)
+    state(conn, second, "lv", SEEN, T2)
 
     curation.merge_works(target, [second, first], curation_repos(conn))
 
-    assert states_of(conn, target) == {"live": (None, T0)}
+    assert states_of(conn, target) == {"live": (DISMISSED, T1), "lv": (SEEN, T2)}
 
 
 # --- D1: split, reassign and move_file_to_work ------------------------------------------------
 
 
 def test_split(conn: Conn) -> None:
-    """D1: when the old work survives, both kinds and their states stay on it, even those
-    naming the file split off; when it empties, they go with it."""
-    work, _ = mastered_work(conn)
+    """D1: both kinds stay on the old work, even those naming the file split off, while it
+    survives, and go with it when it empties. The new work gets the old work's state of each
+    text on the split file's lines; the old work keeps all of its own."""
+    work, master = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
     override(conn, work, "AC", leaving)
-    state(conn, work, "live")
+    state(conn, work, "live", SEEN, T0)
+    state(conn, work, "demo", DISMISSED, T1)
+    state(conn, work, "acoustic", SEEN, T0)
+    line(conn, "Black (Live)", leaving)
+    line(conn, "Black (Demo)", master)
     lone = seed.work(conn)
     only = file_on(conn, lone)
     entry(conn, lone, "live", only)
     override(conn, lone, "AC", only)
-    state(conn, lone, "live")
+    state(conn, lone, "acoustic", DISMISSED, T1)
+    state(conn, lone, "live", SEEN, T0)
+    line(conn, "Black (Acoustic)", only)
     repos = curation_repos(conn)
 
     split = curation.split_file_off(work, leaving, repos)
     emptied = curation.split_file_off(lone, only, repos)
 
     assert overrides_of(conn, work) == {(None, "live"): leaving, ("AC", None): leaving}
-    assert states_of(conn, work) == {"live": (None, T0)}
+    assert states_of(conn, work) == {
+        "live": (SEEN, T0),
+        "demo": (DISMISSED, T1),
+        "acoustic": (SEEN, T0),
+    }
     assert overrides_of(conn, split.new_work_id) == {}
-    assert states_of(conn, split.new_work_id) == {}
+    assert states_of(conn, split.new_work_id) == {"live": (SEEN, T0)}
     assert emptied.old_work_deleted
     assert overrides_of(conn, lone) == {}
     assert states_of(conn, lone) == {}
     assert overrides_of(conn, emptied.new_work_id) == {}
+    assert states_of(conn, emptied.new_work_id) == {"acoustic": (DISMISSED, T1)}
 
 
 def test_reassign(conn: Conn) -> None:
-    """D1, as for split."""
+    """D1, as for split; where the target's own state meets a copied one, dismissed if either
+    was, seen at the later time."""
     work, _ = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
     override(conn, work, "AC", leaving)
-    state(conn, work, "live")
+    state(conn, work, "live", DISMISSED, T0)
+    state(conn, work, "demo", SEEN, T0)
+    line(conn, "Black (Live)", leaving)
     lone = seed.work(conn)
     only = file_on(conn, lone)
     entry(conn, lone, "live", only)
-    state(conn, lone, "live")
+    state(conn, lone, "acoustic", SEEN, T1)
+    line(conn, "Black (Acoustic)", only)
     target, _ = mastered_work(conn)
+    state(conn, target, "live", SEEN, T2)
     repos = curation_repos(conn)
 
     curation.reassign_file(leaving, target, repos)
     emptied = curation.reassign_file(only, target, repos)
 
     assert overrides_of(conn, work) == {(None, "live"): leaving, ("AC", None): leaving}
-    assert states_of(conn, work) == {"live": (None, T0)}
+    assert states_of(conn, work) == {"live": (DISMISSED, T0), "demo": (SEEN, T0)}
     assert overrides_of(conn, target) == {}
-    assert states_of(conn, target) == {}
+    assert states_of(conn, target) == {"live": (DISMISSED, T2), "acoustic": (SEEN, T1)}
     assert emptied.old_work_deleted
     assert overrides_of(conn, lone) == {}
     assert states_of(conn, lone) == {}
@@ -537,16 +588,22 @@ def test_reassign(conn: Conn) -> None:
 def test_move_file_to_work(conn: Conn) -> None:
     """D1: enrichment's and Set master's move leaves both kinds behind, so a line on the old
     work still plays the moved file (today's gap for format overrides, ARCHITECTURE.md); a
-    work emptied by the move stays while an entry names it."""
+    work emptied by the move stays while an entry names it. The target gets the old work's
+    state of each text on the moved file's lines; the old work keeps its own."""
     work, master = mastered_work(conn)
     moving = file_on(conn, work)
     entry(conn, work, "live", moving)
     override(conn, work, "AC", moving)
+    state(conn, work, "live", SEEN, T0)
+    state(conn, work, "acoustic", SEEN, T1)
+    event = line(conn, "Black (Live)", master)
+    line(conn, "Black (Acoustic)", moving)
     lone = seed.work(conn)
     only = file_on(conn, lone)
     entry(conn, lone, "live", only)
+    state(conn, lone, "demo", DISMISSED, T0)
+    line(conn, "Black (Demo)", only)
     target, _ = mastered_work(conn)
-    event = line(conn, "Black (Live)", master)
     repos = RepositoryFactory(conn)
     move = WorkMoveRepos(
         files=repos.library_files,
@@ -565,6 +622,9 @@ def test_move_file_to_work(conn: Conn) -> None:
     assert plays(conn, event) == (moving, "present", "version")
     assert work_exists(conn, lone)
     assert overrides_of(conn, lone) == {(None, "live"): only}
+    assert states_of(conn, work) == {"live": (SEEN, T0), "acoustic": (SEEN, T1)}
+    assert states_of(conn, lone) == {"demo": (DISMISSED, T0)}
+    assert states_of(conn, target) == {"acoustic": (SEEN, T1), "demo": (DISMISSED, T0)}
 
 
 # --- D3: delete_if_empty --------------------------------------------------------------------------
@@ -578,7 +638,7 @@ def test_delete_if_empty(conn: Conn) -> None:
     named = seed.work(conn)
     entry(conn, named, "live", their_file)
     stated = seed.work(conn)
-    state(conn, stated, "live", dismissed=True)
+    state(conn, stated, "live", DISMISSED)
     works = RepositoryFactory(conn).works
 
     assert not works.delete_if_empty(named)

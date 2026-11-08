@@ -57,6 +57,7 @@ def version_text(conn: Conn, identity_id: UUID) -> str | None:
         ("Black ( Live   at  Wembley )", "live at wembley"),
         ("Black (Live)  ", "live"),
         ("Happy Xmas (War Is Over)", "war is over"),
+        ("(Nice Dream)", "nice dream"),
         ("Brass in Pocket (I'm Special)", "i'm special"),
         ("(I Can't Get No) Satisfaction", None),
         ("Black (Live) Remastered", None),
@@ -67,7 +68,8 @@ def version_text(conn: Conn, identity_id: UUID) -> str | None:
 def test_the_version_text_of_a_title(conn: Conn, title: str, expected: str | None) -> None:
     """The real shapes ("(Live S&M)", "('08 Mix)", "(Lv)", "(Part 1) (Live)", none), and the
     rule's edges: square brackets, several groups, case, spaces, a leading or inner group, a dash
-    suffix, an empty group."""
+    suffix, an empty group, a title wholly in brackets (its one group is its version text; the
+    reader decides it is title words)."""
     line = seed.identity(conn, title=title)
 
     assert version_text(conn, line) == expected
