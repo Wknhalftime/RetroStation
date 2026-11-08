@@ -26,16 +26,19 @@ per path, through the services as the routes and tasks call them:
 ``IN`` and ``NOT IN`` over the target's formats, its ``DISTINCT ON (format_name)``, and the fold's
 ``t.format_name = s.format_name``.
 
-``version_entry_states`` follow the lines (S3, D3; question A of the lock request), so no move
-makes a seen or dismissed text read as new on its new work:
+``version_entry_states`` follow the lines (S3, D3; question A of the lock request, Lance
+2026-11-08: "Seen only"), so no move makes a seen text read as new on its new work, and a
+dismissal on one song never hides a text on another:
 
-- a works merge copies every source state to the target;
-- split, reassign, ``move_file_to_work`` and the fold copy, to the work the file's lines move to,
-  the old work's state of each version text on a line matched to the file; the fold also copies
-  the state of each entry it moves. The old work keeps its own;
-- where two states for one text meet, the result is dismissed if either was, seen at the later
-  time;
-- a deleted work's states go with it.
+- a works merge and the fold join copies of one song. A merge copies every source state to the
+  target; the fold copies the old work's state of each version text on a line matched to the
+  folded file, and of each entry it moves. Where two states for one text meet: dismissed if
+  either was, seen at the later time;
+- split, reassign and ``move_file_to_work`` carry lines to another song. The work they move to
+  gets, for each version text on a line matched to the file, the old work's state as seen only,
+  never a dismissal, at the old work's ``seen_at``. A state it already has keeps its own
+  dismissal, or none, seen at the later time;
+- the old work keeps all of its own; a deleted work's states go with it.
 
 E1, missing: an entry whose file goes missing stays, and its lines report the unavailable file
 without falling back, as the view does for format overrides and masters.
@@ -379,7 +382,7 @@ def test_fold_collision(conn: Conn) -> None:
     entry(conn, left, "lv", folded)
     entry(conn, left, "unplugged", folded)
     override(conn, left, "AC", folded)
-    state(conn, left, "live", SEEN, T2)
+    state(conn, left, "live", SEEN, T0)
     state(conn, left, "lv", DISMISSED, T0)
     state(conn, left, "unplugged", SEEN, T0)
     kept, survivor = mastered_work(conn)
@@ -400,7 +403,7 @@ def test_fold_collision(conn: Conn) -> None:
         ("AC", None): theirs,
     }
     assert states_of(conn, kept) == {
-        "live": (DISMISSED, T2),
+        "live": (DISMISSED, T1),
         "lv": (DISMISSED, T2),
         "unplugged": (DISMISSED, T1),
     }
@@ -525,7 +528,8 @@ def test_merge_states_of_two_sources(conn: Conn) -> None:
 def test_split(conn: Conn) -> None:
     """D1: both kinds stay on the old work, even those naming the file split off, while it
     survives, and go with it when it empties. The new work gets the old work's state of each
-    text on the split file's lines; the old work keeps all of its own."""
+    text on the split file's lines as seen only, never a dismissal, also when the old work is
+    deleted; the old work keeps all of its own."""
     work, master = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
@@ -559,12 +563,12 @@ def test_split(conn: Conn) -> None:
     assert overrides_of(conn, lone) == {}
     assert states_of(conn, lone) == {}
     assert overrides_of(conn, emptied.new_work_id) == {}
-    assert states_of(conn, emptied.new_work_id) == {"acoustic": (DISMISSED, T1)}
+    assert states_of(conn, emptied.new_work_id) == {"acoustic": (SEEN, T1)}
 
 
 def test_reassign(conn: Conn) -> None:
-    """D1, as for split; where the target's own state meets a copied one, dismissed if either
-    was, seen at the later time."""
+    """D1, as for split: the target gets each text as seen only. A state it already has keeps
+    its own dismissal, or none, seen at the later time."""
     work, _ = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
@@ -579,6 +583,7 @@ def test_reassign(conn: Conn) -> None:
     line(conn, "Black (Acoustic)", only)
     target, _ = mastered_work(conn)
     state(conn, target, "live", SEEN, T2)
+    state(conn, target, "acoustic", DISMISSED, T0)
     repos = curation_repos(conn)
 
     curation.reassign_file(leaving, target, repos)
@@ -587,7 +592,7 @@ def test_reassign(conn: Conn) -> None:
     assert overrides_of(conn, work) == {(None, "live"): leaving, ("AC", None): leaving}
     assert states_of(conn, work) == {"live": (DISMISSED, T0), "demo": (SEEN, T0)}
     assert overrides_of(conn, target) == {}
-    assert states_of(conn, target) == {"live": (DISMISSED, T2), "acoustic": (SEEN, T1)}
+    assert states_of(conn, target) == {"live": (SEEN, T2), "acoustic": (DISMISSED, T1)}
     assert emptied.old_work_deleted
     assert overrides_of(conn, lone) == {}
     assert states_of(conn, lone) == {}
@@ -597,7 +602,8 @@ def test_move_file_to_work(conn: Conn) -> None:
     """D1: enrichment's and Set master's move leaves both kinds behind, so a line on the old
     work still plays the moved file (today's gap for format overrides, ARCHITECTURE.md); a
     work emptied by the move stays while an entry names it. The target gets the old work's
-    state of each text on the moved file's lines; the old work keeps its own."""
+    state of each text on the moved file's lines as seen only; one it already has keeps its own
+    dismissal, seen at the later time. The old work keeps its own."""
     work, master = mastered_work(conn)
     moving = file_on(conn, work)
     entry(conn, work, "live", moving)
@@ -612,6 +618,7 @@ def test_move_file_to_work(conn: Conn) -> None:
     state(conn, lone, "demo", DISMISSED, T0)
     line(conn, "Black (Demo)", only)
     target, _ = mastered_work(conn)
+    state(conn, target, "acoustic", DISMISSED, T0)
     repos = RepositoryFactory(conn)
     move = WorkMoveRepos(
         files=repos.library_files,
@@ -632,7 +639,7 @@ def test_move_file_to_work(conn: Conn) -> None:
     assert overrides_of(conn, lone) == {(None, "live"): only}
     assert states_of(conn, work) == {"live": (SEEN, T0), "acoustic": (SEEN, T1)}
     assert states_of(conn, lone) == {"demo": (DISMISSED, T0)}
-    assert states_of(conn, target) == {"acoustic": (SEEN, T1), "demo": (DISMISSED, T0)}
+    assert states_of(conn, target) == {"acoustic": (DISMISSED, T1), "demo": (SEEN, T0)}
 
 
 # --- D3: delete_if_empty --------------------------------------------------------------------------
