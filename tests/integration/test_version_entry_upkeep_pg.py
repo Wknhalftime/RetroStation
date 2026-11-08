@@ -377,15 +377,18 @@ def test_fold_collision(conn: Conn) -> None:
     folded = file_on(conn, left, status="missing")
     entry(conn, left, "live", folded)
     entry(conn, left, "lv", folded)
+    entry(conn, left, "unplugged", folded)
     override(conn, left, "AC", folded)
     state(conn, left, "live", SEEN, T2)
     state(conn, left, "lv", DISMISSED, T0)
+    state(conn, left, "unplugged", SEEN, T0)
     kept, survivor = mastered_work(conn)
     theirs = file_on(conn, kept)
     entry(conn, kept, "live", theirs)
     override(conn, kept, "AC", theirs)
     state(conn, kept, "live", DISMISSED, T1)
     state(conn, kept, "lv", SEEN, T2)
+    state(conn, kept, "unplugged", DISMISSED, T1)
     line(conn, "Black (Live)", folded)
 
     remap_missing_file(folded, survivor, reconciliation_repos(RepositoryFactory(conn)))
@@ -393,9 +396,14 @@ def test_fold_collision(conn: Conn) -> None:
     assert overrides_of(conn, kept) == {
         (None, "live"): theirs,
         (None, "lv"): survivor,
+        (None, "unplugged"): survivor,
         ("AC", None): theirs,
     }
-    assert states_of(conn, kept) == {"live": (DISMISSED, T2), "lv": (DISMISSED, T2)}
+    assert states_of(conn, kept) == {
+        "live": (DISMISSED, T2),
+        "lv": (DISMISSED, T2),
+        "unplugged": (DISMISSED, T1),
+    }
     assert not work_exists(conn, left)
     assert states_of(conn, left) == {}
 
