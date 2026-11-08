@@ -339,7 +339,11 @@ def compute_normalized_signature(normalized_artist: str, normalized_title: str) 
 # Multi-word phrases come first — order matters to avoid partial overlaps
 # (e.g. "rough mix" → DEMO before the bare "mix" → REMIX rule fires).
 # Word-boundary patterns (\b) prevent substring false positives such as
-# "Alive" ⊃ "live" or "Credit" ⊃ "edit".
+# "Alive" ⊃ "live" or "Credit" ⊃ "edit". A rule mapping to UNKNOWN marks title
+# words a later rule would misread ("I'm Special"), so they stay in the title.
+# This is the file-side reader (grouping, enrichment, the untagged search, title
+# scoring's dash suffixes); the log's abbreviations ("Lv", "Unplgd") belong to
+# the log-side reader (phase 2b S10), not here (C63, D4).
 _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     # Multi-word phrases
     (re.compile(r"rough mix"), VersionType.DEMO),
@@ -359,6 +363,9 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     # Single keywords
     (re.compile(r"\blive\b|\bconcert\b"), VersionType.LIVE),
     (re.compile(r"\bacoustic\b|unplugged"), VersionType.ACOUSTIC),
+    # C63: "Original Mix" is the original. Just ahead of the bare "mix" rule that misread
+    # it, so a reading above still wins ("Live Original Mix" is live).
+    (re.compile(r"\boriginal mix\b"), VersionType.ORIGINAL),
     (re.compile(r"\b(?:remix|remixed)\b|\bdub\b|\bmix\b"), VersionType.REMIX),
     (re.compile(r"remaster"), VersionType.REMASTER),
     (re.compile(r"edition"), VersionType.EDITION),  # after "deluxe edition" etc.
@@ -371,6 +378,9 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     (re.compile(r"explicit|lyrical|\blanguage\b|\blyrics\b"), VersionType.EXPLICIT),
     (re.compile(r"\bclean\b"), VersionType.CLEAN),
     (re.compile(r"\bcover\b"), VersionType.COVER),
+    # C63: "(I'm Special)" is a title (The Pretenders' "Brass in Pocket (I'm Special)"),
+    # not the edition the bare "special" below would read.
+    (re.compile(r"\bi['\u2019]m special\b"), VersionType.UNKNOWN),
     (re.compile(r"deluxe|bonus|anniversary|\bspecial\b|\blimited\b"), VersionType.EDITION),
     (re.compile(r"\balt\b|alternate|alternative"), VersionType.ALTERNATE),
     (re.compile(r"\bmono\b|\bstereo\b"), VersionType.FORMAT),
@@ -381,8 +391,12 @@ _VERSION_RULES: list[tuple[re.Pattern[str], VersionType]] = [
     # Broad catch-alls for common bracketed version indicators not covered above.
     # Order here matters: placed AFTER every specific rule so existing
     # classifications (ORIGINAL, LIVE, ACOUSTIC, …) still win.
+    # C63: "Amended" is a clean edit, and an album, LP or studio version the original.
+    # Just ahead of the "version" catch-all that misread them, so every rule above still
+    # wins ("Live Album Version" is live, "Explicit Album Version" explicit).
+    (re.compile(r"\bamended\b"), VersionType.CLEAN),
+    (re.compile(r"\b(?:album|lp|studio) version\b"), VersionType.ORIGINAL),
     (re.compile(r"\bversion\b"), VersionType.REMIX),
-    (re.compile(r"\bamended\b"), VersionType.REMIX),
     (re.compile(r"\bbootleg\b"), VersionType.REMIX),
     (re.compile(r"\bvideo\b"), VersionType.REMIX),
     (re.compile(r"\bstudio\b"), VersionType.REMIX),

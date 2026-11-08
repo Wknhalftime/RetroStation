@@ -949,15 +949,22 @@ def test_detect_embedded_remix_dub() -> None:
 # Protects against the Alice In Chains duplicate-works pattern where
 # "(Album Version)" was not recognized as a version tag and leaked into
 # the base title, producing a duplicate work row during local grouping.
+# Since C63 (phase 2b S13) the album, LP and studio versions, "Original Mix"
+# and "Amended" are read for what they are; tests/services/test_version_reader.py
+# holds those cases.
 # ---------------------------------------------------------------------------
 
 
 def test_classify_tier_a_version_catchall() -> None:
     """Bare `\\bversion\\b` falls through to REMIX when no specific rule claims it."""
-    assert classify_version_descriptor("Album Version") == VersionType.REMIX
-    assert classify_version_descriptor("album version") == VersionType.REMIX
     assert classify_version_descriptor("European Version") == VersionType.REMIX
     assert classify_version_descriptor("UK Version") == VersionType.REMIX
+
+
+def test_classify_album_version_is_original_not_the_catchall() -> None:
+    """C63: an album version is the original, not a remix read off the catch-all."""
+    assert classify_version_descriptor("Album Version") == VersionType.ORIGINAL
+    assert classify_version_descriptor("album version") == VersionType.ORIGINAL
 
 
 def test_classify_original_version_still_wins_over_catchall() -> None:
@@ -966,9 +973,13 @@ def test_classify_original_version_still_wins_over_catchall() -> None:
     assert classify_version_descriptor("Original Recording") == VersionType.ORIGINAL
 
 
+def test_classify_amended_is_clean() -> None:
+    """C63: "Amended" is a clean edit, not a remix."""
+    assert classify_version_descriptor("Amended") == VersionType.CLEAN
+
+
 def test_classify_tier_b_remix_tokens() -> None:
     """Tier B structural tags classify as REMIX when nothing specific claims them."""
-    assert classify_version_descriptor("Amended") == VersionType.REMIX
     assert classify_version_descriptor("Bootleg") == VersionType.REMIX
     assert classify_version_descriptor("Video") == VersionType.REMIX
     assert classify_version_descriptor("Studio") == VersionType.REMIX
@@ -998,16 +1009,17 @@ def test_classify_ordering_specific_rules_win() -> None:
 
 
 def test_extract_album_version_strips_to_base() -> None:
-    """`(Album Version)` is now stripped off the base title — the Alice In Chains fix."""
+    """`(Album Version)` is stripped off the base title (the Alice In Chains fix), and since
+    C63 the file is the original."""
     base, vtype = extract_version_info("Down In A Hole (Album Version)")
     assert base == "Down In A Hole"
-    assert vtype == VersionType.REMIX
+    assert vtype == VersionType.ORIGINAL
 
 
 def test_extract_album_version_lowercase() -> None:
     base, vtype = extract_version_info("Get Born Again (album version)")
     assert base == "Get Born Again"
-    assert vtype == VersionType.REMIX
+    assert vtype == VersionType.ORIGINAL
 
 
 def test_extract_generic_version_qualifier() -> None:

@@ -124,8 +124,8 @@ def _musicbrainz_marks_live(rec_data: MbRecording) -> bool:
     is live elsewhere: a "live" attribute on the performance relation (only
     lookups carry relations) or "live" in the disambiguation ("live,
     1988-08-19: Nassau Coliseum"; searches carry this too). The title-suffix
-    rules are not used on the disambiguation: they read "album version" as a
-    remix and a bare date ("1951-10-01 recording") as a concert.
+    rules are not used on the disambiguation: they read "radio edit" as an
+    edit and a bare date ("1951-10-01 recording") as a concert.
     """
     for rel in rec_data.get("relations", []):
         if rel.get("type") == "performance" and "live" in rel.get("attributes", []):
