@@ -267,8 +267,8 @@ def _matches(conn: Conn, song: UUID) -> list[tuple[UUID, str]]:
     return [(row["library_file_id"], row["match_tier"]) for row in rows]
 
 
-# Each write, as (status the song starts in, request). The file ids are filled in per case:
-# "file" is the one the song is matched to (or, for Resolve, the one it is matched to by hand).
+# Each write, as (the status its song starts in, the route, the match_status it sends; None
+# sends no body). Resolve picks another file; Reject names the file the song is matched to.
 WRITES = {
     "resolve": (MatchStatus.NEEDS_REVIEW, "resolve", "manual_matched"),
     "reject": (MatchStatus.AUTO_MATCHED, "resolve", "manual_rejected"),
@@ -317,8 +317,10 @@ def test_a_request_opens_one_sync_connection(
 
 
 def test_the_recalculation_sees_the_committed_match(
-    client: TestClient, db_conn: Conn, migrated_db: str, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, db_conn: Conn, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Resolve commits before it recalculates the work's master on another connection, and
+    calls ``recalculate_for_work_sync`` (by its name in the router) with the work."""
     song = _song(db_conn, MatchStatus.NEEDS_REVIEW)
     work_id = work(RepositoryFactory(db_conn))
     db_conn.commit()
