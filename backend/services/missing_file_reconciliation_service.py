@@ -255,8 +255,9 @@ class ReconciliationRepos:
 def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> bool:
     """Move every reference to the missing row onto its successor, then delete it.
 
-    When the successor sits in another work, the moved matches and format
-    overrides take that work, and the work the missing row left re-picks its
+    When the successor sits in another work, the moved matches and overrides of
+    both kinds take that work, with the moved lines' and entries' version-entry
+    states (phase 2b, D6), and the work the missing row left re-picks its
     master from its own present files and is deleted once nothing references
     it. A move the library has overtaken since planning (the missing row came
     back, or the successor went missing) is skipped. Returns whether it folded.
@@ -266,9 +267,21 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     """
     if not repos.files.lock_fold_pair(move.missing_id, move.successor_id):
         return False
+    _carry_line_states(move, repos)
     repos.files.merge_into(move.missing_id, move.successor_id)
     settle_fold_across_works(move.successor_id, move.missing_work_id, move.successor_work_id, repos)
     return True
+
+
+def _carry_line_states(move: MissingFileMove, repos: ReconciliationRepos) -> None:
+    """Give the survivor's work the left work's state of each version text on the folded row's
+    lines, combined as for one song (phase 2b, D6). Read before ``merge_into``, while those
+    lines are still the folded row's alone, so the survivor's own lines take nothing from the
+    left work. Rows on the same work need nothing."""
+    left, survivor = move.missing_work_id, move.successor_work_id
+    if left is None or survivor is None or left == survivor:
+        return
+    repos.matches.copy_version_states(move.missing_id, left, survivor)
 
 
 def settle_fold_across_works(
@@ -281,10 +294,12 @@ def settle_fold_across_works(
 
     ``merge_into`` re-points the folded row's matches, format overrides and
     master at the survivor but leaves them on the work the folded row was in.
-    The matches and overrides take the survivor's work, and the work the folded
-    row left re-picks its master from its own present files (so it never points
-    at the survivor) and is deleted once nothing references it. Rows on the
-    same work need nothing.
+    The matches and overrides (format overrides and version entries, each moved
+    entry with its state) take the survivor's work; the folded lines' states
+    came across before the merge (:func:`_carry_line_states`). The work the
+    folded row left re-picks its master from its own present files (so it never
+    points at the survivor) and is deleted once nothing references it. Rows on
+    the same work need nothing.
     """
     if left_work_id == survivor_work_id:
         return

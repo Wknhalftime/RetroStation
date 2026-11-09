@@ -343,9 +343,10 @@ async def _work_song_master(conn: AsyncConnection[Any], work_id: str) -> SongMas
 async def _work_format_overrides(
     conn: AsyncConnection[Any], work_id: str
 ) -> list[FormatOverrideInfo]:
-    """Return a real work's format overrides, ordered by format name."""
+    """Return a real work's format overrides, never its version entries, by format name."""
     fo_cur = await conn.execute(
-        "SELECT * FROM format_overrides WHERE work_id = %s ORDER BY format_name",
+        "SELECT * FROM format_overrides WHERE work_id = %s AND format_name IS NOT NULL"
+        " ORDER BY format_name",
         (work_id,),
     )
     fo_rows = await fo_cur.fetchall()

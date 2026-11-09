@@ -69,6 +69,10 @@ class FakeWorkCurationRepository(WorkCurationRepository):
             del self._overrides[override_id]
         return len(dropped)
 
+    def move_version_states_of_works(self, work_ids: list[str], target_id: str) -> None:
+        # Version-entry states live in PostgreSQL only; the integration tests check them.
+        return None
+
     def move_overrides_of_works(self, work_ids: list[str], target_id: str) -> None:
         for override in [o for o in self._overrides.values() if o.work_id in work_ids]:
             self._overrides[override.id] = replace(override, work_id=target_id)

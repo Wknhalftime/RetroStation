@@ -474,7 +474,56 @@ returns the row it finds).
   they see a fix at once, on existing files too (an untagged "(I'm Special)" file no longer
   equals MusicBrainz's plain title).
 - The log's abbreviations and venues (Lv, Unplgd, S&M2) stay off this reader: the log side gets
-  its own (phase 2b S10), which never feeds grouping, matching or air play.
+  its own (phase 2b S10, below), which never feeds grouping, matching or air play.
+
+## Which file plays: version entry, format override, master (phase 2b, C59-C61, AUD-R033)
+
+- `play_file_resolution` (migration 0030, replaced by 0050) picks one file per play. A matched
+  line (auto or manual matched; its best match with a file, by confidence, then `created_at`,
+  `id`) has the file's work, else that file's recording's work. The work's **version entry**
+  for the line's version text plays first, else its **format override** for the station's
+  format, else its **song master**; `source` is `version`, `override`, `master` or NULL, and
+  is only logged. The version step is a second join of `format_overrides` by key: no
+  subquery and no title parsing (AUD-R033). Four readers fence the view with
+  `LATERAL … OFFSET 0`: the M3U repository, `playable_schedule.py`, `stream_cue_work.py` and
+  the gate's `scripts/airplay_snapshot.py`.
+- A line's version text is `track_identities.version_text` (C59): a generated, stored, indexed
+  column over `original_title`, its trailing round or square bracket groups lowercased,
+  single-spaced and joined ("(Part 1) (Live)" is `part 1 live`), NULL without one. No writer
+  sets it.
+- A version entry (C60) is a `format_overrides` row with a `version_text` and a NULL
+  `format_name` (a CHECK allows exactly one; `UNIQUE (work_id, version_text)` beside
+  `UNIQUE (work_id, format_name)`). Every format reader (`list_by_work`, `get`, the work page's
+  `_work_format_overrides`) adds `format_name IS NOT NULL`, so a `FormatOverride` is never a
+  version entry, and every upkeep path keys each kind on its own column (a NULL never equals,
+  so no `IN`, `NOT IN` or `DISTINCT ON` over `format_name`): the merge's
+  `drop_colliding_overrides` and the fold's `format_overrides.move_to_work`. `delete_for_file`
+  deletes both kinds, and `delete_if_empty` keeps a work that has either.
+- `version_entry_states` (work, version text, `dismissed` or none, `seen_at`) holds what a
+  mapping can't. Its `work_id` cascades (D3), so a state never keeps a work alive. Migration
+  0050 marked every (work, version text) on a matched line seen (S9). States follow the lines
+  (D6): a works merge and the fold join copies of one song and combine (dismissed if either
+  was, seen at the later time); split, reassign and `move_file_to_work` carry lines to another
+  song, so the target gets each text as seen only, never a dismissal, and keeps its own. The
+  old work keeps all of its own. The line copies are on `MatchRepository`, which every path
+  that moves a file's lines already holds; the fold reads the folded row's lines before
+  `merge_into` gives them to the survivor. The two conflict rules are written once, in
+  `db/repositories/_version_entry_states.py`.
+- **A gap kept on purpose, both kinds (D1):** split and reassign (when the old work survives)
+  and `move_file_to_work` (enrichment, Set master) move a file without its overrides, so a
+  format override or a version entry can name a file now on another work, and the view still
+  plays it. Moving or deleting them would change what those lines play.
+- The log-side reader, `domain/log_version_reader.read_log_version` (C63, S10), reads a version
+  text as a `VersionType` (UNKNOWN for title words): the file side's table as phase 2b PR 1
+  left it, plus the log's abbreviations and venues (Lv, Lv. Ac., Unplgd, Acous, Stripped, S&M2,
+  BBC, Telethon, Ed Sullivan). Only the Library's version pages read it (phase 2b PR 3); it
+  never feeds grouping, matching or air play
+  (`tests/domain/test_log_version_reader.py::test_grouping_matching_and_air_play_never_read_it`).
+- The checks are `tests/integration/test_version_text_pg.py`,
+  `tests/integration/test_version_entries_schema_pg.py`,
+  `tests/integration/test_version_entry_upkeep_pg.py` and
+  `tests/integration/test_view_version_order_pg.py`, beside the locked
+  `tests/integration/test_play_file_resolution.py`.
 
 ## Derived counts kept by triggers
 
@@ -611,7 +660,9 @@ returns the row it finds).
 
 - **Flows:**
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
-    `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020)
+    `ingestion_task` → `embedding_task` as a side branch that hands off to nothing (AUD-R020).
+    A new line's version text needs no task: `track_identities.version_text` is generated
+    (phase 2b S1), so the ingest upsert fills it
   - `scan_library` → `library_scan_task` → hash backfill + `library_enrichment_task` →
     `mb_enrichment_task` → `link_local_artists_task` (AUD-R026, in part superseded by
     AUD-R036), then `rematch_undecided_task("changed")` → `artist_matching_task` per playlist

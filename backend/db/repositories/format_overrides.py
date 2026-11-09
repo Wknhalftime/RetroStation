@@ -6,6 +6,7 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._version_entry_states import ON_CONFLICT_COMBINE
 from backend.domain.curation import CurationStorageError, FormatOverride
 from backend.repositories.format_overrides import FormatOverrideRepository
 
@@ -66,15 +67,21 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
 
         Returns:
             The matching :class:`FormatOverride`, or ``None`` if absent.
+            Never a version entry: the equality alone excludes a NULL
+            ``format_name``; the explicit filter is S3's, as in every reader.
         """
         row = self._conn.execute(
-            "SELECT * FROM format_overrides WHERE work_id = %s AND format_name = %s",
+            "SELECT * FROM format_overrides"
+            " WHERE work_id = %s AND format_name = %s AND format_name IS NOT NULL",
             (work_id, format_name),
         ).fetchone()
         return self._row_to_model(row) if row else None
 
     def list_by_work(self, work_id: str) -> list[FormatOverride]:
         """Return all format overrides for a given work, ordered by format_name.
+
+        Version entries share the table with a NULL format_name and are left
+        out, so ``FormatOverride.format_name`` stays a string (S3).
 
         Args:
             work_id: The work MBID.
@@ -83,7 +90,8 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
             List of :class:`FormatOverride` instances.
         """
         rows = self._conn.execute(
-            "SELECT * FROM format_overrides WHERE work_id = %s ORDER BY format_name",
+            "SELECT * FROM format_overrides WHERE work_id = %s AND format_name IS NOT NULL"
+            " ORDER BY format_name",
             (work_id,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
@@ -102,18 +110,35 @@ class PgFormatOverrideRepository(FormatOverrideRepository):
         )
 
     def move_to_work(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
-        """Re-key *from_work_id*'s overrides of *file_id* onto *to_work_id*.
+        """Re-key *from_work_id*'s overrides of *file_id*, of both kinds, onto *to_work_id*.
 
-        format_overrides has UNIQUE (work_id, format_name), so an override
-        the target work already has for the same format wins and the moved
-        one is dropped rather than colliding.
+        format_overrides has UNIQUE (work_id, format_name) and UNIQUE (work_id,
+        version_text), so an override the target work already has for the same
+        format, or a version entry for the same version text, wins and the moved
+        one is dropped rather than colliding (S3, E7). Each version entry that
+        moves takes its ``version_entry_states`` row along as a copy: where the
+        target has one, dismissed if either was, seen at the later time (D6).
+        The old work keeps its own.
         """
+        keys = {"from": from_work_id, "file": str(file_id), "to": to_work_id}
         self._conn.execute(
             """DELETE FROM format_overrides s
-               WHERE s.work_id = %s AND s.preferred_file_id = %s
+               WHERE s.work_id = %(from)s AND s.preferred_file_id = %(file)s
                  AND EXISTS (SELECT 1 FROM format_overrides t
-                             WHERE t.work_id = %s AND t.format_name = s.format_name)""",
-            (from_work_id, str(file_id), to_work_id),
+                             WHERE t.work_id = %(to)s
+                               AND (t.format_name = s.format_name
+                                    OR t.version_text = s.version_text))""",
+            keys,
+        )
+        self._conn.execute(
+            f"""INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
+               SELECT %(to)s, st.version_text, st.state, st.seen_at
+               FROM version_entry_states st
+               JOIN format_overrides s
+                 ON s.work_id = st.work_id AND s.version_text = st.version_text
+               WHERE s.work_id = %(from)s AND s.preferred_file_id = %(file)s
+               {ON_CONFLICT_COMBINE}""",
+            keys,
         )
         self._conn.execute(
             """UPDATE format_overrides SET work_id = %s

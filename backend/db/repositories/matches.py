@@ -6,9 +6,29 @@ from uuid import UUID
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
+from backend.db.repositories._version_entry_states import (
+    ON_CONFLICT_COMBINE,
+    ON_CONFLICT_KEEP_STATE,
+)
 from backend.domain.enums import MatchTier, TargetType
 from backend.domain.matching import Match, MatchingStorageError
 from backend.repositories.matches import MatchRepository
+
+# The version texts of the lines a file plays for, by play_file_resolution's rule (0050): the
+# line is auto or manual matched and its best match with a file (highest confidence, then
+# created_at, id) is this file. Starts from the file's own matches, so it reads a few rows.
+_FILE_LINE_TEXTS = """
+    SELECT ti.version_text
+    FROM matches fm
+    JOIN track_identities ti ON ti.id = fm.identity_id
+    WHERE fm.library_file_id = %(file)s
+      AND ti.version_text IS NOT NULL
+      AND ti.match_status IN ('auto_matched', 'manual_matched')
+      AND fm.id = (
+          SELECT m.id FROM matches m
+          WHERE m.identity_id = ti.id AND m.library_file_id IS NOT NULL
+          ORDER BY m.confidence_score DESC, m.created_at, m.id
+          LIMIT 1)"""
 
 
 @translate_lost_connection(MatchingStorageError)
@@ -64,6 +84,26 @@ class PgMatchRepository(MatchRepository):
             "SELECT * FROM matches WHERE identity_id = %s", (identity_id,)
         ).fetchone()
         return self._row_to_model(row) if row else None
+
+    def copy_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        self._conn.execute(
+            f"""INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
+               SELECT %(to)s, st.version_text, st.state, st.seen_at
+               FROM version_entry_states st
+               WHERE st.work_id = %(from)s AND st.version_text IN ({_FILE_LINE_TEXTS})
+               {ON_CONFLICT_COMBINE}""",
+            {"to": to_work_id, "from": from_work_id, "file": str(file_id)},
+        )
+
+    def see_version_states(self, file_id: UUID, from_work_id: str, to_work_id: str) -> None:
+        self._conn.execute(
+            f"""INSERT INTO version_entry_states (work_id, version_text, state, seen_at)
+               SELECT %(to)s, st.version_text, NULL, st.seen_at
+               FROM version_entry_states st
+               WHERE st.work_id = %(from)s AND st.version_text IN ({_FILE_LINE_TEXTS})
+               {ON_CONFLICT_KEEP_STATE}""",
+            {"to": to_work_id, "from": from_work_id, "file": str(file_id)},
+        )
 
     def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
         self._conn.execute(

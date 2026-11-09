@@ -166,8 +166,9 @@ def _delete_unused_local_artists(artist_ids: set[str], repos: WorkCurationRepos)
 def merge_works(
     target_id: str, source_work_ids: list[str], repos: WorkCurationRepos
 ) -> MergeResult:
-    """Fold the source works into the target: files, overrides, recordings, matches; the
-    sources and their masters go, the target's master is re-picked."""
+    """Fold the source works into the target: files, overrides of both kinds, version-entry
+    states (combined, D6), recordings, matches; the sources and their masters go, the
+    target's master is re-picked."""
     target = _work(target_id, repos.works)
     if target_id in source_work_ids:
         raise MergeTargetInSourcesError("Target work ID must not appear in source_work_ids")
@@ -179,6 +180,7 @@ def merge_works(
     merged = repos.curation.move_files_of_works(source_ids, target_id)
     dropped = repos.curation.drop_colliding_overrides(source_ids, target_id)
     repos.curation.move_overrides_of_works(source_ids, target_id)
+    repos.curation.move_version_states_of_works(source_ids, target_id)
     _consolidate_recordings(source_ids, target_id, repos)
     repos.curation.move_matches_of_works(source_ids, target_id)
     repos.curation.delete_masters_of_works(source_ids)
@@ -195,7 +197,8 @@ def merge_works(
 
 def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> SplitResult:
     """Move a file onto a new work of its own (same title and artist), with a copy of its
-    recording; the work it left is deleted if emptied, else its master is re-picked."""
+    recording and each version text on its lines as seen (D6); the work it left is deleted
+    if emptied, else its master is re-picked. Overrides stay behind (D1)."""
     work = _work(work_id, repos.works)
     file = repos.files.get_by_id(file_id)
     if file is None or file.work_id != work_id:
@@ -216,6 +219,7 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
         repos.curation.set_file_recording(file_id, copy.id)
     repos.files.update_work_id(file_id, new_work_id)
     repos.matches.move_to_work(file_id, new_work_id)
+    repos.matches.see_version_states(file_id, work_id, new_work_id)
     repos.curation.store_split_master(uuid4(), new_work_id, file_id)
     left_deleted = _settle_left_work(work_id, repos)
     return SplitResult(new_work_id=new_work_id, old_work_deleted=left_deleted)
@@ -255,8 +259,9 @@ def _repoint_recording(
 
 
 def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> ReassignResult:
-    """Move a file onto another work; its recording and matches follow, the target's master
-    is re-picked, and the work it left is deleted if emptied, else its master is re-picked."""
+    """Move a file onto another work; its recording and matches follow, the target gets each
+    version text on its lines as seen (D6) and re-picks its master, and the work it left is
+    deleted if emptied, else its master is re-picked. Overrides stay behind (D1)."""
     file = repos.files.get_by_id(file_id)
     if file is None:
         raise CurationFileNotFoundError(f"File {file_id} not found")
@@ -271,6 +276,7 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
     _recalculate_master(work_id, repos)
     left_deleted = False
     if file.work_id is not None:
+        repos.matches.see_version_states(file_id, file.work_id, work_id)
         left_deleted = _settle_left_work(file.work_id, repos)
     return ReassignResult(old_work_id=file.work_id, old_work_deleted=left_deleted)
 
