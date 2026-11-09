@@ -5,6 +5,10 @@ result back through the ports. It runs on the in-memory fakes (``tests/fakes/
 work_curation.py`` over the other fakes' rows) and on PostgreSQL, so the fake cannot drift
 from the SQL. The service's own behaviour is pinned in
 ``tests/services/test_work_curation_service.py``.
+
+The merge's and a left work's statements on ``matches``, ``move_matches_of_works`` and
+``release_work_matches``, live on the matches port since phase 3a PR 1, which only
+``SongMatchService`` calls (D2); their cases stay here, run on that port.
 """
 
 from __future__ import annotations
@@ -81,6 +85,7 @@ def _fake_ports() -> Ports:
     artists = FakeArtistRepository()
     works.set_library_file_repo(files)
     masters.set_library_file_repo(files)
+    matches.set_library_file_repo(files)
 
     def set_created_at(override_id: UUID, when: datetime) -> None:
         overrides._data[override_id].created_at = when
@@ -312,7 +317,7 @@ def test_matches_follow_and_works_and_artists_go(ports: Ports) -> None:
     on_work = _line(ports, target=source)
     elsewhere = _line(ports, target=target)
 
-    ports.curation.move_matches_of_works([source], target)
+    ports.matches.move_matches_of_works([source], target)
     assert (_match(ports, on_file).work_id, _match(ports, on_work).target_id) == (target, target)
     assert _match(ports, elsewhere).target_id == target
 
@@ -372,7 +377,7 @@ def test_a_left_work_is_cleared(ports: Ports) -> None:
     _override(ports, left, "mp3", _file(ports, left, "stays"), EARLY)
     take = _recording(ports, left)
 
-    ports.curation.release_work_matches(left)
+    ports.matches.release_work_matches(left)
     ports.curation.delete_overrides_of_work(left)
     ports.curation.delete_recordings_of_work(left)
 
@@ -466,7 +471,7 @@ def test_edge_cases_the_fake_and_the_sql_agree_on(ports: Ports) -> None:
 
     # A match with no file, released from its work, is left with none.
     no_file = _line(ports, work_id=first, target=first)
-    ports.curation.release_work_matches(first)
+    ports.matches.release_work_matches(first)
     assert _match(ports, no_file).work_id is None
 
     # A candidate carries the file's stored release status and type.
