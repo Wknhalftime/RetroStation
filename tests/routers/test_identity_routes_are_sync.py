@@ -300,15 +300,19 @@ def _seed(db_conn: Conn, write: str) -> tuple[UUID, UUID, UUID]:
 def test_a_request_opens_one_sync_connection(
     client: TestClient, db_conn: Conn, monkeypatch: pytest.MonkeyPatch, write: str
 ) -> None:
+    """Every sync connection is opened by ``psycopg.connect``; the request opens one that holds
+    a transaction (the log writer's autocommit connection aside), so no write of the decision
+    can land on a second one."""
     song, old, new = _seed(db_conn, write)  # no work: Resolve's recalculation is skipped
-    opened: list[str] = []
-    real_connect = sync_conn.connect_sync
+    opened: list[object] = []
+    real_connect = psycopg.connect
 
-    def _counting(dsn: str, **kwargs: Any) -> psycopg.Connection[Any]:
-        opened.append(dsn)
-        return real_connect(dsn, **kwargs)
+    def _counting(*args: Any, **kwargs: Any) -> psycopg.Connection[Any]:
+        if not kwargs.get("autocommit"):
+            opened.append(args[0] if args else kwargs.get("conninfo"))
+        return real_connect(*args, **kwargs)
 
-    monkeypatch.setattr(sync_conn, "connect_sync", _counting)
+    monkeypatch.setattr(psycopg, "connect", _counting)
 
     response = _post(client, song, write, new if write == "resolve" else old)
 
