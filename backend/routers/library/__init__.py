@@ -10,6 +10,7 @@ from backend.routers.library import (
     scan,
     silent_files,
     status,
+    versions,
     works,
 )
 
@@ -22,3 +23,4 @@ router.include_router(works.router)
 router.include_router(missing.router)
 router.include_router(silent_files.router)
 router.include_router(cues.router)
+router.include_router(versions.router)

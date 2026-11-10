@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { WorkFilesTable } from "@/components/domain/works/WorkFilesTable";
 import { FormatOverridePanel } from "@/components/domain/works/FormatOverridePanel";
+import { WorkVersionsPanel } from "@/components/domain/works/WorkVersionsPanel";
 import {
   useWorkDetail,
   useSetMaster,
@@ -175,6 +176,16 @@ export function AssociatedWorks() {
           onDelete={(oid) => deleteOverride.mutate({ oid })}
           isAdding={createOverride.isPending}
           isDeleting={deleteOverride.isPending}
+        />
+      </section>
+
+      {/* Versions (phase 2b S6), beside the format overrides */}
+      <section>
+        <WorkVersionsPanel
+          workId={work_id ?? ""}
+          versions={work.versions ?? []}
+          masterFlag={work.master_flag ?? null}
+          recordings={work.recordings}
         />
       </section>
     </div>

@@ -7,6 +7,7 @@ from psycopg import AsyncConnection
 from pydantic import BaseModel
 
 from backend.db.repositories.artist_merges import ARTIST_GROUP_SQL, MERGE_ROOTS_CTE
+from backend.db.repositories.version_entries import AsyncVersionEntryReader
 from backend.dependencies import SyncRepos, get_current_token, get_db_connection
 from backend.domain.catalog import (
     SPECIAL_PURPOSE_MBIDS,
@@ -17,6 +18,7 @@ from backend.domain.catalog import (
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 from backend.domain.system import StorageUnavailableError
 from backend.services.artist_merge_service import merge_artist, unmerge_artist
+from backend.services.version_entry_service import new_counts
 
 router = APIRouter()
 
@@ -88,6 +90,7 @@ class ArtistSummary(BaseModel):
     file_count: int
     mbid: str | None = None
     origin: str = "local"
+    new_version_count: int = 0
 
 
 class PaginatedArtists(BaseModel):
@@ -103,6 +106,7 @@ class WorkSummary(BaseModel):
     mbid: str | None = None
     origin: str = "local"
     version_types: list[str] = []
+    new_version_count: int = 0
 
 
 class MergedMember(BaseModel):
@@ -123,6 +127,7 @@ class ArtistDetail(BaseModel):
     works: list[WorkSummary]
     merged_into: str | None = None
     members: list[MergedMember] = []
+    new_version_count: int = 0
 
 
 class MergeIn(BaseModel):
@@ -169,7 +174,8 @@ async def list_artists(
             a.mbid,
             a.origin,
             COUNT(DISTINCT w.id)  AS work_count,
-            COUNT(DISTINCT lf.id) AS file_count
+            COUNT(DISTINCT lf.id) AS file_count,
+            array_agg(DISTINCT w.id) FILTER (WHERE w.id IS NOT NULL) AS work_ids
         FROM artists a
         LEFT JOIN (
             -- each work under the root of its artist's group: the artist itself, unmerged
@@ -188,6 +194,8 @@ async def list_artists(
     items_cur = await conn.execute(items_sql, items_params)
     rows = await items_cur.fetchall()
 
+    work_ids = sorted({w for row in rows for w in (row["work_ids"] or [])})
+    counts = await new_counts(AsyncVersionEntryReader(conn), work_ids)
     items = [
         ArtistSummary(
             id=row["id"],
@@ -198,6 +206,7 @@ async def list_artists(
             file_count=row["file_count"],
             mbid=row.get("mbid"),
             origin=row.get("origin", "local"),
+            new_version_count=sum(counts.get(w, 0) for w in row["work_ids"] or []),
         )
         for row in rows
     ]
@@ -317,6 +326,8 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
         for row in group
         if row["mbid"] and not (row["is_primary"] and str(row["id"]) in owners)
     )
+    counts = await new_counts(AsyncVersionEntryReader(conn), [w.id for w in works])
+    works = [w.model_copy(update={"new_version_count": counts.get(w.id, 0)}) for w in works]
     works += await _files_by_mbid(conn, by_file, works)
 
     is_primary = primary_id == artist_id
@@ -327,6 +338,7 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
         disambiguation=artist_row.get("disambiguation"),
         works=works,
         merged_into=None if is_primary else primary_id,
+        new_version_count=sum(counts.values()),
         members=[
             MergedMember(
                 id=row["id"], name=row["name"], mbid=row["mbid"], primary_id=row["primary_id"]

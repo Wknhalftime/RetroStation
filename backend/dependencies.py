@@ -41,6 +41,7 @@ from backend.services.streaming.service import StreamService
 from backend.services.streaming.sign_off import SignOffPorts, sign_off_folder
 from backend.services.streaming.station_years import StationYearRepos
 from backend.services.streaming.stream_settings import StreamingState, streaming_state
+from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
 from backend.services.work_move_service import WorkMoveRepos
 
@@ -174,6 +175,13 @@ def get_artist_resolution_repos(repos: SyncRepos) -> ArtistResolutionRepos:
     """The artist Resolve and Unmatch repositories, on the request's connection (phase 1a,
     C75)."""
     return artist_resolution_repos(repos)
+
+
+def get_version_entry_repos(repos: SyncRepos) -> VersionEntryRepos:
+    """The version pages' writes' repositories, on the request's connection (phase 2b S5)."""
+    return VersionEntryRepos(
+        works=repos.works, files=repos.library_files, versions=repos.version_entries
+    )
 
 
 def get_work_curation_repos(repos: SyncRepos) -> WorkCurationRepos:

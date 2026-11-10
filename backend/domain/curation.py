@@ -80,6 +80,18 @@ class SongMasterNotFoundError(WorkCurationError):
     """The work has no song master."""
 
 
+class VersionTextNotListedError(WorkCurationError):
+    """A version text the work doesn't list (on a matched line or an entry), or none given."""
+
+
+class VersionTextMappedError(WorkCurationError):
+    """A mapped version text can't be dismissed; unmap it first."""
+
+
+class VersionArtistNotFoundError(WorkCurationError):
+    """The artist whose versions Dismiss all names does not exist."""
+
+
 @dataclass(frozen=True)
 class MergeResult:
     merged_file_count: int

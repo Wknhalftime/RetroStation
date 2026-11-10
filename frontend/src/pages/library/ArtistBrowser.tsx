@@ -48,6 +48,11 @@ function ArtistRow({ artist }: { artist: ArtistSummary }) {
           <span className="font-medium text-gray-700">{artist.file_count}</span>{" "}
           {artist.file_count === 1 ? "file" : "files"}
         </span>
+        {(artist.new_version_count ?? 0) > 0 && (
+          <span className="font-medium text-indigo-600">
+            {artist.new_version_count} new {artist.new_version_count === 1 ? "version" : "versions"}
+          </span>
+        )}
       </div>
     </Link>
   );

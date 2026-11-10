@@ -3,6 +3,7 @@ import { ArrowLeft, Crown, Music } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArtistDetail } from "@/api/artists";
+import { useDismissListed } from "@/api/versions";
 import {
   MergedMembers,
   MergePicker,
@@ -15,6 +16,7 @@ export function ArtistDetail() {
   const { artist_id } = useParams<{ artist_id: string }>();
   const { data, isLoading, isError } = useArtistDetail(artist_id);
   const mergedFrom = (useLocation().state as MergedFromState | null)?.mergedFrom;
+  const dismissListed = useDismissListed();
 
   if (isLoading) {
     return (
@@ -68,6 +70,25 @@ export function ArtistDetail() {
 
       <PageHeader title={data.name} description={description || undefined} />
 
+      {(data.new_version_count ?? 0) > 0 && (
+        <div className="mb-4 flex items-center gap-3 rounded-md bg-indigo-50 p-3 text-sm text-indigo-800">
+          <span>
+            {data.new_version_count} new {data.new_version_count === 1 ? "version" : "versions"}
+          </span>
+          <button
+            type="button"
+            disabled={dismissListed.isPending}
+            onClick={() => {
+              const count = data.new_version_count ?? 0;
+              const prompt = `Dismiss every unmapped version of ${data.name} (${count} new)? Their lines keep the master.`;
+              if (window.confirm(prompt)) dismissListed.mutate({ artist_id: data.id });
+            }}
+          >
+            Dismiss all
+          </button>
+        </div>
+      )}
+
       <MergePicker artist={data} />
       <MergedMembers artist={data} />
 
@@ -96,6 +117,11 @@ export function ArtistDetail() {
                   )}
                   <span className="truncate text-sm font-medium text-gray-900">{work.title}</span>
                   <VersionBadges versionTypes={work.version_types} />
+                  {(work.new_version_count ?? 0) > 0 && (
+                    <span className="text-xs font-medium text-indigo-600">
+                      {work.new_version_count} new
+                    </span>
+                  )}
                 </div>
                 <span className="ml-4 shrink-0 text-xs text-gray-400">
                   {work.recording_count} {work.recording_count === 1 ? "recording" : "recordings"}

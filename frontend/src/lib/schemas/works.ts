@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MasterFlagSchema, WorkVersionSchema } from "@/lib/schemas/versions";
 
 // ---------------------------------------------------------------------------
 // File info
@@ -81,6 +82,9 @@ export const WorkDetailSchema = z.object({
   recordings: z.array(RecordingDetailSchema),
   song_master: SongMasterInfoSchema.nullable(),
   format_overrides: z.array(FormatOverrideInfoSchema),
+  // Phase 2b S5, S12: optional, so a work detail without them still shows the page.
+  versions: z.array(WorkVersionSchema).optional(),
+  master_flag: MasterFlagSchema.nullable().optional(),
   mbid: z.string().nullable().default(null),
   origin: z.enum(["local", "musicbrainz"]).default("local"),
 });
