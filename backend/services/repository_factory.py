@@ -37,6 +37,7 @@ from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRep
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.silent_files import PgSilentFileReportRepository
+from backend.db.repositories.song_decisions import PgSongDecisionRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.station_liners import PgStationLinerRepository
 from backend.db.repositories.stream_cue_edits import PgStreamCueEditRepository
@@ -50,9 +51,10 @@ from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
 from backend.services.artist_resolution_service import ArtistResolutionRepos
-from backend.services.identity_resolution_service import RecalcRepos
+from backend.services.identity_resolution_service import RecalcRepos, SongDecisionRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
+from backend.services.song_match_service import SongMatchService
 from backend.services.streaming.station_years import StationYearRepos
 from backend.services.work_curation_service import WorkCurationRepos
 
@@ -214,6 +216,7 @@ class RepositoryFactory:
         self.artist_names = PgArtistNameRepository(conn)
         self.artist_merges = PgArtistMergeRepository(conn)
         self.version_entries = PgVersionEntryRepository(conn)
+        self.song_decisions = PgSongDecisionRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -296,6 +299,17 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         artists=repos.artists,
         links=repos.log_name_links,
         merges=repos.artist_merges,
+    )
+
+
+def song_decision_repos(repos: RepositoryFactory) -> SongDecisionRepos:
+    """The port bundle a song's Resolve, Reject and Unmatch write through, on *repos*'
+    connection (phase 3a PR 1, C75): its matches through the one song-match writer (C52)."""
+    return SongDecisionRepos(
+        songs=repos.song_decisions,
+        files=repos.library_files,
+        song_matches=SongMatchService(repos.matches),
+        commit=repos.commit_or_unavailable,
     )
 
 

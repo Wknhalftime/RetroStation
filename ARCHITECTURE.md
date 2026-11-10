@@ -50,9 +50,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - `domain.library` never references streaming (D20). **Enforced.**
 
 **Known gaps** (true today, not rules to copy):
-- Routers run SQL directly: 45 `.execute()` lines in 10 router files (phase 0c moved the works
-  router's writes out, and phase 1a the artist Resolve and Unmatch, below).
-  `routers/matching.py` is 1,030 lines.
+- Routers run SQL directly: 25 `.execute()` lines in 6 router files (phase 0c moved the works
+  router's writes out, phase 1a the artist Resolve and Unmatch, and phase 3a the song Resolve,
+  Reject and Unmatch, below). `routers/matching.py` is 1,154 lines.
 - Wiring happens in three places (`main.py`, `dependencies.py`, `services/repository_factory.py`),
   not one.
 - import-linter carries 7 baseline ignores.
@@ -82,7 +82,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   "Artist identity" below). AUD-R035's "may be deleted only when" still holds; this is one more
   condition, so no ruling changes.
 - The router's read route (the work detail) keeps its SQL on the async connection until 3b
-  rebuilds the Library pages (AUD-R010 noted).
+  rebuilds the Library pages (AUD-R010 noted; AUD-R074 replaces it for the song routes, "Song
+  matches: one writer" below).
 - The checks are `tests/test_works_router_writes_have_no_sql.py` (no write route reaches an
   `.execute` or a psycopg or `backend.db` name),
   `tests/routers/test_works_write_routes_are_sync.py`,
@@ -556,6 +557,37 @@ returns the row it finds).
   rerun"). If it outgrows a second, the SPEC's fallback is an ingest-kept summary (a migration).
 - The checks are `tests/routers/test_work_versions.py` (AUD-R046) and
   `tests/routers/test_unmapped_versions.py` (AUD-R034).
+
+## Song matches: one writer (phase 3a, C52, C75, AUD-R074)
+
+- `SongMatchService` (`services/song_match_service.py`) is the only code that calls the matches
+  port's writes (D2): the auto-matcher's result (`record_result`), Resolve's manual match
+  (`match_by_hand`), Reject's and Unmatch's clearing (`clear_song`), a deleted file's release
+  (`release_file`), and every move that carries a file's or a work's matches along
+  (`follow_file`, `follow_works`, `release_work`). It is sync over the port and commits
+  nothing: it writes in the caller's transaction. Bundles that locked tests build by keyword
+  keep their port field (`IdentityMatchingRepos(match_repo=...)`, `matches=` elsewhere), and
+  their services wrap it in the service.
+- The port's adapter (`db/repositories/matches.py`) holds the SQL; the works merge's and a left
+  work's match statements moved there from `WorkCurationRepository`. Five repository statements
+  stay where they are, with their locked tests and fakes: the two cascade CTEs of
+  `broadcast_track_identities` (`bulk_reject_by_artist`, `bulk_defer_by_artist`),
+  `artist_cascade.delete_matches_of_lines`, `artist_resolution.delete_pending_song_matches` and
+  the fold's re-point in `library_files.merge_into`. Phase 2b's version-state copies sit on the
+  port but write `version_entry_states`, so they stay outside the service.
+  `scripts/probe_truncate_cost.py` truncates a test database's tables and is tooling, not a
+  writer.
+- A song's Resolve, Reject and Unmatch are sync routes on `SyncRepos` (C75), calling
+  `identity_resolution_service` with `SongDecisionRepos`: the song's row through
+  `SongDecisionRepository` (`repositories/song_decisions.py`; Reject and Unmatch take its
+  `FOR UPDATE` lock first, Resolve its row's update), its matches through the service, so status
+  and matches commit together. `record_song_rejection` and `persist_manual_match` keep their
+  names (AUD-R029 stands). Resolve commits, then recalculates the work's master on its own
+  connection (`recalculate_for_work_sync`, best effort, as before). A lost connection answers
+  503.
+- The checks are `tests/test_song_match_single_writer.py` (a scan of `backend/` and `scripts/`:
+  only the adapter and the five statements hold SQL that writes `matches`, and only the service
+  calls the port's writes) and `tests/routers/test_identity_routes_are_sync.py`.
 
 ## Derived counts kept by triggers
 

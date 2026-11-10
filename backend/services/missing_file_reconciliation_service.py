@@ -49,6 +49,7 @@ from backend.repositories.missing_files import MissingFileListingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
+from backend.services.song_match_service import SongMatchService
 
 # A remaster or an edit on the same release differs by more than this.
 MAX_DURATION_DIFF_MS = 2_000
@@ -303,7 +304,7 @@ def settle_fold_across_works(
     """
     if left_work_id == survivor_work_id:
         return
-    repos.matches.move_to_work(survivor_id, survivor_work_id)
+    SongMatchService(repos.matches).follow_file(survivor_id, survivor_work_id)
     if left_work_id is not None and survivor_work_id is not None:
         repos.format_overrides.move_to_work(survivor_id, left_work_id, survivor_work_id)
     if left_work_id is not None:
@@ -337,7 +338,7 @@ def _release_matches(
     identities: BroadcastTrackIdentityRepository,
 ) -> int:
     """Delete the file's matches; each identity left with none goes back to review."""
-    identity_ids = matches.delete_for_file(file_id)
+    identity_ids = SongMatchService(matches).release_file(file_id)
     for identity_id in set(identity_ids):
         if matches.get_by_identity(identity_id) is None:
             identities.update_match_status(
