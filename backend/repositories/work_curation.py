@@ -60,11 +60,6 @@ class WorkCurationRepository(ABC):
         ...
 
     @abstractmethod
-    def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
-        """Point every match at *work_ids*, as its target or its file's work, at *target_id*."""
-        ...
-
-    @abstractmethod
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         """Delete the song masters of *work_ids*, whatever their method."""
         ...
@@ -102,11 +97,6 @@ class WorkCurationRepository(ABC):
         ...
 
     # --- a work a file left ----------------------------------------------------------------
-
-    @abstractmethod
-    def release_work_matches(self, work_id: str) -> None:
-        """Point each match still on *work_id* at its file's current work (or none)."""
-        ...
 
     @abstractmethod
     def delete_overrides_of_work(self, work_id: str) -> None:

@@ -13,6 +13,7 @@ from backend.repositories.matches import MatchRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
+from backend.services.song_match_service import SongMatchService
 
 logger = structlog.get_logger()
 
@@ -39,7 +40,7 @@ def place_ungrouped_file(
     had no work has none. The file left no work, so there is no master to settle.
     """
     files.update_work_id(file_id, work_id)
-    matches.move_to_work(file_id, work_id)
+    SongMatchService(matches).follow_file(file_id, work_id)
 
 
 def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRepos) -> None:
@@ -56,7 +57,7 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
     if previous_work_id == work_id:
         return
     repos.files.update_work_id(library_file.id, work_id)
-    repos.matches.move_to_work(library_file.id, work_id)
+    SongMatchService(repos.matches).follow_file(library_file.id, work_id)
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     if previous_work_id is not None:
         repos.matches.see_version_states(library_file.id, previous_work_id, work_id)

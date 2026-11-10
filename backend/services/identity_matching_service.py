@@ -46,6 +46,7 @@ from backend.services.matching_reasons import (
 from backend.services.matching_utils import rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.recording_search import RecordingSearch
+from backend.services.song_match_service import SongMatchService
 from backend.services.title_scoring import (
     TitleScore,
     _candidate_scores,
@@ -1058,6 +1059,7 @@ def match_identities_for_playlist(
     checked: dict[UUID, bool] = {}
 
     # Each artist's songs together, so the strategies read each artist once (_ArtistMemo).
+    song_matches = SongMatchService(repos.match_repo)
     for identity in ticking(group_by_artist(pending), progress):
         artist = artists_by_id.get(identity.broadcast_artist_id)
         if artist is not None and repos.placeholders is not None:
@@ -1091,24 +1093,25 @@ def match_identities_for_playlist(
         # The new result replaces whatever the song showed before, "no file" included. A
         # re-check rewinds songs with their match rows kept, and matches has
         # UNIQUE(identity_id, library_file_id) with no ON CONFLICT (spec 2026-10-05 §4.2).
-        repos.match_repo.delete_for_identity(identity.id)
-
-        # Persist a matches row for a suggestion worth showing (AUTO_MATCHED or NEEDS_REVIEW),
-        # so the resolution-center UI's LEFT JOIN matches surfaces the real
-        # confidence_score/triage_bucket. An AUTO_REJECTED result writes none (AUD-R022 D6):
+        # A suggestion worth showing (AUTO_MATCHED or NEEDS_REVIEW) is stored, so the
+        # resolution-center UI's LEFT JOIN matches surfaces the real
+        # confidence_score/triage_bucket. An AUTO_REJECTED result stores none (AUD-R022 D6):
         # a row would let _release_matches pull the song back into review when its file is
         # deleted, and would count as a suggestion for a missing file.
-        if result.library_file_id is not None and result.status != MatchStatus.AUTO_REJECTED:
-            repos.match_repo.create(
-                Match(
-                    id=uuid4(),
-                    identity_id=identity.id,
-                    library_file_id=result.library_file_id,
-                    confidence_score=result.confidence_score,
-                    match_tier=result.tier,
-                    work_id=result.work_id or None,
-                )
+        shown = result.library_file_id is not None and result.status != MatchStatus.AUTO_REJECTED
+        song_matches.record_result(
+            identity.id,
+            Match(
+                id=uuid4(),
+                identity_id=identity.id,
+                library_file_id=result.library_file_id,
+                confidence_score=result.confidence_score,
+                match_tier=result.tier,
+                work_id=result.work_id or None,
             )
+            if shown
+            else None,
+        )
 
         if result.status == MatchStatus.AUTO_MATCHED:
             auto_matched += 1

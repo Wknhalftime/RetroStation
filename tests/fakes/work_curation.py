@@ -1,9 +1,10 @@
 """In-memory :class:`WorkCurationRepository` over the other fakes' rows.
 
-The works writes' statements reach across files, recordings, overrides, matches, masters and
-artists, so this fake works on those fakes' own rows: what a statement changes, the other
-fakes then read. ``tests/repositories/test_work_curation_contract.py`` runs the same cases
-against it and against ``PgWorkCurationRepository``.
+The works writes' statements reach across files, recordings, overrides, masters and artists,
+so this fake works on those fakes' own rows: what a statement changes, the other fakes then
+read. The match statements moved to the matches port in phase 3a PR 1 (D2).
+``tests/repositories/test_work_curation_contract.py`` runs the same cases against it and
+against ``PgWorkCurationRepository``.
 
 It enforces no foreign key or unique constraint. One the service can meet: emptying a work
 whose recording a file on another work still holds fails in PostgreSQL (as the router did
@@ -15,12 +16,11 @@ from uuid import UUID
 
 from backend.domain.catalog import Recording, RecordingVersion
 from backend.domain.curation import FormatOverride, MasterCandidate, SongMaster
-from backend.domain.enums import FileStatus, SelectionMethod, TargetType
+from backend.domain.enums import FileStatus, SelectionMethod
 from backend.repositories.work_curation import WorkCurationRepository
 from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.format_overrides import FakeFormatOverrideRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
-from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.recordings import FakeRecordingRepository
 from tests.fakes.song_masters import FakeSongMasterRepository
 from tests.fakes.works import FakeWorkRepository
@@ -35,7 +35,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         recordings: FakeRecordingRepository,
         song_masters: FakeSongMasterRepository,
         overrides: FakeFormatOverrideRepository,
-        matches: FakeMatchRepository,
         artists: FakeArtistRepository,
     ) -> None:
         self._works = works._data
@@ -43,7 +42,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         self._recordings = recordings._data
         self._masters = song_masters._data
         self._overrides = overrides._data
-        self._matches = matches._data
         self._artists = artists._data
 
     # --- merge ---------------------------------------------------------------------------
@@ -96,13 +94,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         if recording is not None:
             self._recordings[recording_id] = replace(recording, work_id=work_id)
 
-    def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
-        for match in list(self._matches.values()):
-            if match.target_type == TargetType.WORK and match.target_id in work_ids:
-                self._matches[match.id] = match = replace(match, target_id=target_id)
-            if match.work_id in work_ids:
-                self._matches[match.id] = replace(match, work_id=target_id)
-
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         for work_id in work_ids:
             self._masters.pop(work_id, None)
@@ -141,13 +132,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         )
 
     # --- a work a file left ----------------------------------------------------------------
-
-    def release_work_matches(self, work_id: str) -> None:
-        for match in [m for m in self._matches.values() if m.work_id == work_id]:
-            file = self._files.get(match.library_file_id) if match.library_file_id else None
-            self._matches[match.id] = replace(
-                match, work_id=file.work_id if file is not None else None
-            )
 
     def delete_overrides_of_work(self, work_id: str) -> None:
         for override_id in [o.id for o in self._overrides.values() if o.work_id == work_id]:

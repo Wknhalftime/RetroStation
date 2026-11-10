@@ -16,9 +16,10 @@ from backend.dependencies import (
     get_current_token,
     get_db_connection,
     get_mb_client,
+    get_song_decision_repos,
 )
 from backend.domain.artist_cascade import CascadeCounts
-from backend.domain.enums import CascadeAction, MatchStatus, MatchTier, ReasonCode
+from backend.domain.enums import CascadeAction, MatchStatus, ReasonCode
 from backend.domain.matching import (
     ListedLogNameError,
     LogNameNotFoundError,
@@ -39,9 +40,10 @@ from backend.services.artist_resolution_service import (
 from backend.services.identity_resolution_service import (
     IdentityNotFoundError,
     LibraryFileNotFoundError,
+    SongDecisionRepos,
     SongNotRejectableError,
     SuggestionRequiredError,
-    persist_manual_match,
+    match_song_by_hand,
     recalculate_for_work_sync,
     reject_song_suggestion,
     unmatch_song,
@@ -65,6 +67,8 @@ Token = Annotated[str, Depends(get_current_token)]
 MbClient = Annotated[MusicBrainzClientProtocol, Depends(get_mb_client)]
 # The artist Resolve and Unmatch write on the request's one sync connection (C75).
 ResolutionRepos = Annotated[ArtistResolutionRepos, Depends(get_artist_resolution_repos)]
+# A song's Resolve, Reject and Unmatch write on the request's one sync connection (C75).
+SongDecisions = Annotated[SongDecisionRepos, Depends(get_song_decision_repos)]
 
 # Statuses that are eligible for the review queue
 _QUEUE_STATUSES: list[str] = [MatchStatus.NEEDS_REVIEW.value, MatchStatus.PENDING.value]
@@ -852,10 +856,10 @@ def resolve_artist(
     "/identities/{identity_id}/resolve",
     response_model=ResolveResult,
 )
-async def resolve_identity(
+def resolve_identity(
     identity_id: UUID,
     body: IdentityResolution,
-    conn: DbConn,
+    repos: SongDecisions,
     _token: Token,
 ) -> ResolveResult:
     """Manually resolve a log_identity as matched or rejected.
@@ -866,15 +870,8 @@ async def resolve_identity(
     with ``resolve_artist``, where MANUAL_MATCHED/MANUAL_REJECTED do cascade
     because the artist mapping is shared by all children.
 
-    Args:
-        identity_id: UUID of the log_identity to resolve.
-        body: Resolution decision. ``library_file_id`` is required for
-            MANUAL_MATCHED.
-        conn: Async database connection.
-        _token: Bearer token (auth check only).
-
-    Returns:
-        :class:`ResolveResult` with updated id and match_status.
+    A sync route on the request's one connection (C75): the song's status and its
+    matches commit together, before the master recalculation runs on its own.
 
     Raises:
         HTTPException: 404 if the identity does not exist.
@@ -882,6 +879,7 @@ async def resolve_identity(
             missing for MANUAL_MATCHED, or library_file_id does not exist.
         HTTPException: 409 if the song is already rejected.
         HTTPException: 422 if a song in review is rejected without library_file_id.
+        HTTPException: 503 if the database connection is lost.
     """
     if body.match_status not in (MatchStatus.MANUAL_MATCHED, MatchStatus.MANUAL_REJECTED):
         raise HTTPException(
@@ -897,86 +895,12 @@ async def resolve_identity(
             detail="library_file_id is required for MANUAL_MATCHED",
         )
 
-    identity_cur = await conn.execute(
-        "SELECT id FROM track_identities WHERE id = %s",
-        (identity_id,),
-    )
-    if await identity_cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Identity {identity_id} not found",
-        )
-
-    new_status = MatchStatus(body.match_status)
-
-    if new_status == MatchStatus.MANUAL_MATCHED:
-        # library_file_id presence is enforced by the 422 guard above; assert
-        # for the type-checker so persist_manual_match's UUID parameter is
-        # satisfied without a runtime cast.
-        assert body.library_file_id is not None  # noqa: S101
-
-        # Update log_identity with status and MANUAL tier
-        await conn.execute(
-            "UPDATE track_identities SET match_status = %s, match_tier = %s WHERE id = %s",
-            (new_status.value, MatchTier.MANUAL.value, identity_id),
-        )
-        # Delete any existing match for this identity (drops a stale auto
-        # match before the manual replacement is inserted, all inside the
-        # same async transaction so the resolve is atomic).
-        await conn.execute(
-            "DELETE FROM matches WHERE identity_id = %s",
-            (identity_id,),
-        )
-
-        # Insert the new match with derived work_id INSIDE this transaction.
-        # 422 if the picked library_file_id doesn't exist, so failure is
-        # deterministic instead of waiting for an FK violation to bubble
-        # up as 500.
-        try:
-            work_id = await persist_manual_match(conn, identity_id, body.library_file_id)
-        except LibraryFileNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=str(exc),
-            ) from exc
-
-        # Commit the durable match-state writes BEFORE the cross-connection
-        # recalc step. Mirrors resolve_artist's commit-before-enqueue
-        # pattern — the post-yield commit in get_db_connection
-        # becomes a no-op once this fires.
-        await conn.commit()
-
-        if work_id is not None:
-            settings = get_settings()
-            try:
-                # recalculate_for_work_sync's own try only swallows
-                # psycopg.Error (a transient DB problem — safe to retry via
-                # the next matching run). This outer try is the backstop for
-                # everything else that can come out of that call: a non-DB
-                # bug in the recalc itself, plus thread/cancellation
-                # boundary errors the inner try can't reach either way.
-                # Both layers are intentional — do not collapse into one.
-                # The match is already committed at this point; recalc is
-                # best-effort regardless of which layer catches the failure.
-                await asyncio.to_thread(
-                    recalculate_for_work_sync,
-                    settings.database_url,
-                    work_id,
-                    recalc_repos,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "manual_resolve_recalc_failed",
-                    identity_id=str(identity_id),
-                    work_id=work_id,
-                    exc_info=True,
-                )
-    else:
+    if MatchStatus(body.match_status) == MatchStatus.MANUAL_REJECTED:
         # Reject rules out this (song, work) pair (AUD-R022, D3/D5): the song is parked as
         # manual_rejected with the file recorded, and the next matching run re-checks it
         # without that file and its work (AUD-R029, spec 2026-10-13 R2, R6).
         try:
-            await reject_song_suggestion(conn, identity_id, body.library_file_id)
+            reject_song_suggestion(repos, identity_id, body.library_file_id)
         except IdentityNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except SuggestionRequiredError as exc:
@@ -985,9 +909,45 @@ async def resolve_identity(
             ) from exc
         except SongNotRejectableError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except StorageUnavailableError as lost:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
         return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
-    return ResolveResult(id=identity_id, match_status=new_status.value)
+    # library_file_id presence is enforced by the 422 guard above; assert for the
+    # type-checker so match_song_by_hand's UUID parameter is satisfied without a cast.
+    assert body.library_file_id is not None  # noqa: S101
+    try:
+        work_id = match_song_by_hand(repos, identity_id, body.library_file_id)
+        # Commit the durable match-state writes BEFORE the cross-connection recalc step;
+        # the dependency's own commit after the route is then a no-op.
+        repos.commit()
+    except IdentityNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LibraryFileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
+
+    if work_id is not None:
+        try:
+            # recalculate_for_work_sync's own try only swallows psycopg.Error (a transient
+            # DB problem — safe to retry via the next matching run). This outer try is the
+            # backstop for everything else that can come out of that call: a non-DB bug in
+            # the recalc itself. Both layers are intentional — do not collapse into one.
+            # The match is already committed at this point; recalc is best-effort
+            # regardless of which layer catches the failure.
+            recalculate_for_work_sync(get_settings().database_url, work_id, recalc_repos)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manual_resolve_recalc_failed",
+                identity_id=str(identity_id),
+                work_id=work_id,
+                exc_info=True,
+            )
+
+    return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_MATCHED.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1101,9 +1061,9 @@ def take_off_the_not_an_artist_list(
     "/identities/{identity_id}/unmatch",
     response_model=ResolveResult,
 )
-async def unmatch_identity(
+def unmatch_identity(
     identity_id: UUID,
-    conn: DbConn,
+    repos: SongDecisions,
     _token: Token,
 ) -> ResolveResult:
     """Take a matched song's match away and park it.
@@ -1112,17 +1072,21 @@ async def unmatch_identity(
     artist. Mirrors the asymmetry in ``resolve_identity`` (no cascade).
     A matched song's file(s) are recorded as rejected (AUD-R022, D5).
     The song becomes manual_rejected until the next matching run (AUD-R029, spec 2026-10-13 R6).
+    A sync route on the request's one connection (C75).
 
     Raises:
         HTTPException: 404 if the identity does not exist.
         HTTPException: 409 if the identity is not auto_matched or manual_matched.
+        HTTPException: 503 if the database connection is lost.
     """
     try:
-        await unmatch_song(conn, identity_id)
+        unmatch_song(repos, identity_id)
     except IdentityNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SongNotRejectableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except StorageUnavailableError as lost:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "unavailable") from lost
     return ResolveResult(id=identity_id, match_status=MatchStatus.MANUAL_REJECTED.value)
 
 
