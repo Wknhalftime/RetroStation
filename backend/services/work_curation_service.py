@@ -44,6 +44,7 @@ from backend.repositories.work_curation import WorkCurationRepository
 from backend.repositories.works import WorkRepository
 from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.master_selection_service import score_file_row
+from backend.services.song_match_service import SongMatchService
 
 _NOTHING_MERGED = MergeResult(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
 
@@ -119,7 +120,7 @@ def _settle_left_work(work_id: str, repos: WorkCurationRepos) -> bool:
     if repos.files.get_by_work(work_id):
         _recalculate_master(work_id, repos)
         return False
-    repos.curation.release_work_matches(work_id)
+    SongMatchService(repos.matches).release_work(work_id)
     repos.song_masters.delete_by_work(work_id)
     repos.curation.delete_overrides_of_work(work_id)
     repos.curation.delete_recordings_of_work(work_id)
@@ -182,7 +183,7 @@ def merge_works(
     repos.curation.move_overrides_of_works(source_ids, target_id)
     repos.curation.move_version_states_of_works(source_ids, target_id)
     _consolidate_recordings(source_ids, target_id, repos)
-    repos.curation.move_matches_of_works(source_ids, target_id)
+    SongMatchService(repos.matches).follow_works(source_ids, target_id)
     repos.curation.delete_masters_of_works(source_ids)
     deleted = repos.curation.delete_works(source_ids)
     _recalculate_master(target_id, repos)
@@ -218,7 +219,7 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
         repos.curation.insert_recording(copy)
         repos.curation.set_file_recording(file_id, copy.id)
     repos.files.update_work_id(file_id, new_work_id)
-    repos.matches.move_to_work(file_id, new_work_id)
+    SongMatchService(repos.matches).follow_file(file_id, new_work_id)
     repos.matches.see_version_states(file_id, work_id, new_work_id)
     repos.curation.store_split_master(uuid4(), new_work_id, file_id)
     left_deleted = _settle_left_work(work_id, repos)
@@ -272,7 +273,7 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
     if file.recording_id is not None:
         _repoint_recording(file_id, file.recording_id, work_id, repos)
     repos.files.update_work_id(file_id, work_id)
-    repos.matches.move_to_work(file_id, work_id)
+    SongMatchService(repos.matches).follow_file(file_id, work_id)
     _recalculate_master(work_id, repos)
     left_deleted = False
     if file.work_id is not None:

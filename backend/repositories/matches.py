@@ -47,3 +47,16 @@ class MatchRepository(ABC):
         file, so it follows the file whenever the file changes work.
         """
         ...
+
+    # The works merge's and a left work's statements (moved from the curation port in phase
+    # 3a PR 1, D2: only SongMatchService writes matches).
+
+    @abstractmethod
+    def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
+        """Point every match at *work_ids*, as its target or its file's work, at *target_id*."""
+        ...
+
+    @abstractmethod
+    def release_work_matches(self, work_id: str) -> None:
+        """Point each match still on *work_id* at its file's current work (or none)."""
+        ...

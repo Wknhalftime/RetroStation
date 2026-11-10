@@ -111,6 +111,35 @@ class PgMatchRepository(MatchRepository):
             (work_id, str(file_id)),
         )
 
+    def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
+        src = ", ".join("%s" for _ in work_ids)
+        self._conn.execute(
+            f"""
+            UPDATE matches
+            SET target_id = %s
+            WHERE target_type = %s AND target_id IN ({src})
+            """,
+            [target_id, TargetType.WORK.value, *work_ids],
+        )
+        self._conn.execute(
+            f"UPDATE matches SET work_id = %s WHERE work_id IN ({src})",
+            [target_id, *work_ids],
+        )
+
+    def release_work_matches(self, work_id: str) -> None:
+        # matches.work_id is an FK without ON DELETE, so this must run before the work is
+        # deleted. A match without a file is left with a NULL work_id.
+        self._conn.execute(
+            """
+            UPDATE matches m
+            SET work_id = (
+                SELECT lf.work_id FROM library_files lf WHERE lf.id = m.library_file_id
+            )
+            WHERE m.work_id = %s
+            """,
+            (work_id,),
+        )
+
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
 

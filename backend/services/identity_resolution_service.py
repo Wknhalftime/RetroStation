@@ -1,42 +1,23 @@
-"""Manual identity-resolution writes + post-commit master-selection recalc.
+"""A curator's decision on one song, and the master recalculation after a manual match.
 
-Splits the work into two functions with distinct failure semantics:
+Resolve (a manual match), Reject and Unmatch write in the caller's transaction, on the
+request's one sync connection (``SongDecisionRepos``, phase 3a PR 1, C75): the song's row
+through ``SongDecisionRepository``, its matches through ``SongMatchService`` (C52). Anything
+raised aborts the whole decision; the route's ``SyncRepos`` rolls it back.
 
-- ``persist_manual_match`` runs INSIDE the caller's async transaction. It
-  derives ``work_id`` from the picked library file and inserts the match row.
-  Anything raised here aborts the whole resolve — the txn rolls back, no
-  partial state is left behind.
+``recalculate_for_work_sync`` runs AFTER the caller commits, on a connection supplied by its
+``repos_factory`` argument (mirrors ``identity_matching_task`` in
+``backend/tasks/identity_matching_tasks.py``, which builds its own). This recalc is a
+best-effort side effect for *database* failures only: a ``psycopg.Error`` (a constraint
+violation, etc.) or a repository's ``StorageUnavailableError`` (the connection dropping) is
+caught and logged here so the durable match write is never undone by a recalc problem.
+Anything else is a genuine defect, not an expected operational failure, so it propagates
+instead of being silently absorbed. The router additionally wraps the call in its own
+try/except, the backstop for exactly that.
 
-- ``recalculate_for_work_sync`` runs AFTER the caller commits, on a
-  connection supplied by its ``repos_factory`` argument (mirrors
-  ``identity_matching_task`` in ``backend/tasks/identity_matching_tasks.py``,
-  which builds its own).
-  This recalc is a best-effort side effect for *database* failures only:
-  a ``psycopg.Error`` (a constraint violation, etc.) or a repository's
-  ``StorageUnavailableError`` (the connection dropping) is caught and
-  logged here so the durable match write is never
-  undone by a recalc problem. Anything else — a bug in scoring, a bad
-  work_id, whatever — is a genuine defect, not an expected operational
-  failure, so it propagates instead of being silently absorbed. The router
-  additionally wraps the to_thread call in its own try/except, which is
-  the backstop for exactly that: non-DB errors from this function, plus
-  thread/cancellation boundary errors this function's try can't reach.
-
-This module builds no Pg adapters and never imports the database layer
-(AUD-054): ``recalculate_for_work_sync`` depends only on the repository
-ports in
-``backend.repositories``, bundled into ``RecalcRepos``. The concrete wiring
-— opening a sync connection and constructing the three Pg repositories —
-lives in ``backend.services.repository_factory.recalc_repos``, which the
-manual-resolve router passes in as ``repos_factory``. Every new collaborator
-the recalc needs means editing ``RecalcRepos`` and ``recalc_repos``, not this
-function's signature (same precedent as ``IdentityMatchingRepos``).
-
-This file deliberately avoids both ``match_repo`` and the pre-existing raw
-SQL in ``routers/matching.resolve_identity``: the manual-resolve endpoint
-already does its other writes via raw SQL on the async connection; matching
-that style here keeps a single, consistent failure surface for the manual
-branch. Refactoring the whole endpoint onto repositories is a separate PR.
+This module builds no Pg adapters and never imports the database layer (AUD-054): it depends
+only on the repository ports in ``backend.repositories``. The concrete wiring lives in
+``backend.services.repository_factory`` (``recalc_repos``, ``song_decision_repos``).
 """
 
 from __future__ import annotations
@@ -44,19 +25,19 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import psycopg
 import structlog
-from psycopg import AsyncConnection
 
-from backend.domain.enums import MatchStatus, MatchTier, ReasonCode, TargetType
+from backend.domain.enums import MatchStatus
 from backend.domain.system import StorageUnavailableError
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
+from backend.repositories.song_decisions import SongDecisionRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.services import master_selection_service
+from backend.services.song_match_service import SongMatchService
 
 logger = structlog.get_logger()
 
@@ -108,63 +89,47 @@ _MATCHED = (MatchStatus.AUTO_MATCHED.value, MatchStatus.MANUAL_MATCHED.value)
 _IN_REVIEW = (MatchStatus.PENDING.value, MatchStatus.NEEDS_REVIEW.value)
 
 
-async def _lock_song_status(conn: AsyncConnection[Any], identity_id: UUID) -> str:
-    cur = await conn.execute(
-        "SELECT match_status FROM track_identities WHERE id = %s FOR UPDATE", (identity_id,)
-    )
-    row = await cur.fetchone()
-    if row is None:
+@dataclass(frozen=True)
+class SongDecisionRepos:
+    """The ports a song's Resolve, Reject and Unmatch write through, and the request's commit,
+    all on the request's one sync connection (built by ``repository_factory.
+    song_decision_repos``; phase 3a PR 1, C75)."""
+
+    songs: SongDecisionRepository
+    files: LibraryFileRepository
+    song_matches: SongMatchService
+    commit: Callable[[], None]
+    """Commit now: a lost connection is the domain's ``StorageUnavailableError``."""
+
+
+def _lock_song_status(repos: SongDecisionRepos, identity_id: UUID) -> str:
+    status = repos.songs.lock_status(identity_id)
+    if status is None:
         raise IdentityNotFoundError(f"Identity {identity_id} not found")
-    return str(row["match_status"])
+    return status
 
 
-async def _matched_file_ids(conn: AsyncConnection[Any], identity_id: UUID) -> list[UUID]:
-    cur = await conn.execute(
-        """SELECT DISTINCT library_file_id FROM matches
-            WHERE identity_id = %s AND library_file_id IS NOT NULL""",
-        (identity_id,),
-    )
-    return [row["library_file_id"] for row in await cur.fetchall()]
-
-
-async def record_song_rejection(
-    conn: AsyncConnection[Any], identity_id: UUID, library_file_ids: Sequence[UUID]
+def record_song_rejection(
+    repos: SongDecisionRepos, identity_id: UUID, library_file_ids: Sequence[UUID]
 ) -> None:
     """Record rejected files and park the song, inside the caller's transaction.
 
     The one write behind both Reject and Unmatch (AUD-R022, D3/D5). The song becomes
     manual_rejected / USER_UNMATCHED and leaves review until the next matching run re-checks
-    it without these files (AUD-R029, spec 2026-10-13 R2, R6). The first statement locks the
-    row, so a worker's uncommitted match insert cannot survive the delete that follows.
+    it without these files (AUD-R029, spec 2026-10-13 R2, R6). Its caller locked the row
+    first, so a worker's uncommitted match insert cannot survive the delete that follows.
     """
-    await conn.execute(
-        """UPDATE track_identities
-              SET rejected_file_ids = COALESCE(
-                      (SELECT array_agg(DISTINCT x)
-                         FROM unnest(rejected_file_ids || %s::uuid[]) AS x),
-                      '{}'),
-                  match_status  = %s,
-                  match_tier    = NULL,
-                  reason_code   = %s,
-                  reason_detail = NULL
-            WHERE id = %s""",
-        (
-            list(library_file_ids),
-            MatchStatus.MANUAL_REJECTED.value,
-            ReasonCode.USER_UNMATCHED.value,
-            identity_id,
-        ),
-    )
-    await conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
+    repos.songs.park_rejected(identity_id, library_file_ids)
+    repos.song_matches.clear_song(identity_id)
 
 
-async def reject_song_suggestion(
-    conn: AsyncConnection[Any], identity_id: UUID, shown_file_id: UUID | None
+def reject_song_suggestion(
+    repos: SongDecisionRepos, identity_id: UUID, shown_file_id: UUID | None
 ) -> None:
     """Reject: a song in review rejects the suggestion shown; a matched song its matched file(s)."""
-    status = await _lock_song_status(conn, identity_id)
+    status = _lock_song_status(repos, identity_id)
     if status in _MATCHED:
-        files = await _matched_file_ids(conn, identity_id)
+        files = repos.songs.matched_file_ids(identity_id)
     elif status in _IN_REVIEW:
         if shown_file_id is None:
             raise SuggestionRequiredError("library_file_id (the suggestion shown) is required")
@@ -173,71 +138,50 @@ async def reject_song_suggestion(
         raise SongNotRejectableError(
             f"Identity {identity_id} is in {status!r}; it has no suggestion to reject"
         )
-    await record_song_rejection(conn, identity_id, files)
+    record_song_rejection(repos, identity_id, files)
 
 
-async def unmatch_song(conn: AsyncConnection[Any], identity_id: UUID) -> None:
+def unmatch_song(repos: SongDecisionRepos, identity_id: UUID) -> None:
     """Unmatch: a matched song is parked and its file(s) recorded as rejected (D5, R6)."""
-    status = await _lock_song_status(conn, identity_id)
+    status = _lock_song_status(repos, identity_id)
     if status not in _MATCHED:
         raise SongNotRejectableError(
             f"Identity {identity_id} is in {status!r}; only matched songs can be unmatched"
         )
-    await record_song_rejection(conn, identity_id, await _matched_file_ids(conn, identity_id))
+    record_song_rejection(repos, identity_id, repos.songs.matched_file_ids(identity_id))
 
 
-async def persist_manual_match(
-    conn: AsyncConnection[Any],
-    identity_id: UUID,
-    library_file_id: UUID,
+def match_song_by_hand(
+    repos: SongDecisionRepos, identity_id: UUID, library_file_id: UUID
 ) -> str | None:
-    """Insert the manual match row inside the caller's transaction.
+    """Resolve: the song is manual_matched, with the manual tier, to the picked file.
 
-    Returns the picked file's ``library_files.work_id`` (or ``None`` if it
-    is unset) so the caller can dispatch a post-commit master-selection
-    recalc. ``recording_id`` is intentionally NOT consulted as a fallback —
-    ``matches.work_id`` is FK to ``works(id)`` and a recording_id (which
-    lives in ``recordings(id)``) would fail the FK on insert. Migration
-    0011 already backfills ``library_files.work_id`` from
-    ``recordings.work_id`` at scan time, so a NULL here means the
-    underlying work is genuinely unknown.
-
-    The caller owns the surrounding ``UPDATE track_identities`` and
-    ``DELETE FROM matches WHERE identity_id = %s`` writes plus the commit.
+    Its row is written first, so a worker's uncommitted match is waited for and then
+    replaced. Returns the work to recalculate the master of (see ``persist_manual_match``).
     """
-    cur = await conn.execute(
-        "SELECT work_id FROM library_files WHERE id = %s",
-        (library_file_id,),
-    )
-    lf_row = await cur.fetchone()
+    if not repos.songs.exists(identity_id):
+        raise IdentityNotFoundError(f"Identity {identity_id} not found")
+    repos.songs.set_matched_by_hand(identity_id)
+    return persist_manual_match(repos, identity_id, library_file_id)
 
-    if lf_row is None:
+
+def persist_manual_match(
+    repos: SongDecisionRepos, identity_id: UUID, library_file_id: UUID
+) -> str | None:
+    """Replace the song's matches with the manual match, inside the caller's transaction.
+
+    Returns the picked file's ``library_files.work_id`` (or ``None`` if it is unset) so the
+    caller can dispatch a post-commit master-selection recalc. ``recording_id`` is
+    intentionally NOT consulted as a fallback: ``matches.work_id`` is FK to ``works(id)``
+    and a recording_id (which lives in ``recordings(id)``) would fail the FK on insert.
+    Migration 0011 already backfills ``library_files.work_id`` from ``recordings.work_id``
+    at scan time, so a NULL here means the underlying work is genuinely unknown.
+    """
+    picked = repos.files.get_by_id(library_file_id)
+    if picked is None:
         raise LibraryFileNotFoundError(f"library_file_id {library_file_id} does not exist")
-
-    # Only the file's real work_id — never recording_id as a stand-in.
-    # matches.work_id is FK to works(id); a recording_id would fail the
-    # FK on insert. Migration 0011 backfills library_files.work_id from
-    # recordings.work_id at scan time, so any recording-with-a-work has
-    # lib_file.work_id populated; a NULL here means the work is genuinely
-    # unknown and the post-commit recalc is correctly skipped.
-    derived_work_id: str | None = lf_row["work_id"] or None
-
-    await conn.execute(
-        """INSERT INTO matches
-               (id, identity_id, library_file_id, target_type, work_id,
-                confidence_score, match_tier)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (
-            uuid4(),
-            identity_id,
-            library_file_id,
-            TargetType.LIBRARY_FILE.value,
-            derived_work_id,
-            1.0,
-            MatchTier.MANUAL.value,
-        ),
-    )
-
+    derived_work_id: str | None = picked.work_id or None
+    repos.song_matches.match_by_hand(identity_id, library_file_id, derived_work_id)
     return derived_work_id
 
 
@@ -253,9 +197,9 @@ def recalculate_for_work_sync(
     for a lost connection, is caught and logged here so the already-committed
     manual match is not undone by a transient DB problem. Anything else
     propagates — see the module docstring. ``repos_factory`` opens its own
-    connection (the async endpoint connection has already been committed
-    and released by the time this runs in a worker thread) — in production
-    this is ``repository_factory.recalc_repos``.
+    connection (the route has already committed its own connection's
+    transaction by the time this runs) — in production this is
+    ``repository_factory.recalc_repos``.
     """
     try:
         with repos_factory(db_url) as repos:
@@ -268,12 +212,12 @@ def recalculate_for_work_sync(
             repos.commit()
     except (psycopg.Error, StorageUnavailableError):
         # Swallow-and-log: the durable write already committed in the
-        # endpoint's async txn, and a DB hiccup here (dropped connection,
+        # route's own transaction, and a DB hiccup here (dropped connection,
         # constraint violation, etc.) is exactly the transient/operational
         # failure this recalc is meant to tolerate. Master selection is
         # idempotent and will be retried whenever matching is re-run for
         # this work, so it is safe (and intentional) to absorb it here
-        # rather than re-raise into the worker thread. Anything that is
+        # rather than re-raise into the route. Anything that is
         # NOT a database error is a genuine defect (bad scoring logic, a bad
         # work_id, ...) and is deliberately left to propagate to the
         # router's outer catch instead of being masked here.

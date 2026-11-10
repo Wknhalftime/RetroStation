@@ -12,7 +12,7 @@ from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.db.repositories._version_entry_states import ON_CONFLICT_COMBINE
 from backend.domain.catalog import Recording, RecordingVersion
 from backend.domain.curation import CurationStorageError, FormatOverride, MasterCandidate
-from backend.domain.enums import TargetType, VersionType
+from backend.domain.enums import VersionType
 from backend.repositories.work_curation import WorkCurationRepository
 
 
@@ -116,21 +116,6 @@ class PgWorkCurationRepository(WorkCurationRepository):
             "UPDATE recordings SET work_id = %s WHERE id = %s", (work_id, recording_id)
         )
 
-    def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
-        src = _placeholders(work_ids)
-        self._conn.execute(
-            f"""
-            UPDATE matches
-            SET target_id = %s
-            WHERE target_type = %s AND target_id IN ({src})
-            """,
-            [target_id, TargetType.WORK.value, *work_ids],
-        )
-        self._conn.execute(
-            f"UPDATE matches SET work_id = %s WHERE work_id IN ({src})",
-            [target_id, *work_ids],
-        )
-
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         self._conn.execute(
             f"DELETE FROM song_masters WHERE work_id IN ({_placeholders(work_ids)})",
@@ -188,20 +173,6 @@ class PgWorkCurationRepository(WorkCurationRepository):
         )
 
     # --- a work a file left ----------------------------------------------------------------
-
-    def release_work_matches(self, work_id: str) -> None:
-        # matches.work_id is an FK without ON DELETE, so this must run before the work is
-        # deleted. A match without a file is left with a NULL work_id.
-        self._conn.execute(
-            """
-            UPDATE matches m
-            SET work_id = (
-                SELECT lf.work_id FROM library_files lf WHERE lf.id = m.library_file_id
-            )
-            WHERE m.work_id = %s
-            """,
-            (work_id,),
-        )
 
     def delete_overrides_of_work(self, work_id: str) -> None:
         self._conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (work_id,))
