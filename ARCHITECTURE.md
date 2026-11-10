@@ -552,9 +552,10 @@ returns the row it finds).
 - No summary table of its own: plays and stations come from `station_identity_plays` (below),
   so they count only plays in a station's playlists, and each line's first play is looked up
   through that line's own plays. Every query has an every-work and a scoped variant; the scoped
-  one reads only identities with a match on the works' files. On the 2026-11-09 copy (7.4M
-  plays) the page's query took 163 ms, down from 1.4 s reading `play_events` (Lance: "Rewrite +
-  rerun"). If it outgrows a second, the SPEC's fallback is an ingest-kept summary (a migration).
+  one reads only identities with a match on the works' files. On the 2026-11-09 gate copy (7.55M
+  plays) the page's query took 156 ms and the page 240 ms, down from 1.26 s and 1.29 s reading
+  `play_events` (Lance: "Rewrite + rerun"). If it outgrows a second, the SPEC's fallback is an
+  ingest-kept summary (a migration).
 - The checks are `tests/routers/test_work_versions.py` (AUD-R046) and
   `tests/routers/test_unmapped_versions.py` (AUD-R034).
 
