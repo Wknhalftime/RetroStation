@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
+from backend.db.repositories.version_entries import AsyncVersionEntryReader
 from backend.dependencies import (
     SyncRepos,
     get_current_token,
     get_db_connection,
     get_master_choice_repos,
+    get_version_entry_repos,
     get_work_curation_repos,
 )
 from backend.domain.curation import (
@@ -29,12 +31,18 @@ from backend.domain.curation import (
     MergeTargetInSourcesError,
     NewFormatOverride,
     SongMasterNotFoundError,
+    VersionArtistNotFoundError,
+    VersionTextMappedError,
+    VersionTextNotListedError,
     WorkCurationError,
 )
 from backend.domain.enums import FileStatus
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
+from backend.domain.version_pages import WorkVersion
+from backend.services import version_entry_service as versions_service
 from backend.services import work_curation_service as curation
 from backend.services.master_choice_service import MasterChoiceRepos, choose_master
+from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
 
 router = APIRouter()
@@ -46,6 +54,7 @@ DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
 ChoiceRepos = Annotated[MasterChoiceRepos, Depends(get_master_choice_repos)]
 CurationRepos = Annotated[WorkCurationRepos, Depends(get_work_curation_repos)]
+VersionRepos = Annotated[VersionEntryRepos, Depends(get_version_entry_repos)]
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +107,40 @@ class FormatOverrideInfo(BaseModel):
     created_at: datetime
 
 
+class VersionSuggestionInfo(BaseModel):
+    file_id: UUID
+    reason: str
+    track_title: str | None
+    file_path: str
+
+
+class WorkVersionInfo(BaseModel):
+    """One version text of the work's matched lines or entries (phase 2b S5)."""
+
+    version_text: str
+    version_type: str
+    reads_as_version: bool
+    state: str
+    mapped_file_id: UUID | None
+    plays: int
+    stations: list[str]
+    first_seen: date | None
+    first_station: str | None
+    new: bool
+    suggestion: VersionSuggestionInfo | None
+
+
+class MasterFlagInfo(BaseModel):
+    master_file_id: UUID
+    version_type: str
+    plain_file_ids: list[UUID]
+
+
+class WorkVersions(BaseModel):
+    versions: list[WorkVersionInfo]
+    master_flag: MasterFlagInfo | None
+
+
 class WorkDetail(BaseModel):
     id: str
     title: str
@@ -105,6 +148,17 @@ class WorkDetail(BaseModel):
     recordings: list[RecordingDetail]
     song_master: SongMasterInfo | None
     format_overrides: list[FormatOverrideInfo]
+    versions: list[WorkVersionInfo] = []
+    master_flag: MasterFlagInfo | None = None
+
+
+class MapVersionsRequest(BaseModel):
+    version_texts: list[str]
+    file_id: UUID
+
+
+class VersionTextsRequest(BaseModel):
+    version_texts: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +432,7 @@ async def _real_work_detail(conn: AsyncConnection[Any], work_id: str) -> WorkDet
     recordings = await _work_recordings(conn, work_id, work_row["title"])
     song_master = await _work_song_master(conn, work_id)
     format_overrides = await _work_format_overrides(conn, work_id)
+    versions = await _work_versions(conn, work_id)
 
     return WorkDetail(
         id=work_row["id"],
@@ -386,6 +441,46 @@ async def _real_work_detail(conn: AsyncConnection[Any], work_id: str) -> WorkDet
         recordings=recordings,
         song_master=song_master,
         format_overrides=format_overrides,
+        versions=versions.versions,
+        master_flag=versions.master_flag,
+    )
+
+
+def version_info(version: WorkVersion) -> WorkVersionInfo:
+    suggestion = version.suggestion
+    return WorkVersionInfo(
+        version_text=version.version_text,
+        version_type=version.version_type.value,
+        reads_as_version=version.reads_as_version,
+        state=version.state.value,
+        mapped_file_id=version.mapped_file_id,
+        plays=version.plays,
+        stations=list(version.stations),
+        first_seen=version.first_seen,
+        first_station=version.first_station,
+        new=version.new,
+        suggestion=None
+        if suggestion is None
+        else VersionSuggestionInfo(
+            file_id=suggestion.file_id,
+            reason=suggestion.reason.value,
+            track_title=suggestion.track_title,
+            file_path=suggestion.file_path,
+        ),
+    )
+
+
+async def _work_versions(conn: AsyncConnection[Any], work_id: str) -> WorkVersions:
+    versions, flag = await versions_service.work_versions(AsyncVersionEntryReader(conn), work_id)
+    return WorkVersions(
+        versions=[version_info(v) for v in versions],
+        master_flag=None
+        if flag is None
+        else MasterFlagInfo(
+            master_file_id=flag.master_file_id,
+            version_type=flag.version_type.value,
+            plain_file_ids=list(flag.plain_file_ids),
+        ),
     )
 
 
@@ -455,6 +550,19 @@ async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDeta
     return await _synthetic_work_detail(conn, work_id, artist_id, track_title)
 
 
+@router.get("/works/{work_id}/versions", response_model=WorkVersions)
+async def get_work_versions(work_id: str, conn: DbConn, _token: Token) -> WorkVersions:
+    """The version texts of the work's matched lines and entries, and the master flag (S5)."""
+    if decode_synthetic_work_id(work_id) is not None:
+        return WorkVersions(versions=[], master_flag=None)
+    cur = await conn.execute("SELECT 1 FROM works WHERE id = %s", (work_id,))
+    if await cur.fetchone() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Work {work_id} not found"
+        )
+    return await _work_versions(conn, work_id)
+
+
 # ---------------------------------------------------------------------------
 # Routes — writes: sync routes on the request's one connection (SyncRepos, C75), each
 # calling work_curation_service (or master_choice_service); a refusal's detail is the
@@ -471,6 +579,9 @@ _REFUSAL_STATUS: dict[type[WorkCurationError], int] = {
     CurationFileMissingError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     FileAlreadyOnWorkError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     MergeTargetInSourcesError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    VersionTextNotListedError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    VersionTextMappedError: status.HTTP_409_CONFLICT,
+    VersionArtistNotFoundError: status.HTTP_404_NOT_FOUND,
 }
 _REFUSALS = tuple(_REFUSAL_STATUS)
 
@@ -553,6 +664,39 @@ def delete_format_override(
     """Delete a format override by ID."""
     try:
         curation.delete_format_override(work_id, override_id, repos.format_overrides)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+
+
+@router.post("/works/{work_id}/version-entries", status_code=status.HTTP_204_NO_CONTENT)
+def map_work_versions(
+    _token: Token, work_id: str, body: MapVersionsRequest, repos: VersionRepos
+) -> None:
+    """Map one or more version texts to a present file of the work (S5, E3, E5)."""
+    try:
+        versions_service.map_versions(work_id, body.version_texts, body.file_id, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+
+
+@router.delete("/works/{work_id}/version-entries", status_code=status.HTTP_204_NO_CONTENT)
+def unmap_work_versions(
+    _token: Token, work_id: str, body: VersionTextsRequest, repos: VersionRepos
+) -> None:
+    """Unmap version texts; their states stay (S5)."""
+    try:
+        versions_service.unmap_versions(work_id, body.version_texts, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+
+
+@router.post("/works/{work_id}/versions/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+def dismiss_work_versions(
+    _token: Token, work_id: str, body: VersionTextsRequest, repos: VersionRepos
+) -> None:
+    """Dismiss version texts: the master is fine (S5)."""
+    try:
+        versions_service.dismiss_versions(work_id, body.version_texts, repos)
     except _REFUSALS as refused:
         raise _refused(refused) from refused
 

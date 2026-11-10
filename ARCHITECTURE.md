@@ -526,6 +526,39 @@ returns the row it finds).
   `tests/integration/test_view_version_order_pg.py`, beside the locked
   `tests/integration/test_play_file_resolution.py`.
 
+## Version pages: Map, Dismiss, the new-version marker (phase 2b PR 3, C62, C64, C66)
+
+- A work's version texts are those on its matched lines (the view's rule above: the best
+  match's file's own work, else its recording's) plus the texts of its version entries, so an
+  entry left behind by D1 is listed as mapped with 0 plays. `db/repositories/version_entries.py`
+  reads them with their plays, stations, first play and state in one query; the pure rules are
+  in `domain/version_pages.py` and the writes in `services/version_entry_service.py`.
+- Each text is read by the log-side reader. Title words and originals (UNKNOWN, ORIGINAL) are
+  not versions: they are listed under "Title words" on the work page, can be mapped, are never
+  new and never on the Unmapped versions page.
+- State is mapped (an entry), else dismissed (a `version_entry_states` row), else unmapped.
+  **New** (S8, D2) is an unmapped version with no state row, or with a copy (a present file of
+  the work whose recording's `version_type` is the reading) indexed after the row's `seen_at`.
+  Map writes the entry and marks the text seen now; Unmap deletes the entry and keeps the state;
+  Dismiss refuses a mapped text (409) and marks it dismissed and seen now.
+- Suggestions (S11) are read, never written (C64, AUD-R046): the one copy the text's lines are
+  matched to, else the work's one copy. Only Map, on Lance's press, writes an entry. The master
+  flag (S12, C66) is a flag too: the master's title reads live, acoustic, demo, remix or
+  extended and the work holds a plain copy.
+- Counts: the Unmapped versions page (`/library/versions`, by plays, paged at 50) answers its
+  total and new total for the Library Status card; the artist list's `new_version_count` sums
+  the group's works on the group primary (D5). Dismiss all on that page takes every listed
+  text; on an artist page, only the group's new ones (question D).
+- No summary table of its own: plays and stations come from `station_identity_plays` (below),
+  so they count only plays in a station's playlists, and each line's first play is looked up
+  through that line's own plays. Every query has an every-work and a scoped variant; the scoped
+  one reads only identities with a match on the works' files. On the 2026-11-09 gate copy (7.55M
+  plays) the page's query took 156 ms and the page 240 ms, down from 1.26 s and 1.29 s reading
+  `play_events` (Lance: "Rewrite + rerun"). If it outgrows a second, the SPEC's fallback is an
+  ingest-kept summary (a migration).
+- The checks are `tests/routers/test_work_versions.py` (AUD-R046) and
+  `tests/routers/test_unmapped_versions.py` (AUD-R034).
+
 ## Song matches: one writer (phase 3a, C52, C75, AUD-R074)
 
 - `SongMatchService` (`services/song_match_service.py`) is the only code that calls the matches
@@ -562,7 +595,8 @@ returns the row it finds).
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
   station, identity). Triggers on `play_events` (insert / delete / update / truncate) and on
   `playlists` (delete, station change) keep it equal, so no service writes it and no task
-  reconciles it. The station missing-matches report reads it instead of scanning every play.
+  reconciles it. The station missing-matches report and the version pages (above) read it
+  instead of scanning every play.
 - It is not a work list: no task reads it, so it is not in the status-column table below.
 - The check is `tests/integration/test_station_identity_plays_pg.py`, which compares it with
   the count after every kind of write. This is the only trigger-maintained table; a second one

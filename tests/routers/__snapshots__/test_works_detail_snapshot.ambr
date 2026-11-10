@@ -19,6 +19,7 @@
       }),
     ]),
     'id': 'w-snapshot-rich',
+    'master_flag': None,
     'recordings': list([
       dict({
         'duration_ms': None,
@@ -89,6 +90,8 @@
       'updated_at': '<TIMESTAMP>',
     }),
     'title': 'Snapshot Work',
+    'versions': list([
+    ]),
   })
 # ---
 # name: test_synthetic_work_detail_snapshot
@@ -97,6 +100,7 @@
     'format_overrides': list([
     ]),
     'id': 'syn_YS1zbmFwc2hvdC1zeW50aGV0aWM6U25hcHNob3QgU3ludGhldGljIFRyYWNr',
+    'master_flag': None,
     'recordings': list([
       dict({
         'duration_ms': 456000,
@@ -121,5 +125,7 @@
     ]),
     'song_master': None,
     'title': 'Snapshot Synthetic Track',
+    'versions': list([
+    ]),
   })
 # ---

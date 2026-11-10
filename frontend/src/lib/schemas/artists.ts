@@ -9,6 +9,7 @@ export const ArtistSummarySchema = z.object({
   file_count: z.number(),
   mbid: z.string().nullable().default(null),
   origin: z.enum(["local", "musicbrainz"]).default("local"),
+  new_version_count: z.number().optional(),
 });
 
 export const PaginatedArtistsSchema = z.object({
@@ -22,6 +23,7 @@ export const WorkSummarySchema = z.object({
   recording_count: z.number(),
   has_master: z.boolean(),
   version_types: z.array(z.string()).default([]),
+  new_version_count: z.number().optional(),
 });
 
 // An artist merged into a primary's group (phase 2a S11); primary_id is the one it was merged
@@ -43,6 +45,7 @@ export const ArtistDetailSchema = z.object({
   origin: z.enum(["local", "musicbrainz"]).default("local"),
   merged_into: z.string().nullable().default(null),
   members: z.array(MergedMemberSchema).default([]),
+  new_version_count: z.number().optional(),
 });
 
 export type ArtistSummary = z.infer<typeof ArtistSummarySchema>;

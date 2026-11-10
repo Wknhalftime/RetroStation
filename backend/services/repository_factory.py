@@ -46,6 +46,7 @@ from backend.db.repositories.stream_cues import PgStreamCueRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
+from backend.db.repositories.version_entries import PgVersionEntryRepository
 from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
@@ -214,6 +215,7 @@ class RepositoryFactory:
         self.artist_credit_files = PgArtistCreditFilesRepository(conn)
         self.artist_names = PgArtistNameRepository(conn)
         self.artist_merges = PgArtistMergeRepository(conn)
+        self.version_entries = PgVersionEntryRepository(conn)
         self.song_decisions = PgSongDecisionRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders

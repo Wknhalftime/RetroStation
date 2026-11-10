@@ -40,6 +40,11 @@ dismissal on one song never hides a text on another:
   dismissal, or none, seen at the later time;
 - the old work keeps all of its own; a deleted work's states go with it.
 
+A line is matched to a file by the view's rule: auto or manual matched, and the file is its best
+match with a file. A line whose best match is another file, or whose match on the file awaits
+review, brings no state (``::test_split_brings_no_state_from_a_line_matched_elsewhere``,
+``::test_reassign_brings_no_state_from_a_line_not_matched``).
+
 E1, missing: an entry whose file goes missing stays, and its lines report the unavailable file
 without falling back, as the view does for format overrides and masters.
 """
@@ -640,6 +645,46 @@ def test_move_file_to_work(conn: Conn) -> None:
     assert states_of(conn, work) == {"live": (SEEN, T0), "acoustic": (SEEN, T1)}
     assert states_of(conn, lone) == {"demo": (DISMISSED, T0)}
     assert states_of(conn, target) == {"acoustic": (DISMISSED, T1), "demo": (SEEN, T0)}
+
+
+def test_split_brings_no_state_from_a_line_matched_elsewhere(conn: Conn) -> None:
+    """The matched-line rule: a line with a weaker match on the split file, its best match on the
+    master, brings the new work no state; a line whose best match is the split file does."""
+    work, master = mastered_work(conn)
+    leaving = file_on(conn, work)
+    state(conn, work, "live", SEEN, T0)
+    state(conn, work, "demo", SEEN, T1)
+    weaker = seed.identity(conn, title="Black (Live)")
+    seed.match(conn, weaker, master, confidence=0.9)
+    seed.match(conn, weaker, leaving, confidence=0.5)
+    seed.play(conn, seed.playlist(conn, seed.station(conn)), weaker, at("08:00"))
+    line(conn, "Black (Demo)", leaving)
+
+    split = curation.split_file_off(work, leaving, curation_repos(conn))
+
+    assert states_of(conn, split.new_work_id) == {"demo": (SEEN, T1)}
+    assert states_of(conn, work) == {"live": (SEEN, T0), "demo": (SEEN, T1)}
+
+
+def test_reassign_brings_no_state_from_a_line_not_matched(conn: Conn) -> None:
+    """The matched-line rule: a line whose match on the reassigned file awaits review (a
+    suggestion) brings the target no state; an auto or a manual match does."""
+    work, _ = mastered_work(conn)
+    leaving = file_on(conn, work)
+    state(conn, work, "demo", SEEN, T0)
+    state(conn, work, "live", SEEN, T1)
+    state(conn, work, "acoustic", SEEN, T2)
+    suggested = seed.identity(conn, title="Black (Demo)", status="needs_review")
+    seed.match(conn, suggested, leaving)
+    seed.play(conn, seed.playlist(conn, seed.station(conn)), suggested, at("08:00"))
+    line(conn, "Black (Live)", leaving)
+    manual = seed.identity(conn, title="Black (Acoustic)", status="manual_matched")
+    seed.match(conn, manual, leaving)
+    target, _ = mastered_work(conn)
+
+    curation.reassign_file(leaving, target, curation_repos(conn))
+
+    assert states_of(conn, target) == {"live": (SEEN, T1), "acoustic": (SEEN, T2)}
 
 
 # --- D3: delete_if_empty --------------------------------------------------------------------------
