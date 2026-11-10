@@ -4,6 +4,13 @@ with their plays and states (versions phase 2b PR 3, SPEC S5, S7, S8; design C60
 A matched line is the air-play view's: auto or manual matched, its best match with a file
 (highest confidence, then created_at, id), that file's own work, else its recording's. The SQL is
 shared by the sync repository (the writes, Dismiss all) and the async reader (the read routes).
+
+Plays, stations and the first play count only plays in a station's playlists: the counts come
+from ``station_identity_plays`` (migration 0040, kept by triggers), which counts a play under its
+playlist's station, so a play in a playlist with no station is not counted. The dev database had
+none on 2026-11-09 (Lance's "Rewrite + rerun": reading 7.4M play_events made the Unmapped
+versions page take 1.4 s). Each query comes in two variants, every work and a scoped one, so a
+prepared generic plan never keeps an "every work OR" branch and loses the work filter.
 """
 
 from __future__ import annotations
@@ -21,7 +28,6 @@ from backend.domain.curation import CurationStorageError
 from backend.domain.version_pages import VersionEntryRow, WorkFile
 from backend.repositories.version_entries import VersionEntryRepository
 
-# %(all)s: every work; else %(works)s, an array of work ids.
 _LINE_WORKS = """
     SELECT ti.id AS identity_id, ti.version_text, best.library_file_id AS file_id,
            COALESCE(lf.work_id, r.work_id) AS work_id
@@ -34,36 +40,58 @@ _LINE_WORKS = """
       JOIN library_files lf ON lf.id = best.library_file_id
       LEFT JOIN recordings r ON r.id = lf.recording_id
      WHERE ti.version_text IS NOT NULL
-       AND ti.match_status IN ('auto_matched', 'manual_matched')
-       AND (%(all)s OR COALESCE(lf.work_id, r.work_id) = ANY(%(works)s))"""
+       AND ti.match_status IN ('auto_matched', 'manual_matched')"""
 
-_ENTRY_ROWS = f"""
-WITH lines AS ({_LINE_WORKS}),
+# The scoped variant: %(works)s, an array of work ids. A line's best match is on a file of the
+# work (by the file's work or its recording's), so it has some match there: only those
+# identities are read, then the view's rule picks the lines that are on the works.
+_IN_WORKS = """
+       AND ti.id IN (
+           SELECT m.identity_id FROM matches m
+             JOIN library_files f ON f.id = m.library_file_id
+            WHERE f.work_id = ANY(%(works)s)
+           UNION
+           SELECT m.identity_id FROM matches m
+             JOIN library_files f ON f.id = m.library_file_id
+             JOIN recordings rr ON rr.id = f.recording_id
+            WHERE rr.work_id = ANY(%(works)s))
+       AND COALESCE(lf.work_id, r.work_id) = ANY(%(works)s)"""
+
+
+def _entry_rows_sql(lines: str, entries_on: str) -> str:
+    return f"""
+WITH lines AS MATERIALIZED ({lines}),
 keys AS (
     SELECT work_id, version_text FROM lines WHERE work_id IS NOT NULL
     UNION
     SELECT work_id, version_text FROM format_overrides
-     WHERE version_text IS NOT NULL AND (%(all)s OR work_id = ANY(%(works)s))
+     WHERE version_text IS NOT NULL {entries_on}
 ),
 plays AS (
-    SELECT l.work_id, l.version_text, count(pe.id) AS plays,
+    SELECT l.work_id, l.version_text, COALESCE(sum(sip.play_count), 0) AS plays,
            array_agg(DISTINCT s.call_letters ORDER BY s.call_letters)
                FILTER (WHERE s.call_letters IS NOT NULL) AS stations
       FROM lines l
-      LEFT JOIN play_events pe ON pe.identity_id = l.identity_id
-      LEFT JOIN playlists p ON p.id = pe.playlist_id
-      LEFT JOIN stations s ON s.id = p.station_id
+      LEFT JOIN station_identity_plays sip ON sip.identity_id = l.identity_id
+      LEFT JOIN stations s ON s.id = sip.station_id
      GROUP BY l.work_id, l.version_text
 ),
 firsts AS (
+    -- Each line's first play, looked up through the line's own plays (play_events by
+    -- identity), then the earliest of the text's lines.
     SELECT DISTINCT ON (l.work_id, l.version_text)
            l.work_id, l.version_text,
-           (pe.played_at AT TIME ZONE 'UTC')::date AS first_seen, s.call_letters AS first_station
+           (f.played_at AT TIME ZONE 'UTC')::date AS first_seen, f.call_letters AS first_station
       FROM lines l
-      JOIN play_events pe ON pe.identity_id = l.identity_id
-      LEFT JOIN playlists p ON p.id = pe.playlist_id
-      LEFT JOIN stations s ON s.id = p.station_id
-     ORDER BY l.work_id, l.version_text, pe.played_at, s.call_letters
+     CROSS JOIN LATERAL (
+           SELECT pe.played_at, s.call_letters
+             FROM play_events pe
+             JOIN playlists p ON p.id = pe.playlist_id
+             JOIN stations s ON s.id = p.station_id
+            WHERE pe.identity_id = l.identity_id
+            ORDER BY pe.played_at, s.call_letters
+            LIMIT 1) f
+     ORDER BY l.work_id, l.version_text, f.played_at, f.call_letters
 )
 SELECT k.work_id, k.version_text, COALESCE(pl.plays, 0) AS plays, pl.stations,
        f.first_seen, f.first_station, fo.preferred_file_id AS mapped_file_id,
@@ -75,9 +103,17 @@ SELECT k.work_id, k.version_text, COALESCE(pl.plays, 0) AS plays, pl.stations,
   LEFT JOIN version_entry_states st
          ON st.work_id = k.work_id AND st.version_text = k.version_text"""
 
-_LINE_FILES = f"""
-SELECT DISTINCT work_id, version_text, file_id FROM ({_LINE_WORKS}) lines
+
+def _line_files_sql(lines: str) -> str:
+    return f"""
+SELECT DISTINCT work_id, version_text, file_id FROM ({lines}) lines
  WHERE work_id IS NOT NULL"""
+
+
+_ENTRY_ROWS_ALL = _entry_rows_sql(_LINE_WORKS, "")
+_ENTRY_ROWS_IN = _entry_rows_sql(_LINE_WORKS + _IN_WORKS, "AND work_id = ANY(%(works)s)")
+_LINE_FILES_ALL = _line_files_sql(_LINE_WORKS)
+_LINE_FILES_IN = _line_files_sql(_LINE_WORKS + _IN_WORKS)
 
 _WORK_FILES = """
 SELECT lf.work_id, lf.id AS file_id, r.version_type, lf.indexed_at, lf.track_title, lf.file_path
@@ -122,8 +158,20 @@ SELECT w, t, 'dismissed', now() FROM unnest(%(works)s::text[], %(texts)s::text[]
 ON CONFLICT (work_id, version_text) DO UPDATE SET state = 'dismissed', seen_at = now()"""
 
 
-def _scope(work_ids: list[str] | None) -> dict[str, Any]:
-    return {"all": work_ids is None, "works": work_ids or []}
+Query = tuple[str, dict[str, Any] | None]
+
+
+def _entry_rows_query(work_ids: list[str] | None) -> Query:
+    """Every work's rows (None), or those of *work_ids*."""
+    if work_ids is None:
+        return _ENTRY_ROWS_ALL, None
+    return _ENTRY_ROWS_IN, {"works": work_ids}
+
+
+def _line_files_query(work_ids: list[str] | None) -> Query:
+    if work_ids is None:
+        return _LINE_FILES_ALL, None
+    return _LINE_FILES_IN, {"works": work_ids}
 
 
 def _entry_row(row: dict[str, Any]) -> VersionEntryRow:
@@ -170,11 +218,11 @@ class PgVersionEntryRepository(VersionEntryRepository):
         self._conn = conn
 
     def entry_rows(self, work_ids: list[str] | None) -> list[VersionEntryRow]:
-        rows = self._conn.execute(_ENTRY_ROWS, _scope(work_ids)).fetchall()
+        rows = self._conn.execute(*_entry_rows_query(work_ids)).fetchall()
         return [_entry_row(row) for row in rows]
 
     def line_files(self, work_ids: list[str] | None) -> dict[tuple[str, str], frozenset[UUID]]:
-        return _line_files(self._conn.execute(_LINE_FILES, _scope(work_ids)).fetchall())
+        return _line_files(self._conn.execute(*_line_files_query(work_ids)).fetchall())
 
     def work_files(self, work_ids: list[str]) -> dict[str, list[WorkFile]]:
         return _work_files(self._conn.execute(_WORK_FILES, {"works": work_ids}).fetchall())
@@ -206,13 +254,13 @@ class AsyncVersionEntryReader:
         self._conn = conn
 
     async def entry_rows(self, work_ids: list[str] | None) -> list[VersionEntryRow]:
-        cur = await self._conn.execute(_ENTRY_ROWS, _scope(work_ids))
+        cur = await self._conn.execute(*_entry_rows_query(work_ids))
         return [_entry_row(row) for row in await cur.fetchall()]
 
     async def line_files(
         self, work_ids: list[str] | None
     ) -> dict[tuple[str, str], frozenset[UUID]]:
-        cur = await self._conn.execute(_LINE_FILES, _scope(work_ids))
+        cur = await self._conn.execute(*_line_files_query(work_ids))
         return _line_files(await cur.fetchall())
 
     async def work_files(self, work_ids: list[str]) -> dict[str, list[WorkFile]]:

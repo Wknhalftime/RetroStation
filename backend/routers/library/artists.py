@@ -174,8 +174,7 @@ async def list_artists(
             a.mbid,
             a.origin,
             COUNT(DISTINCT w.id)  AS work_count,
-            COUNT(DISTINCT lf.id) AS file_count,
-            array_agg(DISTINCT w.id) FILTER (WHERE w.id IS NOT NULL) AS work_ids
+            COUNT(DISTINCT lf.id) AS file_count
         FROM artists a
         LEFT JOIN (
             -- each work under the root of its artist's group: the artist itself, unmerged
@@ -194,8 +193,10 @@ async def list_artists(
     items_cur = await conn.execute(items_sql, items_params)
     rows = await items_cur.fetchall()
 
-    work_ids = sorted({w for row in rows for w in (row["work_ids"] or [])})
-    counts = await new_counts(AsyncVersionEntryReader(conn), work_ids)
+    page_works = await _page_work_ids(conn, [str(row["id"]) for row in rows])
+    counts = await new_counts(
+        AsyncVersionEntryReader(conn), sorted({w for ws in page_works.values() for w in ws})
+    )
     items = [
         ArtistSummary(
             id=row["id"],
@@ -206,11 +207,37 @@ async def list_artists(
             file_count=row["file_count"],
             mbid=row.get("mbid"),
             origin=row.get("origin", "local"),
-            new_version_count=sum(counts.get(w, 0) for w in row["work_ids"] or []),
+            new_version_count=sum(counts.get(w, 0) for w in page_works.get(str(row["id"]), [])),
         )
         for row in rows
     ]
     return PaginatedArtists(items=items, total=total)
+
+
+# The works of a page of listed artists, each under the root of its artist's group (the list's
+# own rule): read by works.artist_id for the page's artists and their merged members only.
+_PAGE_WORKS_SQL = f"""
+    WITH RECURSIVE {MERGE_ROOTS_CTE}
+    SELECT COALESCE(r.primary_id, w.artist_id) AS root_id, w.id
+      FROM works w
+      LEFT JOIN merge_roots r ON r.artist_id = w.artist_id
+     WHERE (w.artist_id = ANY(%(ids)s)
+            OR w.artist_id IN (SELECT m.artist_id FROM merge_roots m
+                                WHERE m.primary_id = ANY(%(ids)s)))
+       AND COALESCE(r.primary_id, w.artist_id) = ANY(%(ids)s)
+"""
+
+
+async def _page_work_ids(conn: AsyncConnection[Any], artist_ids: list[str]) -> dict[str, list[str]]:
+    """New-version counts (D5) need each listed artist's works; read for the page only, so the
+    list's own query keeps its two counts."""
+    if not artist_ids:
+        return {}
+    cur = await conn.execute(_PAGE_WORKS_SQL, {"ids": artist_ids})
+    found: dict[str, list[str]] = {}
+    for row in await cur.fetchall():
+        found.setdefault(str(row["root_id"]), []).append(str(row["id"]))
+    return found
 
 
 _GROUP_WORKS_SQL = """

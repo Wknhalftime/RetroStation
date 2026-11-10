@@ -548,8 +548,12 @@ returns the row it finds).
   total and new total for the Library Status card; the artist list's `new_version_count` sums
   the group's works on the group primary (D5). Dismiss all on that page takes every listed
   text; on an artist page, only the group's new ones (question D).
-- The page reads every matched line with a version text on each request: no summary table. If
-  it outgrows a second, the SPEC's fallback is an ingest-kept summary (a migration).
+- No summary table of its own: plays and stations come from `station_identity_plays` (below),
+  so they count only plays in a station's playlists, and each line's first play is looked up
+  through that line's own plays. Every query has an every-work and a scoped variant; the scoped
+  one reads only identities with a match on the works' files. On the 2026-11-09 copy (7.4M
+  plays) the page's query took 163 ms, down from 1.4 s reading `play_events` (Lance: "Rewrite +
+  rerun"). If it outgrows a second, the SPEC's fallback is an ingest-kept summary (a migration).
 - The checks are `tests/routers/test_work_versions.py` (AUD-R046) and
   `tests/routers/test_unmapped_versions.py` (AUD-R034).
 
@@ -558,7 +562,8 @@ returns the row it finds).
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
   station, identity). Triggers on `play_events` (insert / delete / update / truncate) and on
   `playlists` (delete, station change) keep it equal, so no service writes it and no task
-  reconciles it. The station missing-matches report reads it instead of scanning every play.
+  reconciles it. The station missing-matches report and the version pages (above) read it
+  instead of scanning every play.
 - It is not a work list: no task reads it, so it is not in the status-column table below.
 - The check is `tests/integration/test_station_identity_plays_pg.py`, which compares it with
   the count after every kind of write. This is the only trigger-maintained table; a second one
