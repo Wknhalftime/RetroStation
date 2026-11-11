@@ -46,9 +46,16 @@ from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.missing_files import MissingFileListingRepository
+from backend.repositories.performances import PerformanceRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
+from backend.services.performance_service import (
+    leave,
+    move_out,
+    repick_stranded,
+    settle,
+)
 from backend.services.song_match_service import SongMatchService
 
 # A remaster or an edit on the same release differs by more than this.
@@ -251,6 +258,8 @@ class ReconciliationRepos:
     works: WorkRepository
     song_masters: SongMasterRepository
     format_overrides: FormatOverrideRepository
+    # Phase 3a (S3, S5): the files' performances; None skips them.
+    performances: PerformanceRepository | None = None
 
 
 def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -> bool:
@@ -269,7 +278,20 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     if not repos.files.lock_fold_pair(move.missing_id, move.successor_id):
         return False
     _carry_line_states(move, repos)
+    performances = repos.performances
+    left = (
+        {}
+        if performances is None
+        else leave([move.missing_id], performances, survivor=move.successor_id)
+    )
     repos.files.merge_into(move.missing_id, move.successor_id)
+    if performances is not None:
+        settle(
+            left,
+            performances,
+            SongMatchService(repos.matches),
+            survivors={move.missing_id: move.successor_id},
+        )
     settle_fold_across_works(move.successor_id, move.missing_work_id, move.successor_work_id, repos)
     return True
 
@@ -321,6 +343,8 @@ def repick_stranded_masters(repos: ReconciliationRepos) -> int:
     work_ids = repos.song_masters.list_work_ids_with_missing_master()
     for work_id in work_ids:
         reselect_master_from_files(work_id, repos.song_masters, repos.files)
+    if repos.performances is not None:
+        repick_stranded(repos.performances)
     return len(work_ids)
 
 
@@ -375,8 +399,11 @@ def _delete_missing_row(
         return None
     released = _release_matches(row.id, repos.matches, identities)
     _detach_curation(row.id, repos)
+    left = move_out([row.id], repos.performances)
     if not repos.files.delete_missing(row.id):
         raise MissingFileChangedError(f"library file {row.id} is no longer missing")
+    if repos.performances is not None:
+        settle(left, repos.performances, SongMatchService(repos.matches))
     if row.work_id is not None:
         repos.works.delete_if_empty(row.work_id)
     return released

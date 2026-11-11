@@ -49,7 +49,9 @@ from backend.services.missing_file_reconciliation_service import (
     purge_unmatched_missing,
     repick_stranded_masters,
 )
+from backend.services.performance_service import reassign_retagged
 from backend.services.repository_factory import RepositoryFactory, reconciliation_repos
+from backend.services.song_match_service import SongMatchService
 from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
@@ -197,6 +199,18 @@ def purge_counts(result: MissingFilePurge) -> dict[str, int]:
 def _purge_details(progress: dict[str, object]) -> dict[str, object]:
     """The purge counts a scan's final progress carries, for its scan_completed log."""
     return {key: progress[key] for key in PURGE_COUNT_KEYS if key in progress}
+
+
+def _reassign_retagged(
+    written_files: list[LibraryFile], indexed_before: set[str], repos: RepositoryFactory
+) -> int:
+    """Phase 3a D6: a stored file the scan re-read whose tags no longer fit its performance is
+    placed again in its work. Files first indexed now were placed by grouping."""
+    paths = [lf.file_path for lf in written_files if lf.file_path in indexed_before]
+    moved = reassign_retagged(paths, repos.performances, SongMatchService(repos.matches))
+    if moved:
+        logger.info("scan_performances_reassigned", files=moved)
+    return moved
 
 
 def _row_to_group(
@@ -383,7 +397,13 @@ def _run_scan(
                 song_master_repo=repos.song_masters,
             )
             if result:
-                place_ungrouped_file(row.id, result.work_id, repos.library_files, repos.matches)
+                place_ungrouped_file(
+                    row.id,
+                    result.work_id,
+                    repos.library_files,
+                    repos.matches,
+                    repos.performances,
+                )
                 if result.recording_id:
                     repos.library_files.update_recording_link(
                         row.id,
@@ -415,6 +435,8 @@ def _run_scan(
         library_conn.commit()
     if grouped > 0:
         logger.info("scan_grouping_complete", grouped=grouped, total=len(written_files))
+    if _reassign_retagged(written_files, indexed_before, repos):
+        library_conn.commit()
 
     # Successors need their work (grouping above) before rows fold into them.
     if reconcile_missing_after_scan(library_conn, repos) is not None:

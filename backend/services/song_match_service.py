@@ -63,3 +63,11 @@ class SongMatchService:
     def release_work(self, work_id: str) -> None:
         """Point each match still on *work_id* at its file's current work (or none)."""
         self._matches.release_work_matches(work_id)
+
+    def hand_off_performance(self, match_ids: list[UUID], performance_id: UUID) -> None:
+        """The lines store *performance_id* instead (phase 3a, E3, D5)."""
+        self._matches.set_stored_performance(match_ids, performance_id)
+
+    def release_performance(self, match_ids: list[UUID]) -> None:
+        """The lines store no performance: they follow the work's default (E3, D5)."""
+        self._matches.set_stored_performance(match_ids, None)

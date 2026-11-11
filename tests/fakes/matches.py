@@ -12,6 +12,8 @@ class FakeMatchRepository(MatchRepository):
         self._data: dict[UUID, Match] = {}
         # set_library_file_repo for release_work_matches, which reads each match's file.
         self._library_file_repo: LibraryFileRepository | None = None
+        # Phase 3a: the performance each match stores, by match id (PostgreSQL holds it).
+        self.stored_performances: dict[UUID, UUID | None] = {}
 
     def set_library_file_repo(self, repo: LibraryFileRepository) -> None:
         """Wire in the files a released match takes its work from (PostgreSQL reads them)."""
@@ -53,6 +55,10 @@ class FakeMatchRepository(MatchRepository):
                 else None
             )
             self._data[match.id] = replace(match, work_id=file.work_id if file else None)
+
+    def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
+        for match_id in match_ids:
+            self.stored_performances[match_id] = performance_id
 
     def delete_for_identity(self, identity_id: UUID) -> None:
         to_delete = [id for id, m in self._data.items() if m.identity_id == identity_id]

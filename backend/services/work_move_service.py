@@ -10,9 +10,11 @@ import structlog
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.performances import PerformanceRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
+from backend.services.performance_service import assign_performance, move_out, place
 from backend.services.song_match_service import SongMatchService
 
 logger = structlog.get_logger()
@@ -26,6 +28,8 @@ class WorkMoveRepos:
     works: WorkRepository
     song_masters: SongMasterRepository
     matches: MatchRepository
+    # Phase 3a (S3): optional, so the locked tests' bundles still build; None skips it.
+    performances: PerformanceRepository | None = None
 
 
 def place_ungrouped_file(
@@ -33,6 +37,7 @@ def place_ungrouped_file(
     work_id: str,
     files: LibraryFileRepository,
     matches: MatchRepository,
+    performances: PerformanceRepository | None = None,
 ) -> None:
     """Give a file with no work the work grouping chose; its matches take that work too.
 
@@ -41,6 +46,8 @@ def place_ungrouped_file(
     """
     files.update_work_id(file_id, work_id)
     SongMatchService(matches).follow_file(file_id, work_id)
+    if performances is not None:
+        assign_performance(file_id, performances)
 
 
 def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRepos) -> None:
@@ -56,8 +63,11 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
     previous_work_id = library_file.work_id
     if previous_work_id == work_id:
         return
+    left = move_out([library_file.id], repos.performances)
     repos.files.update_work_id(library_file.id, work_id)
-    SongMatchService(repos.matches).follow_file(library_file.id, work_id)
+    song_matches = SongMatchService(repos.matches)
+    song_matches.follow_file(library_file.id, work_id)
+    place([library_file.id], left, repos.performances, song_matches)
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     if previous_work_id is not None:
         repos.matches.see_version_states(library_file.id, previous_work_id, work_id)

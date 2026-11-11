@@ -60,3 +60,8 @@ class MatchRepository(ABC):
     def release_work_matches(self, work_id: str) -> None:
         """Point each match still on *work_id* at its file's current work (or none)."""
         ...
+
+    @abstractmethod
+    def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
+        """The performance the matches store: another (a hand-off) or none (a release)."""
+        ...

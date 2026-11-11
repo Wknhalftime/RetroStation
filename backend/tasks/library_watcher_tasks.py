@@ -30,7 +30,9 @@ from backend.repositories.library_folders import LibraryFolderRepository
 from backend.services.folder_hash_service import diff_tree
 from backend.services.grouping_service import assign_work
 from backend.services.library_scan_service import scan_folder_incrementally
+from backend.services.performance_service import reassign_retagged
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.song_match_service import SongMatchService
 from backend.services.work_move_service import place_ungrouped_file
 from backend.tasks._enqueue_chain import enqueue_or_log
 from backend.tasks.huey_app import huey
@@ -208,6 +210,13 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
             folder_files = repos.library_files.get_by_folder_path(
                 folder_path,
             )
+            # Phase 3a D6: a retagged file already on a work is placed again in it.
+            if reassign_retagged(
+                [lf.file_path for lf in folder_files if lf.work_id is not None],
+                repos.performances,
+                SongMatchService(repos.matches),
+            ):
+                library_conn.commit()
             for lf in folder_files:
                 if lf.work_id is not None:
                     continue
@@ -232,6 +241,7 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                             grouping.work_id,
                             repos.library_files,
                             repos.matches,
+                            repos.performances,
                         )
                         if grouping.recording_id:
                             repos.library_files.update_recording_link(

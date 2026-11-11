@@ -14,6 +14,7 @@ from backend.domain.curation import (
 from backend.domain.enums import FileStatus, SelectionMethod
 from backend.domain.library import LibraryFile
 from backend.repositories.recordings import RecordingRepository
+from backend.services.performance_service import prefer_chosen
 from backend.services.work_move_service import WorkMoveRepos, move_file_to_work
 
 
@@ -50,6 +51,8 @@ def choose_master(work_id: str, file_id: UUID, repos: MasterChoiceRepos) -> Song
             selection_method=SelectionMethod.MANUAL,
         )
     )
+    if repos.move.performances is not None:
+        prefer_chosen(file_id, repos.move.performances)
     stored = repos.move.song_masters.get_by_work(work_id)
     if stored is None:
         raise RuntimeError(f"Expected a song master for work {work_id} after storing it")

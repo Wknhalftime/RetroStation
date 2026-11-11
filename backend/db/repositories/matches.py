@@ -140,6 +140,14 @@ class PgMatchRepository(MatchRepository):
             (work_id,),
         )
 
+    def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
+        if not match_ids:
+            return
+        self._conn.execute(
+            "UPDATE matches SET performance_id = %s WHERE id = ANY(%s)",
+            (performance_id, match_ids),
+        )
+
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
 

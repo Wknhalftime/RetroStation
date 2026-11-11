@@ -357,6 +357,8 @@ PURGE_MISSING_SETTING = "library.purge_missing"
 
 # Set once the artist credits backfill has finished (phase 2a S3).
 ARTIST_CREDITS_BACKFILLED_SETTING = "library.artist_credits_backfilled"
+# Phase 3a S2: the run-once performance build's done-marker.
+PERFORMANCES_BUILT_SETTING = "library.performances_built"
 
 
 @dataclass(frozen=True)

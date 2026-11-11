@@ -297,6 +297,7 @@ def get_master_choice_repos(repos: SyncRepos) -> MasterChoiceRepos:
             works=repos.works,
             song_masters=repos.song_masters,
             matches=repos.matches,
+            performances=repos.performances,
         ),
         recordings=repos.recordings,
     )
