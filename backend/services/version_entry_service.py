@@ -28,6 +28,7 @@ from backend.domain.version_pages import (
     WorkFile,
     WorkVersion,
     master_flag,
+    version_is_new,
     work_page_order,
     work_version,
 )
@@ -237,12 +238,17 @@ async def unmapped_page(reader: VersionPageReader, offset: int, limit: int) -> U
 
 
 async def new_counts(reader: VersionPageReader, work_ids: list[str]) -> dict[str, int]:
-    """D5: how many new versions each work has."""
+    """D5: how many new versions each work has. The marker reads a work's texts and its files,
+    so this reads the files of only the works that have a text, and no line files: those are for
+    suggestions, which a count never shows."""
     if not work_ids:
         return {}
-    versions, _ = await _read_versions(reader, work_ids)
+    rows = await reader.entry_rows(work_ids)
+    if not rows:
+        return {}
+    files = await reader.work_files(sorted({row.work_id for row in rows}))
     counts: dict[str, int] = {}
-    for version in versions:
-        if version.new:
-            counts[version.work_id] = counts.get(version.work_id, 0) + 1
+    for row in rows:
+        if version_is_new(row, files.get(row.work_id, [])):
+            counts[row.work_id] = counts.get(row.work_id, 0) + 1
     return counts

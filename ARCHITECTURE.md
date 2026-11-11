@@ -548,7 +548,9 @@ returns the row it finds).
 - Counts: the Unmapped versions page (`/library/versions`, by plays, paged at 50) answers its
   total and new total for the Library Status card; the artist list's `new_version_count` sums
   the group's works on the group primary (D5). Dismiss all on that page takes every listed
-  text; on an artist page, only the group's new ones (question D).
+  text; on an artist page, only the group's new ones (question D). The artist list's and the
+  artist page's counts (`new_counts`) read the listed works' texts, then the files of only the
+  works that have one, and no line files: a count shows no suggestion.
 - No summary table of its own: plays and stations come from `station_identity_plays` (below),
   so they count only plays in a station's playlists, and each line's first play is looked up
   through that line's own plays. Every query has an every-work and a scoped variant; the scoped
@@ -557,7 +559,9 @@ returns the row it finds).
   `play_events` (Lance: "Rewrite + rerun"). If it outgrows a second, the SPEC's fallback is an
   ingest-kept summary (a migration).
 - The checks are `tests/routers/test_work_versions.py` (AUD-R046) and
-  `tests/routers/test_unmapped_versions.py` (AUD-R034).
+  `tests/routers/test_unmapped_versions.py` (AUD-R034), and for the artist pages' counts
+  `tests/routers/test_artist_new_version_counts.py` and
+  `tests/services/test_version_new_counts_reads.py`.
 
 ## Song matches: one writer (phase 3a, C52, C75, AUD-R074)
 
