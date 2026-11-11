@@ -158,12 +158,16 @@ def _suggestion(copies: list[WorkFile], line_files: frozenset[UUID]) -> VersionS
     return None
 
 
-def version_is_new(row: VersionEntryRow, files: list[WorkFile]) -> bool:
-    """S8, D2: the new-version marker of one text; *files* are the work's present files."""
-    version_type = read_log_version(row.version_text)
+def _marker(row: VersionEntryRow, version_type: VersionType, files: list[WorkFile]) -> bool:
+    """S8, D2: the new-version marker of a text already read as *version_type*."""
     if not reads_as_version(version_type):
         return False
     return _is_new(row, _state(row), _copies(files, version_type))
+
+
+def version_is_new(row: VersionEntryRow, files: list[WorkFile]) -> bool:
+    """S8, D2: the new-version marker of one text; *files* are the work's present files."""
+    return _marker(row, read_log_version(row.version_text), files)
 
 
 def work_version(
@@ -186,7 +190,7 @@ def work_version(
         stations=row.stations,
         first_seen=row.first_seen,
         first_station=row.first_station,
-        new=version_is_new(row, files),
+        new=_marker(row, version_type, files),  # the text read once (the Unmapped page's cost)
         suggestion=(_suggestion(copies, line_files) if state is VersionState.UNMAPPED else None),
     )
 
