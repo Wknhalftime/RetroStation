@@ -38,12 +38,14 @@ from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.performances import PerformanceRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.work_curation import WorkCurationRepository
 from backend.repositories.works import WorkRepository
 from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.master_selection_service import score_file_row
+from backend.services.performance_service import move_out, place
 from backend.services.song_match_service import SongMatchService
 
 _NOTHING_MERGED = MergeResult(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
@@ -63,6 +65,8 @@ class WorkCurationRepos:
     artists: ArtistCatalogRepository
     links: LogNameLinkRepository
     merges: ArtistMergeRepository
+    # Phase 3a (S3): the files' performances; None skips them.
+    performances: PerformanceRepository | None = None
 
 
 def _work(work_id: str, works: WorkRepository) -> Work:
@@ -178,12 +182,16 @@ def merge_works(
         return _NOTHING_MERGED
 
     source_ids = [work.id for work in sources]
+    moving = [f.id for work_id in source_ids for f in repos.files.get_by_work(work_id)]
+    left = move_out(moving, repos.performances)
     merged = repos.curation.move_files_of_works(source_ids, target_id)
     dropped = repos.curation.drop_colliding_overrides(source_ids, target_id)
     repos.curation.move_overrides_of_works(source_ids, target_id)
     repos.curation.move_version_states_of_works(source_ids, target_id)
     _consolidate_recordings(source_ids, target_id, repos)
-    SongMatchService(repos.matches).follow_works(source_ids, target_id)
+    song_matches = SongMatchService(repos.matches)
+    song_matches.follow_works(source_ids, target_id)
+    place(moving, left, repos.performances, song_matches)
     repos.curation.delete_masters_of_works(source_ids)
     deleted = repos.curation.delete_works(source_ids)
     _recalculate_master(target_id, repos)
@@ -218,8 +226,11 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
         )
         repos.curation.insert_recording(copy)
         repos.curation.set_file_recording(file_id, copy.id)
+    left = move_out([file_id], repos.performances)
     repos.files.update_work_id(file_id, new_work_id)
-    SongMatchService(repos.matches).follow_file(file_id, new_work_id)
+    song_matches = SongMatchService(repos.matches)
+    song_matches.follow_file(file_id, new_work_id)
+    place([file_id], left, repos.performances, song_matches)
     repos.matches.see_version_states(file_id, work_id, new_work_id)
     repos.curation.store_split_master(uuid4(), new_work_id, file_id)
     left_deleted = _settle_left_work(work_id, repos)
@@ -272,8 +283,11 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
 
     if file.recording_id is not None:
         _repoint_recording(file_id, file.recording_id, work_id, repos)
+    left = move_out([file_id], repos.performances)
     repos.files.update_work_id(file_id, work_id)
-    SongMatchService(repos.matches).follow_file(file_id, work_id)
+    song_matches = SongMatchService(repos.matches)
+    song_matches.follow_file(file_id, work_id)
+    place([file_id], left, repos.performances, song_matches)
     _recalculate_master(work_id, repos)
     left_deleted = False
     if file.work_id is not None:

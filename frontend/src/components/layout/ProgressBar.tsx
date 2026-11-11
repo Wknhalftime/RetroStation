@@ -12,6 +12,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   library_enrichment: "Enriching library metadata",
   hash_backfill: "Fingerprinting library files",
   artist_credits_backfill: "Filling in every artist of each file",
+  performances_build: "Grouping each song's files into performances",
   mb_enrichment: "Enhancing MusicBrainz entities",
   artist_linking: "Linking artists to MusicBrainz",
   ingestion: "Ingesting tracks",

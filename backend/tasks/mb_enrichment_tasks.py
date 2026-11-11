@@ -688,6 +688,7 @@ def _run_recordings_phase(
                 song_masters=repos.song_masters,
                 matches=repos.matches,
                 artists=repos.artists,
+                performances=repos.performances,
             )
             applied_totals = {"works_linked": 0, "files_moved": 0, "marked_live": 0}
             # Commit pre-pass cache writes NOW so they can't be rolled

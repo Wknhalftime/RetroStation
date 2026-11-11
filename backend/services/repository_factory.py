@@ -33,6 +33,7 @@ from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.mb_cache_listing import PgMusicBrainzCacheListing
 from backend.db.repositories.missing_files import PgMissingFileListingRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
+from backend.db.repositories.performances import PgPerformanceRepository
 from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
 from backend.db.repositories.recordings import PgRecordingRepository
@@ -217,6 +218,7 @@ class RepositoryFactory:
         self.artist_merges = PgArtistMergeRepository(conn)
         self.version_entries = PgVersionEntryRepository(conn)
         self.song_decisions = PgSongDecisionRepository(conn)
+        self.performances = PgPerformanceRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -282,6 +284,7 @@ def reconciliation_repos(repos: RepositoryFactory) -> ReconciliationRepos:
         works=repos.works,
         song_masters=repos.song_masters,
         format_overrides=repos.format_overrides,
+        performances=repos.performances,
     )
 
 
@@ -299,6 +302,7 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         artists=repos.artists,
         links=repos.log_name_links,
         merges=repos.artist_merges,
+        performances=repos.performances,
     )
 
 

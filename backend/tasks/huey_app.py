@@ -42,4 +42,5 @@ import backend.tasks.library_watcher_tasks  # noqa: F401, E402
 import backend.tasks.matching_recheck_tasks  # noqa: F401, E402
 import backend.tasks.mb_enrichment_tasks  # noqa: F401, E402
 import backend.tasks.normalize_backfill_tasks  # noqa: F401, E402
+import backend.tasks.performance_build_tasks  # noqa: F401, E402
 import backend.tasks.progress_prune_tasks  # noqa: F401, E402

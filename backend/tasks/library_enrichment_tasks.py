@@ -136,6 +136,7 @@ def library_enrichment_task() -> dict[str, int]:
                 song_masters=repos.song_masters,
                 matches=repos.matches,
                 artists=repos.artists,
+                performances=repos.performances,
             )
             with MusicBrainzApiClient(
                 cache_repo,

@@ -590,6 +590,60 @@ returns the row it finds).
   only the adapter and the five statements hold SQL that writes `matches`, and only the service
   calls the port's writes) and `tests/routers/test_identity_routes_are_sync.py`.
 
+## Performances, kept by every writer (phase 3a PR 2, C40, C44, C71, AUD-R075)
+
+- **The model (0051).** `performances` holds one recording of a work: its work, an optional
+  recording MBID (unique within the work), the file-side reader's version, its first file's
+  length, and a preferred copy. `performance_credits` holds its credit (position, artist or
+  MBID, credited name, joining words, main or featured). An MBID no artist holds yet is
+  credited by MBID, and readers find the artist on the MBID later (D1: no stub). A file points
+  at its performance through `(performance_id, work_id)`, so a file and its performance always
+  share a work; the key is checked per statement, so every `work_id` write clears
+  `performance_id` in the same UPDATE. A performance's preferred copy is one of its own files
+  (a composite key on `library_files (id, performance_id)`). `matches.performance_id` is a
+  line's stored performance; nothing stores one before PR 3's Credit picks. `song_masters`
+  stays each work's default copy (C71).
+- **The identity rule (§6.2, `domain/performances.py`).** A file joins a performance of its
+  work with the same recording MBID; a file with an MBID joins nothing else. A file without one
+  joins any performance of its work (MBID or not) with the same credit artists (sets of MBIDs,
+  placeholders left out), version and a length within 3 s of the performance's `length_ms`;
+  the closest wins, then the one whose first file has the lower id. A NULL or negative length
+  never joins.
+- **The build (`tasks/performance_build_tasks.py`).** A run-once task, after 2a's credit
+  backfill marker: every file on a work, present or missing, in file-id order, in committed
+  batches, so a stopped run resumes. Its own marker (`library.performances_built`) ends it;
+  from then on the writers keep performances. It reports as `performances_build`. Nothing
+  queues it: the cutover and the gate run it by name.
+- **The writers (S3, `services/performance_service.py`)** keep one order: `leave` (re-pick a
+  preferred copy that is leaving), the writer's own move, `assign_performance` for each file
+  that now sits on a work, then `settle`. Grouping (the scan and the watcher), the work move
+  (enrichment, Set master), merge, split, reassign, the fold, the missing-file delete and the
+  purge all do. The bundles that locked tests build by keyword (`WorkMoveRepos`,
+  `EnrichmentRepos`, `ReconciliationRepos`) carry the port as an optional `performances`
+  field, as does `WorkCurationRepos`; every builder in `backend/` passes it.
+- **Settling (E3, D5).** A line storing a performance the writer touched is handed off when
+  the performance emptied and all its files now sit in one performance of the line's own work
+  (a folded file sits where its survivor does); it keeps its performance when that is still in
+  its work with files; otherwise it is released to the default. Both are logged
+  (`stored_performance_handed_off`, `stored_performance_released`) and go through
+  `SongMatchService`. An emptied performance is deleted, before any work the writer deletes,
+  so the cascade never drops a stored line unlogged.
+- **D6, tags only.** The scan and the watcher re-check the files they re-read: a file whose
+  recording MBID tag, title version, length or credit no longer fits its performance is placed
+  again in its work (one read per 1,000 paths). Enrichment's recording link and the curation's
+  recording re-points never move a performance.
+- **Preferred copies (S5, E8).** A path that takes a preferred copy out of its performance
+  re-picks it inside the performance: the best copy left by the master rules, present before
+  missing (a fold onto a copy of the same performance re-points it to the survivor, as it does
+  a master). A performance given a line gets its best present copy if it had none. After a
+  scan, `repick_stranded_masters` also re-picks preferred copies gone missing among present
+  copies; with none present the copy stays. Set master makes the chosen file its performance's
+  preferred copy when that performance has one.
+- The checks are `tests/integration/test_performances_schema_pg.py` (AUD-R032),
+  `tests/tasks/test_build_performances_task.py`,
+  `tests/integration/test_writers_keep_performances_pg.py` and
+  `tests/integration/test_preferred_copy_upkeep_pg.py`.
+
 ## Derived counts kept by triggers
 
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's

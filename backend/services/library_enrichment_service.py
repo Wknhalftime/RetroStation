@@ -12,6 +12,7 @@ from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
+from backend.repositories.performances import PerformanceRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
@@ -40,6 +41,8 @@ class EnrichmentRepos:
     song_masters: SongMasterRepository
     matches: MatchRepository
     artists: ArtistCatalogRepository
+    # Phase 3a (S3): optional, so the locked tests' bundles still build; None skips it.
+    performances: PerformanceRepository | None = None
 
 
 def _extract_artist_from_credits(
@@ -215,6 +218,7 @@ def _move_file_to_work(
             works=repos.works,
             song_masters=repos.song_masters,
             matches=repos.matches,
+            performances=repos.performances,
         ),
     )
 

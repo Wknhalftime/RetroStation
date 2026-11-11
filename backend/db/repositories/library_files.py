@@ -78,6 +78,13 @@ _UPSERT_SQL = """
             EXCLUDED.recording_id, library_files.recording_id),
         work_id                = COALESCE(
             EXCLUDED.work_id, library_files.work_id),
+        -- Phase 3a (S3): a file and its performance share a work, so naming another work
+        -- clears the performance in this statement; the caller places the file again.
+        performance_id         = CASE
+            WHEN EXCLUDED.work_id IS NULL
+              OR EXCLUDED.work_id = library_files.work_id
+            THEN library_files.performance_id
+        END,
         recording_mbid         = EXCLUDED.recording_mbid,
         artist_mbid            = EXCLUDED.artist_mbid,
         album_artist_mbid      = EXCLUDED.album_artist_mbid,
@@ -454,9 +461,14 @@ class PgLibraryFileRepository(
         file_id: UUID,
         work_id: str | None,
     ) -> None:
+        # Phase 3a (S3, E4): another work clears the performance in the same statement.
         self._conn.execute(
-            "UPDATE library_files SET work_id = %s WHERE id = %s",
-            (work_id, str(file_id)),
+            """UPDATE library_files
+               SET work_id = %s,
+                   performance_id = CASE WHEN work_id IS NOT DISTINCT FROM %s
+                                         THEN performance_id END
+               WHERE id = %s""",
+            (work_id, work_id, str(file_id)),
         )
 
     def get_by_work(self, work_id: str) -> list[LibraryFile]:

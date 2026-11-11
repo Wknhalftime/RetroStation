@@ -29,7 +29,9 @@ class PgWorkCurationRepository(WorkCurationRepository):
 
     def move_files_of_works(self, work_ids: list[str], target_id: str) -> int:
         cur = self._conn.execute(
-            f"UPDATE library_files SET work_id = %s WHERE work_id IN ({_placeholders(work_ids)})",
+            # Phase 3a (S3, E4): the files leave their performances in the same statement.
+            f"""UPDATE library_files SET work_id = %s, performance_id = NULL
+                WHERE work_id IN ({_placeholders(work_ids)})""",
             [target_id, *work_ids],
         )
         # rowcount can be -1 (unknown) for some driver modes; clamp to 0.
