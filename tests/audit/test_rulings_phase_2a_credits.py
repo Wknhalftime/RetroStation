@@ -26,7 +26,7 @@ def _check(ruling_id: str) -> str:
 
 
 def test_r032_has_left_2a_behind() -> None:
-    assert _check("AUD-R032").endswith("check pending: 3a, 3b.")
+    assert _check("AUD-R032").endswith("check pending: 3b.")
 
 
 def test_r073_amends_r072() -> None:
