@@ -11,15 +11,15 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 6,
     "node.producer": 17,
-    "node.task": 17,
+    "node.task": 18,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
     "rule.EV05": 0,
-    "rule.EV06": 4,
+    "rule.EV06": 5,
     "rule.EV07": 1,
-    "rule.EV08": 23,
+    "rule.EV08": 24,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -424,6 +424,15 @@
       "class": "inventory",
       "code": "EV06",
       "detail": "no_producer",
+      "file": "backend/tasks/credit_pick_tasks.py",
+      "line": 26,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.credit_pick_tasks:propose_credit_picks_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
       "file": "backend/tasks/normalize_backfill_tasks.py",
       "line": 50,
       "referenced_in_unresolved_dispatch": false,
@@ -488,6 +497,17 @@
       "value": {
         "body_lines": 114,
         "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/credit_pick_tasks.py",
+      "line": 26,
+      "subject": "backend.tasks.credit_pick_tasks:propose_credit_picks_task",
+      "value": {
+        "body_lines": 30,
+        "service_calls": 1
       }
     },
     {
@@ -1044,6 +1064,20 @@
             "name": "run_id"
           }
         ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 30,
+        "envelope": "task_run",
+        "file": "backend/tasks/credit_pick_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 26,
+        "module": "backend.tasks.credit_pick_tasks",
+        "name": "propose_credit_picks_task",
+        "params": [],
         "registered": true,
         "retries": 0,
         "schedule": null

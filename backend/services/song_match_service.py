@@ -71,3 +71,8 @@ class SongMatchService:
     def release_performance(self, match_ids: list[UUID]) -> None:
         """The lines store no performance: they follow the work's default (E3, D5)."""
         self._matches.set_stored_performance(match_ids, None)
+
+    def store_performance(self, match_id: UUID, performance_id: UUID | None) -> None:
+        """The line stores *performance_id* for its credit, or none (Credit picks: Apply, a
+        pick, ``apply_credit_picks.py``; phase 3a S5, S9, M28)."""
+        self._matches.set_stored_performance([match_id], performance_id)

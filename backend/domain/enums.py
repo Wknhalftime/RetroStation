@@ -149,6 +149,7 @@ class TaskType(StrEnum):
     STREAM_RESOURCES = "stream_resources"  # D90: the streaming cost meter's one row
     ARTIST_CREDITS_BACKFILL = "artist_credits_backfill"  # phase 2a S3: run once
     PERFORMANCES_BUILD = "performances_build"  # phase 3a S2: run once
+    CREDIT_PICK_PROPOSALS = "credit_pick_proposals"  # phase 3a S8: re-runnable (4.4)
 
 
 class ArtistNameSource(StrEnum):

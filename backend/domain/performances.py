@@ -9,7 +9,7 @@ E). Credit artists are compared as sets of MBIDs, placeholders left out.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -203,6 +203,86 @@ def best_copy(copies: Sequence[CopyScore]) -> UUID | None:
 def _descending(file_id: UUID) -> tuple[int, ...]:
     """Sort key making the lower id win under ``max``."""
     return tuple(-b for b in file_id.bytes)
+
+
+class PerformanceReason(StrEnum):
+    """Why ``choose_performance`` answered as it did (C47)."""
+
+    CREDIT = "credit"
+    SHARED_ARTIST = "shared_artist"
+    DEFAULT = "default"
+    NO_PERFORMER = "no_performer"
+
+
+@dataclass(frozen=True)
+class CreditedPerformance:
+    """A performance of the work and its credit's artists (ids, or ``mbid:`` keys, D1)."""
+
+    id: UUID
+    artists: frozenset[str]
+
+
+@dataclass(frozen=True)
+class PerformanceChoice:
+    """The performance a line's credit picks, or none; ``tied`` holds the performances that tie
+    at the best, for Lance's per-line pick (D3)."""
+
+    reason: PerformanceReason
+    performance_id: UUID | None
+    tied: tuple[UUID, ...] = ()
+
+
+def choose_performance(
+    credit_artists: Iterable[str],
+    performances: Iterable[CreditedPerformance],
+    default: UUID | None,
+    *,
+    primary_of: Mapping[str, str] | None = None,
+    work_artist: str | None = None,
+) -> PerformanceChoice:
+    """The performance a log line's credit picks inside its work (S6, D3, D8, D9; C47, M21).
+
+    Every artist compares as its merge-group primary. A performance answers better when it
+    misses fewer of the line's artists, then credits fewer others; the default wins any tie with
+    the best. An uncredited default credits the work's artist (D8). A line with no linked artist
+    gets the default (C16).
+    """
+    groups = primary_of or {}
+    line = frozenset(groups.get(a, a) for a in credit_artists)
+    if not line:
+        return PerformanceChoice(PerformanceReason.DEFAULT, default)
+    scored: list[tuple[tuple[int, int], UUID]] = []
+    default_score: tuple[int, int] | None = None
+    for candidate in performances:
+        artists = frozenset(groups.get(a, a) for a in candidate.artists)
+        if candidate.id == default and not artists and work_artist is not None:
+            artists = frozenset({groups.get(work_artist, work_artist)})
+        if not artists & line:
+            continue
+        score = (len(line - artists), len(artists - line))
+        if candidate.id == default:
+            default_score = score
+        else:
+            scored.append((score, candidate.id))
+    return _best_answer(scored, default, default_score)
+
+
+def _best_answer(
+    scored: list[tuple[tuple[int, int], UUID]],
+    default: UUID | None,
+    default_score: tuple[int, int] | None,
+) -> PerformanceChoice:
+    """D9: the default wins a tie with the best; tied non-defaults go to Lance."""
+    best = min([s for s, _ in scored] + ([default_score] if default_score else []), default=None)
+    if best is None:
+        return PerformanceChoice(PerformanceReason.NO_PERFORMER, None)
+    if default_score == best:
+        return PerformanceChoice(PerformanceReason.DEFAULT, default)
+    reason = PerformanceReason.CREDIT if best[0] == 0 else PerformanceReason.SHARED_ARTIST
+    winners = sorted(performance_id for score, performance_id in scored if score == best)
+    if len(winners) == 1:
+        return PerformanceChoice(reason, winners[0])
+    return PerformanceChoice(reason, None, tuple(winners))
 
 
 def stored_line_outcome(

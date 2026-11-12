@@ -25,6 +25,7 @@ from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.artist_resolution_service import ArtistResolutionRepos
 from backend.services.audio_tags import probe_clip
+from backend.services.credit_pick_service import CreditPickRepos
 from backend.services.identity_resolution_service import SongDecisionRepos
 from backend.services.master_choice_service import MasterChoiceRepos
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
@@ -32,6 +33,7 @@ from backend.services.missing_file_reconciliation_service import ReconciliationR
 from backend.services.repository_factory import (
     RepositoryFactory,
     artist_resolution_repos,
+    credit_pick_repos,
     reconciliation_repos,
     song_decision_repos,
     work_curation_repos,
@@ -184,6 +186,11 @@ def get_version_entry_repos(repos: SyncRepos) -> VersionEntryRepos:
     return VersionEntryRepos(
         works=repos.works, files=repos.library_files, versions=repos.version_entries
     )
+
+
+def get_credit_pick_repos(repos: SyncRepos) -> CreditPickRepos:
+    """Credit picks' repositories, on the request's connection (phase 3a PR 3, S9)."""
+    return credit_pick_repos(repos)
 
 
 def get_song_decision_repos(repos: SyncRepos) -> SongDecisionRepos:
