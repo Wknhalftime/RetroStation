@@ -30,6 +30,7 @@ from backend.services.streaming.cue_editor import CueEditorPorts
 from tests.fakes.library_files import FakeLibraryFileRepository
 from tests.fakes.stream_cue_edits import FakeStreamCueEditRepository
 from tests.fakes.stream_cues import FakeStreamCueRepository
+from tests.fakes.stream_endings import FakeStreamEndingRepository
 
 CONFIGURED_FFMPEG = r"C:\Tools\ffmpeg\bin\ffmpeg.exe"
 
@@ -93,11 +94,16 @@ def test_the_peak_reader_follows_a_change_of_ffmpeg_path(
 
 def test_the_ports_are_built_from_the_request_repositories() -> None:
     """R7, Task 7: files from ``repos.library_files``, cues from ``repos.streaming.cues``,
-    edits from ``repos.streaming.edits``: the very repositories, not copies."""
+    edits from ``repos.streaming.edits``, and (EOM ending rules, 2026-11-07) endings from
+    ``repos.streaming.endings``: the very repositories, not copies."""
     files = FakeLibraryFileRepository()
     cues = FakeStreamCueRepository()
     edits = FakeStreamCueEditRepository()
-    repos = SimpleNamespace(library_files=files, streaming=SimpleNamespace(cues=cues, edits=edits))
+    endings = FakeStreamEndingRepository()
+    repos = SimpleNamespace(
+        library_files=files,
+        streaming=SimpleNamespace(cues=cues, edits=edits, endings=endings),
+    )
 
     ports = get_cue_editor_ports(cast(RepositoryFactory, repos))
 
@@ -105,6 +111,7 @@ def test_the_ports_are_built_from_the_request_repositories() -> None:
     assert ports.files is files
     assert ports.cues is cues
     assert ports.edits is edits
+    assert ports.endings is endings
 
 
 def test_the_ports_take_the_request_scoped_repositories() -> None:

@@ -194,6 +194,12 @@ type = "forbidden"
 source_modules = ["backend.playout"]
 forbidden_modules = ["backend.domain", "backend.services", "backend.repositories",
                      "backend.db", "backend.routers", "backend.tasks", "backend.main"]
+ignore_imports = [
+    # EOM ending rules (2026-11-07): the loudness reader returns the domain's LoudnessTail,
+    # the value its locked tests (tests/playout/test_loudness.py) check for. No other playout
+    # module may import the domain.
+    "backend.playout.loudness -> backend.domain.endings",
+]
 
 [[tool.importlinter.contracts]]
 name = "Library never references streaming (D20)"

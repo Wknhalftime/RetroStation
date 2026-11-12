@@ -13,25 +13,7 @@ import {
   useDeleteFormatOverride,
 } from "@/api/works";
 import { useArtistDetail } from "@/api/artists";
-import { ValidationError } from "@/api/client";
-
-/** The text to show for a refused master change: the server's reason where it gave one. */
-function errorText(error: Error): string {
-  if (error instanceof ValidationError) {
-    // FastAPI sends a list of {msg}; a hand-raised 422 sends a plain string.
-    const detail: unknown = error.detail;
-    if (typeof detail === "string" && detail) return detail;
-    if (Array.isArray(detail)) {
-      const reasons = detail
-        .map((item: unknown) =>
-          typeof item === "object" && item !== null && "msg" in item ? String(item.msg) : ""
-        )
-        .filter(Boolean);
-      if (reasons.length > 0) return reasons.join(" ");
-    }
-  }
-  return error.message;
-}
+import { errorText } from "@/lib/errors";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -92,9 +74,8 @@ export function AssociatedWorks() {
   const masterBannerText = work.song_master
     ? [
         `Selection: ${work.song_master.selection_method}`,
-        work.song_master.score != null
-          ? `Score: ${Math.round(work.song_master.score * 100)}%`
-          : null,
+        // Points (release status + release type + format), not a fraction.
+        work.song_master.score != null ? `Score: ${work.song_master.score} points` : null,
       ]
         .filter(Boolean)
         .join("  ·  ")
