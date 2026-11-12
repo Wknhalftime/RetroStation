@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { Database, AlertTriangle, FileX, Layers, Users, VolumeX } from "lucide-react";
+import { Database, AlertTriangle, FileX, Layers, ListChecks, Users, VolumeX } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
+import { useCreditPicksCount } from "@/api/creditPicks";
 import { useLibraryStatus } from "@/api/library";
 import { useMissingFiles } from "@/api/missing";
 import { useUnmappedVersions } from "@/api/versions";
@@ -11,6 +12,7 @@ export function LibraryStatus() {
   const { data, isLoading, isError } = useLibraryStatus();
   const missing = useMissingFiles(0, 1);
   const unmapped = useUnmappedVersions(0, 1);
+  const creditPicks = useCreditPicksCount();
 
   if (isLoading) {
     return (
@@ -31,6 +33,7 @@ export function LibraryStatus() {
   const missingCount = missing.data?.total ?? 0;
   const unmappedCount = unmapped.data?.total ?? 0;
   const newCount = unmapped.data?.new_total ?? 0;
+  const creditPicksCount = creditPicks.data?.total ?? 0;
   const enrichedCount = data.by_enrichment["enriched"] ?? 0;
   const enrichedPct =
     data.total_files > 0 ? Math.round((enrichedCount / data.total_files) * 100) : 0;
@@ -140,6 +143,23 @@ export function LibraryStatus() {
                     ({newCount.toLocaleString()} new)
                   </span>
                 )}
+              </p>
+            </div>
+          </Link>
+        )}
+
+        {creditPicksCount > 0 && (
+          <Link
+            to="/library/credit-picks"
+            className="flex items-start gap-4 rounded-xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm hover:bg-indigo-100"
+          >
+            <div className="rounded-lg bg-indigo-100 p-2">
+              <ListChecks className="h-5 w-5 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm text-indigo-700">Credit picks</p>
+              <p className="text-2xl font-semibold text-indigo-900">
+                {creditPicksCount.toLocaleString()}
               </p>
             </div>
           </Link>

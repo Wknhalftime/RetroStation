@@ -255,3 +255,21 @@ def repick_stranded(performances: PerformanceRepository) -> int:
             performances.set_preferred_copy(performance_id, best)
             repicked += 1
     return repicked
+
+
+def copy_to_prefer(performance_id: UUID, performances: PerformanceRepository) -> UUID | None:
+    """The copy a stored performance plays: its preferred copy, else the one storing it would
+    make preferred (the master rules, present before missing; S5)."""
+    preferred = performances.preferred_copy(performance_id)
+    if preferred is not None:
+        return preferred
+    return best_copy(_scored(performances.copies(performance_id)))
+
+
+def give_preferred_copy(performance_id: UUID, performances: PerformanceRepository) -> None:
+    """Every stored performance has a preferred copy: one that has none gets its best copy, and
+    one that has one keeps it (S5, C71)."""
+    if performances.preferred_copy(performance_id) is None:
+        performances.set_preferred_copy(
+            performance_id, best_copy(_scored(performances.copies(performance_id)))
+        )

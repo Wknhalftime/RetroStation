@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from backend.routers.library import (
     artists,
+    credit_picks,
     cues,
     files,
     missing,
@@ -24,3 +25,4 @@ router.include_router(missing.router)
 router.include_router(silent_files.router)
 router.include_router(cues.router)
 router.include_router(versions.router)
+router.include_router(credit_picks.router)

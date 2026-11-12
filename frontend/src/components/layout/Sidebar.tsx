@@ -23,6 +23,7 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   hash_backfill: "/library",
   artist_credits_backfill: "/library",
   performances_build: "/library",
+  credit_pick_proposals: "/library/credit-picks",
   mb_enrichment: "/library",
   artist_linking: "/library",
   ingestion: "/stations",

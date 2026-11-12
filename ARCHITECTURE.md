@@ -649,6 +649,44 @@ returns the row it finds).
   `tests/integration/test_writers_keep_performances_pg.py` and
   `tests/integration/test_preferred_copy_upkeep_pg.py`.
 
+## Credit picks: the credit picks a performance (phase 3a PR 3, C47, C57, C61, C64, C65, AUD-R076)
+
+- **`choose_performance` (`domain/performances.py`, C47, D3, D8, D9).** Pure: the log name's
+  active links against the work's performances' credits, every artist as its merge-group
+  primary. A performance answers better when it misses fewer of the line's artists, then
+  credits fewer others: missing none is `credit`, missing some but sharing one is
+  `shared_artist` (M21), sharing none is `no_performer`. The default (the performance of the
+  master's file) wins any tie with the best; tied non-defaults go to Lance. An uncredited
+  default counts as crediting its work's artist (D8). A name with no linked artist gets the
+  default (C16). 4.3's matcher is to use it as it is.
+- **Air play (0052, C61, C71, AUD-R033).** `play_file_resolution` plays the performance the
+  line's best match stores (its preferred copy, `source = 'performance'`), then the version
+  entry, the format override and the master. The stored performance comes from the existing
+  best-match lateral and is key-joined on (id, the line's work), so another work's performance
+  never plays; it is skipped while it is the default, so Set master still moves the line. An
+  unavailable file is reported, never fallen back from. The view still only looks up keys.
+- **Proposals (`tasks/credit_pick_tasks.py`, S8, C57 as D4 amends it).** After the build's
+  marker, a re-runnable task (`credit_pick_proposals`) writes one `credit_pick_proposals` row
+  per matched line whose credit answers with a non-default performance: `credit` (Apply's
+  list), `version_line` (a version `read_log_version` recognises) or `tie` (both for a per-line
+  pick, C65). A re-run keeps decided rows, keeps an undecided row only while its answer is
+  unchanged, and gives a changed answer a new row (C64). It changes nothing that plays.
+- **Deciding (`services/credit_pick_service.py`, S5, S9, M28).** Apply stores the `credit` rows
+  Lance saw minus his skips and records the skips; a version-line pick (one candidate, or none)
+  is stored at once; `scripts/apply_credit_picks.py` does Apply on a gate copy. All three store
+  through `SongMatchService` on the line's best match, giving the performance its best copy as
+  preferred copy first. A row stale when read or applied (its line re-resolved, its
+  performance gone, on another work or now the default) is left out of the lists and the count
+  and never applied. The page is reached from Library Status (D7).
+- **Rollbacks.** `rollback_0052_credit_picks.sql` puts back 0050's view and drops the table;
+  `rollback_0051_performances.sql` undoes 0052 first (idempotently), since the view and the
+  proposals depend on what 0051 adds.
+- The checks are `tests/domain/test_choose_performance.py`,
+  `tests/integration/test_view_stored_performance_pg.py` (AUD-R033),
+  `tests/integration/test_stored_performance_pg.py`,
+  `tests/tasks/test_credit_repoint_proposals.py` (AUD-R039), `tests/routers/test_credit_picks.py`
+  and `tests/scripts/test_apply_credit_picks.py`.
+
 ## Derived counts kept by triggers
 
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's

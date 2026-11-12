@@ -21,6 +21,7 @@ from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRe
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.credit_picks import PgCreditPickRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.library_folders import PgLibraryFolderRepository
@@ -53,6 +54,7 @@ from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
 from backend.services.artist_resolution_service import ArtistResolutionRepos
+from backend.services.credit_pick_service import CreditPickRepos
 from backend.services.identity_resolution_service import RecalcRepos, SongDecisionRepos
 from backend.services.m3u_generator_service import M3uRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
@@ -223,6 +225,7 @@ class RepositoryFactory:
         self.version_entries = PgVersionEntryRepository(conn)
         self.song_decisions = PgSongDecisionRepository(conn)
         self.performances = PgPerformanceRepository(conn)
+        self.credit_picks = PgCreditPickRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -332,4 +335,12 @@ def artist_resolution_repos(repos: RepositoryFactory) -> ArtistResolutionRepos:
         commit=repos.commit_or_unavailable,
         names=repos.broadcast_artists,
         placeholders=repos.log_name_placeholders,
+    )
+
+
+def credit_pick_repos(repos: RepositoryFactory) -> CreditPickRepos:
+    """The port bundle Credit picks read and write through, on *repos*' connection (phase 3a
+    PR 3, S9)."""
+    return CreditPickRepos(
+        credit_picks=repos.credit_picks, performances=repos.performances, matches=repos.matches
     )
