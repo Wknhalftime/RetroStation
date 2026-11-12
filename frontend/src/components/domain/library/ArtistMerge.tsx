@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Users } from "lucide-react";
 import { useArtistPick, useMergeArtist, useUnmergeArtist } from "@/api/artists";
 import { useDebounce } from "@/lib/useDebounce";
 import type { ArtistDetail, MergedMember } from "@/lib/schemas/artists";
@@ -43,18 +44,27 @@ export function MergePicker({ artist }: { artist: ArtistDetail }) {
   };
 
   return (
-    <section className="mb-6">
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 ${
+          open ? "border-gray-300 bg-gray-100" : "border-gray-200 bg-white"
+        }`}
       >
-        Merge into another artist…
+        <Users className="h-4 w-4 text-gray-400" />
+        Merge artist…
       </button>
       {open && (
-        <div id={panelId} className="mt-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div
+          id={panelId}
+          className="absolute right-0 top-full z-20 mt-2 w-96 rounded-xl border border-gray-200 bg-white p-4 shadow-lg"
+        >
+          <p className="mb-3 text-sm font-medium text-gray-900">
+            Merge {artist.name} into another artist
+          </p>
           <label className="block text-xs font-medium text-gray-500">
             The artist to merge into: a name or an MBID
             <input
@@ -102,6 +112,18 @@ export function MergePicker({ artist }: { artist: ArtistDetail }) {
               </li>
             ))}
           </ul>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+            <p className="text-xs text-gray-400">
+              Pick the artist to merge into. You confirm before anything changes.
+            </p>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="shrink-0 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       {merge.isError && (
@@ -109,7 +131,7 @@ export function MergePicker({ artist }: { artist: ArtistDetail }) {
           {merge.error.message}
         </p>
       )}
-    </section>
+    </div>
   );
 }
 

@@ -51,6 +51,8 @@ export const SongMasterInfoSchema = z.object({
   id: z.string().uuid(),
   preferred_file_id: z.string().uuid(),
   selection_method: z.string(),
+  // Whole points from master selection (release status + release type + format,
+  // 0-190; see backend/services/master_selection_service.py), not a fraction.
   score: z.number().nullable(),
   updated_at: z.string(),
 });

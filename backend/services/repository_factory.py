@@ -44,6 +44,7 @@ from backend.db.repositories.station_liners import PgStationLinerRepository
 from backend.db.repositories.stream_cue_edits import PgStreamCueEditRepository
 from backend.db.repositories.stream_cue_work import PgCueWorkRepository
 from backend.db.repositories.stream_cues import PgStreamCueRepository
+from backend.db.repositories.stream_endings import PgStreamEndingRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
@@ -125,7 +126,8 @@ class SystemRepos:
 class StreamingRepos:
     """Tune-in streaming repositories: the cue cache, the playable schedule reader, the
     cue pre-computation work reader (``cue_work``), the Library Silent Files report's read
-    (``silent_files``, S6), and the manual cue edits (``edits``).
+    (``silent_files``, S6), the manual cue edits (``edits``), and the measured song endings
+    (``endings``, EOM ending rules).
 
     The reader checks no cue freshness (D20): a cue row for the final file's audio is used as
     it is, whatever its ``analyser_version``.
@@ -136,6 +138,7 @@ class StreamingRepos:
     cue_work: PgCueWorkRepository
     silent_files: PgSilentFileReportRepository
     edits: PgStreamCueEditRepository
+    endings: PgStreamEndingRepository
 
 
 class RepositoryFactory:
@@ -191,6 +194,7 @@ class RepositoryFactory:
             cue_work=PgCueWorkRepository(conn),
             silent_files=PgSilentFileReportRepository(conn),
             edits=PgStreamCueEditRepository(conn),
+            endings=PgStreamEndingRepository(conn),
         )
 
         # Flat access — delegates to sub-factories for backwards compatibility

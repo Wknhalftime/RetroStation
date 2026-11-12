@@ -9,7 +9,7 @@
     "edge.POLL": 0,
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
-    "node.periodic": 5,
+    "node.periodic": 6,
     "node.producer": 17,
     "node.task": 17,
     "rule.EV01": 0,
@@ -19,7 +19,7 @@
     "rule.EV05": 0,
     "rule.EV06": 4,
     "rule.EV07": 1,
-    "rule.EV08": 22,
+    "rule.EV08": 23,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -182,7 +182,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        585
+        580
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -194,7 +194,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        578
+        573
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -311,7 +311,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        274
+        280
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.stream_cue_tasks:request_cue_analysis"
@@ -335,7 +335,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        282
+        288
       ],
       "message_class": null,
       "producer": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
@@ -392,7 +392,7 @@
       "class": "inventory",
       "code": "EV02",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 282,
+      "line": 288,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume -> stream_cue_analysis_task"
     },
     {
@@ -560,7 +560,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 462,
+      "line": 457,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "body_lines": 168,
@@ -648,7 +648,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 280,
+      "line": 286,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
       "value": {
         "body_lines": 2,
@@ -659,7 +659,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 232,
+      "line": 238,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_task",
       "value": {
         "body_lines": 17,
@@ -670,7 +670,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 286,
+      "line": 318,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_prune_task",
       "value": {
         "body_lines": 8,
@@ -681,10 +681,21 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 255,
+      "line": 261,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_request_task",
       "value": {
         "body_lines": 13,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/stream_cue_tasks.py",
+      "line": 304,
+      "subject": "backend.tasks.stream_cue_tasks:stream_ending_analysis_task",
+      "value": {
+        "body_lines": 10,
         "service_calls": 1
       }
     },
@@ -779,7 +790,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 462,
+      "line": 457,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "tasks": 2
@@ -839,7 +850,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 271,
+      "line": 277,
       "subject": "backend.tasks.stream_cue_tasks:request_cue_analysis",
       "value": {
         "tasks": 1
@@ -849,7 +860,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/stream_cue_tasks.py",
-      "line": 280,
+      "line": 286,
       "subject": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume",
       "value": {
         "tasks": 1
@@ -919,7 +930,7 @@
       {
         "file": "backend/tasks/library_scan_tasks.py",
         "layer": "task",
-        "line": 462,
+        "line": 457,
         "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
       },
       {
@@ -955,13 +966,13 @@
       {
         "file": "backend/tasks/stream_cue_tasks.py",
         "layer": "task",
-        "line": 271,
+        "line": 277,
         "qualname": "backend.tasks.stream_cue_tasks:request_cue_analysis"
       },
       {
         "file": "backend/tasks/stream_cue_tasks.py",
         "layer": "task",
-        "line": 280,
+        "line": 286,
         "qualname": "backend.tasks.stream_cue_tasks:stream_cue_analysis_resume"
       },
       {
@@ -1158,7 +1169,7 @@
         "file": "backend/tasks/library_scan_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 462,
+        "line": 457,
         "module": "backend.tasks.library_scan_tasks",
         "name": "library_scan_task",
         "params": [
@@ -1294,7 +1305,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "periodic",
-        "line": 280,
+        "line": 286,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_analysis_resume",
         "params": [],
@@ -1308,7 +1319,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
-        "line": 232,
+        "line": 238,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_analysis_task",
         "params": [],
@@ -1322,7 +1333,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "periodic",
-        "line": 286,
+        "line": 318,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_prune_task",
         "params": [],
@@ -1336,7 +1347,7 @@
         "file": "backend/tasks/stream_cue_tasks.py",
         "instance": "backend.tasks.cue_huey_app:cue_huey",
         "kind": "task",
-        "line": 255,
+        "line": 261,
         "module": "backend.tasks.stream_cue_tasks",
         "name": "stream_cue_request_task",
         "params": [
@@ -1348,6 +1359,20 @@
         "registered": true,
         "retries": 0,
         "schedule": null
+      },
+      {
+        "body_lines": 10,
+        "envelope": "context",
+        "file": "backend/tasks/stream_cue_tasks.py",
+        "instance": "backend.tasks.cue_huey_app:cue_huey",
+        "kind": "periodic",
+        "line": 304,
+        "module": "backend.tasks.stream_cue_tasks",
+        "name": "stream_ending_analysis_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": "crontab(minute=\"*/5\")"
       }
     ]
   },

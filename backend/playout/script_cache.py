@@ -5,6 +5,10 @@ includes, while the app runs left it cold: a cold compile takes about 5.3 s, ove
 readiness deadline, so every session was killed before it could write the cache, and every
 ``/listen`` failed until a restart. ``ScriptCache`` fingerprints the script before each start
 and warms the cache again when the fingerprint changed.
+
+Liquidsoap can also stop using its cache for a script that has not changed (2026-11-08, cause
+unknown), with the same result. So a start that fails makes the cache check itself again: a
+warm-up of a cache that is still good takes about 1 s, of a cold one about 9 s.
 """
 
 from __future__ import annotations
@@ -73,7 +77,8 @@ class ScriptCache:
     One build runs at a time, and every start waiting on it shares it; a start that is
     cancelled leaves the build running. A script Liquidsoap rejected fails every start at
     once until it changes; a build that overran or could not run is tried again by the next
-    start. ``on_failure`` is told about each failed build once.
+    start. ``recheck`` builds it again although it did not change. ``on_failure`` is told
+    about each failed build once.
     """
 
     def __init__(
@@ -111,6 +116,19 @@ class ScriptCache:
                 f"the session script could not be read: {unreadable}"
             ) from unreadable
 
+    def recheck(self) -> None:
+        """Stop trusting the cache and build it again now, without waiting for the build.
+
+        A build already running stands for the re-check. The new build is of the last
+        script warmed; a script edited since is warmed by the next ``ensure_warm`` (D113).
+        Before the first warm-up there is nothing to re-check.
+        """
+        build = self._build
+        if build is None:
+            return
+        self._warm_for = None
+        self._current(build.fingerprint)
+
     def _current(self, fingerprint: str) -> _Build:
         """The build in progress, this script's rejected build, or a new build of it."""
         build = self._build
@@ -143,10 +161,16 @@ class ScriptCache:
 def warm_first[E, R](
     cache: ScriptCache, start: Callable[[E], Awaitable[R]]
 ) -> Callable[[E], Awaitable[R]]:
-    """``start``, run once ``cache`` holds the script on disk now."""
+    """``start``, run once ``cache`` holds the script on disk now. A start that fails with
+    ``EngineStartError`` has ``cache`` re-check itself before the error is raised: a session
+    that compiled a cold script overran D37's deadline, and the next start must not."""
 
     async def started(endpoint: E) -> R:
         await cache.ensure_warm()
-        return await start(endpoint)
+        try:
+            return await start(endpoint)
+        except EngineStartError:
+            cache.recheck()
+            raise
 
     return started

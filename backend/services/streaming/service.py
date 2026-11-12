@@ -41,6 +41,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from backend.domain.broadcast import BroadcastStation
+from backend.domain.endings import before_liner
 from backend.domain.liners import (
     InvalidLinerValueError,
     PlayableLiner,
@@ -876,7 +877,8 @@ class StreamService:
         landing = await asyncio.to_thread(
             _landing_assigned, session.load_day, self._placed(call, session)
         )
-        return self._assign(call, self._authorised(call), landing)
+        session = self._authorised(call)
+        return self._assign(call, session, self._before_liner_if_due(session, call.seq, landing))
 
     async def _after_landing(self, call: ItemCall, session: StreamSession) -> ItemPayload:
         """A later seq (plan note 8): the walk to the next song comes first, so the end of the
@@ -906,7 +908,24 @@ class StreamService:
             if liner is not None:
                 return liner  # the song walked to is walked again for the next seq
         following = await self._with_stored_cues(following)  # D85; never seq 0 (D86c)
-        return self._assign(call, self._authorised(call), following)
+        session = self._authorised(call)
+        return self._assign(call, session, self._before_liner_if_due(session, call.seq, following))
+
+    def _before_liner_if_due(self, session: StreamSession, seq: int, song: Assigned) -> Assigned:
+        """``song`` with a long tail's quick fade (EOM ending rules: 1 s, not 2 s) when the
+        session's cadence makes a liner due right after it (LR7); otherwise unchanged. A liner
+        that is due but then does not play leaves the song with the quick fade, harmlessly."""
+        file = song.item.file
+        if file is None or file.ending is None or file.cues is None:
+            return song
+        if session.station_id is None or self._config.liners_dir is None:
+            return song
+        if not liner_due(songs_since_liner(session, seq) + 1, session.liner_cadence):
+            return song
+        cues = before_liner(file.cues, file.ending)
+        if cues == file.cues:
+            return song
+        return replace(song, item=replace(song.item, file=replace(file, cues=cues)))
 
     async def _liner_after(
         self, call: ItemCall, session: StreamSession, song: Assigned, next_song: Assigned

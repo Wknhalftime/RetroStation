@@ -15,9 +15,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from backend.domain.library import AudioHash
+
+if TYPE_CHECKING:
+    from backend.domain.endings import SongEnding
 
 _ONE_MS = timedelta(milliseconds=1)
 
@@ -306,12 +310,17 @@ class StreamTiming:
 
 @dataclass(frozen=True)
 class PlayableFile:
-    """The library file a play resolves to."""
+    """The library file a play resolves to.
+
+    ``ending`` is the song's ending (``backend.domain.endings``) when the reader applied the
+    ending rule to ``cues``; None otherwise, and always None under a manual edit.
+    """
 
     file_id: UUID
     path: str
     duration_ms: int | None
     cues: CuePoints | None
+    ending: SongEnding | None = None
 
     def __post_init__(self) -> None:
         if self.duration_ms is not None:
@@ -346,8 +355,12 @@ class PlayableFile:
     def with_stored_cues(self, cues: CuePoints | None, timing: StreamTiming) -> PlayableFile:
         """This file with the cues stored for its audio now (D85): a row makes it cued, no
         row makes it uncued, unless the change would leave it unplayable (D9); then it is
-        returned unchanged, with the values read at tune-in."""
-        candidate = replace(self, cues=cues)
+        returned unchanged, with the values read at tune-in. Changed cues drop ``ending``: the
+        re-read answers cues only, so an ending read at tune-in no longer describes them (an
+        edit saved since, say, which the liner fade must never shorten)."""
+        if cues == self.cues:
+            return self
+        candidate = replace(self, cues=cues, ending=None)
         return candidate if candidate.is_playable(timing) else self
 
 

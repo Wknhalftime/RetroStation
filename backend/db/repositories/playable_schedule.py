@@ -8,6 +8,7 @@ import psycopg
 import structlog
 from psycopg.rows import DictRow
 
+from backend.domain.endings import EndingType, Follows, SongEnding, ending_applies, ruled_cues
 from backend.domain.enums import FileStatus
 from backend.domain.streaming import (
     CueMarkers,
@@ -48,7 +49,8 @@ SELECT dp.play_event_id AS event_id,
        c.audio_hash AS cued_audio,
        c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db,
        COALESCE(c.audio_silent, false) AS audio_silent,
-       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms
+       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms,
+       n.audio_hash AS ended_audio, n.ending, n.eom_ms AS ending_eom_ms, n.measured_cue_out_ms
 FROM station_day_plays dp
 JOIN track_identities ti ON ti.id = dp.identity_id
 JOIN broadcast_artists ba ON ba.id = ti.broadcast_artist_id
@@ -66,6 +68,12 @@ LEFT JOIN LATERAL (
     WHERE x.audio_hash = f.audio_hash
     OFFSET 0
 ) e ON true
+LEFT JOIN LATERAL (
+    SELECT y.audio_hash, y.ending, y.eom_ms, y.measured_cue_out_ms
+    FROM stream_endings y
+    WHERE y.audio_hash = f.audio_hash
+    OFFSET 0
+) n ON true
 WHERE dp.station_id = %(station_id)s
   AND dp.play_date = %(day)s
 ORDER BY dp.position
@@ -75,7 +83,8 @@ _FILE_CUES_SQL = """
 SELECT f.audio_hash,
        c.audio_hash AS cued_audio,
        c.cue_in_ms, c.cue_out_ms, c.fade_in_ms, c.fade_out_ms, c.start_next_ms, c.gain_db,
-       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms
+       e.audio_hash AS edited_audio, e.start_ms, e.eom_ms, e.fade_at_ms, e.stop_ms,
+       n.audio_hash AS ended_audio, n.ending, n.eom_ms AS ending_eom_ms, n.measured_cue_out_ms
 FROM library_files f
 LEFT JOIN stream_cues c ON c.audio_hash = f.audio_hash
 LEFT JOIN LATERAL (
@@ -84,6 +93,12 @@ LEFT JOIN LATERAL (
     WHERE x.audio_hash = f.audio_hash
     OFFSET 0
 ) e ON true
+LEFT JOIN LATERAL (
+    SELECT y.audio_hash, y.ending, y.eom_ms, y.measured_cue_out_ms
+    FROM stream_endings y
+    WHERE y.audio_hash = f.audio_hash
+    OFFSET 0
+) n ON true
 WHERE f.id = %(file_id)s
   AND (c.audio_hash IS NOT NULL OR e.audio_hash IS NOT NULL)
 """
@@ -136,7 +151,8 @@ class PgPlayableScheduleRepository(PlayableScheduleRepository):
             stored = _stored_points(row)
         except InvalidStreamValueError as error:
             _log_reread_invalid(file_id, row["audio_hash"], error)
-        return _with_edit(row, stored)
+        cues, _ = _played(row, stored)
+        return cues
 
 
 def _to_item(row: DictRow) -> ScheduleItem:
@@ -177,7 +193,8 @@ def _to_file(row: DictRow) -> PlayableFile | None:
     if row["audio_silent"]:
         _warn_silent(row)
         return None
-    return dataclasses.replace(file, cues=_to_cues(row))
+    cues, ending = _to_cues(row)
+    return dataclasses.replace(file, cues=cues, ending=ending)
 
 
 def _warn_no_master(row: DictRow) -> None:
@@ -240,6 +257,30 @@ def _stored_points(row: DictRow) -> CuePoints | None:
     return _points(row)
 
 
+def _ending(row: DictRow) -> SongEnding | None:
+    """The audio's measured ending, or none: no row, or a row that fails validation (logged)."""
+    if row["ended_audio"] is None:
+        return None
+    try:
+        return SongEnding(
+            EndingType(row["ending"]), row["ending_eom_ms"], row["measured_cue_out_ms"]
+        )
+    except ValueError as error:  # InvalidStreamValueError, or an unknown ending value
+        logger.warning("stream_ending_invalid", audio_hash=row["ended_audio"], error=str(error))
+        return None
+
+
+def _played(row: DictRow, stored: CuePoints | None) -> tuple[CuePoints | None, SongEnding | None]:
+    """What the radio plays for the audio, and the ending it played by: the manual edit (no
+    ending), else the ending rule over autocue's row when it applies, else ``stored``."""
+    if row["edited_audio"] is not None:
+        return _with_edit(row, stored), None
+    ending = _ending(row)
+    if stored is None or ending is None or not ending_applies(stored, ending):
+        return stored, None
+    return ruled_cues(stored, ending, Follows.SONG), ending
+
+
 def _with_edit(row: DictRow, stored: CuePoints | None) -> CuePoints | None:
     """The audio's manual edit played over ``stored``, or ``stored`` itself with no edit.
 
@@ -259,8 +300,9 @@ def _with_edit(row: DictRow, stored: CuePoints | None) -> CuePoints | None:
     return edited_cues(markers, stored)
 
 
-def _to_cues(row: DictRow) -> CuePoints | None:
-    """The audio's cue points, or none. A row that fails validation is logged, not raised."""
+def _to_cues(row: DictRow) -> tuple[CuePoints | None, SongEnding | None]:
+    """The audio's cue points (or none) and the ending they were ruled by (or none). A row that
+    fails validation is logged, not raised."""
     stored: CuePoints | None = None
     try:
         stored = _stored_points(row)
@@ -271,4 +313,4 @@ def _to_cues(row: DictRow) -> CuePoints | None:
             file_id=str(row["file_id"]),
             error=str(error),
         )
-    return _with_edit(row, stored)
+    return _played(row, stored)
