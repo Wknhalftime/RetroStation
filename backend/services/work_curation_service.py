@@ -1,10 +1,11 @@
 """The Library's works writes: merge, split, reassign, format overrides, the master delete.
 
-Moved from ``routers/library/works.py`` in phase 0c (C75), with today's behaviour, oddities
-included: a merge drops a source's hand-picked master, and the master recalculation replaces
-a manual pick that is no longer a present file of the work (phase 3b changes both). Each
-write runs in the caller's transaction (a sync route's ``SyncRepos``) and commits nothing;
-each refusal is a :class:`WorkCurationError` whose message is the route's detail.
+Moved from ``routers/library/works.py`` in phase 0c (C75), with the router's behaviour,
+oddities included: the master recalculation replaces a manual pick that is no longer a present
+file of the work. Phase 3b PR 1 changed the merge's master (3b SPEC S3, E1, D8-D11): a
+hand-picked master, from the target or a source, beats an automatic one. Each write runs in
+the caller's transaction (a sync route's ``SyncRepos``) and commits nothing; each refusal is a
+:class:`WorkCurationError` whose message is the route's detail.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from backend.domain.curation import (
     MergeTargetInSourcesError,
     NewFormatOverride,
     ReassignResult,
+    SongMaster,
     SongMasterNotFoundError,
     SplitResult,
 )
@@ -168,12 +170,62 @@ def _delete_unused_local_artists(artist_ids: set[str], repos: WorkCurationRepos)
             repos.curation.delete_artist(artist_id)
 
 
+def _is_valid_pick(master: SongMaster, work_ids: list[str], files: LibraryFileRepository) -> bool:
+    """Whether *master* is hand-picked and its file a present file of one of *work_ids*
+    (3b SPEC D10: a pick that couldn't play doesn't compete)."""
+    if master.selection_method != SelectionMethod.MANUAL:
+        return False
+    chosen = files.get_by_id(master.preferred_file_id)
+    return (
+        chosen is not None
+        and chosen.work_id in work_ids
+        and chosen.file_status == FileStatus.PRESENT
+    )
+
+
+def _hand_picked_master(
+    target_id: str, source_ids: list[str], repos: WorkCurationRepos
+) -> SongMaster | None:
+    """The hand-picked master the merged work keeps (3b SPEC S3, E1), or None: then the
+    recalculation re-picks the master from the merged work's present files, stored automatic
+    (D8). Read before anything moves.
+
+    Between two or more valid picks, the work with more matched plays wins (D9), then the
+    target, then the source listed first.
+    """
+    order = [target_id, *source_ids]
+    picks: dict[str, SongMaster] = {}
+    for work_id in order:
+        master = repos.song_masters.get_by_work(work_id)
+        if master is not None and _is_valid_pick(master, order, repos.files):
+            picks[work_id] = master
+    if len(picks) < 2:
+        return next(iter(picks.values()), None)
+    plays = repos.curation.matched_plays(list(picks))
+    # More plays first; on a tie the one earlier in `order`: the target, then the listed sources.
+    return picks[max(picks, key=lambda work_id: (plays.get(work_id, 0), -order.index(work_id)))]
+
+
+def _carry_master(master: SongMaster, target_id: str, repos: WorkCurationRepos) -> None:
+    """Store a source's hand-picked master as the target's, still hand-picked (D11)."""
+    current = repos.song_masters.get_by_work(target_id)
+    repos.song_masters.replace(
+        SongMaster(
+            id=current.id if current is not None else uuid4(),
+            work_id=target_id,
+            preferred_file_id=master.preferred_file_id,
+            selection_method=SelectionMethod.MANUAL,
+            score=master.score,
+        )
+    )
+
+
 def merge_works(
     target_id: str, source_work_ids: list[str], repos: WorkCurationRepos
 ) -> MergeResult:
     """Fold the source works into the target: files, overrides of both kinds, version-entry
-    states (combined, D6), recordings, matches; the sources and their masters go, the
-    target's master is re-picked."""
+    states (combined, D6), recordings, matches; the sources and their masters go. The merged
+    work keeps the hand-picked master 3b's S3 picks, else its master is re-picked (D8)."""
     target = _work(target_id, repos.works)
     if target_id in source_work_ids:
         raise MergeTargetInSourcesError("Target work ID must not appear in source_work_ids")
@@ -182,6 +234,7 @@ def merge_works(
         return _NOTHING_MERGED
 
     source_ids = [work.id for work in sources]
+    kept = _hand_picked_master(target_id, source_ids, repos)
     moving = [f.id for work_id in source_ids for f in repos.files.get_by_work(work_id)]
     left = move_out(moving, repos.performances)
     merged = repos.curation.move_files_of_works(source_ids, target_id)
@@ -194,6 +247,8 @@ def merge_works(
     place(moving, left, repos.performances, song_matches)
     repos.curation.delete_masters_of_works(source_ids)
     deleted = repos.curation.delete_works(source_ids)
+    if kept is not None and kept.work_id != target_id:
+        _carry_master(kept, target_id, repos)
     _recalculate_master(target_id, repos)
     _delete_unused_local_artists({work.artist_id for work in sources} - {target.artist_id}, repos)
     return MergeResult(

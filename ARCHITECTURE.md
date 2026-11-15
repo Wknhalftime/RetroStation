@@ -74,10 +74,25 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (`tests/fakes/work_curation.py`) works on the other fakes' rows, and
   `tests/repositories/test_work_curation_contract.py` runs the same cases on the fake and on
   PostgreSQL.
-- Behaviour is the router's, oddities included: a merge drops a source's hand-picked master,
-  and the master recalculation replaces a manual pick that is no longer a present file of the
-  work (phase 3b changes both). Each refusal is a `WorkCurationError` whose message is the
-  route's detail.
+- Behaviour is the router's, oddities included: the master recalculation replaces a manual pick
+  that is no longer a present file of the work (phase 3b keeps this). Each refusal is a
+  `WorkCurationError` whose message is the route's detail.
+- The merge's master (phase 3b PR 1: 3b SPEC S3, E1, D8-D11; AUD-R032's "puts a hand-picked
+  master first"). Before 3b a merge dropped every source's master and re-picked the target's.
+  Now:
+  - a hand-picked master, the target's or a source's, beats an automatic one and stays
+    hand-picked (D11);
+  - a pick counts only while its file is a present file of the merged work (D10);
+  - between picks, the work with more matched plays keeps its master (D9). Those are the plays
+    of the lines whose view work (`play_file_resolution.work_id`) is that work, counted by
+    `WorkCurationRepository.matched_plays` on the merge's connection before anything moves. A
+    tie goes to the target, then to the source listed first;
+  - with no valid pick, the recalculation re-picks the master from the merged work's present
+    files, stored automatic, as before (D8). Plays keep no automatic master, because every
+    matching run re-picks it (`tasks/identity_matching_tasks.py`).
+
+  The fake's `matched_plays` returns nothing (the fakes hold no plays), so its check is
+  `tests/integration/test_work_merge_service_pg.py`.
 - A merge deletes a source's local artist only when it is left with no work, no log-name link in
   any state (AUD-R035, which changes AUD-R004) and no artist merge on either side (phase 2a S11,
   "Artist identity" below). AUD-R035's "may be deleted only when" still holds; this is one more
@@ -88,8 +103,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The checks are `tests/test_works_router_writes_have_no_sql.py` (no write route reaches an
   `.execute` or a psycopg or `backend.db` name),
   `tests/routers/test_works_write_routes_are_sync.py`,
-  `tests/routers/test_works_write_refusals.py` and
-  `tests/services/test_work_curation_service.py`.
+  `tests/routers/test_works_write_refusals.py`,
+  `tests/services/test_work_curation_service.py` and (the merge's master)
+  `tests/integration/test_work_merge_service_pg.py`.
 
 ## Log-name links: one table, one writer (phase 1a, C30)
 
