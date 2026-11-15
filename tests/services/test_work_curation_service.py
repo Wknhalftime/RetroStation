@@ -2,10 +2,12 @@
 
 ``work_curation_service`` holds the writes the works router ran as raw SQL on its async
 connection: merge, split, reassign, format override create and delete, master delete, and the
-master recalculation they share. It writes in the caller's transaction and reproduces today's
-behaviour, oddities included: a merge drops a source's hand-picked master, and the
-recalculation replaces a manual pick whose file is no longer a present file of the work
-(phase 3b changes both). Each refusal carries today's HTTP detail as its message.
+master recalculation they share. It writes in the caller's transaction and reproduces the
+router's behaviour, oddities included: the recalculation replaces a manual pick whose file is
+no longer a present file of the work. Phase 3b PR 1 changed one: a merge used to drop a
+source's hand-picked master, and now keeps it (S3, E1; the rule is pinned in
+``tests/integration/test_work_merge_service_pg.py``). Each refusal carries today's HTTP detail
+as its message.
 
 The routes' own tests (``tests/routers/test_library.py``, unlocked) and phase 0a's scenario
 tests are the safety net for every response; these pin the service: its results, its
@@ -260,11 +262,12 @@ def test_merge_folds_every_source_into_the_target(conn: Conn) -> None:
     assert _row(conn, "artists", artist) is not None
 
 
-def test_merge_drops_a_sources_hand_picked_master(conn: Conn) -> None:
-    """Today's oddity, kept: the source's manual pick is not carried (phase 3b changes it)."""
+def test_merge_keeps_a_sources_hand_picked_master(conn: Conn) -> None:
+    """Phase 3b (S3): a hand-picked master beats an automatic one, or none, so the source's
+    manual pick becomes the merged work's master, still manual, over the better file."""
     artist = _artist(conn, "Nirvana")
     target = _work(conn, "Lithium", artist)
-    best = _file(conn, target, "best", fmt="flac")
+    _file(conn, target, "best", fmt="flac")  # scores higher, but is no hand-pick
     source = _work(conn, "lithium", artist)
     picked = _file(conn, source, "picked")
     _master(conn, source, picked, SelectionMethod.MANUAL)
@@ -274,7 +277,7 @@ def test_merge_drops_a_sources_hand_picked_master(conn: Conn) -> None:
     conn.commit()
 
     assert _master_of(conn, source) is None
-    assert _master_of(conn, target) == (best, "auto")
+    assert _master_of(conn, target) == (picked, "manual")
 
 
 def test_merge_keeps_a_source_artist_with_another_work_or_from_musicbrainz(conn: Conn) -> None:

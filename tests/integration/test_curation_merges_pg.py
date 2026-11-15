@@ -3,12 +3,12 @@ of both works.
 
 Phase 3b rebuilds the merge on purpose (AUD-R032, C58: one merge path that pins every line
 whose playing file would change, puts a hand-picked master first and redirects merged ids) and
-relocks this file. Until then it records today's merge (POST /library/works/{target}/merge),
-read only through ``play_file_resolution``:
+relocks this file as it goes. As phase 3b PR 1 leaves it, a merge
+(POST /library/works/{target}/merge), read only through ``play_file_resolution``:
 
-- the merged work keeps the target's master, re-picked automatically from every file it now
-  holds, so the source's hand-picked master is dropped and the source's lines move with it;
-- the source's format overrides move to the merged work, except one whose format the target
+- puts a hand-picked master first: the merged work keeps the source's hand-picked master over
+  the target's automatic one, so the target's lines move to it (until PR 2's pins hold them);
+- moves the source's format overrides to the merged work, except one whose format the target
   already overrides: the target's wins.
 
 The library comes from the scan; the masters and overrides from the works routes; stations,
@@ -150,14 +150,15 @@ def _merge(client: TestClient, target: str, source: str) -> None:
     assert response.status_code == 200
 
 
-def test_merge_drops_the_source_masters_and_moves_its_overrides(
+def test_merge_keeps_the_source_hand_picked_master_and_moves_its_overrides(
     conn: Conn, client: TestClient, tmp_path: Path
 ) -> None:
     """S1, a work merge: AGAIN filed under Janet Jackson (target) and under Janet (source).
 
-    The source's hand-picked master (the single) loses to the target's automatic one (the
-    album scores higher), so the source's CHR line moves to the album; its AC override moves
-    to the merged work and now reaches the target's line at the AC station too.
+    The source's hand-picked master (the single) beats the target's automatic one (the album,
+    though it scores higher; 3b S3), so the target's CHR line moves to the single; the
+    source's AC override moves to the merged work and now reaches the target's line at the AC
+    station too. PR 2 pins the CHR line to the album and flags the AC change (C74).
     """
     root = tmp_path / "library"
     _tagged(root / "again-album.mp3", "Janet Jackson", "Again", "album")
@@ -177,8 +178,8 @@ def test_merge_drops_the_source_masters_and_moves_its_overrides(
 
     _merge(client, target, source)
 
-    assert [_plays(conn, e) for e in target_line] == [ac_mix, album]
-    assert [_plays(conn, e) for e in source_line] == [ac_mix, album]
+    assert [_plays(conn, e) for e in target_line] == [ac_mix, single]
+    assert [_plays(conn, e) for e in source_line] == [ac_mix, single]
 
 
 def test_merge_keeps_the_targets_override_for_a_shared_format(
