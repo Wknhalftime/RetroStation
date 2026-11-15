@@ -60,6 +60,13 @@ class WorkCurationRepository(ABC):
         ...
 
     @abstractmethod
+    def matched_plays(self, work_ids: list[str]) -> dict[str, int]:
+        """The plays of the lines air play gives each of *work_ids* (3b SPEC E1, D9): a line's
+        work is its best auto or manual match's file's work, as in ``play_file_resolution``.
+        A work with no such play is left out."""
+        ...
+
+    @abstractmethod
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         """Delete the song masters of *work_ids*, whatever their method."""
         ...

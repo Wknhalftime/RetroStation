@@ -94,6 +94,10 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         if recording is not None:
             self._recordings[recording_id] = replace(recording, work_id=work_id)
 
+    def matched_plays(self, work_ids: list[str]) -> dict[str, int]:
+        # Plays live in PostgreSQL only; the integration tests count them.
+        return {}
+
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         for work_id in work_ids:
             self._masters.pop(work_id, None)

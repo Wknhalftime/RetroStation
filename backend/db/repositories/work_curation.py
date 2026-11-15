@@ -118,6 +118,49 @@ class PgWorkCurationRepository(WorkCurationRepository):
             "UPDATE recordings SET work_id = %s WHERE id = %s", (work_id, recording_id)
         )
 
+    def matched_plays(self, work_ids: list[str]) -> dict[str, int]:
+        # The view's best-match lateral, run only for the lines with a match on these works'
+        # files (a file's work, else its recording's), then their plays counted.
+        rows = self._conn.execute(
+            """
+            WITH touched AS (
+                SELECT m.identity_id
+                FROM matches m
+                JOIN library_files f ON f.id = m.library_file_id
+                WHERE f.work_id = ANY(%(works)s)
+                UNION
+                SELECT m.identity_id
+                FROM matches m
+                JOIN library_files f ON f.id = m.library_file_id
+                JOIN recordings r ON r.id = f.recording_id
+                WHERE f.work_id IS NULL AND r.work_id = ANY(%(works)s)
+            ),
+            lines AS (
+                SELECT t.identity_id, COALESCE(f.work_id, r.work_id) AS work_id
+                FROM touched t
+                JOIN track_identities ti
+                  ON ti.id = t.identity_id
+                 AND ti.match_status IN ('auto_matched', 'manual_matched')
+                CROSS JOIN LATERAL (
+                    SELECT m.library_file_id
+                    FROM matches m
+                    WHERE m.identity_id = t.identity_id AND m.library_file_id IS NOT NULL
+                    ORDER BY m.confidence_score DESC, m.created_at, m.id
+                    LIMIT 1
+                ) best
+                JOIN library_files f ON f.id = best.library_file_id
+                LEFT JOIN recordings r ON r.id = f.recording_id
+            )
+            SELECT l.work_id, count(*) AS plays
+            FROM lines l
+            JOIN play_events pe ON pe.identity_id = l.identity_id
+            WHERE l.work_id = ANY(%(works)s)
+            GROUP BY l.work_id
+            """,
+            {"works": work_ids},
+        ).fetchall()
+        return {r["work_id"]: int(r["plays"]) for r in rows}
+
     def delete_masters_of_works(self, work_ids: list[str]) -> None:
         self._conn.execute(
             f"DELETE FROM song_masters WHERE work_id IN ({_placeholders(work_ids)})",
