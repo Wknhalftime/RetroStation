@@ -13,10 +13,11 @@ its work when:
   performances qualify, the closest length wins, then the performance whose first file has the
   lower id.
 
-"The same credit artists" compares sets of MBIDs: the file's from its ``credit``, the
-performance's from its credits, placeholders (``SPECIAL_PURPOSE_MBIDS``) left out of both. No
-credit, or only placeholders, is the empty set (E1). "The same version" is the file-side
-reader's ``VersionType`` of ``track_title`` (no title reads as ``original``).
+"The same credit artists" compares sets (3b's D1): the file's from its ``credit``, the
+performance's from its credits, placeholders (``SPECIAL_PURPOSE_MBIDS``) left out of both, each
+credit as its MBID when known, else its artist's id. No credit, or only placeholders, counts as
+the work's artist (E1 as D1 makes it). "The same version" is the file-side reader's
+``VersionType`` of ``track_title`` (no title reads as ``original``).
 
 A new performance takes its first file's recording MBID, version and length, and its credits
 from that file's ``credit``, placeholders left out, numbered from 0 in order:
@@ -27,6 +28,9 @@ from that file's ``credit``, placeholders left out, numbered from 0 in order:
 - ``join_after`` is the entry's joining words as stored;
 - ``role`` is ``featured`` when the joining words before the entry are "feat.", "feat", "ft.",
   "ft" or "featuring" (any case, spaces trimmed), else ``main`` (C69).
+
+With none left, it credits the work's artist (3b's D1): position 0, the artist's id, its MBID
+if it has one, its name, ``main``; a placeholder work artist gives none.
 
 The task commits as it goes; a run that stopped resumes with the files still without a
 performance, and files done keep theirs (E5). It sets its own done-marker once every file on a
@@ -379,10 +383,11 @@ def test_an_mbid_with_no_artist_and_no_name_is_credited_by_mbid(conn: Conn) -> N
 
 
 def test_placeholders_are_never_credited(conn: Conn) -> None:
-    """C7: the track artist without the placeholder; a credit of placeholders only is empty, so
-    the file groups as an untagged one with a file that has no credit (E1). A later file whose
-    credit holds a placeholder beside the track artist joins the track artist's performance:
-    the file's side leaves placeholders out too."""
+    """C7: the track artist without the placeholder; a credit of placeholders only counts as
+    none, so the file groups as an untagged one with a file that has no credit (E1), and their
+    performance credits the work's artist (3b's D1). A later file whose credit holds a
+    placeholder beside the track artist joins the track artist's performance: the file's side
+    leaves placeholders out too."""
     work = seed.work(conn)
     file_row(conn, work, 1, credit=[(VARIOUS, "Various Artists", " / "), (ONE, "Blondie", None)])
     file_row(conn, work, 2, duration_ms=300_000, credit=[(VARIOUS, "Various Artists", None)])
@@ -395,7 +400,9 @@ def test_placeholders_are_never_credited(conn: Conn) -> None:
 
     assert credits_of(conn, fid(1)) == [(0, None, ONE, "Blondie", None, "main")]
     assert groups(conn, work) == [[fid(1), fid(4)], [fid(2), fid(3)]]
-    assert credits_of(conn, fid(3)) == []
+    row = conn.execute("SELECT artist_id FROM works WHERE id = %s", (work,)).fetchone()
+    assert row is not None
+    assert credits_of(conn, fid(3)) == [(0, row["artist_id"], None, "Artist", None, "main")]
 
 
 def test_untagged_file(conn: Conn) -> None:
@@ -472,7 +479,7 @@ def test_resume(conn: Conn) -> None:
     assert performance_of(conn, fid(1)) == done
     assert performance_of(conn, fid(2)) == done
     assert groups(conn, work) == [[fid(1), fid(2)], [fid(3)]]
-    assert count(conn, "performance_credits") == 1
+    assert count(conn, "performance_credits") == 2  # file 3's work's artist (3b's D1)
     assert marker(conn, PERFORMANCES_BUILT_SETTING) is not None
 
 
