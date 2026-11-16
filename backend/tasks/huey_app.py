@@ -45,3 +45,4 @@ import backend.tasks.mb_enrichment_tasks  # noqa: F401, E402
 import backend.tasks.normalize_backfill_tasks  # noqa: F401, E402
 import backend.tasks.performance_build_tasks  # noqa: F401, E402
 import backend.tasks.progress_prune_tasks  # noqa: F401, E402
+import backend.tasks.work_artist_credit_tasks  # noqa: F401, E402

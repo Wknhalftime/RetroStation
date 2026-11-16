@@ -76,10 +76,9 @@ class LineCredit:
 
 @dataclass(frozen=True)
 class WorkCredits:
-    """A work's performances with their credit artists, its default and its artist (D8)."""
+    """A work's performances with their credit artists and its default."""
 
     work_id: str
-    artist_id: str | None
     default_performance_id: UUID | None
     performances: tuple[CreditedPerformance, ...]
 
@@ -142,7 +141,6 @@ def propose(
         work.performances,
         work.default_performance_id,
         primary_of=primary_of,
-        work_artist=work.artist_id,
     )
     if choice.reason in (PerformanceReason.DEFAULT, PerformanceReason.NO_PERFORMER):
         return None

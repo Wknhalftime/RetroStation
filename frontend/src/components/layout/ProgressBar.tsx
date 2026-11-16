@@ -14,6 +14,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   artist_credits_backfill: "Filling in every artist of each file",
   performances_build: "Grouping each song's files into performances",
   credit_pick_proposals: "Proposing credit picks",
+  work_artist_credits: "Crediting each song's artist",
   mb_enrichment: "Enhancing MusicBrainz entities",
   artist_linking: "Linking artists to MusicBrainz",
   ingestion: "Ingesting tracks",

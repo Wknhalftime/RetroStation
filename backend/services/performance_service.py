@@ -1,12 +1,14 @@
 """Keep files' performances and preferred copies right (phase 3a PR 2; SPEC S2, S3, S5, E2, E3,
-E8, D5, D6; design C40, C71; AUD-R075).
+E8, D5, D6; design C40, C71; AUD-R075; 3b PR 2's credits, D1, D18, AUD-R078).
 
 Every writer that sets a file's work keeps one order (S3):
 
 1. :func:`leave`: before files leave their performances, re-pick each preferred copy that is
    one of them, and remember where they were;
 2. the writer's own ``work_id`` write, which clears ``performance_id`` in the same statement;
-3. :func:`assign_performance` for each file that now sits on a work;
+3. :func:`assign_performance` for each file that now sits on a work; a file with no credit of
+   its own keeps the act of the performance it left (3b D18), and a new performance whose first
+   file has none credits its work's artist (D1);
 4. :func:`settle`: the lines storing a performance the writer touched are handed off or
    released (E3, D5, question B), and an emptied performance is deleted. A writer that
    deletes the work a file left settles first, or the work's cascade would drop the lines'
@@ -28,14 +30,18 @@ from backend.domain.performances import (
     CopyRow,
     CopyScore,
     FileForPerformance,
+    NewCredit,
     PerformanceKey,
     StoredLineOutcome,
+    WorkArtist,
     best_copy,
-    credit_mbids,
+    default_artists,
+    default_credits,
     find_performance,
     fits,
     new_credits,
     stored_line_outcome,
+    tag_artists,
 )
 from backend.repositories.performances import PerformanceRepository
 from backend.services.master_selection_service import score_file_row
@@ -50,29 +56,47 @@ type Left = dict[UUID, set[UUID]]
 """Each performance files left, with the files that left it."""
 
 
-def file_key(file: FileForPerformance) -> PerformanceKey:
-    """S2's key of a file: its recording MBID, credit artists, version and length."""
+def file_key(file: FileForPerformance, default: frozenset[str]) -> PerformanceKey:
+    """S2's key of a file: its recording MBID, credit artists (*default* when it has no credit
+    of its own, 3b D1), version and length."""
     _, version = extract_version_info(file.title or "")
     return PerformanceKey(
         recording_mbid=file.recording_mbid,
-        credit_mbids=credit_mbids(file.credit),
+        credit_artists=tag_artists(file.credit) or default,
         version_type=version,
         length_ms=file.length_ms,
     )
 
 
-def assign_performance(file_id: UUID, performances: PerformanceRepository) -> UUID | None:
-    """Find or create the file's performance in its current work (S2's rule); idempotent."""
+def _uncredited_as(
+    file: FileForPerformance, came_from: UUID | None, performances: PerformanceRepository
+) -> tuple[frozenset[str], list[NewCredit]]:
+    """Who a file with no credit of its own counts as, and the credits a performance it starts
+    gets: the performance it left (3b D18: a moved untagged copy keeps its act), else its work's
+    artist (D1)."""
+    carried = performances.carried(came_from) if came_from is not None else None
+    if carried is not None and carried.artists:
+        return carried.artists, list(carried.credits)
+    return default_artists(file.default_artist), default_credits(file.default_artist)
+
+
+def assign_performance(
+    file_id: UUID, performances: PerformanceRepository, *, came_from: UUID | None = None
+) -> UUID | None:
+    """Find or create the file's performance in its current work (S2's rule); idempotent.
+    *came_from* is the performance the file just left, if any (3b D18)."""
     file = performances.file_for_performance(file_id)
     if file is None or file.work_id is None:
         return None
     if file.performance_id is not None:
         return file.performance_id
-    key = file_key(file)
+    default, default_credit = _uncredited_as(file, came_from, performances)
+    key = file_key(file, default)
     found = find_performance(key, performances.candidates(file.work_id))
     if found is None:
-        artists = performances.artists_by_mbid(sorted(key.credit_mbids))
-        found = performances.create(file.work_id, key, new_credits(file.credit, artists))
+        tagged = sorted(tag_artists(file.credit))
+        credits = new_credits(file.credit, performances.artists_by_mbid(tagged)) or default_credit
+        found = performances.create(file.work_id, key, credits)
     performances.hold(file_id, found)
     return found
 
@@ -121,10 +145,25 @@ def leave(
     return left
 
 
-def assign_all(file_ids: Iterable[UUID], performances: PerformanceRepository) -> None:
-    """:func:`assign_performance` for each file, in file-id order."""
+def assign_all(
+    file_ids: Iterable[UUID], performances: PerformanceRepository, *, left: Left | None = None
+) -> None:
+    """:func:`assign_performance` for each file, in file-id order; a file in *left* counts as
+    the performance it left (3b D1)."""
+    came_from = {f: p for p, files in (left or {}).items() for f in files}
     for file_id in sorted(set(file_ids)):
-        assign_performance(file_id, performances)
+        assign_performance(file_id, performances, came_from=came_from.get(file_id))
+
+
+def credit_work_artist(
+    performance_id: UUID, artist: WorkArtist | None, performances: PerformanceRepository
+) -> bool:
+    """3b D1's run-once step for one performance with no credit: credit its work's artist,
+    unless that is a placeholder; whether it did."""
+    credits = default_credits(artist)
+    if credits:
+        performances.add_credits(performance_id, credits)
+    return bool(credits)
 
 
 def settle(
@@ -206,7 +245,7 @@ def place(
     """Steps 3 and 4 after a writer's move: assign, then settle."""
     if performances is None:
         return
-    assign_all(file_ids, performances)
+    assign_all(file_ids, performances, left=left)
     settle(left, performances, song_matches)
 
 
@@ -220,14 +259,14 @@ def reassign_retagged(
     stale: list[UUID] = []
     for start in range(0, len(paths), PATH_BATCH):
         for file, held in performances.held_files(paths[start : start + PATH_BATCH]):
-            if not fits(file_key(file), held):
+            if not fits(file_key(file, held.credit_artists), held):
                 stale.append(file.id)
     if not stale:
         return 0
     left = leave(stale, performances)
     for file_id in stale:
         performances.hold(file_id, None)
-    assign_all(stale, performances)
+    assign_all(stale, performances, left=left)
     settle(left, performances, song_matches)
     return len(stale)
 

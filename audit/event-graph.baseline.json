@@ -11,15 +11,15 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 6,
     "node.producer": 17,
-    "node.task": 18,
+    "node.task": 19,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
     "rule.EV05": 0,
-    "rule.EV06": 5,
+    "rule.EV06": 6,
     "rule.EV07": 1,
-    "rule.EV08": 24,
+    "rule.EV08": 25,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -448,6 +448,15 @@
       "subject": "backend.tasks.performance_build_tasks:build_performances_task"
     },
     {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
+      "file": "backend/tasks/work_artist_credit_tasks.py",
+      "line": 34,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.work_artist_credit_tasks:credit_work_artists_task"
+    },
+    {
       "annotation": "bytes",
       "class": "inventory",
       "code": "EV07",
@@ -716,6 +725,17 @@
       "subject": "backend.tasks.stream_cue_tasks:stream_ending_analysis_task",
       "value": {
         "body_lines": 10,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/work_artist_credit_tasks.py",
+      "line": 34,
+      "subject": "backend.tasks.work_artist_credit_tasks:credit_work_artists_task",
+      "value": {
+        "body_lines": 46,
         "service_calls": 1
       }
     },
@@ -1407,6 +1427,20 @@
         "registered": true,
         "retries": 0,
         "schedule": "crontab(minute=\"*/5\")"
+      },
+      {
+        "body_lines": 46,
+        "envelope": "task_run",
+        "file": "backend/tasks/work_artist_credit_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 34,
+        "module": "backend.tasks.work_artist_credit_tasks",
+        "name": "credit_work_artists_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
       }
     ]
   },

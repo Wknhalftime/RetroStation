@@ -4,7 +4,9 @@
 Pure rules only. A file joins a performance of its own work when it has a recording MBID and
 the performance has the same one, or, with no recording MBID, when the performance has the
 same credit artists, version and a length within 3 s of its ``length_ms`` (SPEC S2, question
-E). Credit artists are compared as sets of MBIDs, placeholders left out.
+E). Credit artists are compared as sets, placeholders left out, each credit as its MBID when
+known, else its artist's id (3b SPEC D1, Q4). A file with no credit of its own counts as the
+credit artists of the performance it holds or leaves (D18), else as its work's artist (D1).
 """
 
 from __future__ import annotations
@@ -35,9 +37,19 @@ class PerformanceKey:
     """What S2's rule compares: a file's, or a performance's from its first file."""
 
     recording_mbid: str | None
-    credit_mbids: frozenset[str]
+    credit_artists: frozenset[str]
     version_type: VersionType
     length_ms: int | None
+
+
+@dataclass(frozen=True)
+class WorkArtist:
+    """The artist a work names (``works.artist_id``): 3b's D1 credit for a performance whose
+    files have no credit of their own."""
+
+    id: str
+    mbid: str | None
+    name: str
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,8 @@ class FileForPerformance:
     title: str | None
     length_ms: int | None
     credit: tuple[CreditPart, ...]
+    # 3b D1: its work's artist, whom it counts as when it has no credit of its own.
+    default_artist: WorkArtist | None = None
 
 
 @dataclass(frozen=True)
@@ -87,10 +101,19 @@ class PerformanceCandidate:
 class NewCredit:
     position: int
     artist_id: str | None
-    mbid: str
+    mbid: str | None
     credited_name: str | None
     join_after: str | None
     role: CreditRole
+
+
+@dataclass(frozen=True)
+class CarriedCredit:
+    """What a file with no credit of its own takes from the performance it leaves (3b D18):
+    that performance's credit artists, and its credits for a performance it starts."""
+
+    artists: frozenset[str]
+    credits: tuple[NewCredit, ...]
 
 
 @dataclass(frozen=True)
@@ -108,9 +131,44 @@ class StoredLineOutcome(StrEnum):
     RELEASED = "released"
 
 
-def credit_mbids(parts: Iterable[CreditPart]) -> frozenset[str]:
-    """The credit's artists, placeholders left out (C7)."""
+def _is_placeholder(artist: WorkArtist) -> bool:
+    """A work's artist that is never credited: MusicBrainz's special-purpose ones (C7)."""
+    return artist.mbid in SPECIAL_PURPOSE_MBIDS
+
+
+def tag_artists(parts: Iterable[CreditPart]) -> frozenset[str]:
+    """A tag credit's artists: its MBIDs, placeholders left out (C7)."""
     return frozenset(p.mbid for p in parts if p.mbid not in SPECIAL_PURPOSE_MBIDS)
+
+
+def default_artists(artist: WorkArtist | None) -> frozenset[str]:
+    """3b D1: the work's artist as a credit artist, its MBID when it has one, else its id (Q4);
+    none for a placeholder or no artist (Q5)."""
+    if artist is None or _is_placeholder(artist):
+        return frozenset()
+    return frozenset({artist.mbid or artist.id})
+
+
+def credit_artists(parts: Iterable[CreditPart], artist: WorkArtist | None) -> frozenset[str]:
+    """A new file's credit artists: its tag credit's, else its work's artist (3b D1)."""
+    return tag_artists(parts) or default_artists(artist)
+
+
+def default_credits(artist: WorkArtist | None) -> list[NewCredit]:
+    """3b D1: one credit naming the work's artist, by id with its MBID if it has one; none for
+    a placeholder or no artist."""
+    if artist is None or _is_placeholder(artist):
+        return []
+    return [
+        NewCredit(
+            position=0,
+            artist_id=artist.id,
+            mbid=artist.mbid,
+            credited_name=artist.name,
+            join_after=None,
+            role=CreditRole.MAIN,
+        )
+    ]
 
 
 def joins_by_length(length_ms: int | None) -> bool:
@@ -127,7 +185,7 @@ def distance_to(key: PerformanceKey, theirs: PerformanceKey) -> int | None:
     """
     if key.recording_mbid is not None:
         return 0 if key.recording_mbid == theirs.recording_mbid else None
-    if theirs.credit_mbids != key.credit_mbids or theirs.version_type != key.version_type:
+    if theirs.credit_artists != key.credit_artists or theirs.version_type != key.version_type:
         return None
     if key.length_ms is None or theirs.length_ms is None:
         return None
@@ -238,14 +296,13 @@ def choose_performance(
     default: UUID | None,
     *,
     primary_of: Mapping[str, str] | None = None,
-    work_artist: str | None = None,
 ) -> PerformanceChoice:
     """The performance a log line's credit picks inside its work (S6, D3, D8, D9; C47, M21).
 
     Every artist compares as its merge-group primary. A performance answers better when it
     misses fewer of the line's artists, then credits fewer others; the default wins any tie with
-    the best. An uncredited default credits the work's artist (D8). A line with no linked artist
-    gets the default (C16).
+    the best. An untagged default credits its work's artist through 3b's D1 credit (D8). A line
+    with no linked artist gets the default (C16).
     """
     groups = primary_of or {}
     line = frozenset(groups.get(a, a) for a in credit_artists)
@@ -255,8 +312,6 @@ def choose_performance(
     default_score: tuple[int, int] | None = None
     for candidate in performances:
         artists = frozenset(groups.get(a, a) for a in candidate.artists)
-        if candidate.id == default and not artists and work_artist is not None:
-            artists = frozenset({groups.get(work_artist, work_artist)})
         if not artists & line:
             continue
         score = (len(line - artists), len(artists - line))

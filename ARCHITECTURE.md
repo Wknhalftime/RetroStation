@@ -94,8 +94,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   The fake's `matched_plays` returns nothing (the fakes hold no plays), so its check is
   `tests/integration/test_work_merge_service_pg.py`.
 - A merge deletes a source's local artist only when it is left with no work, no log-name link in
-  any state (AUD-R035, which changes AUD-R004) and no artist merge on either side (phase 2a S11,
-  "Artist identity" below). AUD-R035's "may be deleted only when" still holds; this is one more
+  any state (AUD-R035, which changes AUD-R004), no artist merge on either side (phase 2a S11,
+  "Artist identity" below) and no performance crediting it (3b D19, AUD-R078: the act still
+  performs a copy of the merged work). AUD-R035's "may be deleted only when" still holds; this is one more
   condition, so no ruling changes.
 - The router's read route (the work detail) keeps its SQL on the async connection until 3b
   rebuilds the Library pages (AUD-R010 noted; AUD-R074 replaces it for the song routes, "Song
@@ -611,13 +612,16 @@ returns the row it finds).
   only the adapter and the five statements hold SQL that writes `matches`, and only the service
   calls the port's writes) and `tests/routers/test_identity_routes_are_sync.py`.
 
-## Performances, kept by every writer (phase 3a PR 2, C40, C44, C71, AUD-R075)
+## Performances, kept by every writer (phase 3a PR 2, C40, C44, C71, AUD-R075; 3b PR 2, AUD-R078)
 
 - **The model (0051).** `performances` holds one recording of a work: its work, an optional
   recording MBID (unique within the work), the file-side reader's version, its first file's
   length, and a preferred copy. `performance_credits` holds its credit (position, artist or
   MBID, credited name, joining words, main or featured). An MBID no artist holds yet is
-  credited by MBID, and readers find the artist on the MBID later (D1: no stub). A file points
+  credited by MBID, and readers find the artist on the MBID later (D1: no stub). Every
+  performance credits someone (3b D1): one whose first file has no credit left after
+  placeholders credits its work's artist (`works.artist_id` until 3b PR 5) by id, with its MBID
+  if it has one; a placeholder work artist gives none. A file points
   at its performance through `(performance_id, work_id)`, so a file and its performance always
   share a work; the key is checked per statement, so every `work_id` write clears
   `performance_id` in the same UPDATE. A performance's preferred copy is one of its own files
@@ -626,18 +630,29 @@ returns the row it finds).
   stays each work's default copy (C71).
 - **The identity rule (§6.2, `domain/performances.py`).** A file joins a performance of its
   work with the same recording MBID; a file with an MBID joins nothing else. A file without one
-  joins any performance of its work (MBID or not) with the same credit artists (sets of MBIDs,
-  placeholders left out), version and a length within 3 s of the performance's `length_ms`;
-  the closest wins, then the one whose first file has the lower id. A NULL or negative length
-  never joins.
+  joins any performance of its work (MBID or not) with the same credit artists, version and a
+  length within 3 s of the performance's `length_ms`; the closest wins, then the one whose
+  first file has the lower id. A NULL or negative length never joins. Credit artists are sets,
+  placeholders left out, each credit as its MBID when known (its own, else its artist's as it
+  is now), else its artist id (3b D1, AUD-R078): two name-only acts stay apart, and an artist
+  promoted in place keeps every key. A file with no credit of its own counts as the performance
+  it holds or leaves (3b D18), else as its work's artist, so an untagged copy joins its artist's
+  tagged performance when version and length agree.
 - **The build (`tasks/performance_build_tasks.py`).** A run-once task, after 2a's credit
   backfill marker: every file on a work, present or missing, in file-id order, in committed
   batches, so a stopped run resumes. Its own marker (`library.performances_built`) ends it;
   from then on the writers keep performances. It reports as `performances_build`. Nothing
   queues it: the cutover and the gate run it by name.
+- **D1's step (`tasks/work_artist_credit_tasks.py`, 3b PR 2).** A run-once task after the
+  build's marker gives every performance with no credit its work's artist (none for a
+  placeholder), in committed batches, with no MusicBrainz call and no file moved. Its marker is
+  `library.work_artists_credited`; it reports as `work_artist_credits`. The build already
+  credits what it makes, so on the live data it credits almost nothing (3b D20); it covers
+  performances made before 3b. The merge planner (3b PR 4) waits for its marker.
 - **The writers (S3, `services/performance_service.py`)** keep one order: `leave` (re-pick a
   preferred copy that is leaving), the writer's own move, `assign_performance` for each file
-  that now sits on a work, then `settle`. Grouping (the scan and the watcher), the work move
+  that now sits on a work (a moving file with no credit of its own keeps the act of the
+  performance it left, 3b D18), then `settle`. Grouping (the scan and the watcher), the work move
   (enrichment, Set master), merge, split, reassign, the fold, the missing-file delete and the
   purge all do. The bundles that locked tests build by keyword (`WorkMoveRepos`,
   `EnrichmentRepos`, `ReconciliationRepos`) carry the port as an optional `performances`
@@ -651,7 +666,8 @@ returns the row it finds).
   so the cascade never drops a stored line unlogged.
 - **D6, tags only.** The scan and the watcher re-check the files they re-read: a file whose
   recording MBID tag, title version, length or credit no longer fits its performance is placed
-  again in its work (one read per 1,000 paths). Enrichment's recording link and the curation's
+  again in its work (one read per 1,000 paths). A file with no credit of its own is compared
+  with the credit artists of the performance it holds, so only a tag change moves it (3b D18). Enrichment's recording link and the curation's
   recording re-points never move a performance.
 - **Preferred copies (S5, E8).** A path that takes a preferred copy out of its performance
   re-picks it inside the performance: the best copy left by the master rules, present before
@@ -662,19 +678,22 @@ returns the row it finds).
   preferred copy when that performance has one.
 - The checks are `tests/integration/test_performances_schema_pg.py` (AUD-R032),
   `tests/tasks/test_build_performances_task.py`,
-  `tests/integration/test_writers_keep_performances_pg.py` and
-  `tests/integration/test_preferred_copy_upkeep_pg.py`.
+  `tests/integration/test_writers_keep_performances_pg.py`,
+  `tests/integration/test_preferred_copy_upkeep_pg.py`, and for 3b's D1
+  `tests/domain/test_performance_key.py`, `tests/integration/test_default_credit_pg.py` and
+  `tests/tasks/test_credit_work_artists_task.py` (AUD-R078).
 
-## Credit picks: the credit picks a performance (phase 3a PR 3, C47, C57, C61, C64, C65, AUD-R076)
+## Credit picks: the credit picks a performance (phase 3a PR 3, C47, C57, C61, C64, C65, AUD-R076; AUD-R078)
 
 - **`choose_performance` (`domain/performances.py`, C47, D3, D8, D9).** Pure: the log name's
   active links against the work's performances' credits, every artist as its merge-group
   primary. A performance answers better when it misses fewer of the line's artists, then
   credits fewer others: missing none is `credit`, missing some but sharing one is
   `shared_artist` (M21), sharing none is `no_performer`. The default (the performance of the
-  master's file) wins any tie with the best; tied non-defaults go to Lance. An uncredited
-  default counts as crediting its work's artist (D8). A name with no linked artist gets the
-  default (C16). 4.3's matcher is to use it as it is.
+  master's file) wins any tie with the best; tied non-defaults go to Lance. An untagged
+  default counts as its work's artist (D8) through the credit 3b's D1 gives it, so the function
+  reads credits alone; a performance with no credit at all shares no artist. A name with no
+  linked artist gets the default (C16). 4.3's matcher is to use it as it is.
 - **Air play (0052, C61, C71, AUD-R033).** `play_file_resolution` plays the performance the
   line's best match stores (its preferred copy, `source = 'performance'`), then the version
   entry, the format override and the master. The stored performance comes from the existing
@@ -1000,3 +1019,4 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `resolution\.set_status\b` `ArtistResolutionRepository\.set_status\b` `def set_status\(self, broadcast_artist_id\b` | `LogNameLinkService` writes the status from the links (`status_from_links`, 1c S3) | 1c | #235 | AUD-R068 | `tests/services/test_status_from_links.py` |
 | `links\.unlink_all\b` `LogNameLinkService\.unlink_all\b` `def unlink_all\(self, broadcast_artist_id\b` | `unlink_keeping_rejected` (Not an artist keeps the rejected pairs) | 1c | #235 | AUD-R069 | none |
 | `link_copy_stubs` | none: 0046's rollback recreates it empty for 0044's rollback | 1c | #235 | AUD-R070 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_log_name_links_copy_pg.py` |
+| `\bwork_artist\s*[:=]` `\bcredit_mbids\b` | the performance's own credits: an untagged default carries its work's artist as a credit (3b D1), and the key compares `credit_artists` (AUD-R078) | 3b | PR 2 | AUD-R077 | none |

@@ -10,12 +10,14 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from backend.domain.performances import (
+    CarriedCredit,
     CopyRow,
     FileForPerformance,
     NewCredit,
     PerformanceCandidate,
     PerformanceKey,
     StoredLine,
+    WorkArtist,
 )
 
 
@@ -36,6 +38,19 @@ class PerformanceRepository(ABC):
     @abstractmethod
     def artists_by_mbid(self, mbids: list[str]) -> dict[str, tuple[str, str]]:
         """(artist id, name) of the artist holding each MBID that one holds."""
+
+    @abstractmethod
+    def carried(self, performance_id: UUID) -> CarriedCredit | None:
+        """The performance's credit artists and credits, or None when it is gone (3b D18)."""
+
+    @abstractmethod
+    def credits_artist(self, artist_id: str) -> bool:
+        """Whether any performance credits the artist (3b D19)."""
+
+    @abstractmethod
+    def uncredited(self, after: UUID | None, limit: int) -> list[tuple[UUID, WorkArtist | None]]:
+        """Performances with no credit, in id order, after *after*, with their work's artist
+        (3b D1's run-once step)."""
 
     @abstractmethod
     def work_of(self, performance_id: UUID) -> str | None:
@@ -65,6 +80,9 @@ class PerformanceRepository(ABC):
 
     @abstractmethod
     def create(self, work_id: str, key: PerformanceKey, credits: list[NewCredit]) -> UUID: ...
+
+    @abstractmethod
+    def add_credits(self, performance_id: UUID, credits: list[NewCredit]) -> None: ...
 
     @abstractmethod
     def hold(self, file_id: UUID, performance_id: UUID | None) -> None:
