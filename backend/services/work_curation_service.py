@@ -158,13 +158,17 @@ def _consolidate_recordings(
 
 def _delete_unused_local_artists(artist_ids: set[str], repos: WorkCurationRepos) -> None:
     """Delete each local artist left with no work, no log-name link in any state (AUD-R035,
-    which changes AUD-R004; phase 1a S11) and no merge on either side (phase 2a S11)."""
+    which changes AUD-R004; phase 1a S11), no merge on either side (phase 2a S11) and no
+    performance crediting it (3b D19: the source's act still performs a copy of the merged
+    work)."""
     links = LogNameLinkService(repos.links, repos.artists)
     for artist_id in artist_ids:
         artist = repos.artists.get_by_id(artist_id)
         if artist is None or artist.origin != CatalogSource.LOCAL:
             continue
         if repos.works.get_by_artist(artist_id) or repos.merges.is_merged(artist_id):
+            continue
+        if repos.performances is not None and repos.performances.credits_artist(artist_id):
             continue
         if not links.is_linked(artist_id):
             repos.curation.delete_artist(artist_id)

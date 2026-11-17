@@ -110,8 +110,6 @@ def propose_all(picks: CreditPickRepository) -> int:
     artists = {a for line in lines for a in line.artists}
     for credits in works.values():
         artists.update(a for p in credits.performances for a in p.artists)
-        if credits.artist_id is not None:
-            artists.add(credits.artist_id)
     primary_of = picks.primaries(artists)
     wanted: dict[UUID, ProposalAnswer] = {}
     for line in lines:

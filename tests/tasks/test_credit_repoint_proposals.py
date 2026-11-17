@@ -5,8 +5,8 @@ After PR 2's build has finished (its done-marker), a task asks ``choose_performa
 matched line (D4: auto or manual matched, its best match with a file, that file's work, else its
 recording's work, as the view finds it): the log name's **active** links against the work's
 performances, the default being the performance of the master's file (D9; an untagged one
-counts as crediting the work's artist, D8). It writes one row per line it proposes, to
-``credit_pick_proposals``:
+credits its work's artist, D8, through 3b's D1 credit). It writes one row per line it
+proposes, to ``credit_pick_proposals``:
 
 - ``credit``: the answer is a non-default performance (reason ``credit`` or ``shared_artist``)
   and the line names no version -- the performance, with it as the only candidate;
@@ -276,15 +276,15 @@ def test_a_credit_by_mbid_finds_its_artist(conn: Conn) -> None:
 
 
 def test_an_untagged_master_credits_its_works_artist(conn: Conn) -> None:
-    """D8: the untagged master's performance counts as crediting Bon Jovi, the work's artist (a
-    name-only row merged into the one the log names link to). It keeps the solo line; the duet
-    line and the Nettles line get the duet."""
+    """D8, as 3b's D1 makes it: the untagged master's performance credits Bon Jovi, the work's
+    artist (a name-only row merged into the one the log names link to), with D1's credit. It keeps
+    the solo line; the duet line and the Nettles line get the duet."""
     bon_jovi, nettles = seed.artist(conn, "Bon Jovi"), seed.artist(conn, "Jennifer Nettles")
     name_only = seed.artist(conn, "Bon Jovi")
     seed.merge(conn, name_only, bon_jovi)
     work = seed.work(conn, "Who Says You Can't Go Home", name_only)
     master = seed.copy(conn, work)
-    seed.performance(conn, work, [master])
+    seed.performance(conn, work, [master], credit=[name_only])
     seed.master(conn, work, master)
     seed.performance(conn, work, [seed.copy(conn, work)], credit=[bon_jovi], recording_mbid="r1")
     duet = seed.performance(conn, work, [seed.copy(conn, work)], credit=[bon_jovi, nettles])

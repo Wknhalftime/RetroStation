@@ -64,7 +64,7 @@ SELECT p.id, p.work_id,
 """
 
 _WORKS = """
-SELECT w.id, w.artist_id, mf.performance_id AS default_id
+SELECT w.id, mf.performance_id AS default_id
   FROM works w
   LEFT JOIN song_masters sm ON sm.work_id = w.id
   LEFT JOIN library_files mf ON mf.id = sm.preferred_file_id
@@ -168,7 +168,6 @@ class PgCreditPickRepository(CreditPickRepository):
         return {
             str(r["id"]): WorkCredits(
                 work_id=str(r["id"]),
-                artist_id=None if r["artist_id"] is None else str(r["artist_id"]),
                 default_performance_id=_uuid(r["default_id"]),
                 performances=tuple(performances[str(r["id"])]),
             )

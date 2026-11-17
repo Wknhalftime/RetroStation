@@ -9,8 +9,9 @@ import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
 from backend.domain.catalog import CatalogStorageError
-from backend.domain.enums import FileStatus, VersionType
+from backend.domain.enums import CreditRole, FileStatus, VersionType
 from backend.domain.performances import (
+    CarriedCredit,
     CopyRow,
     CreditPart,
     FileForPerformance,
@@ -18,15 +19,19 @@ from backend.domain.performances import (
     PerformanceCandidate,
     PerformanceKey,
     StoredLine,
+    WorkArtist,
 )
 from backend.repositories.performances import PerformanceRepository
 
+# 3b's D1: a credit counts as its MBID when known (its own, else its artist's), else its
+# artist's id, so a name-only artist is told apart and a promotion keeps the key.
 _KEY_SQL = """
     SELECT p.id, p.recording_mbid, p.version_type, p.length_ms,
            COALESCE(
-               (SELECT array_agg(c.mbid) FROM performance_credits c
-                 WHERE c.performance_id = p.id AND c.mbid IS NOT NULL),
-               ARRAY[]::text[]) AS credit_mbids,
+               (SELECT array_agg(COALESCE(c.mbid, a.mbid, c.artist_id))
+                  FROM performance_credits c LEFT JOIN artists a ON a.id = c.artist_id
+                 WHERE c.performance_id = p.id),
+               ARRAY[]::text[]) AS credit_artists,
            (SELECT min(f.id::text) FROM library_files f
              WHERE f.performance_id = p.id) AS first_file_id
     FROM performances p
@@ -40,9 +45,19 @@ def _uuid(value: object) -> UUID | None:
 def _key(row: dict[str, Any]) -> PerformanceKey:
     return PerformanceKey(
         recording_mbid=row["recording_mbid"],
-        credit_mbids=frozenset(row["credit_mbids"]),
+        credit_artists=frozenset(row["credit_artists"]),
         version_type=VersionType(row["version_type"]),
         length_ms=row["length_ms"],
+    )
+
+
+def _work_artist(row: dict[str, Any]) -> WorkArtist | None:
+    if row["work_artist_id"] is None:
+        return None
+    return WorkArtist(
+        id=str(row["work_artist_id"]),
+        mbid=row["work_artist_mbid"],
+        name=str(row["work_artist_name"]),
     )
 
 
@@ -65,9 +80,13 @@ class PgPerformanceRepository(PerformanceRepository):
 
     def file_for_performance(self, file_id: UUID) -> FileForPerformance | None:
         row = self._conn.execute(
-            """SELECT id, work_id, performance_id, recording_mbid, track_title, duration_ms,
-                      credit
-               FROM library_files WHERE id = %s""",
+            """SELECT f.id, f.work_id, f.performance_id, f.recording_mbid, f.track_title,
+                      f.duration_ms, f.credit, a.id AS work_artist_id,
+                      a.mbid AS work_artist_mbid, a.name AS work_artist_name
+               FROM library_files f
+               LEFT JOIN works w ON w.id = f.work_id
+               LEFT JOIN artists a ON a.id = w.artist_id
+               WHERE f.id = %s""",
             (file_id,),
         ).fetchone()
         if row is None:
@@ -80,6 +99,7 @@ class PgPerformanceRepository(PerformanceRepository):
             title=row["track_title"],
             length_ms=row["duration_ms"],
             credit=_credit(row["credit"]),
+            default_artist=_work_artist(row),
         )
 
     def candidates(self, work_id: str) -> list[PerformanceCandidate]:
@@ -99,7 +119,7 @@ class PgPerformanceRepository(PerformanceRepository):
         rows = self._conn.execute(
             """SELECT f.id AS file_id, f.work_id, f.performance_id, f.recording_mbid AS file_mbid,
                       f.track_title, f.duration_ms, f.credit,
-                      k.recording_mbid, k.version_type, k.length_ms, k.credit_mbids
+                      k.recording_mbid, k.version_type, k.length_ms, k.credit_artists
                FROM library_files f
                JOIN ("""
             + _KEY_SQL
@@ -131,6 +151,52 @@ class PgPerformanceRepository(PerformanceRepository):
             "SELECT mbid, id, name FROM artists WHERE mbid = ANY(%s)", (mbids,)
         ).fetchall()
         return {str(r["mbid"]): (str(r["id"]), str(r["name"])) for r in rows}
+
+    def carried(self, performance_id: UUID) -> CarriedCredit | None:
+        key = self._conn.execute(_KEY_SQL + " WHERE p.id = %s", (performance_id,)).fetchone()
+        if key is None:
+            return None
+        rows = self._conn.execute(
+            """SELECT position, artist_id, mbid, credited_name, join_after, role
+               FROM performance_credits WHERE performance_id = %s ORDER BY position""",
+            (performance_id,),
+        ).fetchall()
+        return CarriedCredit(
+            artists=frozenset(key["credit_artists"]),
+            credits=tuple(
+                NewCredit(
+                    position=r["position"],
+                    artist_id=r["artist_id"],
+                    mbid=r["mbid"],
+                    credited_name=r["credited_name"],
+                    join_after=r["join_after"],
+                    role=CreditRole(r["role"]),
+                )
+                for r in rows
+            ),
+        )
+
+    def credits_artist(self, artist_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM performance_credits WHERE artist_id = %s) AS credited",
+            (artist_id,),
+        ).fetchone()
+        return bool(row and row["credited"])
+
+    def uncredited(self, after: UUID | None, limit: int) -> list[tuple[UUID, WorkArtist | None]]:
+        rows = self._conn.execute(
+            """SELECT p.id, a.id AS work_artist_id, a.mbid AS work_artist_mbid,
+                      a.name AS work_artist_name
+               FROM performances p
+               JOIN works w ON w.id = p.work_id
+               LEFT JOIN artists a ON a.id = w.artist_id
+               WHERE NOT EXISTS (SELECT 1 FROM performance_credits c
+                                 WHERE c.performance_id = p.id)
+                 AND (%s::uuid IS NULL OR p.id > %s::uuid)
+               ORDER BY p.id LIMIT %s""",
+            (after, after, limit),
+        ).fetchall()
+        return [(UUID(str(r["id"])), _work_artist(r)) for r in rows]
 
     def work_of(self, performance_id: UUID) -> str | None:
         row = self._conn.execute(
@@ -208,6 +274,10 @@ class PgPerformanceRepository(PerformanceRepository):
         ).fetchone()
         assert row is not None
         performance_id = UUID(str(row["id"]))
+        self.add_credits(performance_id, credits)
+        return performance_id
+
+    def add_credits(self, performance_id: UUID, credits: list[NewCredit]) -> None:
         for credit in credits:
             self._conn.execute(
                 """INSERT INTO performance_credits
@@ -224,7 +294,6 @@ class PgPerformanceRepository(PerformanceRepository):
                     credit.role.value,
                 ),
             )
-        return performance_id
 
     def hold(self, file_id: UUID, performance_id: UUID | None) -> None:
         self._conn.execute(

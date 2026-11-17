@@ -1,10 +1,9 @@
 """``choose_performance``: the line's credit picks a performance inside its work (performances
-phase 3a PR 3, SPEC S6, D3, D8, D9; design C47, M21, C16).
+phase 3a PR 3, SPEC S6, D3, D8, D9; work merges phase 3b PR 2, D1; design C47, M21, C16).
 
 A pure function of the log name's linked artists, the work's performances with their credit
-artists, the work's default performance (its master's) and the work's artist. Every artist is
-compared as its merge-group primary (2a's Merge; ``primary_of``, absent = itself), so the
-artists are sets.
+artists and the work's default performance (its master's). Every artist is compared as its
+merge-group primary (2a's Merge; ``primary_of``, absent = itself), so the artists are sets.
 
 D9 (Lance, 2026-11-12: "Yes, as written"): a performance answers better when it misses fewer of
 the line's artists, then credits fewer others. One that misses none is a ``credit`` answer; one
@@ -14,10 +13,11 @@ artist the answer is ``no_performer``. The default wins whenever it answers as w
 give no performance: their ids come back as ``tied`` for Lance's per-line pick. A log name with
 no linked artist gets the default (C16).
 
-D8 (Lance, 2026-11-12: "A3: work's artist"): a default with no credit (an untagged master, or
-only placeholders) counts as crediting its work's artist (``work_artist``, by its primary), and
-D9 then applies unchanged. Only the default does: another performance with no credit shares no
-artist and is never chosen. With no work artist given, an uncredited default credits no one.
+D8 (Lance, 2026-11-12: "A3: work's artist"), as 3b's D1 makes it real: an untagged master's
+performance (no credit, or only placeholders) carries its work's artist as a credit of its own,
+so it counts as that artist (by its primary) like any credit, and D9 applies unchanged. The
+function takes no work artist. A performance with no credit at all (its work's artist a
+placeholder) shares no artist and is never chosen.
 """
 
 from __future__ import annotations
@@ -187,18 +187,19 @@ def test_two_links_in_one_group_are_one_artist() -> None:
 # --- D8: an untagged master credits its work's artist -----------------------------------------
 
 UNTAGGED_WORK = [
-    credited(UNTAGGED),
+    credited(UNTAGGED, BON_JOVI),
     credited(SOLO, BON_JOVI),
     credited(DUET, BON_JOVI, NETTLES),
 ]
-"""The same song with an untagged master: a tagged solo copy and the tagged duet."""
+"""The same song with an untagged master, credited to Bon Jovi, its work's artist (D1): a
+tagged solo copy and the tagged duet."""
 
 
 def on_untagged(
     line: set[str], work: list[CreditedPerformance] = UNTAGGED_WORK
 ) -> PerformanceChoice:
     """The answer for *line* on Bon Jovi's work whose default is the untagged master."""
-    return choose_performance(line, work, UNTAGGED, work_artist=BON_JOVI)
+    return choose_performance(line, work, UNTAGGED)
 
 
 def test_an_untagged_master_keeps_its_solo_lines() -> None:
@@ -209,7 +210,7 @@ def test_an_untagged_master_keeps_its_solo_lines() -> None:
 
 
 def test_an_untagged_master_keeps_a_solo_line_over_the_duet() -> None:
-    work = [credited(UNTAGGED), credited(DUET, BON_JOVI, NETTLES)]
+    work = [credited(UNTAGGED, BON_JOVI), credited(DUET, BON_JOVI, NETTLES)]
 
     assert on_untagged({BON_JOVI}, work) == choice(PerformanceReason.DEFAULT, UNTAGGED)
 
@@ -236,7 +237,7 @@ def test_an_untagged_master_and_a_shared_artist() -> None:
 
 def test_an_untagged_master_gives_way_to_the_closest_and_ties_to_lance() -> None:
     work = [
-        credited(UNTAGGED),
+        credited(UNTAGGED, BON_JOVI),
         credited(DUET, BON_JOVI, NETTLES),
         credited(TRIO, BON_JOVI, NETTLES, SAMBORA),
     ]
@@ -249,42 +250,43 @@ def test_an_untagged_master_gives_way_to_the_closest_and_ties_to_lance() -> None
 
 
 def test_the_work_artist_counts_as_its_primary() -> None:
-    """The work's artist is a name-only row merged into the Bon Jovi the line links to."""
+    """The work's artist, credited on the untagged master (D1), is a name-only row merged into
+    the Bon Jovi the line links to."""
     name_only = "artist-bon-jovi-name-only"
-    work = [credited(UNTAGGED), credited(SOLO, BON_JOVI)]
+    work = [credited(UNTAGGED, name_only), credited(SOLO, BON_JOVI)]
 
-    merged = choose_performance(
-        {BON_JOVI}, work, UNTAGGED, work_artist=name_only, primary_of={name_only: BON_JOVI}
-    )
-    unmerged = choose_performance({BON_JOVI}, work, UNTAGGED, work_artist=name_only)
+    merged = choose_performance({BON_JOVI}, work, UNTAGGED, primary_of={name_only: BON_JOVI})
+    unmerged = choose_performance({BON_JOVI}, work, UNTAGGED)
 
     assert merged == choice(PerformanceReason.DEFAULT, UNTAGGED)
     assert unmerged == choice(PerformanceReason.CREDIT, SOLO)
 
 
-def test_with_no_work_artist_an_untagged_master_credits_no_one() -> None:
+def test_an_uncredited_master_credits_no_one() -> None:
+    """A master with no credit at all (its work's artist a placeholder, D1) shares no artist."""
     work = [credited(UNTAGGED), credited(SOLO, BON_JOVI)]
 
     assert choose_performance({BON_JOVI}, work, UNTAGGED) == choice(PerformanceReason.CREDIT, SOLO)
 
 
-def test_a_credited_default_ignores_the_work_artist() -> None:
-    """A master credited to Nettles alone stays credited to her, whatever the work's artist."""
+def test_a_credited_default_is_only_its_credit() -> None:
+    """A master credited to Nettles alone counts as her only, whoever the work's artist is."""
     work = [credited(SOLO, NETTLES), credited(DUET, BON_JOVI, NETTLES)]
 
-    picked = choose_performance({BON_JOVI}, work, SOLO, work_artist=BON_JOVI)
+    picked = choose_performance({BON_JOVI}, work, SOLO)
 
     assert picked == choice(PerformanceReason.CREDIT, DUET)
 
 
-def test_only_the_default_borrows_the_work_artist() -> None:
-    """Another performance with no credit shares no artist, so it is never chosen."""
+def test_a_performance_with_no_credit_is_never_chosen() -> None:
+    """With no credit at all (its work's artist a placeholder, D1) a performance shares no
+    artist, so it is never chosen."""
     work = [credited(SOLO, BON_JOVI), credited(UNTAGGED)]
 
-    assert choose_performance({KID_ROCK}, work, SOLO, work_artist=KID_ROCK) == choice(
+    assert choose_performance({KID_ROCK}, work, SOLO) == choice(
         PerformanceReason.NO_PERFORMER, None
     )
-    assert choose_performance({BON_JOVI}, [credited(UNTAGGED)], None, work_artist=BON_JOVI) == (
+    assert choose_performance({BON_JOVI}, [credited(UNTAGGED)], None) == (
         choice(PerformanceReason.NO_PERFORMER, None)
     )
 
