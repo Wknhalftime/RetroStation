@@ -148,6 +148,19 @@ class PgMatchRepository(MatchRepository):
             (performance_id, match_ids),
         )
 
+    def set_pins(self, match_ids: list[UUID], file_id: UUID | None) -> None:
+        if not match_ids:
+            return
+        self._conn.execute(
+            "UPDATE matches SET pinned_file_id = %s WHERE id = ANY(%s)", (file_id, match_ids)
+        )
+
+    def release_pins_of_file(self, file_id: UUID) -> int:
+        cur = self._conn.execute(
+            "UPDATE matches SET pinned_file_id = NULL WHERE pinned_file_id = %s", (file_id,)
+        )
+        return cur.rowcount
+
     def delete_for_identity(self, identity_id: UUID) -> None:
         self._conn.execute("DELETE FROM matches WHERE identity_id = %s", (identity_id,))
 

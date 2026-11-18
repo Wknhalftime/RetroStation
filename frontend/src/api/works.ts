@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/api/client";
+import { ConflictError, apiFetch } from "@/api/client";
 import type { WorkDetail, FormatOverrideInfo } from "@/lib/schemas/works";
 
 // ---------------------------------------------------------------------------
@@ -68,20 +68,54 @@ export interface MergeWorksResult {
   dropped_override_count: number;
 }
 
+/** A change to what a line plays that the merge asks about (409), as the server lists it. */
+export interface MergeChange {
+  station_id: string;
+  station: string;
+  identity_id: string;
+  title: string;
+  artist: string;
+  plays: number;
+  from_file_id: string | null;
+  from_path: string | null;
+  to_file_id: string | null;
+  to_path: string | null;
+}
+
+export interface MergeApproval {
+  station_id: string;
+  identity_id: string;
+  file_id: string | null;
+}
+
 export interface MergeWorksVariables {
   targetId: string;
   sourceWorkIds: string[];
+  /** Lance's approvals; with them the merge goes to merge/approved. */
+  approvals?: MergeApproval[];
+}
+
+/** The changes a 409 from the merge lists, or null for any other error. */
+export function mergeChanges(error: unknown): MergeChange[] | null {
+  if (!(error instanceof ConflictError)) return null;
+  const detail = error.detail as { changes?: unknown } | undefined;
+  return Array.isArray(detail?.changes) ? (detail.changes as MergeChange[]) : null;
 }
 
 /** Fold the source works into the target; the sources are deleted. */
 export function useMergeWorks() {
   const queryClient = useQueryClient();
   return useMutation<MergeWorksResult, Error, MergeWorksVariables>({
-    mutationFn: ({ targetId, sourceWorkIds }) =>
-      apiFetch<MergeWorksResult>(`/api/v1/library/works/${targetId}/merge`, {
-        method: "POST",
-        body: JSON.stringify({ source_work_ids: sourceWorkIds }),
-      }),
+    mutationFn: ({ targetId, sourceWorkIds, approvals }) =>
+      approvals
+        ? apiFetch<MergeWorksResult>(`/api/v1/library/works/${targetId}/merge/approved`, {
+            method: "POST",
+            body: JSON.stringify({ source_work_ids: sourceWorkIds, approvals }),
+          })
+        : apiFetch<MergeWorksResult>(`/api/v1/library/works/${targetId}/merge`, {
+            method: "POST",
+            body: JSON.stringify({ source_work_ids: sourceWorkIds }),
+          }),
     onSuccess: () => {
       // The target gains files and every source work is gone.
       void queryClient.invalidateQueries({ queryKey: ["works"] });

@@ -65,3 +65,13 @@ class MatchRepository(ABC):
     def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
         """The performance the matches store: another (a hand-off) or none (a release)."""
         ...
+
+    @abstractmethod
+    def set_pins(self, match_ids: list[UUID], file_id: UUID | None) -> None:
+        """The file the matches pin (phase 3b, C72), or none."""
+        ...
+
+    @abstractmethod
+    def release_pins_of_file(self, file_id: UUID) -> int:
+        """No match pins *file_id* any more; how many did."""
+        ...

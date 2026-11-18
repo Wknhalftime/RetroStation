@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
 
 from backend.domain.catalog import Recording, Work
+from backend.domain.credit_picks import WorkCredits
 from backend.domain.curation import (
     CurationFileMissingError,
     CurationFileNotFoundError,
@@ -34,8 +35,10 @@ from backend.domain.curation import (
     SplitResult,
 )
 from backend.domain.enums import CatalogSource, FileStatus, SelectionMethod, VersionType
+from backend.domain.performances import choose_performance
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_merges import ArtistMergeRepository
+from backend.repositories.credit_picks import CreditPickRepository
 from backend.repositories.format_overrides import FormatOverrideRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.log_name_links import LogNameLinkRepository
@@ -44,10 +47,12 @@ from backend.repositories.performances import PerformanceRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.work_curation import WorkCurationRepository
+from backend.repositories.work_merges import MasterLine, WorkMergeRepository
 from backend.repositories.works import WorkRepository
 from backend.services.log_name_link_service import LogNameLinkService
 from backend.services.master_selection_service import score_file_row
 from backend.services.performance_service import move_out, place
+from backend.services.pin_upkeep import release_pins
 from backend.services.song_match_service import SongMatchService
 
 _NOTHING_MERGED = MergeResult(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
@@ -69,6 +74,10 @@ class WorkCurationRepos:
     merges: ArtistMergeRepository
     # Phase 3a (S3): the files' performances; None skips them.
     performances: PerformanceRepository | None = None
+    # Phase 3b PR 3 (S3, S4): the lines a merge holds, and the credits that pick their act;
+    # None skips pins.
+    lines: WorkMergeRepository | None = None
+    credits: CreditPickRepository | None = None
 
 
 def _work(work_id: str, works: WorkRepository) -> Work:
@@ -224,6 +233,58 @@ def _carry_master(master: SongMaster, target_id: str, repos: WorkCurationRepos) 
     )
 
 
+def _own_act(
+    line: MasterLine,
+    work: WorkCredits | None,
+    credits: CreditPickRepository,
+    performances: PerformanceRepository,
+) -> UUID | None:
+    """S4: the non-default performance of the merged work the line's links pick, when it holds
+    the file the line played; else None (the line is pinned)."""
+    if work is None or not line.artists:
+        return None
+    artists = set(line.artists) | {a for p in work.performances for a in p.artists}
+    choice = choose_performance(
+        line.artists,
+        work.performances,
+        work.default_performance_id,
+        primary_of=credits.primaries(artists),
+    )
+    if choice.performance_id in (None, work.default_performance_id):
+        return None
+    played = performances.file_for_performance(line.master_file_id)
+    if played is None or played.performance_id != choice.performance_id:
+        return None
+    return choice.performance_id
+
+
+def _hold_lines(target_id: str, held: list[MasterLine], repos: WorkCurationRepos) -> None:
+    """S3, S4: each line whose master's file changed keeps it: its own act's performance stored
+    with that file preferred, or a pin on the file."""
+    master = repos.song_masters.get_by_work(target_id)
+    now = master.preferred_file_id if master is not None else None
+    changed = [line for line in held if line.master_file_id != now]
+    if not changed:
+        return
+    credits, performances = repos.credits, repos.performances
+    work = credits.work_credits([target_id]).get(target_id) if credits is not None else None
+    song_matches = SongMatchService(repos.matches)
+    pins: dict[UUID, list[UUID]] = {}
+    for line in changed:
+        own = (
+            _own_act(line, work, credits, performances)
+            if credits is not None and performances is not None
+            else None
+        )
+        if own is not None and performances is not None:
+            performances.set_preferred_copy(own, line.master_file_id)
+            song_matches.store_performance(line.match_id, own)
+        else:
+            pins.setdefault(line.master_file_id, []).append(line.match_id)
+    for file_id, match_ids in pins.items():
+        song_matches.pin(sorted(set(match_ids)), file_id)
+
+
 def merge_works(
     target_id: str, source_work_ids: list[str], repos: WorkCurationRepos
 ) -> MergeResult:
@@ -239,6 +300,7 @@ def merge_works(
 
     source_ids = [work.id for work in sources]
     kept = _hand_picked_master(target_id, source_ids, repos)
+    held = repos.lines.master_lines([target_id, *source_ids]) if repos.lines is not None else []
     moving = [f.id for work_id in source_ids for f in repos.files.get_by_work(work_id)]
     left = move_out(moving, repos.performances)
     merged = repos.curation.move_files_of_works(source_ids, target_id)
@@ -254,6 +316,7 @@ def merge_works(
     if kept is not None and kept.work_id != target_id:
         _carry_master(kept, target_id, repos)
     _recalculate_master(target_id, repos)
+    _hold_lines(target_id, held, repos)
     _delete_unused_local_artists({work.artist_id for work in sources} - {target.artist_id}, repos)
     return MergeResult(
         merged_file_count=merged, deleted_work_count=deleted, dropped_override_count=dropped
@@ -286,6 +349,7 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
         repos.curation.insert_recording(copy)
         repos.curation.set_file_recording(file_id, copy.id)
     left = move_out([file_id], repos.performances)
+    release_pins(file_id, repos.matches, why="file split off")
     repos.files.update_work_id(file_id, new_work_id)
     song_matches = SongMatchService(repos.matches)
     song_matches.follow_file(file_id, new_work_id)
@@ -343,6 +407,7 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
     if file.recording_id is not None:
         _repoint_recording(file_id, file.recording_id, work_id, repos)
     left = move_out([file_id], repos.performances)
+    release_pins(file_id, repos.matches, why="file reassigned")
     repos.files.update_work_id(file_id, work_id)
     song_matches = SongMatchService(repos.matches)
     song_matches.follow_file(file_id, work_id)

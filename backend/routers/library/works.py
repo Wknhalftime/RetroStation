@@ -16,6 +16,7 @@ from backend.dependencies import (
     get_master_choice_repos,
     get_version_entry_repos,
     get_work_curation_repos,
+    get_work_merge_repos,
 )
 from backend.domain.curation import (
     CurationFileMissingError,
@@ -39,11 +40,20 @@ from backend.domain.curation import (
 from backend.domain.enums import FileStatus
 from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
 from backend.domain.version_pages import WorkVersion
+from backend.domain.work_merges import (
+    MergeApproval,
+    MergeReason,
+    MergeRefused,
+    WorkMergeFailedError,
+    WorkMergeGroup,
+)
 from backend.services import version_entry_service as versions_service
 from backend.services import work_curation_service as curation
+from backend.services import work_merge_service as merges
 from backend.services.master_choice_service import MasterChoiceRepos, choose_master
 from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
+from backend.services.work_merge_service import WorkMergeRepos
 
 router = APIRouter()
 
@@ -54,6 +64,7 @@ DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
 ChoiceRepos = Annotated[MasterChoiceRepos, Depends(get_master_choice_repos)]
 CurationRepos = Annotated[WorkCurationRepos, Depends(get_work_curation_repos)]
+MergeRepos = Annotated[WorkMergeRepos, Depends(get_work_merge_repos)]
 VersionRepos = Annotated[VersionEntryRepos, Depends(get_version_entry_repos)]
 
 
@@ -206,6 +217,17 @@ class FormatOverrideResponse(BaseModel):
 
 class MergeRequest(BaseModel):
     source_work_ids: list[str]
+
+
+class ApprovalBody(BaseModel):
+    station_id: UUID
+    identity_id: UUID
+    file_id: UUID | None
+
+
+class ApprovedMergeRequest(BaseModel):
+    source_work_ids: list[str]
+    approvals: list[ApprovalBody]
 
 
 class MergeResponse(BaseModel):
@@ -418,9 +440,11 @@ async def _work_format_overrides(
 
 async def _real_work_detail(conn: AsyncConnection[Any], work_id: str) -> WorkDetail:
     """Return WorkDetail for a real (non-synthetic) work id; raise 404 if missing."""
+    # A merged-away id answers its merged work (3b S3, Q19); a redirect names a live work.
     work_cur = await conn.execute(
-        "SELECT id, title, artist_id FROM works WHERE id = %s",
-        (work_id,),
+        """SELECT id, title, artist_id FROM works
+           WHERE id = COALESCE((SELECT new_id FROM work_redirects WHERE old_id = %s), %s)""",
+        (work_id, work_id),
     )
     work_row = await work_cur.fetchone()
     if work_row is None:
@@ -428,6 +452,7 @@ async def _real_work_detail(conn: AsyncConnection[Any], work_id: str) -> WorkDet
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Work {work_id} not found",
         )
+    work_id = str(work_row["id"])
 
     recordings = await _work_recordings(conn, work_id, work_row["title"])
     song_master = await _work_song_master(conn, work_id)
@@ -701,20 +726,71 @@ def dismiss_work_versions(
         raise _refused(refused) from refused
 
 
-@router.post("/works/{target_id}/merge", response_model=MergeResponse)
-def merge_works(
-    _token: Token, target_id: str, body: MergeRequest, repos: CurationRepos
+def _optional_id(value: UUID | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _awaiting_approval(refused: MergeRefused) -> HTTPException:
+    """409 with the air-play changes the merge waits on (3b D3, Q7), for the artist page."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": "This merge changes what some lines play; approve the changes.",
+            "changes": [
+                {
+                    "station_id": str(c.station_id),
+                    "station": c.station,
+                    "identity_id": str(c.identity_id),
+                    "title": c.title,
+                    "artist": c.artist,
+                    "plays": c.plays,
+                    "from_file_id": _optional_id(c.from_file_id),
+                    "from_path": c.from_path,
+                    "to_file_id": _optional_id(c.to_file_id),
+                    "to_path": c.to_path,
+                }
+                for c in refused.changes
+            ],
+        },
+    )
+
+
+def _guarded(
+    target_id: str, source_ids: list[str], approvals: frozenset[MergeApproval], repos: MergeRepos
 ) -> MergeResponse:
-    """Merge one or more source works into a target work."""
+    group = WorkMergeGroup(target_id, tuple(source_ids), MergeReason.LIBRARY, approvals)
     try:
-        merged = curation.merge_works(target_id, body.source_work_ids, repos)
+        outcome = merges.guarded_merge(group, repos)
     except _REFUSALS as refused:
         raise _refused(refused) from refused
+    except WorkMergeFailedError as failed:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(failed)) from failed
+    if isinstance(outcome, MergeRefused):
+        raise _awaiting_approval(outcome)
     return MergeResponse(
-        merged_file_count=merged.merged_file_count,
-        deleted_work_count=merged.deleted_work_count,
-        dropped_override_count=merged.dropped_override_count,
+        merged_file_count=outcome.result.merged_file_count,
+        deleted_work_count=outcome.result.deleted_work_count,
+        dropped_override_count=outcome.result.dropped_override_count,
     )
+
+
+@router.post("/works/{target_id}/merge", response_model=MergeResponse)
+def merge_works(
+    _token: Token, target_id: str, body: MergeRequest, repos: MergeRepos
+) -> MergeResponse:
+    """Merge one or more source works into a target work."""
+    return _guarded(target_id, body.source_work_ids, frozenset(), repos)
+
+
+@router.post("/works/{target_id}/merge/approved", response_model=MergeResponse)
+def merge_works_approved(
+    _token: Token, target_id: str, body: ApprovedMergeRequest, repos: MergeRepos
+) -> MergeResponse:
+    """Merge with the air-play changes Lance approved."""
+    approvals = frozenset(
+        MergeApproval(a.station_id, a.identity_id, a.file_id) for a in body.approvals
+    )
+    return _guarded(target_id, body.source_work_ids, approvals, repos)
 
 
 @router.post(

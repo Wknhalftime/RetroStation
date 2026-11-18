@@ -23,7 +23,11 @@ export class AuthError extends ApiError {
 }
 
 export class ConflictError extends ApiError {
-  constructor(message = "Conflict") {
+  constructor(
+    message = "Conflict",
+    /** The server's structured detail, when it sent an object rather than a reason. */
+    public readonly detail: unknown = undefined
+  ) {
     super(409, message);
     this.name = "ConflictError";
   }
@@ -58,7 +62,12 @@ async function throwForStatus(res: Response): Promise<never> {
   if (res.status === 401) throw new AuthError();
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
-    throw new ConflictError((body as { detail?: string }).detail ?? "Conflict");
+    const detail: unknown = (body as { detail?: unknown }).detail;
+    if (typeof detail === "object" && detail !== null) {
+      const message = (detail as { message?: unknown }).message;
+      throw new ConflictError(typeof message === "string" ? message : "Conflict", detail);
+    }
+    throw new ConflictError(typeof detail === "string" ? detail : "Conflict");
   }
   if (res.status === 422) {
     const body = await res.json().catch(() => ({ detail: [] }));

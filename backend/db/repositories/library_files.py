@@ -525,6 +525,10 @@ class PgLibraryFileRepository(
             "UPDATE song_masters SET preferred_file_id = %s WHERE preferred_file_id = %s",
             (target, source),
         )
+        # 3b D4: a pin follows the fold (a fold onto another work released it first, D23).
+        self._conn.execute(
+            "UPDATE matches SET pinned_file_id = %s WHERE pinned_file_id = %s", (target, source)
+        )
         self._conn.execute(
             "UPDATE format_overrides SET preferred_file_id = %s WHERE preferred_file_id = %s",
             (target, source),
