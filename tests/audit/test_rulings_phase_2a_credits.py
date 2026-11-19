@@ -1,6 +1,7 @@
 """The rulings phase 2a PR 2 changes (SPEC S8, S10, D5, the ruling-markers line).
 
-AUD-R032's ``2a`` marker goes with S10's C43, and its later phases stay pending. AUD-R041's goes
+AUD-R032's ``2a`` marker goes with S10's C43; its later phases stayed pending until 3b PR 4
+dropped the last (``3b``). AUD-R041's goes
 in PR 3 (``test_rulings_phase_2a_merge.py``). AUD-R073 amends AUD-R072: a further credit promotes
 only on exactly this MBID (D5), and D8's gap is accepted, for phase 5's page.
 """
@@ -26,7 +27,7 @@ def _check(ruling_id: str) -> str:
 
 
 def test_r032_has_left_2a_behind() -> None:
-    assert _check("AUD-R032").endswith("check pending: 3b.")
+    assert "check pending" not in _check("AUD-R032")
 
 
 def test_r073_amends_r072() -> None:
