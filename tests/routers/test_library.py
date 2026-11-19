@@ -1676,12 +1676,13 @@ class TestSplitWork:
         ).fetchone()
         assert old_rec is None
 
-    def test_split_last_file_deletes_old_work_and_format_overrides(self, client, db_conn) -> None:
-        """Splitting the last file from a work must cascade-clean format_overrides.
+    def test_split_last_file_keeps_a_work_its_format_override_names(self, client, db_conn) -> None:
+        """Splitting the last file from a work leaves a work its override names (phase 3b D7:
+        one deletion rule, C53), with the override, listed for Lance on the merge list.
 
         Regression guard: format_overrides.work_id REFERENCES works(id) has no
-        ON DELETE CASCADE, so leaving behind an override row would FK-violate
-        the DELETE FROM works and surface as a 500.
+        ON DELETE CASCADE, so deleting the work under its override would FK-violate
+        and surface as a 500.
         """
         _, _, _, lf = _seed_canonical_chain(
             db_conn,
@@ -1702,18 +1703,18 @@ class TestSplitWork:
             json={"file_id": str(lf.id)},
         )
         assert resp.status_code == 201
-        assert resp.json()["old_work_deleted"] is True
+        assert resp.json()["old_work_deleted"] is False
 
-        gone_work = db_conn.execute(
+        kept_work = db_conn.execute(
             "SELECT id FROM works WHERE id = %s",
             ("w-last-fo",),
         ).fetchone()
-        assert gone_work is None
-        gone_override = db_conn.execute(
-            "SELECT id FROM format_overrides WHERE work_id = %s",
+        assert kept_work is not None
+        kept_override = db_conn.execute(
+            "SELECT preferred_file_id FROM format_overrides WHERE work_id = %s",
             ("w-last-fo",),
         ).fetchone()
-        assert gone_override is None
+        assert kept_override is not None and kept_override["preferred_file_id"] == lf.id
 
     def test_split_file_with_null_recording_id(self, client, db_conn) -> None:
         """Split succeeds when the target file has work_id set but recording_id NULL.
