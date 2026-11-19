@@ -13,7 +13,7 @@ the one rule. Its song master goes with it, as today. What keeps an empty work:
 
 The sweep (``sweep_empty_works_task``, run by name after the merges and again after phase 4's)
 deletes every empty work nothing points at and keeps the rest, which
-``WorkRepository.list_empty_works`` lists for Lance with what points at each (the merge list's
+``WorkRepository.kept_empty_works`` lists for Lance with what points at each (the merge list's
 section, D15), by title. It has no marker: a second run finds only what emptied since.
 
 Split and reassign use the same rule (D7): a work they empty first loses its file-less
@@ -131,7 +131,7 @@ def refer(conn: Conn, work_id: str, kind: WorkReference) -> None:
 
 
 def listed(conn: Conn) -> list[EmptyWork]:
-    return RepositoryFactory(conn).works.list_empty_works()
+    return RepositoryFactory(conn).works.kept_empty_works()
 
 
 # --- the sweep ------------------------------------------------------------------------------------

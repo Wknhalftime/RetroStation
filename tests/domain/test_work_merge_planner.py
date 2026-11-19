@@ -194,6 +194,38 @@ def test_a_title_join_stands_beside_one_work_mbid() -> None:
     ]
 
 
+def test_the_rule_is_per_set_of_works_a_title_joins() -> None:
+    """Two acts' "Intro"s, each a MusicBrainz work with a local copy of the same act: the title
+    joins nothing across the acts, so each pair holds one work MBID and merges."""
+    works = [
+        facts("w-a-x", "intro", mbid="mbid-x", artists=("act-a",)),
+        facts("w-a-local", "intro", artists=("act-a",)),
+        facts("w-b-y", "intro", mbid="mbid-y", artists=("act-b",)),
+        facts("w-b-local", "intro", artists=("act-b",)),
+    ]
+
+    assert plan(works, {"w-a-local": 2, "w-b-local": 1}) == [
+        group("w-a-x", ("w-a-local",), {MergeJoin.SHARED_ARTIST}, plays=2),
+        group("w-b-y", ("w-b-local",), {MergeJoin.SHARED_ARTIST}, plays=1),
+    ]
+
+
+def test_a_title_join_is_named_by_its_stronger_reason() -> None:
+    """A shared artist over a shared name; a work link between the same works is listed
+    beside it."""
+    works = [
+        facts("w-1", "always", links=("mbid-a",), artists=("a",), names=("bon jovi",)),
+        facts("w-2", "always", links=("mbid-a",), artists=("a",), names=("bon jovi",)),
+        facts("w-3", "runaway", artists=("a",), names=("bon jovi",)),
+        facts("w-4", "runaway", artists=("a",), names=("bon jovi",)),
+    ]
+
+    assert [g.joins for g in plan(works)] == [
+        {MergeJoin.WORK_LINK, MergeJoin.SHARED_ARTIST},
+        {MergeJoin.SHARED_ARTIST},
+    ]
+
+
 def test_a_link_joins_even_where_two_work_mbids_meet_by_title() -> None:
     """The title joins of "intro" go (two MBIDs), but w-cover's lookup names mbid-x: that link
     stands."""
