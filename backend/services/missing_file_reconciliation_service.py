@@ -56,6 +56,7 @@ from backend.services.performance_service import (
     repick_stranded,
     settle,
 )
+from backend.services.pin_upkeep import release_pins
 from backend.services.song_match_service import SongMatchService
 
 # A remaster or an edit on the same release differs by more than this.
@@ -278,6 +279,8 @@ def apply_missing_file_move(move: MissingFileMove, repos: ReconciliationRepos) -
     if not repos.files.lock_fold_pair(move.missing_id, move.successor_id):
         return False
     _carry_line_states(move, repos)
+    if move.crosses_work:
+        release_pins(move.missing_id, repos.matches, why="fold onto another work")
     performances = repos.performances
     left = (
         {}
@@ -400,6 +403,7 @@ def _delete_missing_row(
     released = _release_matches(row.id, repos.matches, identities)
     _detach_curation(row.id, repos)
     left = move_out([row.id], repos.performances)
+    release_pins(row.id, repos.matches, why="missing file deleted")
     if not repos.files.delete_missing(row.id):
         raise MissingFileChangedError(f"library file {row.id} is no longer missing")
     if repos.performances is not None:

@@ -15,6 +15,7 @@ from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
 from backend.services.master_selection_service import reselect_master_from_files
 from backend.services.performance_service import assign_performance, move_out, place
+from backend.services.pin_upkeep import release_pins
 from backend.services.song_match_service import SongMatchService
 
 logger = structlog.get_logger()
@@ -64,6 +65,8 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
     if previous_work_id == work_id:
         return
     left = move_out([library_file.id], repos.performances)
+    if previous_work_id is not None:
+        release_pins(library_file.id, repos.matches, why="file moved to another work")
     repos.files.update_work_id(library_file.id, work_id)
     song_matches = SongMatchService(repos.matches)
     song_matches.follow_file(library_file.id, work_id)

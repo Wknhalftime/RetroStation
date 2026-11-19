@@ -3,13 +3,18 @@ of both works.
 
 Phase 3b rebuilds the merge on purpose (AUD-R032, C58: one merge path that pins every line
 whose playing file would change, puts a hand-picked master first and redirects merged ids) and
-relocks this file as it goes. As phase 3b PR 1 leaves it, a merge
+relocks this file as it goes. As phase 3b PR 3 leaves it, a merge
 (POST /library/works/{target}/merge), read only through ``play_file_resolution``:
 
 - puts a hand-picked master first: the merged work keeps the source's hand-picked master over
-  the target's automatic one, so the target's lines move to it (until PR 2's pins hold them);
+  the target's automatic one, and the target's lines that played its master are pinned to the
+  file they played (3b S3), so they keep playing it;
 - moves the source's format overrides to the merged work, except one whose format the target
-  already overrides: the target's wins.
+  already overrides: the target's wins;
+- asks before a change a pin can't hold (C74; 3b D3, D22): an override reaching a line of the
+  other work makes POST merge answer 409 with the changes, merging nothing, and the approved
+  merge (POST /library/works/{target}/merge/approved, which the artist page's confirm sends
+  with the changes Lance saw) makes them.
 
 The library comes from the scan; the masters and overrides from the works routes; stations,
 lines and plays from the locked ``stream_seed``.
@@ -143,11 +148,31 @@ def _set_master(client: TestClient, work: str, file_id: UUID) -> None:
     assert response.status_code == 200
 
 
-def _merge(client: TestClient, target: str, source: str) -> None:
-    response = client.post(
-        f"/api/v1/library/works/{target}/merge", json={"source_work_ids": [source]}
+def _uuid(value: str | None) -> UUID | None:
+    return None if value is None else UUID(value)
+
+
+def _merge_approving(
+    client: TestClient, target: str, source: str
+) -> set[tuple[UUID, UUID | None, UUID | None]]:
+    """POST merge, refused (409) with the changes a pin can't hold; then the approved merge of
+    exactly those, as the artist page's confirm sends it (3b D3, Q7, Q8). The changes, as
+    (station, file before, file after)."""
+    body = {"source_work_ids": [source]}
+    refused = client.post(f"/api/v1/library/works/{target}/merge", json=body)
+    assert refused.status_code == 409
+    changes = refused.json()["detail"]["changes"]
+    approvals = [
+        {"station_id": c["station_id"], "identity_id": c["identity_id"], "file_id": c["to_file_id"]}
+        for c in changes
+    ]
+    merged = client.post(
+        f"/api/v1/library/works/{target}/merge/approved", json={**body, "approvals": approvals}
     )
-    assert response.status_code == 200
+    assert merged.status_code == 200
+    return {
+        (UUID(c["station_id"]), _uuid(c["from_file_id"]), _uuid(c["to_file_id"])) for c in changes
+    }
 
 
 def test_merge_keeps_the_source_hand_picked_master_and_moves_its_overrides(
@@ -156,9 +181,10 @@ def test_merge_keeps_the_source_hand_picked_master_and_moves_its_overrides(
     """S1, a work merge: AGAIN filed under Janet Jackson (target) and under Janet (source).
 
     The source's hand-picked master (the single) beats the target's automatic one (the album,
-    though it scores higher; 3b S3), so the target's CHR line moves to the single; the
-    source's AC override moves to the merged work and now reaches the target's line at the AC
-    station too. PR 2 pins the CHR line to the album and flags the AC change (C74).
+    though it scores higher; 3b S3), so the target's CHR line is pinned to the album and keeps
+    playing it. The source's AC override moves to the merged work and would reach the target's
+    line at the AC station: a pin can't hold that (C74), so POST merge asks first, and the
+    approved merge makes the change.
     """
     root = tmp_path / "library"
     _tagged(root / "again-album.mp3", "Janet Jackson", "Again", "album")
@@ -176,9 +202,10 @@ def test_merge_keeps_the_source_hand_picked_master_and_moves_its_overrides(
     assert [_plays(conn, e) for e in target_line] == [album, album]
     assert [_plays(conn, e) for e in source_line] == [ac_mix, single]
 
-    _merge(client, target, source)
+    changes = _merge_approving(client, target, source)
 
-    assert [_plays(conn, e) for e in target_line] == [ac_mix, single]
+    assert changes == {(stations["KAAA"], album, ac_mix)}
+    assert [_plays(conn, e) for e in target_line] == [ac_mix, album]
     assert [_plays(conn, e) for e in source_line] == [ac_mix, single]
 
 
@@ -186,7 +213,7 @@ def test_merge_keeps_the_targets_override_for_a_shared_format(
     conn: Conn, client: TestClient, tmp_path: Path
 ) -> None:
     """S1, a work merge where both works override AC: the target's override wins, so the
-    source's AC line moves to the target's AC edit."""
+    source's AC line moves to the target's AC edit, once approved (C74; 3b D22)."""
     root = tmp_path / "library"
     _tagged(root / "jj-album.mp3", "Janet Jackson", "Again", "album")
     _tagged(root / "jj-ac.mp3", "Janet Jackson", "Again (AC Edit)", "single")
@@ -205,6 +232,7 @@ def test_merge_keeps_the_targets_override_for_a_shared_format(
     conn.commit()
     assert (_plays(conn, target_at_kaaa), _plays(conn, source_at_kaaa)) == (jj_ac, j_ac)
 
-    _merge(client, target, source)
+    changes = _merge_approving(client, target, source)
 
+    assert changes == {(stations["KAAA"], j_ac, jj_ac)}
     assert (_plays(conn, target_at_kaaa), _plays(conn, source_at_kaaa)) == (jj_ac, jj_ac)

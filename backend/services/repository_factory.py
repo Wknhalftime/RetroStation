@@ -51,6 +51,7 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.version_entries import PgVersionEntryRepository
 from backend.db.repositories.work_curation import PgWorkCurationRepository
+from backend.db.repositories.work_merges import PgWorkMergeRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
 from backend.services.artist_resolution_service import ArtistResolutionRepos
@@ -61,6 +62,7 @@ from backend.services.missing_file_reconciliation_service import ReconciliationR
 from backend.services.song_match_service import SongMatchService
 from backend.services.streaming.station_years import StationYearRepos
 from backend.services.work_curation_service import WorkCurationRepos
+from backend.services.work_merge_service import WorkMergeRepos
 
 
 @dataclass
@@ -226,6 +228,7 @@ class RepositoryFactory:
         self.song_decisions = PgSongDecisionRepository(conn)
         self.performances = PgPerformanceRepository(conn)
         self.credit_picks = PgCreditPickRepository(conn)
+        self.work_merges = PgWorkMergeRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -310,7 +313,14 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         links=repos.log_name_links,
         merges=repos.artist_merges,
         performances=repos.performances,
+        lines=repos.work_merges,
+        credits=repos.credit_picks,
     )
+
+
+def work_merge_repos(repos: RepositoryFactory) -> WorkMergeRepos:
+    """The guarded merge's bundle, on *repos*' connection (phase 3b PR 3)."""
+    return WorkMergeRepos(curation=work_curation_repos(repos), log=repos.work_merges)
 
 
 def song_decision_repos(repos: RepositoryFactory) -> SongDecisionRepos:

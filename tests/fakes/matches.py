@@ -14,6 +14,8 @@ class FakeMatchRepository(MatchRepository):
         self._library_file_repo: LibraryFileRepository | None = None
         # Phase 3a: the performance each match stores, by match id (PostgreSQL holds it).
         self.stored_performances: dict[UUID, UUID | None] = {}
+        # Phase 3b: the file each match pins, by match id.
+        self.pins: dict[UUID, UUID | None] = {}
 
     def set_library_file_repo(self, repo: LibraryFileRepository) -> None:
         """Wire in the files a released match takes its work from (PostgreSQL reads them)."""
@@ -59,6 +61,16 @@ class FakeMatchRepository(MatchRepository):
     def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
         for match_id in match_ids:
             self.stored_performances[match_id] = performance_id
+
+    def set_pins(self, match_ids: list[UUID], file_id: UUID | None) -> None:
+        for match_id in match_ids:
+            self.pins[match_id] = file_id
+
+    def release_pins_of_file(self, file_id: UUID) -> int:
+        pinned = [m for m, f in self.pins.items() if f == file_id]
+        for match_id in pinned:
+            self.pins[match_id] = None
+        return len(pinned)
 
     def delete_for_identity(self, identity_id: UUID) -> None:
         to_delete = [id for id, m in self._data.items() if m.identity_id == identity_id]

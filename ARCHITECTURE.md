@@ -64,7 +64,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 - The works router's write routes (merge, split, reassign, format override create and delete,
   Set and Remove master) are plain `def` routes on `SyncRepos`: one sync connection and one
   transaction per request, committed when the route succeeds and rolled back when it raises.
-  Set master calls `master_choice_service`; every other write calls
+  Set master calls `master_choice_service`; the merge calls `work_merge_service.guarded_merge`
+  (3b PR 3, "Work merges: the guard" below), which wraps `merge_works`; every other write calls
   `services/work_curation_service.py`, which commits nothing of its own.
 - The service writes through `WorkCurationRepos`: the existing works, library file, recording,
   song master, format override, match and artist repositories wherever one already runs the
@@ -503,9 +504,14 @@ returns the row it finds).
   for the line's version text plays first, else its **format override** for the station's
   format, else its **song master**; `source` is `version`, `override`, `master` or NULL, and
   is only logged. The version step is a second join of `format_overrides` by key: no
-  subquery and no title parsing (AUD-R033). Four readers fence the view with
-  `LATERAL … OFFSET 0`: the M3U repository, `playable_schedule.py`, `stream_cue_work.py` and
-  the gate's `scripts/airplay_snapshot.py`.
+  subquery and no title parsing (AUD-R033). Five readers fence the view with
+  `LATERAL … OFFSET 0`: the M3U repository, `playable_schedule.py`, `stream_cue_work.py`, the
+  gate's `scripts/airplay_snapshot.py` and the guarded merge (`db/repositories/work_merges.py`).
+- The full order since 3b PR 3 (0053): the stored performance (3a, "Credit picks" below), the
+  version entry, the format override, the line's **merge pin**, the master. The pin is read
+  from the same best-match lateral (`matches.pinned_file_id`); a pin on the master's own file
+  reads as `master`, and a missing pinned file is reported, never fallen back from ("Work
+  merges: the guard" below).
 - A line's version text is `track_identities.version_text` (C59): a generated, stored, indexed
   column over `original_title`, its trailing round or square bracket groups lowercased,
   single-spaced and joined ("(Part 1) (Live)" is `part 1 live`), NULL without one. No writer
@@ -596,7 +602,8 @@ returns the row it finds).
   stay where they are, with their locked tests and fakes: the two cascade CTEs of
   `broadcast_track_identities` (`bulk_reject_by_artist`, `bulk_defer_by_artist`),
   `artist_cascade.delete_matches_of_lines`, `artist_resolution.delete_pending_song_matches` and
-  the fold's re-point in `library_files.merge_into`. Phase 2b's version-state copies sit on the
+  the fold's re-points in `library_files.merge_into` (the matched file and, since 3b PR 3, the
+  pin). Phase 2b's version-state copies sit on the
   port but write `version_entry_states`, so they stay outside the service.
   `scripts/probe_truncate_cost.py` truncates a test database's tables and is tooling, not a
   writer.
@@ -721,6 +728,71 @@ returns the row it finds).
   `tests/integration/test_stored_performance_pg.py`,
   `tests/tasks/test_credit_repoint_proposals.py` (AUD-R039), `tests/routers/test_credit_picks.py`
   and `tests/scripts/test_apply_credit_picks.py`.
+
+## Work merges: the guard, pins, the log (phase 3b PR 3, C58, C72, C74, AUD-R079)
+
+- **The guard (`services/work_merge_service.py`, S3, D3).** `guarded_merge(group, repos)` is
+  the only way two works merge. A `WorkMergeGroup` is a target, its sources, a reason
+  (`library`, `merge list`, `musicbrainz work link`) and Lance's approvals. In a savepoint on
+  the caller's connection it reads what each (station, line) of the group's works plays through
+  the view (one play per station stands for all, from `station_identity_plays`), runs
+  `merge_works`, reads again, and keeps the merge only when every change is approved. An
+  approval is (station, line, new file) (Q8), so it covers that one change only. Otherwise the
+  savepoint is undone and `MergeRefused(changes)` is answered. The pure rules (`changes_between`,
+  `all_approved`) are in `domain/work_merges.py`; the reads, the savepoint and the log are on
+  `WorkMergeRepository` (`repositories/work_merges.py`, adapter
+  `db/repositories/work_merges.py`).
+- **What `merge_works` holds (S3, S4, D2, D25).** Before anything moves it reads the lines of
+  the group's works that play a master somewhere (`master_lines`). After the master is
+  re-picked, each line whose master's file is no longer the master keeps it:
+  - a line whose log name's links pick a **non-default** performance of the merged work that
+    holds the file stores that performance, with the file as its preferred copy (S4: a cover
+    act keeps its own copy);
+  - any other line is **pinned** to the file (`SongMatchService.pin`, `matches.pinned_file_id`).
+
+  A stored line is never pinned: its change is a flag (D2). A line no station plays through its
+  master (an override or a version entry plays instead) is not pinned (D25), so if that entry
+  goes later, the line plays the merged work's master. Changes a pin can't hold (a stored line,
+  an override or version entry crossing acts) are what the guard asks about.
+- **The routes (D3, Q7, Q19, D22).** `POST /works/{id}/merge` answers 409 with
+  `{"message", "changes": [...]}` (each change's station, line, plays, and from and to file)
+  when a change waits, and `POST /works/{id}/merge/approved` takes the same body plus
+  `approvals`. A different change found on the second call is a 409 again. The artist page's
+  "Merge N works" shows the list ("What this merge changes") with "Merge anyway" and "Cancel";
+  the client's `ConflictError` keeps an object detail. A failed merge answers 500; the
+  request's rollback takes its `failed` log row with it, and the `work_merge_failed` log line
+  stays.
+- **Pins kept right (`services/pin_upkeep.py`, D4, D14, D23, E7).** `pinned_file_id` has no
+  `ON DELETE` action, so a path that forgets fails at the foreign key. A pin stands in for its
+  work's master only, so every path that deletes a file (Missing files' delete and the purge,
+  both through `_delete_missing_row`) or moves it to another work (split, reassign,
+  `move_file_to_work`, a fold onto another work) releases its pins first, logged as
+  `pins_released`. A fold onto a copy on the same work re-points them in `merge_into`.
+- **The log (0054, S10, Q18).** `work_merges` has one row per merge: merged, failed (with its
+  error) or rolled back. It has no foreign keys, because the works it names may be gone and
+  0051's rollback drops performances. `work_redirects` maps each merged-away id to the live work.
+  A later merge of that work re-points its redirects, so a chain resolves in one step. The work
+  detail answers a redirected id with the live work, and the work page replaces its URL (Q19).
+  `work_merge_rows` is the rollback map: each row the merge changed in twelve tables, keyed by
+  table and key, with the row as it was, or NULL for a row it inserted. A capture trigger
+  (`work_merge_capture`) fills it, so cascades and `SET NULL`s are caught with no code in the
+  merge. The trigger acts only while the transaction-local setting `retrostation.merge_id` is
+  set, between the guard's `start` and `stop`. A failed merge is undone alone (its savepoint),
+  logged after the rollback, and raised as `WorkMergeFailedError`.
+- **The restore and rollbacks.** `backend/db/rollback_work_merges.sql` (by hand, app stopped,
+  `psql -1 -f`) restores every merged merge, newest first:
+  - parents come back before children, and rows the merge inserted go;
+  - preferred copies are cleared first and put back last;
+  - the merge's redirects go, and it is marked `rolled_back`.
+
+  `rollback_0054_work_merge_log.sql` drops the log, and `rollback_0053_merge_pins.sql` puts
+  back 0052's view and drops the pins. Run the restore first: dropping the pins loses what they
+  held.
+- The checks are `tests/integration/test_work_merge_guard_pg.py`,
+  `tests/integration/test_view_pin_order_pg.py` (AUD-R033),
+  `tests/integration/test_work_merge_rollback_pg.py`, `tests/routers/test_work_merge_approval.py`,
+  `tests/routers/test_work_redirects.py`, `ArtistDetail.mergeConfirm.test.tsx` and
+  `AssociatedWorks.redirect.test.tsx`; their seed is `tests/integration/work_merge_seed.py`.
 
 ## Derived counts kept by triggers
 

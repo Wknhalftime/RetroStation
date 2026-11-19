@@ -37,6 +37,7 @@ from backend.services.repository_factory import (
     reconciliation_repos,
     song_decision_repos,
     work_curation_repos,
+    work_merge_repos,
 )
 from backend.services.streaming.cue_editor import CueEditorPorts, ReadPeaks
 from backend.services.streaming.liner_cues import LinerCuePorts
@@ -47,6 +48,7 @@ from backend.services.streaming.station_years import StationYearRepos
 from backend.services.streaming.stream_settings import StreamingState, streaming_state
 from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
+from backend.services.work_merge_service import WorkMergeRepos
 from backend.services.work_move_service import WorkMoveRepos
 
 logger = structlog.get_logger()
@@ -202,6 +204,11 @@ def get_song_decision_repos(repos: SyncRepos) -> SongDecisionRepos:
 def get_work_curation_repos(repos: SyncRepos) -> WorkCurationRepos:
     """The works writes' repositories, on the request's connection (phase 0c, C75)."""
     return work_curation_repos(repos)
+
+
+def get_work_merge_repos(repos: SyncRepos) -> WorkMergeRepos:
+    """The guarded merge's repositories, on the request's connection (phase 3b PR 3)."""
+    return work_merge_repos(repos)
 
 
 def get_station_year_repos(repos: SyncRepos) -> StationYearRepos:

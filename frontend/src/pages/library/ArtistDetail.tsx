@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import { useArtistDetail } from "@/api/artists";
 import { useDismissListed } from "@/api/versions";
-import { useMergeWorks, type MergeWorksResult } from "@/api/works";
+import { mergeChanges, useMergeWorks, type MergeChange, type MergeWorksResult } from "@/api/works";
 import {
   MergedMembers,
   MergePicker,
@@ -48,6 +48,7 @@ export function ArtistDetail() {
   const [picked, setPicked] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [keptTitle, setKeptTitle] = useState("");
+  const [changes, setChanges] = useState<MergeChange[] | null>(null);
 
   if (isLoading) {
     return (
@@ -92,21 +93,39 @@ export function ArtistDetail() {
   };
   const clearPicks = () => {
     setConfirming(false);
+    setChanges(null);
     setPicked([]);
   };
   const askToMerge = () => {
     mergeWorks.reset();
     setConfirming(true);
   };
-  const runMerge = () => {
+  const runMerge = (approved?: MergeChange[]) => {
     if (!keeper) return;
     const sourceWorkIds = pickedWorks.filter((w) => w.id !== keeper.id).map((w) => w.id);
+    const approvals = approved?.map((c) => ({
+      station_id: c.station_id,
+      identity_id: c.identity_id,
+      file_id: c.to_file_id,
+    }));
     setKeptTitle(keeper.title);
     mergeWorks.mutate(
-      { targetId: keeper.id, sourceWorkIds },
-      { onSuccess: clearPicks, onError: () => setConfirming(false) }
+      { targetId: keeper.id, sourceWorkIds, approvals },
+      {
+        onSuccess: clearPicks,
+        onError: (error) => {
+          setConfirming(false);
+          setChanges(mergeChanges(error));
+        },
+      }
     );
   };
+  const cancelChanges = () => {
+    setChanges(null);
+    mergeWorks.reset();
+  };
+  const fileName = (path: string | null) => (path ? path.split(/[\\/]/).pop() : "nothing");
+  const refusal = mergeWorks.error && !changes ? mergeWorks.error : null;
 
   return (
     <div>
@@ -167,10 +186,44 @@ export function ArtistDetail() {
             {mergedText(mergeWorks.data, keptTitle)}
           </p>
         )}
-        {mergeWorks.error && (
+        {refusal && (
           <p role="alert" className="mb-3 rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
-            Could not merge: {errorText(mergeWorks.error)}
+            Could not merge: {errorText(refusal)}
           </p>
+        )}
+
+        {/* What a pin can't hold: Lance confirms each change before the merge (C74) */}
+        {changes && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="mb-2">
+              This merge changes what {plural(changes.length, "line")} plays. Merge anyway?
+            </p>
+            <ul aria-label="What this merge changes" className="mb-3 space-y-1">
+              {changes.map((c) => (
+                <li key={`${c.station_id}-${c.identity_id}`}>
+                  {c.station}: “{c.title}” by {c.artist} ({plural(c.plays, "play")}):{" "}
+                  {fileName(c.from_path)} → {fileName(c.to_path)}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => runMerge(changes)}
+                disabled={mergeWorks.isPending}
+                className="rounded-md bg-red-600 px-3 py-1.5 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Merge anyway
+              </button>
+              <button
+                type="button"
+                onClick={cancelChanges}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Merge bar: always there (fixed height), so ticking never shifts the list */}
@@ -202,7 +255,7 @@ export function ArtistDetail() {
                 </span>
                 <button
                   type="button"
-                  onClick={runMerge}
+                  onClick={() => runMerge()}
                   disabled={mergeWorks.isPending}
                   className="rounded-md bg-red-600 px-3 py-1.5 font-medium text-white hover:bg-red-700 disabled:opacity-50"
                 >

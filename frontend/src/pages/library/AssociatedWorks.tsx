@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -52,6 +52,11 @@ export function AssociatedWorks() {
         Failed to load work details. Please try again.
       </p>
     );
+  }
+
+  // A merged-away id answers its merged work: the URL follows (3b S3, Q19).
+  if (work.id !== work_id) {
+    return <Navigate to={`/library/artists/${artist_id}/works/${work.id}`} replace />;
   }
 
   // ---------------------------------------------------------------------------

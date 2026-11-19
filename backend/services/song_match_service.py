@@ -72,6 +72,14 @@ class SongMatchService:
         """The lines store no performance: they follow the work's default (E3, D5)."""
         self._matches.set_stored_performance(match_ids, None)
 
+    def pin(self, match_ids: list[UUID], file_id: UUID) -> None:
+        """The lines pin *file_id*, the file their master step played (3b S3, C72)."""
+        self._matches.set_pins(match_ids, file_id)
+
+    def release_pins(self, file_id: UUID) -> int:
+        """No line pins *file_id* any more (3b D4, D14, D23); how many did."""
+        return self._matches.release_pins_of_file(file_id)
+
     def store_performance(self, match_id: UUID, performance_id: UUID | None) -> None:
         """The line stores *performance_id* for its credit, or none (Credit picks: Apply, a
         pick, ``apply_credit_picks.py``; phase 3a S5, S9, M28)."""
