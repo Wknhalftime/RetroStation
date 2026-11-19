@@ -34,6 +34,7 @@ import backend.tasks.artist_linking_tasks  # noqa: F401, E402
 import backend.tasks.artist_matching_tasks  # noqa: F401, E402
 import backend.tasks.credit_pick_tasks  # noqa: F401, E402
 import backend.tasks.embedding_tasks  # noqa: F401, E402
+import backend.tasks.empty_work_sweep_tasks  # noqa: F401, E402
 import backend.tasks.identity_matching_tasks  # noqa: F401, E402
 import backend.tasks.ingestion_tasks  # noqa: F401, E402
 import backend.tasks.library_enrichment_tasks  # noqa: F401, E402
@@ -45,4 +46,5 @@ import backend.tasks.mb_enrichment_tasks  # noqa: F401, E402
 import backend.tasks.normalize_backfill_tasks  # noqa: F401, E402
 import backend.tasks.performance_build_tasks  # noqa: F401, E402
 import backend.tasks.progress_prune_tasks  # noqa: F401, E402
+import backend.tasks.recording_index_tasks  # noqa: F401, E402
 import backend.tasks.work_artist_credit_tasks  # noqa: F401, E402

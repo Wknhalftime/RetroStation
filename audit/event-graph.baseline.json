@@ -11,15 +11,15 @@
     "edge.SUBSCRIBE": 0,
     "node.periodic": 6,
     "node.producer": 17,
-    "node.task": 19,
+    "node.task": 21,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
     "rule.EV04": 0,
     "rule.EV05": 0,
-    "rule.EV06": 6,
+    "rule.EV06": 8,
     "rule.EV07": 1,
-    "rule.EV08": 25,
+    "rule.EV08": 27,
     "rule.EV09": 1,
     "rule.EV10": 17,
     "unresolved_dispatch": 1
@@ -433,6 +433,15 @@
       "class": "inventory",
       "code": "EV06",
       "detail": "no_producer",
+      "file": "backend/tasks/empty_work_sweep_tasks.py",
+      "line": 23,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.empty_work_sweep_tasks:sweep_empty_works_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
       "file": "backend/tasks/normalize_backfill_tasks.py",
       "line": 50,
       "referenced_in_unresolved_dispatch": false,
@@ -446,6 +455,15 @@
       "line": 33,
       "referenced_in_unresolved_dispatch": false,
       "subject": "backend.tasks.performance_build_tasks:build_performances_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
+      "file": "backend/tasks/recording_index_tasks.py",
+      "line": 25,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.recording_index_tasks:build_recording_index_task"
     },
     {
       "class": "inventory",
@@ -527,6 +545,17 @@
       "subject": "backend.tasks.embedding_tasks:embedding_task",
       "value": {
         "body_lines": 45,
+        "service_calls": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/empty_work_sweep_tasks.py",
+      "line": 23,
+      "subject": "backend.tasks.empty_work_sweep_tasks:sweep_empty_works_task",
+      "value": {
+        "body_lines": 8,
         "service_calls": 1
       }
     },
@@ -671,6 +700,17 @@
       "value": {
         "body_lines": 7,
         "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/recording_index_tasks.py",
+      "line": 25,
+      "subject": "backend.tasks.recording_index_tasks:build_recording_index_task",
+      "value": {
+        "body_lines": 14,
+        "service_calls": 2
       }
     },
     {
@@ -1122,6 +1162,20 @@
         "schedule": null
       },
       {
+        "body_lines": 8,
+        "envelope": "none",
+        "file": "backend/tasks/empty_work_sweep_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 23,
+        "module": "backend.tasks.empty_work_sweep_tasks",
+        "name": "sweep_empty_works_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
         "body_lines": 63,
         "envelope": "task_failure_telemetry",
         "file": "backend/tasks/identity_matching_tasks.py",
@@ -1352,6 +1406,20 @@
         "registered": true,
         "retries": 0,
         "schedule": "crontab(minute=\"30\", hour=\"4\")"
+      },
+      {
+        "body_lines": 14,
+        "envelope": "none",
+        "file": "backend/tasks/recording_index_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 25,
+        "module": "backend.tasks.recording_index_tasks",
+        "name": "build_recording_index_task",
+        "params": [],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
       },
       {
         "body_lines": 2,

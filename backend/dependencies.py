@@ -29,11 +29,13 @@ from backend.services.credit_pick_service import CreditPickRepos
 from backend.services.identity_resolution_service import SongDecisionRepos
 from backend.services.master_choice_service import MasterChoiceRepos
 from backend.services.mb_client import MusicBrainzApiClient, MusicBrainzClientProtocol
+from backend.services.merge_list_service import MergeListRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.repository_factory import (
     RepositoryFactory,
     artist_resolution_repos,
     credit_pick_repos,
+    merge_list_repos,
     reconciliation_repos,
     song_decision_repos,
     work_curation_repos,
@@ -209,6 +211,17 @@ def get_work_curation_repos(repos: SyncRepos) -> WorkCurationRepos:
 def get_work_merge_repos(repos: SyncRepos) -> WorkMergeRepos:
     """The guarded merge's repositories, on the request's connection (phase 3b PR 3)."""
     return work_merge_repos(repos)
+
+
+def get_merge_list_repos(repos: SyncRepos) -> MergeListRepos:
+    """The merge list's repositories, on the request's connection (phase 3b PR 4)."""
+    return merge_list_repos(repos)
+
+
+def get_merge_list_commit(repos: SyncRepos) -> Callable[[], None]:
+    """The request's commit, which Apply runs after each group (3b D26); a lost connection is
+    ``StorageUnavailableError`` (503 at the route)."""
+    return repos.commit_or_unavailable
 
 
 def get_station_year_repos(repos: SyncRepos) -> StationYearRepos:

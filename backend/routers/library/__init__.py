@@ -7,6 +7,7 @@ from backend.routers.library import (
     credit_picks,
     cues,
     files,
+    merge_list,
     missing,
     scan,
     silent_files,
@@ -26,3 +27,4 @@ router.include_router(silent_files.router)
 router.include_router(cues.router)
 router.include_router(versions.router)
 router.include_router(credit_picks.router)
+router.include_router(merge_list.router)

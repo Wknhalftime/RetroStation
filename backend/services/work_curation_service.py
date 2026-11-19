@@ -130,17 +130,21 @@ def _recalculate_master(work_id: str, repos: WorkCurationRepos) -> None:
 
 
 def _settle_left_work(work_id: str, repos: WorkCurationRepos) -> bool:
-    """Delete a work its last file just left, with its masters, overrides and recordings,
-    else re-pick its master; whether it was deleted."""
+    """Settle the work a file just left; whether it was deleted.
+
+    With files left, its master is re-picked. With none, a match still on it follows its file
+    to that file's work and its file-less recordings go, as before; then the one deletion rule
+    decides (3b D7, D16; C53): nothing else pointing at it, it goes with its master; else it
+    stays, listed for Lance, losing only a master left on another work's file."""
     if repos.files.get_by_work(work_id):
         _recalculate_master(work_id, repos)
         return False
     SongMatchService(repos.matches).release_work(work_id)
-    repos.song_masters.delete_by_work(work_id)
-    repos.curation.delete_overrides_of_work(work_id)
-    repos.curation.delete_recordings_of_work(work_id)
-    repos.curation.delete_works([work_id])
-    return True
+    repos.curation.delete_fileless_recordings_of_work(work_id)
+    if repos.works.delete_if_empty(work_id):
+        return True
+    _recalculate_master(work_id, repos)
+    return False
 
 
 # --- merge -------------------------------------------------------------------------------------

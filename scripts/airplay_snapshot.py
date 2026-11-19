@@ -34,7 +34,7 @@ import hashlib
 import statistics
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -145,15 +145,21 @@ def _files(conn: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     return file_work, tags
 
 
+def override_key(row: Mapping[str, Any]) -> str:
+    """The ``overrides`` section's key of one ``format_overrides`` row (also the gate's apply
+    scripts' allowlist key, 3b S11)."""
+    parts = [str(row["work_id"])]
+    for column in sorted(set(row) - _OVERRIDE_VALUE_COLUMNS):
+        if row[column] is not None:
+            parts.append(f"{column}={row[column]}")
+    return "/".join(parts)
+
+
 def _overrides(conn: Any) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for row in conn.execute("SELECT * FROM format_overrides").fetchall():
-        parts = [str(row["work_id"])]
-        for column in sorted(set(row) - _OVERRIDE_VALUE_COLUMNS):
-            if row[column] is not None:
-                parts.append(f"{column}={row[column]}")
-        out["/".join(parts)] = _text(row["preferred_file_id"])
-    return out
+    return {
+        override_key(row): _text(row["preferred_file_id"])
+        for row in conn.execute("SELECT * FROM format_overrides").fetchall()
+    }
 
 
 def _names(conn: Any) -> dict[str, Any]:

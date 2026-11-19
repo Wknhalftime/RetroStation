@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
-from backend.domain.catalog import Work
+from backend.domain.catalog import EmptyWork, Work
 
 
 class WorkRepository(ABC):
@@ -40,10 +40,21 @@ class WorkRepository(ABC):
 
     @abstractmethod
     def delete_if_empty(self, work_id: str) -> bool:
-        """Delete the work unless files, recordings, matches or overrides reference it.
+        """Delete the work unless files, recordings, matches, overrides of either kind or a
+        performance a match stores reference it (C53, 3b S6).
 
         Its song master goes with it. Returns True if deleted.
         """
+        ...
+
+    @abstractmethod
+    def list_empty_work_ids(self) -> list[str]:
+        """Every work with no files (the sweep's candidates, 3b S6)."""
+        ...
+
+    @abstractmethod
+    def kept_empty_works(self) -> list[EmptyWork]:
+        """Every work with no files that something points at, with what, by title (D15)."""
         ...
 
     @abstractmethod

@@ -99,6 +99,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   "Artist identity" below) and no performance crediting it (3b D19, AUD-R078: the act still
   performs a copy of the merged work). AUD-R035's "may be deleted only when" still holds; this is one more
   condition, so no ruling changes.
+- A split or reassign that empties a work (3b PR 4, D7, D16, D31) first points each match still
+  on it at its file's work and deletes its file-less recordings, as before; then the one
+  deletion rule (`delete_if_empty`, "The merge list" below) decides. A work an override, entry
+  or match on the work still names stays, losing only a master left on another work's file.
 - The router's read route (the work detail) keeps its SQL on the async connection until 3b
   rebuilds the Library pages (AUD-R010 noted; AUD-R074 replaces it for the song routes, "Song
   matches: one writer" below).
@@ -793,6 +797,54 @@ returns the row it finds).
   `tests/integration/test_work_merge_rollback_pg.py`, `tests/routers/test_work_merge_approval.py`,
   `tests/routers/test_work_redirects.py`, `ArtistDetail.mergeConfirm.test.tsx` and
   `AssociatedWorks.redirect.test.tsx`; their seed is `tests/integration/work_merge_seed.py`.
+
+## The merge list, one deletion rule, the recording index (phase 3b PR 4, C53, C57, AUD-R080)
+
+- **The planner (S1, D29).** `domain/work_merge_planner.py` is pure; `merge_plan_service`
+  feeds it each work's facts from `MergeListRepository.plan_works`:
+  - the title key: grouping's exact base-title rule (`title_key`), never its fuzzy match;
+  - the work MBID, and the work MBIDs its performances' cached recording lookups name;
+  - its credits' artists (merge-group primaries, else MBIDs) and names, placeholders out.
+
+  Works join on a shared work MBID, or on an equal title key with a shared artist or credited
+  name; a title alone never joins. The title joins of one key stand only while the works they
+  join hold at most one work MBID (Q15). The target is a MusicBrainz work, then more matched
+  plays, then the lower id. Until D1's marker the planner refuses (`CreditsNotReadyError`, Q22).
+- **The page (S2, D6, D15, D27, D28).** `GET /library/merge-list` plans on every read (it
+  stores nothing, Q13). It tries each group's guarded merge with
+  `work_merge_service.preview`, in a savepoint always undone, with no log row and no capture,
+  and shows the changes a pin can't hold. Beside them are flags that only show: hand-picked
+  masters meeting, a cue edit on a master's audio, a widened rejection. It also shows the
+  group's last failed attempt, the recording MBIDs still under two works, and the empty works
+  kept. The count route uses the planner alone; Library Status shows the planned-group count
+  while any of the three sections has rows.
+- **Apply (D26, E5).** `merge_list_service.apply` plans again and merges each group Lance saw,
+  as he saw it, with his approvals, through `guarded_merge` (reason `merge list`). It commits
+  after each group (the route's commit port), so a failed group's log row is kept on its own.
+  Each group answers `merged`, `waiting`, `failed`, `already_merged` (every source redirects to
+  the target) or `changed` (its works no longer plan together; nothing is merged).
+- **One deletion rule (C53, D7, D30).** `WorkRepository.delete_if_empty` and
+  `kept_empty_works` read one map of references:
+  - a recording, a match on the work (`matches.work_id`), a match whose target is the work;
+  - a format override, a version entry;
+  - a performance of the work that a match stores.
+
+  A pinned file is a file, so the files clause covers it. `sweep_empty_works_task` (no marker,
+  run by name after the merges and after phase 4's) deletes every file-less work nothing points
+  at.
+- **The global index (S5, C40, E6).** `build_recording_index_task` builds
+  `uq_performances_recording_mbid` with `CREATE UNIQUE INDEX CONCURRENTLY`, on an autocommit
+  connection, never in a migration. It runs only once `PerformanceRepository.duplicate_recordings`
+  is empty, and otherwise names the MBIDs. An invalid index left by a failed build is dropped
+  and built again.
+- **Order at the cutover.** 3a's build, D1's step, the merge list's Apply, then the Credit
+  picks proposals task (nothing queues it, D33), the sweep, and the index.
+  `scripts/apply_merge_list.py` is the gate's Apply: it writes the work map and an allowlist
+  of what its merges change (S11, D32).
+- The checks are `tests/domain/test_work_merge_planner.py`, `tests/routers/test_merge_list.py`,
+  `tests/tasks/test_empty_work_sweep.py`, `tests/integration/test_global_recording_index_pg.py`,
+  `tests/scripts/test_apply_merge_list.py`, `MergeList.test.tsx` and
+  `LibraryStatus.mergeListLink.test.tsx`.
 
 ## Derived counts kept by triggers
 

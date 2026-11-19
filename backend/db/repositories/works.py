@@ -12,11 +12,33 @@ from backend.db.repositories._pg_utils import (
     parse_embedding,
     translate_lost_connection,
 )
-from backend.domain.catalog import CatalogStorageError, Work
+from backend.domain.catalog import CatalogStorageError, EmptyWork, Work, WorkReference
 from backend.domain.enums import CatalogSource, TargetType
 from backend.repositories.works import WorkRepository
 
 logger = structlog.get_logger()
+
+# What keeps a work with no files (C53, 3b S6), each an EXISTS on the work ``w``; the one
+# deletion rule and the kept list read the same SQL.
+_REFERENCES: dict[WorkReference, str] = {
+    WorkReference.RECORDING: "EXISTS (SELECT 1 FROM recordings r WHERE r.work_id = w.id)",
+    WorkReference.MATCH: "EXISTS (SELECT 1 FROM matches m WHERE m.work_id = w.id)",
+    WorkReference.WORK_MATCH: (
+        "EXISTS (SELECT 1 FROM matches m WHERE m.target_type = %(work)s AND m.target_id = w.id)"
+    ),
+    WorkReference.FORMAT_OVERRIDE: (
+        "EXISTS (SELECT 1 FROM format_overrides o"
+        " WHERE o.work_id = w.id AND o.format_name IS NOT NULL)"
+    ),
+    WorkReference.VERSION_ENTRY: (
+        "EXISTS (SELECT 1 FROM format_overrides o"
+        " WHERE o.work_id = w.id AND o.version_text IS NOT NULL)"
+    ),
+    WorkReference.STORED_PERFORMANCE: (
+        "EXISTS (SELECT 1 FROM matches m JOIN performances p ON p.id = m.performance_id"
+        " WHERE p.work_id = w.id)"
+    ),
+}
 
 
 @translate_lost_connection(CatalogStorageError)
@@ -129,18 +151,17 @@ class PgWorkRepository(WorkRepository):
         return {cast(str, row["id"]) for row in rows}
 
     def delete_if_empty(self, work_id: str) -> bool:
-        # Every table with a FK to works except song_masters, which goes
-        # with the work, and version_entry_states, which cascades (phase 2b
-        # D3): a work anything else (files, recordings, matches, format
-        # overrides and version entries) still points at stays.
+        # The one deletion rule (C53, 3b S6, D7): files, and every reference the kept list
+        # names. song_masters go with the work; version_entry_states and performances
+        # cascade (phase 2b D3), unless a match stores one of its performances.
+        clauses = " OR ".join(
+            [
+                "EXISTS (SELECT 1 FROM library_files f WHERE f.work_id = w.id)",
+                *_REFERENCES.values(),
+            ]
+        )
         referenced = self._conn.execute(
-            """SELECT EXISTS (SELECT 1 FROM library_files WHERE work_id = %(id)s)
-                   OR EXISTS (SELECT 1 FROM recordings WHERE work_id = %(id)s)
-                   OR EXISTS (SELECT 1 FROM matches WHERE work_id = %(id)s)
-                   OR EXISTS (SELECT 1 FROM matches
-                              WHERE target_type = %(work)s AND target_id = %(id)s)
-                   OR EXISTS (SELECT 1 FROM format_overrides WHERE work_id = %(id)s)
-                   AS referenced""",
+            f"SELECT {clauses} AS referenced FROM works w WHERE w.id = %(id)s",
             {"id": work_id, "work": TargetType.WORK.value},
         ).fetchone()
         if referenced is None or referenced["referenced"]:
@@ -154,6 +175,32 @@ class PgWorkRepository(WorkRepository):
             (work_id,),
         )
         return True
+
+    def list_empty_work_ids(self) -> list[str]:
+        rows = self._conn.execute(
+            """SELECT w.id FROM works w
+               WHERE NOT EXISTS (SELECT 1 FROM library_files f WHERE f.work_id = w.id)
+               ORDER BY w.id"""
+        ).fetchall()
+        return [str(r["id"]) for r in rows]
+
+    def kept_empty_works(self) -> list[EmptyWork]:
+        columns = ", ".join(f"{sql} AS {kind.value}" for kind, sql in _REFERENCES.items())
+        rows = self._conn.execute(
+            f"""SELECT w.id, w.title, {columns} FROM works w
+                WHERE NOT EXISTS (SELECT 1 FROM library_files f WHERE f.work_id = w.id)
+                ORDER BY w.title, w.id""",
+            {"work": TargetType.WORK.value},
+        ).fetchall()
+        kept = [
+            EmptyWork(
+                work_id=str(r["id"]),
+                title=str(r["title"] or ""),
+                references=tuple(kind for kind in _REFERENCES if r[kind.value]),
+            )
+            for r in rows
+        ]
+        return [w for w in kept if w.references]
 
     def get_candidates_by_normalized_artist(
         self,
