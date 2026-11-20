@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -164,10 +164,12 @@ describe("AssociatedWorks, a copy's row", () => {
       within(other).getByRole("button", { name: "Move into this song and set as master file" })
     );
 
-    expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/master`, {
-      method: "PUT",
-      body: JSON.stringify({ preferred_file_id: ELSEWHERE }),
-    });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/master`, {
+        method: "PUT",
+        body: JSON.stringify({ preferred_file_id: ELSEWHERE }),
+      })
+    );
   });
 
   it("marks the master's copy and keeps every other present copy crownable", async () => {

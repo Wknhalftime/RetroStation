@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -180,10 +180,15 @@ describe("AssociatedWorks, Prefer this copy", () => {
     const mp3 = within(duet).getByRole("listitem", { name: "duet.mp3" });
     fireEvent.click(within(mp3).getByRole("button", { name: "Prefer this copy" }));
 
-    expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/performances/p-duet/preferred-copy`, {
-      method: "PUT",
-      body: JSON.stringify({ file_id: DUET_MP3 }),
-    });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith(
+        `${WORK_URL}/performances/p-duet/preferred-copy`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ file_id: DUET_MP3 }),
+        }
+      )
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

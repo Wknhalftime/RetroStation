@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -175,10 +175,12 @@ describe("AssociatedWorks, pinned lines", () => {
     const copy = await expand();
     fireEvent.click(within(copy).getByRole("button", { name: `Release ${TITLE}` }));
 
-    expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/pins/release`, {
-      method: "POST",
-      body: JSON.stringify({ identity_ids: ["i-1"] }),
-    });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/pins/release`, {
+        method: "POST",
+        body: JSON.stringify({ identity_ids: ["i-1"] }),
+      })
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

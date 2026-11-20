@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -173,10 +173,12 @@ describe("AssociatedWorks, performances and their copies", () => {
     const flac = within(duet).getByRole("listitem", { name: "duet.flac" });
     fireEvent.click(within(flac).getByRole("button", { name: "Set as master file" }));
 
-    expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/master`, {
-      method: "PUT",
-      body: JSON.stringify({ preferred_file_id: DUET_FLAC }),
-    });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith(`${WORK_URL}/master`, {
+        method: "PUT",
+        body: JSON.stringify({ preferred_file_id: DUET_FLAC }),
+      })
+    );
   });
 
   it("names the work's credited artists under its title", async () => {
