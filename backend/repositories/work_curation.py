@@ -115,6 +115,11 @@ class WorkCurationRepository(ABC):
         """Delete every recording of the work."""
         ...
 
+    @abstractmethod
+    def delete_fileless_recordings_of_work(self, work_id: str) -> None:
+        """Delete each recording of the work that no file is on (3b D16)."""
+        ...
+
     # --- the master recalculation ------------------------------------------------------------
 
     @abstractmethod

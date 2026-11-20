@@ -6,8 +6,10 @@ master recalculation they share. It writes in the caller's transaction and repro
 router's behaviour, oddities included: the recalculation replaces a manual pick whose file is
 no longer a present file of the work. Phase 3b PR 1 changed one: a merge used to drop a
 source's hand-picked master, and now keeps it (S3, E1; the rule is pinned in
-``tests/integration/test_work_merge_service_pg.py``). Each refusal carries today's HTTP detail
-as its message.
+``tests/integration/test_work_merge_service_pg.py``). Phase 3b PR 4 changed another: a split or
+reassign that empties a work keeps it while anything still points at it (D7, D16; the rule is
+pinned in ``tests/tasks/test_empty_work_sweep.py``). Each refusal carries today's HTTP detail as
+its message.
 
 The routes' own tests (``tests/routers/test_library.py``, unlocked) and phase 0a's scenario
 tests are the safety net for every response; these pin the service: its results, its
@@ -374,7 +376,10 @@ def test_split_takes_a_file_to_a_work_of_its_own(conn: Conn) -> None:
     assert _master_of(conn, work) == (studio, "auto")
 
 
-def test_split_of_a_works_last_file_deletes_the_work(conn: Conn) -> None:
+def test_split_of_a_works_last_file_keeps_a_work_an_override_names(conn: Conn) -> None:
+    """3b D7, D16: the emptied work's file-less recording goes first; the mp3 override still
+    names the work, so it stays (one deletion rule, C53), losing only the master that left with
+    its file."""
     work = _work(conn, "Lithium", _artist(conn, "Nirvana"))
     take = _recording(conn, work)
     only = _file(conn, work, "only", recording_id=take)
@@ -385,10 +390,10 @@ def test_split_of_a_works_last_file_deletes_the_work(conn: Conn) -> None:
     result = split_file_off(work, only, _repos(conn))
     conn.commit()
 
-    assert result.old_work_deleted is True
-    assert _row(conn, "works", work) is None
+    assert result.old_work_deleted is False
+    assert _row(conn, "works", work) is not None
     assert _row(conn, "recordings", take) is None
-    assert (_master_of(conn, work), _overrides_of(conn, work)) == (None, {})
+    assert (_master_of(conn, work), _overrides_of(conn, work)) == (None, {"mp3": only})
     assert _work_of(conn, only) == result.new_work_id
 
 

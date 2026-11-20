@@ -4,6 +4,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from backend.domain.enums import (
     ArtistLinkOutcome,
@@ -227,6 +228,27 @@ class Work:
     embedding: list[float] | None = None
     mbid: str | None = None
     origin: CatalogSource = CatalogSource.LOCAL
+
+
+class WorkReference(StrEnum):
+    """What keeps a work with no files (C53, 3b S6; ``delete_if_empty``'s check), in the order
+    the list names them."""
+
+    RECORDING = "recording"
+    MATCH = "match"
+    WORK_MATCH = "work_match"
+    FORMAT_OVERRIDE = "format_override"
+    VERSION_ENTRY = "version_entry"
+    STORED_PERFORMANCE = "stored_performance"
+
+
+@dataclass(frozen=True)
+class EmptyWork:
+    """A work with no files that something still points at: kept, and listed for Lance (D15)."""
+
+    work_id: str
+    title: str
+    references: tuple[WorkReference, ...]
 
 
 @dataclass(frozen=True)

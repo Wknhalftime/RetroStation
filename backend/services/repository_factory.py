@@ -32,11 +32,13 @@ from backend.db.repositories.log_name_placeholders import PgLogNamePlaceholderRe
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.db.repositories.mb_cache_listing import PgMusicBrainzCacheListing
+from backend.db.repositories.merge_list import PgMergeListRepository
 from backend.db.repositories.missing_files import PgMissingFileListingRepository
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.performances import PgPerformanceRepository
 from backend.db.repositories.play_file_resolution import PgPlayFileResolutionRepository
 from backend.db.repositories.playable_schedule import PgPlayableScheduleRepository
+from backend.db.repositories.recording_index import PgRecordingIndexRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.silent_files import PgSilentFileReportRepository
 from backend.db.repositories.song_decisions import PgSongDecisionRepository
@@ -54,10 +56,12 @@ from backend.db.repositories.work_curation import PgWorkCurationRepository
 from backend.db.repositories.work_merges import PgWorkMergeRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
+from backend.repositories.recording_index import RecordingIndexRepository
 from backend.services.artist_resolution_service import ArtistResolutionRepos
 from backend.services.credit_pick_service import CreditPickRepos
 from backend.services.identity_resolution_service import RecalcRepos, SongDecisionRepos
 from backend.services.m3u_generator_service import M3uRepos
+from backend.services.merge_list_service import MergeListRepos
 from backend.services.missing_file_reconciliation_service import ReconciliationRepos
 from backend.services.song_match_service import SongMatchService
 from backend.services.streaming.station_years import StationYearRepos
@@ -229,6 +233,7 @@ class RepositoryFactory:
         self.performances = PgPerformanceRepository(conn)
         self.credit_picks = PgCreditPickRepository(conn)
         self.work_merges = PgWorkMergeRepository(conn)
+        self.merge_list = PgMergeListRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -321,6 +326,22 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
 def work_merge_repos(repos: RepositoryFactory) -> WorkMergeRepos:
     """The guarded merge's bundle, on *repos*' connection (phase 3b PR 3)."""
     return WorkMergeRepos(curation=work_curation_repos(repos), log=repos.work_merges)
+
+
+def merge_list_repos(repos: RepositoryFactory) -> MergeListRepos:
+    """The merge list's bundle, on *repos*' connection (phase 3b PR 4)."""
+    return MergeListRepos(
+        merge_list=repos.merge_list,
+        settings=repos.user_settings,
+        works=repos.works,
+        performances=repos.performances,
+        merge=work_merge_repos(repos),
+    )
+
+
+def recording_index_repo(conn: psycopg.Connection[DictRow]) -> RecordingIndexRepository:
+    """The global recording index on an autocommit connection (phase 3b PR 4, S5)."""
+    return PgRecordingIndexRepository(conn)
 
 
 def song_decision_repos(repos: RepositoryFactory) -> SongDecisionRepos:

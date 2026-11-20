@@ -14,9 +14,8 @@ per path, through the services as the routes and tasks call them:
   survivor and its work; one the survivor's work already has for the same key wins;
 - the works merge (E2): the sources' overrides of both kinds move to the target; the target's
   wins a shared key, then the oldest source's, and each dropped row is counted;
-- split, reassign and ``move_file_to_work`` leave both kinds where they were (D1). Split and
-  reassign delete an emptied work's with it; ``move_file_to_work`` keeps an emptied work while
-  an override names it, as ``delete_if_empty`` does;
+- split, reassign and ``move_file_to_work`` leave both kinds where they were (D1), and each
+  keeps an emptied work while an override names it, as ``delete_if_empty`` does (3b D7, D16);
 - ``delete_if_empty`` keeps a work any override row names, version entries included, and never
   for a state alone (D3);
 - the readers (E7): ``list_by_work``, ``get`` and the work page's format overrides return format
@@ -531,10 +530,10 @@ def test_merge_states_of_two_sources(conn: Conn) -> None:
 
 
 def test_split(conn: Conn) -> None:
-    """D1: both kinds stay on the old work, even those naming the file split off, while it
-    survives, and go with it when it empties. The new work gets the old work's state of each
-    text on the split file's lines as seen only, never a dismissal, also when the old work is
-    deleted; the old work keeps all of its own."""
+    """D1: both kinds stay on the old work, even those naming the file split off, and an
+    emptied work stays while they name it (3b D7). The new work gets the old work's state of
+    each text on the split file's lines as seen only, never a dismissal, also when the old work
+    is emptied; the old work keeps all of its own."""
     work, master = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
@@ -564,16 +563,17 @@ def test_split(conn: Conn) -> None:
     }
     assert overrides_of(conn, split.new_work_id) == {}
     assert states_of(conn, split.new_work_id) == {"live": (SEEN, T0)}
-    assert emptied.old_work_deleted
-    assert overrides_of(conn, lone) == {}
-    assert states_of(conn, lone) == {}
+    assert not emptied.old_work_deleted
+    assert overrides_of(conn, lone) == {(None, "live"): only, ("AC", None): only}
+    assert states_of(conn, lone) == {"acoustic": (DISMISSED, T1), "live": (SEEN, T0)}
     assert overrides_of(conn, emptied.new_work_id) == {}
     assert states_of(conn, emptied.new_work_id) == {"acoustic": (SEEN, T1)}
 
 
 def test_reassign(conn: Conn) -> None:
     """D1, as for split: the target gets each text as seen only. A state it already has keeps
-    its own dismissal, or none, seen at the later time."""
+    its own dismissal, or none, seen at the later time. The emptied work stays while its entry
+    names it (3b D7)."""
     work, _ = mastered_work(conn)
     leaving = file_on(conn, work)
     entry(conn, work, "live", leaving)
@@ -598,9 +598,9 @@ def test_reassign(conn: Conn) -> None:
     assert states_of(conn, work) == {"live": (DISMISSED, T0), "demo": (SEEN, T0)}
     assert overrides_of(conn, target) == {}
     assert states_of(conn, target) == {"live": (SEEN, T2), "acoustic": (DISMISSED, T1)}
-    assert emptied.old_work_deleted
-    assert overrides_of(conn, lone) == {}
-    assert states_of(conn, lone) == {}
+    assert not emptied.old_work_deleted
+    assert overrides_of(conn, lone) == {(None, "live"): only}
+    assert states_of(conn, lone) == {"acoustic": (SEEN, T1)}
 
 
 def test_move_file_to_work(conn: Conn) -> None:

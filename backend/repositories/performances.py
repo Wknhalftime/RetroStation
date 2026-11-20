@@ -12,6 +12,7 @@ from uuid import UUID
 from backend.domain.performances import (
     CarriedCredit,
     CopyRow,
+    DuplicateRecording,
     FileForPerformance,
     NewCredit,
     PerformanceCandidate,
@@ -26,6 +27,10 @@ class PerformanceRepository(ABC):
 
     @abstractmethod
     def file_for_performance(self, file_id: UUID) -> FileForPerformance | None: ...
+
+    @abstractmethod
+    def duplicate_recordings(self) -> list[DuplicateRecording]:
+        """Each recording MBID under two or more works, by MBID, its works by id (3b S5)."""
 
     @abstractmethod
     def candidates(self, work_id: str) -> list[PerformanceCandidate]:

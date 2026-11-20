@@ -14,6 +14,7 @@ from backend.domain.performances import (
     CarriedCredit,
     CopyRow,
     CreditPart,
+    DuplicateRecording,
     FileForPerformance,
     NewCredit,
     PerformanceCandidate,
@@ -101,6 +102,20 @@ class PgPerformanceRepository(PerformanceRepository):
             credit=_credit(row["credit"]),
             default_artist=_work_artist(row),
         )
+
+    def duplicate_recordings(self) -> list[DuplicateRecording]:
+        rows = self._conn.execute(
+            """SELECT recording_mbid, array_agg(DISTINCT work_id ORDER BY work_id) AS works
+               FROM performances
+               WHERE recording_mbid IS NOT NULL
+               GROUP BY recording_mbid
+               HAVING count(DISTINCT work_id) > 1
+               ORDER BY recording_mbid"""
+        ).fetchall()
+        return [
+            DuplicateRecording(str(r["recording_mbid"]), tuple(str(w) for w in r["works"]))
+            for r in rows
+        ]
 
     def candidates(self, work_id: str) -> list[PerformanceCandidate]:
         rows = self._conn.execute(

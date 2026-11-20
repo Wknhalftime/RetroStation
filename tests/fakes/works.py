@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from uuid import uuid4
 
-from backend.domain.catalog import Work
+from backend.domain.catalog import EmptyWork, Work
 from backend.domain.enums import CatalogSource
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_files import LibraryFileRepository
@@ -81,6 +81,14 @@ class FakeWorkRepository(WorkRepository):
             return False
         del self._data[work_id]
         return True
+
+    def list_empty_work_ids(self) -> list[str]:
+        files = self._library_file_repo
+        return sorted(w for w in self._data if files is None or not files.get_by_work(w))
+
+    def kept_empty_works(self) -> list[EmptyWork]:
+        # The fakes model no reference but files, so no empty work is kept.
+        return []
 
     def get_candidates_by_normalized_artist(
         self,

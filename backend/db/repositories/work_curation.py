@@ -225,6 +225,13 @@ class PgWorkCurationRepository(WorkCurationRepository):
     def delete_recordings_of_work(self, work_id: str) -> None:
         self._conn.execute("DELETE FROM recordings WHERE work_id = %s", (work_id,))
 
+    def delete_fileless_recordings_of_work(self, work_id: str) -> None:
+        self._conn.execute(
+            """DELETE FROM recordings r WHERE r.work_id = %s
+               AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.recording_id = r.id)""",
+            (work_id,),
+        )
+
     # --- the master recalculation ------------------------------------------------------------
 
     def present_master_candidates(self, work_id: str) -> list[MasterCandidate]:

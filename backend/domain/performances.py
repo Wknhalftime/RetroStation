@@ -358,3 +358,37 @@ def stored_line_outcome(
         if target_work == line_work_id:
             return StoredLineOutcome.HANDED_OFF, target
     return StoredLineOutcome.RELEASED, None
+
+
+@dataclass(frozen=True)
+class DuplicateRecording:
+    """A recording MBID whose performances sit under two or more works (3b S5): the global
+    index waits for it (E6)."""
+
+    recording_mbid: str
+    work_ids: tuple[str, ...]
+
+
+class RecordingIndexState(StrEnum):
+    """The global unique index on ``performances.recording_mbid`` (C40, 3b S5)."""
+
+    ABSENT = "absent"
+    VALID = "valid"
+    INVALID = "invalid"  # a concurrent build that failed leaves one behind
+
+
+class RecordingIndexError(Exception):
+    """Base for the global index's failures."""
+
+
+class RecordingIndexDuplicateError(RecordingIndexError):
+    """A duplicate recording MBID appeared while the index was being built."""
+
+
+@dataclass(frozen=True)
+class RecordingIndexOutcome:
+    """What a run of the index task did: built it, found it built, or waited (E6)."""
+
+    done: bool
+    built: bool
+    remaining: tuple[str, ...]

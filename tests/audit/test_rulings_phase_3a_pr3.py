@@ -1,7 +1,8 @@
 """The rulings phase 3a PR 3 changes (SPEC "Rulings to touch", D4, the Definition of done).
 
 PR 3 finishes 3a, so AUD-R032 (S1), AUD-R033 (S7) and AUD-R039 (S8) drop ``3a`` from their
-check pending; their later phases stay. AUD-R040's ``3a`` went with PR 1. AUD-R076, the next free
+check pending; their later phases stay. 3b PR 4 then dropped AUD-R032's and AUD-R033's ``3b``,
+the last they had (work merges SPEC D17). AUD-R040's ``3a`` went with PR 1. AUD-R076, the next free
 branch ruling, records D4's amendment of C57 beside AUD-R039 (every matched line, not only the
 949) and the rules PR 3 builds: ``choose_performance`` (the SPEC's D8 and D9), the
 view's stored-performance step, the proposals and Credit picks' Apply and pick. Its check is PR
@@ -38,8 +39,8 @@ def _check(ruling_id: str) -> str:
 
 
 def test_r032_r033_and_r039_have_left_3a_behind() -> None:
-    assert _check("AUD-R032").endswith("check pending: 3b.")
-    assert _check("AUD-R033").endswith("check pending: 3b.")
+    assert "check pending" not in _check("AUD-R032")
+    assert "check pending" not in _check("AUD-R033")
     assert _check("AUD-R039").endswith("check pending: 4.4.")
 
 

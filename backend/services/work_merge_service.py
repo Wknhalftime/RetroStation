@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import structlog
 
 from backend.domain.work_merges import (
+    MergeChange,
     MergeDone,
     MergeRefused,
     WorkMergeFailedError,
@@ -49,6 +50,20 @@ def guarded_merge(group: WorkMergeGroup, repos: WorkMergeRepos) -> MergeDone | M
             error=str(failure),
         )
         raise WorkMergeFailedError(f"Merge into {group.target_id} failed: {failure}") from failure
+
+
+def preview(group: WorkMergeGroup, repos: WorkMergeRepos) -> tuple[MergeChange, ...]:
+    """What the group's merge would change in air play, in a savepoint that is always undone:
+    no log row, no capture, no redirect (3b PR 4, D27). A database refusal raises
+    WorkMergeStorageError, logged nowhere."""
+
+    def attempt() -> tuple[tuple[MergeChange, ...], bool]:
+        lines = repos.log.lines_of_works([group.target_id, *group.source_ids])
+        before = repos.log.line_results(lines)
+        merge_works(group.target_id, list(group.source_ids), repos.curation)
+        return changes_between(before, repos.log.line_results(lines)), False
+
+    return repos.log.in_savepoint(attempt)
 
 
 def _attempt(group: WorkMergeGroup, repos: WorkMergeRepos) -> tuple[MergeDone | MergeRefused, bool]:

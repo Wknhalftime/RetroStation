@@ -14,6 +14,7 @@ import { MissingFiles } from "@/pages/library/MissingFiles";
 import { SilentFiles } from "@/pages/library/SilentFiles";
 import { UnmappedVersions } from "@/pages/library/UnmappedVersions";
 import { CreditPicks } from "@/pages/library/CreditPicks";
+import { MergeList } from "@/pages/library/MergeList";
 import { ArtistBrowser } from "@/pages/library/ArtistBrowser";
 import { ArtistDetail } from "@/pages/library/ArtistDetail";
 import { AssociatedWorks } from "@/pages/library/AssociatedWorks";
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       { path: "library/silent", element: <SilentFiles /> },
       { path: "library/versions", element: <UnmappedVersions /> },
       { path: "library/credit-picks", element: <CreditPicks /> },
+      { path: "library/merge-list", element: <MergeList /> },
       { path: "library/artists", element: <ArtistBrowser /> },
       { path: "library/artists/:artist_id", element: <ArtistDetail /> },
       {

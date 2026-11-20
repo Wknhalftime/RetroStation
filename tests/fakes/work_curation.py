@@ -145,6 +145,13 @@ class FakeWorkCurationRepository(WorkCurationRepository):
         for recording_id in [r.id for r in self._recordings.values() if r.work_id == work_id]:
             del self._recordings[recording_id]
 
+    def delete_fileless_recordings_of_work(self, work_id: str) -> None:
+        held = {f.recording_id for f in self._files.values()}
+        for recording_id in [
+            r.id for r in self._recordings.values() if r.work_id == work_id and r.id not in held
+        ]:
+            del self._recordings[recording_id]
+
     # --- the master recalculation ------------------------------------------------------------
 
     def present_master_candidates(self, work_id: str) -> list[MasterCandidate]:
