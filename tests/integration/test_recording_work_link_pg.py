@@ -92,10 +92,15 @@ def test_update_duration_and_musicbrainz_work_listing(migrated_db: str) -> None:
         assert repos.works.list_musicbrainz_ids([]) == set()
 
 
-def test_apply_recording_lookup_moves_the_file_and_settles_the_local_work(
+def test_apply_recording_lookup_gives_the_local_work_the_mbid(
     migrated_db: str,
 ) -> None:
-    """End to end on Postgres: the pass's apply step, on a file grouping put on a local work."""
+    """End to end on Postgres: the pass's apply step, on a file grouping put on a local work.
+
+    The local work has the lookup's artist and title, and no work holds the MBID yet, so the
+    local work takes it and the file stays (AUD-R103, R1). Before that ruling a new
+    MusicBrainz work was made, the file moved and the emptied local work was deleted.
+    """
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         local_artist = repos.artists.upsert_local_artist("Aerosmith", "aerosmith")
@@ -140,7 +145,7 @@ def test_apply_recording_lookup_moves_the_file_and_settles_the_local_work(
         applied = apply_recording_lookup(recording, payload, enrichment_repos)
         conn.commit()
 
-        assert applied.work_id is not None
+        assert applied.work_id == local_work, "the local work takes the MBID"
         work = repos.works.get_by_id(applied.work_id)
         assert work is not None
         assert work.mbid == _WORK and work.origin == CatalogSource.MUSICBRAINZ
@@ -149,8 +154,5 @@ def test_apply_recording_lookup_moves_the_file_and_settles_the_local_work(
         assert stored.work_id == work.id
         assert stored.version_type == VersionType.LIVE
         assert stored.duration_ms == 291000
-        moved = repos.library_files.get_by_id(lf.id)
-        assert moved is not None and moved.work_id == work.id
-        assert repos.works.get_by_id(local_work) is None, "the emptied local work is settled"
-        master = repos.song_masters.get_by_work(work.id)
-        assert master is not None and master.preferred_file_id == lf.id
+        kept = repos.library_files.get_by_id(lf.id)
+        assert kept is not None and kept.work_id == local_work
