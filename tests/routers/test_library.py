@@ -844,10 +844,12 @@ class TestFileShownFromAnotherWork:
         assert resp.status_code == 200
         files = {f["id"]: f for r in resp.json()["recordings"] for f in r["files"]}
         assert files[str(promo.id)]["other_work"] is None
+        # 3b PR 5a (D41 h): named by its credited artists too; this one has no performance yet.
         assert files[str(album.id)]["other_work"] == {
             "id": "w-ct",
             "title": "Bother",
             "artist_name": "Corey Taylor",
+            "artists": [],
         }
 
     def test_crowning_it_moves_it_onto_the_work_as_manual_master(self, client, db_conn) -> None:
