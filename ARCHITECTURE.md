@@ -62,10 +62,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 ## Library works writes: one sync service (phase 0c, C75)
 
 - The works router's write routes (merge, split, reassign, format override create and delete,
-  Set and Remove master) are plain `def` routes on `SyncRepos`: one sync connection and one
-  transaction per request, committed when the route succeeds and rolled back when it raises.
-  Set master calls `master_choice_service`; the merge calls `work_merge_service.guarded_merge`
-  (3b PR 3, "Work merges: the guard" below), which wraps `merge_works`; every other write calls
+  Set and Remove master, and the work page's Prefer this copy and Release, 3b PR 5a) are plain
+  `def` routes on `SyncRepos`: one sync connection and one transaction per request, committed
+  when the route succeeds and rolled back when it raises. Set master and Prefer this copy call
+  `master_choice_service`; the merge calls `work_merge_service.guarded_merge` (3b PR 3, "Work
+  merges: the guard" below), which wraps `merge_works`; every other write calls
   `services/work_curation_service.py`, which commits nothing of its own.
 - The service writes through `WorkCurationRepos`: the existing works, library file, recording,
   song master, format override, match and artist repositories wherever one already runs the
@@ -103,9 +104,10 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   on it at its file's work and deletes its file-less recordings, as before; then the one
   deletion rule (`delete_if_empty`, "The merge list" below) decides. A work an override, entry
   or match on the work still names stays, losing only a master left on another work's file.
-- The router's read route (the work detail) keeps its SQL on the async connection until 3b
-  rebuilds the Library pages (AUD-R010 noted; AUD-R074 replaces it for the song routes, "Song
-  matches: one writer" below).
+- The read routes (the work detail and its versions) call `services/work_page_service.py` on
+  the async connection, and their SQL is in `db/repositories/work_page.py` (3b PR 5a, "The work
+  page" below), so the router holds none (AUD-R010 had left it there; AUD-R074 replaced it for
+  the song routes, "Song matches: one writer" below).
 - The checks are `tests/test_works_router_writes_have_no_sql.py` (no write route reaches an
   `.execute` or a psycopg or `backend.db` name),
   `tests/routers/test_works_write_routes_are_sync.py`,
@@ -508,9 +510,10 @@ returns the row it finds).
   for the line's version text plays first, else its **format override** for the station's
   format, else its **song master**; `source` is `version`, `override`, `master` or NULL, and
   is only logged. The version step is a second join of `format_overrides` by key: no
-  subquery and no title parsing (AUD-R033). Five readers fence the view with
+  subquery and no title parsing (AUD-R033). Six readers fence the view with
   `LATERAL … OFFSET 0`: the M3U repository, `playable_schedule.py`, `stream_cue_work.py`, the
-  gate's `scripts/airplay_snapshot.py` and the guarded merge (`db/repositories/work_merges.py`).
+  gate's `scripts/airplay_snapshot.py`, the guarded merge (`db/repositories/work_merges.py`)
+  and the work page's lines (`db/repositories/work_page.py`).
 - The full order since 3b PR 3 (0053): the stored performance (3a, "Credit picks" below), the
   version entry, the format override, the line's **merge pin**, the master. The pin is read
   from the same best-match lateral (`matches.pinned_file_id`); a pin on the master's own file
@@ -523,7 +526,7 @@ returns the row it finds).
 - A version entry (C60) is a `format_overrides` row with a `version_text` and a NULL
   `format_name` (a CHECK allows exactly one; `UNIQUE (work_id, version_text)` beside
   `UNIQUE (work_id, format_name)`). Every format reader (`list_by_work`, `get`, the work page's
-  `_work_format_overrides`) adds `format_name IS NOT NULL`, so a `FormatOverride` is never a
+  `format_overrides`) adds `format_name IS NOT NULL`, so a `FormatOverride` is never a
   version entry, and every upkeep path keys each kind on its own column (a NULL never equals,
   so no `IN`, `NOT IN` or `DISTINCT ON` over `format_name`): the merge's
   `drop_colliding_overrides` and the fold's `format_overrides.move_to_work`. `delete_for_file`
@@ -771,7 +774,8 @@ returns the row it finds).
   work's master only, so every path that deletes a file (Missing files' delete and the purge,
   both through `_delete_missing_row`) or moves it to another work (split, reassign,
   `move_file_to_work`, a fold onto another work) releases its pins first, logged as
-  `pins_released`. A fold onto a copy on the same work re-points them in `merge_into`.
+  `pins_released`. A fold onto a copy on the same work re-points them in `merge_into`. Lance
+  releases a line's pins by hand on the work page (3b PR 5a, "The work page" below).
 - **The log (0054, S10, Q18).** `work_merges` has one row per merge: merged, failed (with its
   error) or rolled back. It has no foreign keys, because the works it names may be gone and
   0051's rollback drops performances. `work_redirects` maps each merged-away id to the live work.
@@ -853,6 +857,42 @@ returns the row it finds).
   `tests/tasks/test_empty_work_sweep.py`, `tests/integration/test_global_recording_index_pg.py`,
   `tests/scripts/test_apply_merge_list.py`, `MergeList.test.tsx` and
   `LibraryStatus.mergeListLink.test.tsx`.
+
+## The work page: performances, copies, pins (phase 3b PR 5a, S8, D41, AUD-R081)
+
+- **Reads.** `GET /library/works/{id}` and `/versions` call `work_page_service`, which reads
+  through `WorkPageRepos` on the request's async connection (the `WorkPageReader` port, adapter
+  `AsyncWorkPageReader` in `db/repositories/work_page.py`, and the version entry reader) and
+  hands the facts to `domain/work_page.py`. The domain is
+  pure: the performances' order (the default first, then credit, the original before other
+  versions), each credit's text (its joining words, else ", "), the lines pinned on each copy
+  and the file each would play next once released (the master after a pin step, else the file
+  it plays now), and the acts.
+- **The detail (D41 a, b, g, h; D45, D46).** It keeps `recordings` and adds `artists` (the
+  work's credited artists, for the header), `performances` (each with its credit, version,
+  `default` flag, preferred copy, how many lines store it, and its copies with their pinned
+  lines), `acts` and `other_work.artists`. The default is the performance holding the master's
+  file (C71). The page lives at `/library/works/:work_id` as well as under its artist. Copies
+  with no performance yet and copies on other works (a shared recording) are two lists below
+  the performances; the copy table they replace is gone.
+- **The lines.** The page reads each (station, line) whose best match's file is on the work
+  through the air-play view, one play per station, fenced like every reader ("Which file
+  plays" above). `source` tells a pinned line's pin step from a master that is its own file.
+- **Prefer this copy (D41 c).** `PUT /works/{id}/performances/{pid}/preferred-copy` sets a
+  stored performance's preferred copy (`master_choice_service.prefer_copy`). It refuses the
+  default performance, whose copy Set master picks, a file not a copy of the performance and a
+  missing copy.
+- **Release (D41 d, e).** `POST /works/{id}/pins/release` clears the named lines' pins on
+  copies of the work (`work_curation_service.release_line_pins`, through
+  `SongMatchService.unpin`), logged as `pins_released`; a line that pins no copy of the work
+  refuses the whole request. Before Set master replaces a copy holding pins, the page lists
+  those lines unticked and releases the ticked ones first (C72).
+- **Two acts (D41 f, C65).** With two or more acts, Add override and Map versions show how
+  many of the default act's lines the override or entry reaches at each format, and how many
+  lines of each other act keep their own (those whose stored performance plays).
+- The checks are `tests/routers/test_library_works_services.py`,
+  `tests/domain/test_work_page.py` and the seven `AssociatedWorks.<aspect>.test.tsx` files
+  (`performances`, `copyRow`, `preferredCopy`, `pins`, `setMasterPins`, `twoActs`, `address`).
 
 ## Derived counts kept by triggers
 
