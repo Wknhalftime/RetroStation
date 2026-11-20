@@ -14,7 +14,8 @@ import { AssociatedWorks } from "./AssociatedWorks";
 
 // Phase 3b PR 5a (SPEC S8, D41 a): each copy row keeps what "Recordings & Files" showed of a
 // file (the retired WorkFilesTable's tests): a missing or deleted copy is badged and can't be
-// crowned, the album each copy is from, the cue editor for a copy on disk, and another work's
+// crowned, the album each copy is from, the cue editor for a copy on disk (every one its own,
+// wherever the page lists it: each performance and both lists below them), and another work's
 // copy, whose crown moves it into this song as it makes it the master.
 
 const mockedApiFetch = vi.mocked(apiFetch);
@@ -27,6 +28,7 @@ const GONE = "33333333-3333-4333-8333-333333333333";
 const DELETED = "44444444-4444-4444-8444-444444444444";
 const LOOSE = "55555555-5555-4555-8555-555555555555";
 const ELSEWHERE = "66666666-6666-4666-8666-666666666666";
+const LIVE = "88888888-8888-4888-8888-888888888888";
 
 function file(id: string, name: string, extra: Record<string, unknown> = {}) {
   return {
@@ -70,7 +72,7 @@ const WORK = {
       title: TITLE,
       version_type: "original",
       duration_ms: 190_000,
-      files: [...COPIES, file(LOOSE, "loose.mp3"), OTHER],
+      files: [...COPIES, file(LIVE, "live.mp3"), file(LOOSE, "loose.mp3"), OTHER],
     },
   ],
   song_master: {
@@ -91,6 +93,16 @@ const WORK = {
       preferred_copy_id: SOUNDTRACK,
       lines: 0,
       copies: COPIES.map((f) => ({ file: f, pins: [] })),
+    },
+    {
+      id: "p-2",
+      credit: [{ id: "a-urge", name: "Urge Overkill" }],
+      credit_text: "Urge Overkill",
+      version_type: "live",
+      default: false,
+      preferred_copy_id: LIVE,
+      lines: 0,
+      copies: [{ file: file(LIVE, "live.mp3"), pins: [] }],
     },
   ],
   acts: [],
@@ -153,6 +165,29 @@ describe("AssociatedWorks, a copy's row", () => {
     expect(cues.getAttribute("href")).toBe(`/library/files/${HITS}/cues`);
     expect(within(await row("gone.mp3")).queryByRole("link", { name: "Cues" })).toBeNull();
     expect(within(await row("deleted.mp3")).queryByRole("link", { name: "Cues" })).toBeNull();
+  });
+
+  it("gives every copy on disk its own cue editor link, wherever the page lists it", async () => {
+    serve();
+    renderPage();
+
+    const where: [string, string, string][] = [
+      ["Urge Overkill", "soundtrack.flac", SOUNDTRACK],
+      ["Urge Overkill", "hits.mp3", HITS],
+      ["Urge Overkill (live)", "live.mp3", LIVE],
+      ["Not in a performance yet", "loose.mp3", LOOSE],
+      ["On other works", "bother.flac", ELSEWHERE],
+    ];
+    for (const [region, name, id] of where) {
+      const list = await screen.findByRole("region", { name: region });
+      const copy = within(list).getByRole("listitem", { name });
+      const cues = within(copy).getAllByRole("link", { name: "Cues" });
+      expect(cues.map((link) => link.getAttribute("href"))).toEqual([`/library/files/${id}/cues`]);
+    }
+    const every = screen.getAllByRole("link", { name: "Cues" });
+    expect(every.map((link) => link.getAttribute("href")).sort()).toEqual(
+      where.map(([, , id]) => `/library/files/${id}/cues`).sort()
+    );
   });
 
   it("crowns another work's copy by moving it into this song", async () => {
