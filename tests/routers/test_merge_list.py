@@ -1,8 +1,9 @@
 """The merge list (artist model phase 3b PR 4; SPEC S1, S2, D6, D15, D26-D29, E3, E5, E9; scope
 Q11-Q13, Q22; design C57, C58, C74; AUD-R080), on PostgreSQL.
 
-``GET /api/v1/library/merge-list`` plans every group (the planner, from the works' credits,
-cached work links and titles) and answers, stateless (Q13)::
+``GET /api/v1/library/merge-list?offset=<n>&limit=<n>`` plans every group (the planner, from
+the works' credits, cached work links and titles) and answers one page of them, most played
+first (D37: ``offset`` 0 and ``limit`` 50 unless given, ``limit`` 1 to 50), stateless (Q13)::
 
     {"groups": [{"target_id", "source_ids", "joins" ("work_link", "shared_artist",
                  "shared_name"), "plays",
@@ -15,22 +16,24 @@ cached work links and titles) and answers, stateless (Q13)::
                  "failed": {"error", "logged_at"} | null}, ...],
      "duplicates": [{"recording_mbid", "works": [{"work_id", "title"}, ...]}, ...],
      "kept_works": [{"work_id", "title", "references"}, ...],
-     "total": <the number of groups>}
+     "total": <every planned group>, "offset", "limit"}
 
 A group's works list the target first, then its sources in order. Its ``flags`` only show
 (Q11): ``masters_meet`` (a work's hand-picked master meets another work's master), ``cue_edit``
 (a master's audio holds a manual cue edit), ``rejection`` (a line rejected a file of one of the
 group's works, so 4.3 widens it to the merged work, E3). Its ``changes`` are what its guarded
-merge would change in air play, a pin can't hold (C74): each group's merge is tried in a
-savepoint that is always undone (D27), so reading the page writes nothing, not even the merge
-log. ``failed`` is the latest failed attempt at the group, from the merge log.
+merge would change in air play, a pin can't hold (C74): the merge of each group on the page
+is tried in a savepoint that is always undone (D27, as D37 amends it), so reading the page
+writes nothing, not even the merge log. ``failed`` is the latest failed attempt at the group,
+from the merge log. The other two sections come whole with every page.
 
 ``GET /api/v1/library/merge-list/count`` answers ``{"total", "duplicates", "kept_works"}`` for
 Library Status, from the planner alone (D27, D28).
 
 ``POST /api/v1/library/merge-list/apply`` takes ``{"groups": [{"target_id", "source_ids",
-"approvals": [{"station_id", "identity_id", "file_id"}, ...]}, ...]}``: the groups Lance saw,
-minus his skips, each with the changes he applied there (D6). It plans again, and merges each
+"approvals": [{"station_id", "identity_id", "file_id"}, ...]}, ...]}``: the groups of the page
+Lance saw (D37), minus his skips, each with the changes he applied there (D6). It plans again,
+and merges each
 group whose works (merged-away ids followed) still sit in one planned group, as sent, through
 the guard with reason "merge list", committing after each group (D26). It answers::
 
@@ -366,7 +369,14 @@ def test_the_count(client: TestClient, ready: Conn) -> None:
 
 
 def test_empty(client: TestClient, ready: Conn) -> None:
-    assert page(client) == {"groups": [], "duplicates": [], "kept_works": [], "total": 0}
+    assert page(client) == {
+        "groups": [],
+        "duplicates": [],
+        "kept_works": [],
+        "total": 0,
+        "offset": 0,
+        "limit": 50,
+    }
     assert client.get(COUNT).json() == {"total": 0, "duplicates": 0, "kept_works": 0}
     assert apply(client, []) == {
         "results": [],
@@ -376,6 +386,38 @@ def test_empty(client: TestClient, ready: Conn) -> None:
         "already_merged": 0,
         "changed": 0,
     }
+
+
+def pairs(conn: Conn, count: int) -> list[str]:
+    """*count* songs, each filed twice by an act of its own (two credited works, one copy
+    each, no plays); their targets, which the planner orders by the lower work id."""
+    targets = []
+    for n in range(count):
+        act = cp.artist(conn, f"Act {n}")
+        works = [credited_work(conn, f"Song {n}", act)[0] for _ in range(2)]
+        targets.append(min(works))
+    return sorted(targets)
+
+
+def test_pages_of_fifty_most_played_first(client: TestClient, ready: Conn) -> None:
+    """D37: 50 groups a page, most played first, ``total`` counting every planned group. A page
+    past the end is empty; a limit outside 1 to 50, or a negative offset, is refused."""
+    targets = pairs(ready, 51)
+    loudest = same_song(ready, "Always", plays=3)
+    ready.commit()
+
+    first = client.get(PAGE).json()
+    second = client.get(PAGE, params={"offset": 50}).json()
+
+    assert (first["offset"], first["limit"], first["total"]) == (0, 50, 52)
+    assert [g["target_id"] for g in first["groups"]] == [loudest.target, *targets[:49]]
+    assert (second["offset"], second["limit"], second["total"]) == (50, 50, 52)
+    assert [g["target_id"] for g in second["groups"]] == targets[49:]
+    small = client.get(PAGE, params={"offset": 1, "limit": 2}).json()
+    assert [g["target_id"] for g in small["groups"]] == targets[:2]
+    assert client.get(PAGE, params={"offset": 60}).json()["groups"] == []
+    for params in ({"limit": 51}, {"limit": 0}, {"offset": -1}):
+        assert client.get(PAGE, params=params).status_code == 422
 
 
 def test_it_waits_for_d1s_credits(client: TestClient, db_conn: Conn) -> None:

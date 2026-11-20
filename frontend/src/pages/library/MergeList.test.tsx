@@ -13,19 +13,39 @@ vi.mock("@/api/client", async (importOriginal) => {
 import { ConflictError, ServerError, apiFetch } from "@/api/client";
 import { MergeList } from "./MergeList";
 
-// Artist model phase 3b PR 4, SPEC S2, D6, D15, D27, E3 (C57, C58, C74): the merge list. Every
-// planned group as the server sorts it, a region named by the work it merges into, showing its
-// works (that one first, marked as the one kept), each with its artists and plays, how they join,
-// its flags (shown only) and each air-play change a pin can't hold, by station and line, with a
-// tick to apply it there, unticked. Lance ticks only the groups to skip and presses Apply once,
-// which sends every group he saw minus his skips, each with the changes he ticked as approvals;
-// it then says what happened to each group and loads the list again. The recordings still under
-// two works and the empty works kept are listed below. Loading, empty, error, credits-not-ready
-// and in-flight states; a refused Apply says why.
+// Artist model phase 3b PR 4, SPEC S2, D6, D15, D27, D37, E3 (C57, C58, C74): the merge list,
+// 50 groups a page (D37). Every group on the page as the server sorts it, a region named by the
+// work it merges into, showing its works (that one first, marked as the one kept), each with its
+// artists and plays, how they join, its flags (shown only) and each air-play change a pin can't
+// hold, by station and line, with a tick to apply it there, unticked. Lance ticks only the groups
+// to skip and presses Apply once, which sends every group of the page minus his skips, each with
+// the changes he ticked as approvals; it then says what happened to each group and loads the
+// same page again. Previous and Next, beside Apply, move by 50 and say which groups of how many
+// are shown; a new page starts with no ticks, and a page an Apply emptied steps back to the last
+// page that has groups. The recordings still under two works and the empty works kept are listed
+// below. Loading, empty, error, credits-not-ready and in-flight states; a refused Apply says why.
 
 const mockedApiFetch = vi.mocked(apiFetch);
 const PAGE = "/api/v1/library/merge-list";
 const APPLY = "/api/v1/library/merge-list/apply";
+const LIMIT = 50;
+const CHANGE_TICK = "Apply KAAA: Lady Marmalade (LABELLE)";
+
+function pageUrl(offset: number): string {
+  return `${PAGE}?offset=${offset}&limit=${LIMIT}`;
+}
+
+function offsetOf(url: string): number {
+  return Number(new URL(url, "http://test").searchParams.get("offset"));
+}
+
+function button(name: string): HTMLButtonElement {
+  return screen.getByRole("button", { name }) as HTMLButtonElement;
+}
+
+function checkbox(name: string): HTMLInputElement {
+  return screen.getByRole("checkbox", { name }) as HTMLInputElement;
+}
 
 function work(id: string, title: string, artists: string[], plays: number, musicbrainz = false) {
   return {
@@ -111,6 +131,7 @@ const RUNAWAY = {
 
 let qc: QueryClient;
 let served: Record<string, unknown>;
+let pageOf: (offset: number) => Record<string, unknown>;
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -120,10 +141,18 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function isPageRead(url: string, init: RequestInit | undefined): boolean {
+  return url.startsWith(`${PAGE}?`) && init?.method === undefined;
+}
+
 function pageRequests(): number {
-  return mockedApiFetch.mock.calls.filter(
-    ([url, init]) => url === PAGE && (init as RequestInit | undefined)?.method === undefined
-  ).length;
+  return mockedApiFetch.mock.calls.filter(([url, init]) => isPageRead(url, init)).length;
+}
+
+function pageOffsets(): number[] {
+  return mockedApiFetch.mock.calls
+    .filter(([url, init]) => isPageRead(url, init))
+    .map(([url]) => offsetOf(url));
 }
 
 function writes(): [string, string, unknown][] {
@@ -159,7 +188,7 @@ type Write = (url: string, init: RequestInit) => Promise<unknown>;
 function serve(write: Write = () => Promise.resolve(APPLIED)) {
   mockedApiFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (init?.method !== undefined) return write(url, init);
-    if (url === PAGE) return Promise.resolve(served);
+    if (url.startsWith(`${PAGE}?`)) return Promise.resolve(pageOf(offsetOf(url)));
     return Promise.resolve(undefined);
   });
 }
@@ -175,6 +204,7 @@ beforeEach(() => {
     kept_works: [],
     total: 3,
   };
+  pageOf = (offset) => ({ ...served, offset, limit: LIMIT });
   serve();
 });
 
@@ -430,5 +460,93 @@ describe("MergeList: loading, empty and error", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Credits not ready: run D1's step first"
     );
+  });
+});
+
+describe("MergeList: pages of 50 (D37)", () => {
+  it("asks for the first page and says which groups of how many it shows", async () => {
+    served = { ...served, total: 120 };
+    render(<MergeList />, { wrapper });
+    await screen.findByRole("region", { name: "Merge into Runaway" });
+
+    expect(mockedApiFetch.mock.calls[0][0]).toBe(pageUrl(0));
+    expect(screen.getByText("Groups 1–3 of 120")).toBeTruthy();
+    expect(button("Previous").disabled).toBe(true);
+    expect(button("Next").disabled).toBe(false);
+  });
+
+  it("moves by 50 with Next and Previous", async () => {
+    served = { ...served, total: 120 };
+    render(<MergeList />, { wrapper });
+    await screen.findByText("Groups 1–3 of 120");
+
+    fireEvent.click(button("Next"));
+    expect(await screen.findByText("Groups 51–53 of 120")).toBeTruthy();
+    expect(pageOffsets()).toContain(50);
+    fireEvent.click(button("Previous"));
+    expect(await screen.findByText("Groups 1–3 of 120")).toBeTruthy();
+  });
+
+  it("offers neither Previous nor Next when one page holds every group", async () => {
+    render(<MergeList />, { wrapper });
+    await screen.findByText("Groups 1–3 of 3");
+
+    expect(button("Previous").disabled).toBe(true);
+    expect(button("Next").disabled).toBe(true);
+  });
+
+  it("starts a new page with no ticks", async () => {
+    served = { ...served, total: 120 };
+    render(<MergeList />, { wrapper });
+    await screen.findByText("Groups 1–3 of 120");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Skip Always" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: CHANGE_TICK }));
+
+    fireEvent.click(button("Next"));
+    await screen.findByText("Groups 51–53 of 120");
+
+    expect(checkbox("Skip Always").checked).toBe(false);
+    expect(checkbox(CHANGE_TICK).checked).toBe(false);
+  });
+
+  it("sends only the page's groups and loads the same page again after Apply", async () => {
+    served = { ...served, total: 120 };
+    render(<MergeList />, { wrapper });
+    await screen.findByText("Groups 1–3 of 120");
+    fireEvent.click(button("Next"));
+    await screen.findByText("Groups 51–53 of 120");
+    const before = pageOffsets().length;
+
+    fireEvent.click(button("Apply"));
+
+    await screen.findByRole("status");
+    expect(writes()).toHaveLength(1);
+    expect((writes()[0][2] as { groups: unknown[] }).groups).toHaveLength(3);
+    await waitFor(() => expect(pageOffsets().length).toBeGreaterThan(before));
+    const offsets = pageOffsets();
+    expect(offsets[offsets.length - 1]).toBe(50);
+  });
+
+  it("steps back to the last page with groups when an Apply empties its page", async () => {
+    let applied = false;
+    served = { ...served, total: 53 };
+    pageOf = (offset) =>
+      applied && offset >= LIMIT
+        ? { ...served, groups: [], total: 50, offset, limit: LIMIT }
+        : { ...served, total: applied ? 50 : 53, offset, limit: LIMIT };
+    serve(() => {
+      applied = true;
+      return Promise.resolve(APPLIED);
+    });
+    render(<MergeList />, { wrapper });
+    await screen.findByText("Groups 1–3 of 53");
+    fireEvent.click(button("Next"));
+    await screen.findByText("Groups 51–53 of 53");
+
+    fireEvent.click(button("Apply"));
+
+    expect(await screen.findByText("Groups 1–3 of 50")).toBeTruthy();
+    const offsets = pageOffsets();
+    expect(offsets[offsets.length - 1]).toBe(0);
   });
 });

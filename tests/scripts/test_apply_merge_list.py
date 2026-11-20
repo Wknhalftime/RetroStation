@@ -13,7 +13,8 @@ It writes, to ``GATE_RUN_DIR``:
 - ``merge_list_allow.txt``: the gate's allowlist of the differences the merges make, one
   tab-separated ``<section> <key> <reason>`` a row: ``work-source`` of every (station, line)
   whose line it pinned (``master`` -> ``pin``, the same file); ``masters``, ``overrides`` (each
-  override row of the merged work) and the golden ``work-detail`` of each merged work; the
+  override row of the merged work) and the golden ``work-detail`` of each merged work and of
+  each work merged into it (D35: a sampled merged-away id answers its target's detail); the
   golden ``artist-detail`` and ``artist-list`` entries of each artist the merged works credit.
 
 A second run finds nothing to merge. Like every gate tool it refuses a database without "bench"
@@ -146,6 +147,7 @@ def test_writes_the_allowlist(tool: ModuleType, bench: str, conn: Conn, run_dir:
         ("masters", world.target),
         ("overrides", f"{world.target}/format_name=CHR"),
         ("work-detail", world.target),
+        ("work-detail", world.source),
         ("artist-detail", world.act),
         ("artist-list", world.act),
     }
