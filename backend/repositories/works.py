@@ -39,6 +39,30 @@ class WorkRepository(ABC):
         ...
 
     @abstractmethod
+    def get_id_by_mbid(self, mbid: str) -> str | None:
+        """The id of the work that holds ``mbid``, or None."""
+        ...
+
+    @abstractmethod
+    def claim_mbid(self, work_id: str, mbid: str, title: str) -> bool:
+        """Make a local work the MusicBrainz work ``mbid`` names (AUD-R103, R1).
+
+        It takes the MBID, origin ``musicbrainz`` and MusicBrainz's ``title``, and is queued
+        for the works phase. Refuses, returning False and raising nothing, a work that is not
+        local, already has an MBID or does not exist, and an MBID another work holds.
+        """
+        ...
+
+    @abstractmethod
+    def drop_fileless_grouping_recordings(self, work_id: str) -> int:
+        """Delete the work's recordings that grouping made and no file points at; how many.
+
+        Grouping's recordings are the ones never enhanced (``needs_enhancement`` FALSE and no
+        ``enhanced_at``), the predicate of the recordings phase's orphan delete.
+        """
+        ...
+
+    @abstractmethod
     def delete_if_empty(self, work_id: str) -> bool:
         """Delete the work unless files, recordings, matches or overrides reference it.
 

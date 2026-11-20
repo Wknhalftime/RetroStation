@@ -8,8 +8,9 @@ from uuid import uuid4
 
 from rapidfuzz import fuzz
 
+from backend.domain.catalog import Work
 from backend.domain.curation import SongMaster
-from backend.domain.enums import SelectionMethod
+from backend.domain.enums import CatalogSource, SelectionMethod
 from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_files import LibraryFileRepository
@@ -106,8 +107,7 @@ def _fuzzy_match_work(
     input_part = title_part_number(norm_base)
     threshold = _dynamic_threshold(len(norm_base))
     strict_input = strict_normalize(norm_base)
-    best_work_id: str | None = None
-    best_score = -1.0
+    scores: dict[str, float] = {}
 
     for candidate_id, candidate_title in work_candidates:
         norm_candidate = canonicalize_part_number(normalize_title(candidate_title))
@@ -119,16 +119,44 @@ def _fuzzy_match_work(
             full_ratio_score = fuzz.ratio(norm_base, norm_candidate)
             partial_ratio_score = fuzz.partial_ratio(norm_base, norm_candidate)
             score = 0.7 * full_ratio_score + 0.3 * partial_ratio_score
+        scores[candidate_id] = score
 
-        if score > best_score or (
-            score == best_score and (best_work_id is None or candidate_id < best_work_id)
-        ):
-            best_score = score
-            best_work_id = candidate_id
+    if not scores:
+        return None
+    best_score = max(scores.values())
+    if best_score < threshold:
+        return None
+    return _tie_break([cid for cid, score in scores.items() if score == best_score], work_repo)
 
-    if best_score >= threshold and best_work_id is not None:
-        return best_work_id
-    return None
+
+def _tie_break(work_ids: list[str], work_repo: WorkRepository) -> str:
+    """Of works with equal scores, a MusicBrainz one first, then the lowest id (AUD-R103, L2).
+
+    A local and a MusicBrainz work of one song tie; preferring the MusicBrainz work keeps a
+    new copy from refilling the local half of a pair.
+    """
+    tied = sorted(work_ids)
+    if len(tied) == 1:
+        return tied[0]
+    musicbrainz = work_repo.list_musicbrainz_ids(tied)
+    return next((work_id for work_id in tied if work_id in musicbrainz), tied[0])
+
+
+def exact_title_key(title: str) -> tuple[int | None, str]:
+    """What grouping's exact path compares a title by: its part number and its strict form.
+
+    The version suffix is stripped and the part number spelled one way first ("Pt. II" and
+    "(Part 2)" are one part). Titles with equal keys are the same song by title (phase 3b's
+    D29); enrichment's MBID claim uses it (AUD-R103, R1).
+    """
+    base, _ = extract_version_info(title)
+    canonical = canonicalize_part_number(normalize_title(base))
+    return title_part_number(canonical), strict_normalize(canonical)
+
+
+def _musicbrainz_first(work: Work) -> tuple[bool, str]:
+    """Sort key: a MusicBrainz work before a local one, then the lowest id (AUD-R103, L2)."""
+    return work.origin != CatalogSource.MUSICBRAINZ, work.id
 
 
 def _create_local_work(
@@ -150,9 +178,11 @@ def _create_local_work(
     raw_artist = file.audio.artist_name or ""
     artist_id = artist_repo.upsert_local_artist(raw_artist, norm_artist)
     norm_base = normalize_title(base_title)
-    for existing in work_repo.get_by_artist(artist_id):
-        if normalize_title(existing.title) == norm_base:
-            return existing.id
+    same_title = [
+        w for w in work_repo.get_by_artist(artist_id) if normalize_title(w.title) == norm_base
+    ]
+    if same_title:
+        return min(same_title, key=_musicbrainz_first).id
     work_id = work_repo.create_local(base_title, artist_id)
     song_master_repo.upsert(
         SongMaster(

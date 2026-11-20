@@ -72,6 +72,25 @@ class FakeWorkRepository(WorkRepository):
             if w.id in set(work_ids) and w.origin == CatalogSource.MUSICBRAINZ
         }
 
+    def get_id_by_mbid(self, mbid: str) -> str | None:
+        return next((w.id for w in self._data.values() if w.mbid == mbid), None)
+
+    def claim_mbid(self, work_id: str, mbid: str, title: str) -> bool:
+        work = self._data.get(work_id)
+        if work is None or work.origin != CatalogSource.LOCAL or work.mbid is not None:
+            return False
+        if self.get_id_by_mbid(mbid) is not None:
+            return False
+        work.mbid = mbid
+        work.origin = CatalogSource.MUSICBRAINZ
+        work.title = title
+        work.needs_enhancement = True
+        return True
+
+    def drop_fileless_grouping_recordings(self, work_id: str) -> int:
+        # The fakes model no recording links to works (delete_if_empty ignores them too).
+        return 0
+
     def delete_if_empty(self, work_id: str) -> bool:
         # Mirrors PgWorkRepository for the links the fakes model: a work that
         # still has files (via the injected library file repo) stays.
