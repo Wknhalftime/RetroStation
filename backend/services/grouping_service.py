@@ -220,20 +220,23 @@ def planned_work(base_title: str, artist_name: str, work_repo: WorkRepository) -
     reads the works of the one artist ``upsert_local_artist`` picks for the name, this one the
     works of every artist of the name, so the two can differ only past 100 works: when the
     exact title is another artist's of the name (or the name is held by files of several
-    MBIDs, and grouping makes a new name-only artist), or when two works share the title and
-    each picks a different one.
+    MBIDs, and grouping makes a new name-only artist). Works sharing the exact title are
+    ordered as ``_create_local_work`` orders them: a MusicBrainz work first, then the lowest
+    id (AUD-R103, L2).
     """
     norm_base = normalize_title(base_title)
     norm_artist = normalize_artist(artist_name)
     work_id = _fuzzy_match_work(norm_base, norm_artist, work_repo)
     if work_id is not None:
         return work_id
-    for candidate_id, candidate_title in work_repo.get_candidates_by_normalized_artist(
-        norm_artist, limit=_EVERY_WORK
-    ):
-        if normalize_title(candidate_title) == norm_base:
-            return candidate_id
-    return None
+    same_title = [
+        candidate_id
+        for candidate_id, candidate_title in work_repo.get_candidates_by_normalized_artist(
+            norm_artist, limit=_EVERY_WORK
+        )
+        if normalize_title(candidate_title) == norm_base
+    ]
+    return _tie_break(same_title, work_repo) if same_title else None
 
 
 def find_or_create_work(
