@@ -150,6 +150,41 @@ class PgWorkRepository(WorkRepository):
         ).fetchall()
         return {cast(str, row["id"]) for row in rows}
 
+    def get_id_by_mbid(self, mbid: str) -> str | None:
+        row = self._conn.execute("SELECT id FROM works WHERE mbid = %s", (mbid,)).fetchone()
+        return cast(str, row["id"]) if row is not None else None
+
+    def claim_mbid(self, work_id: str, mbid: str, title: str) -> bool:
+        # works.mbid is UNIQUE; the NOT EXISTS keeps a held MBID a refusal, not a raise.
+        cur = self._conn.execute(
+            """UPDATE works
+               SET mbid = %(mbid)s, origin = %(origin)s, title = %(title)s,
+                   needs_enhancement = TRUE
+               WHERE id = %(id)s AND origin = %(local)s AND mbid IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM works held WHERE held.mbid = %(mbid)s)""",
+            {
+                "id": work_id,
+                "mbid": mbid,
+                "title": title,
+                "origin": CatalogSource.MUSICBRAINZ.value,
+                "local": CatalogSource.LOCAL.value,
+            },
+        )
+        return cur.rowcount == 1
+
+    def drop_fileless_grouping_recordings(self, work_id: str) -> int:
+        cur = self._conn.execute(
+            """DELETE FROM recordings r
+               WHERE r.work_id = %s
+                 AND r.needs_enhancement = FALSE
+                 AND r.enhanced_at IS NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM library_files lf WHERE lf.recording_id = r.id
+                 )""",
+            (work_id,),
+        )
+        return max(0, cur.rowcount)
+
     def delete_if_empty(self, work_id: str) -> bool:
         # The one deletion rule (C53, 3b S6, D7): files, and every reference the kept list
         # names. song_masters go with the work; version_entry_states and performances
