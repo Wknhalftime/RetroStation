@@ -1,14 +1,22 @@
-"""Make a file a work's master by hand (the crown on the work's page)."""
+"""Lance's hand picks of the copy that plays, on the work's page: Set master (the crown), and
+Prefer this copy for a performance some line stores (3b PR 5a, D41 c)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+import structlog
+
 from backend.domain.curation import (
+    CopyNotInPerformanceError,
+    CurationWorkNotFoundError,
+    DefaultPerformanceCopyError,
     MasterFileMissingError,
     MasterFileNotOnWorkError,
     MasterWorkNotFoundError,
+    PerformanceNotOnWorkError,
+    PreferredCopyMissingError,
     SongMaster,
 )
 from backend.domain.enums import FileStatus, SelectionMethod
@@ -16,6 +24,8 @@ from backend.domain.library import LibraryFile
 from backend.repositories.recordings import RecordingRepository
 from backend.services.performance_service import prefer_chosen
 from backend.services.work_move_service import WorkMoveRepos, move_file_to_work
+
+logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -73,3 +83,38 @@ def _shown_on_work(library_file: LibraryFile, work_id: str, repos: MasterChoiceR
     if recording is not None and recording.work_id == work_id:
         return True
     return any(f.work_id == work_id for f in repos.move.files.get_by_recording(recording_id))
+
+
+def prefer_copy(
+    work_id: str, performance_id: UUID, file_id: UUID, repos: MasterChoiceRepos
+) -> None:
+    """Make *file_id* the preferred copy of a performance of the work other than its default,
+    so the lines that store it play that copy (S8, D41 c). The default performance's copy is
+    Set master's (C71), and the copy must be a present copy of that performance."""
+    performances = repos.move.performances
+    if repos.move.works.get_by_id(work_id) is None:
+        raise CurationWorkNotFoundError(f"Work {work_id} not found")
+    if performances is None or performances.work_of(performance_id) != work_id:
+        raise PerformanceNotOnWorkError(
+            f"Performance {performance_id} is not a performance of work {work_id}"
+        )
+    master = repos.move.song_masters.get_by_work(work_id)
+    played = performances.file_for_performance(master.preferred_file_id) if master else None
+    if played is not None and played.performance_id == performance_id:
+        raise DefaultPerformanceCopyError(
+            f"Performance {performance_id} is the work's default: Set master picks its copy"
+        )
+    copy = next((c for c in performances.copies(performance_id) if c.file_id == file_id), None)
+    if copy is None:
+        raise CopyNotInPerformanceError(
+            f"File {file_id} is not a copy of performance {performance_id}"
+        )
+    if copy.file_status != FileStatus.PRESENT:
+        raise PreferredCopyMissingError(f"File {file_id} is missing from disk")
+    performances.set_preferred_copy(performance_id, file_id)
+    logger.info(
+        "preferred_copy_chosen",
+        work_id=work_id,
+        performance_id=str(performance_id),
+        file_id=str(file_id),
+    )

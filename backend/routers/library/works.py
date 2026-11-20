@@ -1,28 +1,30 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import asdict
 from datetime import date, datetime
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from psycopg import AsyncConnection
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from backend.db.repositories.version_entries import AsyncVersionEntryReader
 from backend.dependencies import (
     SyncRepos,
     get_current_token,
-    get_db_connection,
     get_master_choice_repos,
     get_version_entry_repos,
     get_work_curation_repos,
     get_work_merge_repos,
+    get_work_page_repos,
 )
 from backend.domain.curation import (
+    CopyNotInPerformanceError,
     CurationFileMissingError,
     CurationFileNotFoundError,
     CurationFileNotOnWorkError,
     CurationWorkNotFoundError,
+    DefaultPerformanceCopyError,
     FileAlreadyOnWorkError,
     FormatOverrideExistsError,
     FormatOverrideNotFoundError,
@@ -31,6 +33,9 @@ from backend.domain.curation import (
     MasterWorkNotFoundError,
     MergeTargetInSourcesError,
     NewFormatOverride,
+    PerformanceNotOnWorkError,
+    PinNotOnWorkError,
+    PreferredCopyMissingError,
     SongMasterNotFoundError,
     VersionArtistNotFoundError,
     VersionTextMappedError,
@@ -38,8 +43,7 @@ from backend.domain.curation import (
     WorkCurationError,
 )
 from backend.domain.enums import FileStatus
-from backend.domain.synthetic_work_id import decode as decode_synthetic_work_id
-from backend.domain.version_pages import WorkVersion
+from backend.domain.version_pages import MasterFlag, WorkVersion
 from backend.domain.work_merges import (
     MergeApproval,
     MergeReason,
@@ -47,18 +51,21 @@ from backend.domain.work_merges import (
     WorkMergeFailedError,
     WorkMergeGroup,
 )
+from backend.domain.work_page import CreditName, PageFile, PerformanceView, WorkDetailPage
 from backend.services import version_entry_service as versions_service
 from backend.services import work_curation_service as curation
 from backend.services import work_merge_service as merges
-from backend.services.master_choice_service import MasterChoiceRepos, choose_master
+from backend.services import work_page_service as pages
+from backend.services.master_choice_service import MasterChoiceRepos, choose_master, prefer_copy
 from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
 from backend.services.work_merge_service import WorkMergeRepos
+from backend.services.work_page_service import WorkPageRepos
 
 router = APIRouter()
 
-# The read routes' async connection; the writes run on SyncRepos.
-DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
+# The read routes' readers, on the request's async connection; the writes run on SyncRepos.
+PageRepos = Annotated[WorkPageRepos, Depends(get_work_page_repos)]
 # Declared first in every write route: FastAPI resolves dependencies in declaration order, so
 # a request without a token gets its 401 before a connection is opened.
 Token = Annotated[str, Depends(get_current_token)]
@@ -79,6 +86,7 @@ class OtherWorkRef(BaseModel):
     id: str
     title: str
     artist_name: str
+    artists: list[str] = []
 
 
 class FileInfo(BaseModel):
@@ -161,6 +169,10 @@ class WorkDetail(BaseModel):
     format_overrides: list[FormatOverrideInfo]
     versions: list[WorkVersionInfo] = []
     master_flag: MasterFlagInfo | None = None
+    # 3b PR 5a (S8, D41 a, f, g); their schemas follow, so the model is rebuilt at the end.
+    artists: list[CreditedArtistInfo] = []
+    performances: list[PerformanceInfo] = []
+    acts: list[ActInfo] = []
 
 
 class MapVersionsRequest(BaseModel):
@@ -255,219 +267,147 @@ class ReassignResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Private helpers
+# Schemas — the work page's performances (3b PR 5a; S8, D41)
 # ---------------------------------------------------------------------------
 
 
-def _file_info(
-    row: dict[str, Any], *, duration_ms: int | None, other_work: OtherWorkRef | None = None
-) -> FileInfo:
-    """Map a library_files row to FileInfo.
+class CreditedArtistInfo(BaseModel):
+    id: str | None
+    name: str
 
-    ``duration_ms`` is resolved by the caller because the three call sites
-    read it under different column aliases (``file_duration_ms`` when the
-    row also carries a recording's own ``duration_ms``, ``duration_ms``
-    otherwise); every other field is identical across all of them.
-    """
+
+class PinnedLineInfo(BaseModel):
+    identity_id: UUID
+    station_id: UUID
+    station: str
+    title: str
+    artist: str
+    plays: int
+    next_file_id: UUID | None
+    next_path: str | None
+
+
+class CopyInfo(BaseModel):
+    file: FileInfo
+    pins: list[PinnedLineInfo]
+
+
+class PerformanceInfo(BaseModel):
+    id: UUID
+    credit: list[CreditedArtistInfo]
+    credit_text: str
+    version_type: str
+    default: bool
+    preferred_copy_id: UUID | None
+    lines: int
+    copies: list[CopyInfo]
+
+
+class ActInfo(BaseModel):
+    credit: str
+    default: bool
+    lines: int
+    reached: dict[str, int]
+
+
+class PreferCopyRequest(BaseModel):
+    file_id: UUID
+
+
+class ReleasePinsRequest(BaseModel):
+    identity_ids: list[UUID] = Field(min_length=1)
+
+
+class ReleasePinsResponse(BaseModel):
+    released: int
+
+
+# ---------------------------------------------------------------------------
+# Mapping the work page service's read models
+# ---------------------------------------------------------------------------
+
+
+def _file_info(file: PageFile) -> FileInfo:
+    other = file.other_work
     return FileInfo(
-        id=row["file_id"],
-        file_path=row["file_path"],
-        format=row["format"],
-        bitrate=row.get("bitrate"),
-        duration_ms=duration_ms,
-        track_title=row.get("track_title"),
-        release_title=row.get("release_title"),
-        enrichment_status=row["enrichment_status"],
-        file_status=row["file_status"],
-        other_work=other_work,
+        id=file.id,
+        file_path=file.file_path,
+        format=file.format,
+        bitrate=file.bitrate,
+        duration_ms=file.duration_ms,
+        track_title=file.track_title,
+        release_title=file.release_title,
+        enrichment_status=file.enrichment_status,
+        file_status=file.file_status,
+        other_work=None
+        if other is None
+        else OtherWorkRef(
+            id=other.id,
+            title=other.title,
+            artist_name=other.artist_name,
+            artists=list(other.artists),
+        ),
     )
 
 
-def _other_work(row: dict[str, Any], work_id: str) -> OtherWorkRef | None:
-    """The work a listed file is on, when that is not the work whose page lists it."""
-    if row["file_work_id"] is None or row["file_work_id"] == work_id:
-        return None
-    return OtherWorkRef(
-        id=row["file_work_id"],
-        title=row["file_work_title"],
-        artist_name=row["file_work_artist_name"],
-    )
+def _credited(parts: tuple[CreditName, ...]) -> list[CreditedArtistInfo]:
+    return [CreditedArtistInfo(id=p.artist_id, name=p.name) for p in parts]
 
 
-async def _work_recordings(
-    conn: AsyncConnection[Any], work_id: str, work_title: str
-) -> list[RecordingDetail]:
-    """Return a real work's recordings, plus its orphan pseudo-recording if any."""
-    rec_cur = await conn.execute(
-        """
-        SELECT
-            r.id            AS rec_id,
-            r.title         AS rec_title,
-            r.version_type  AS rec_version_type,
-            r.duration_ms   AS rec_duration_ms,
-            lf.id           AS file_id,
-            lf.file_path,
-            lf.format,
-            lf.bitrate,
-            lf.duration_ms  AS file_duration_ms,
-            lf.track_title,
-            lf.release_title,
-            lf.enrichment_status,
-            lf.file_status,
-            lf.work_id      AS file_work_id,
-            fw.title        AS file_work_title,
-            fa.name         AS file_work_artist_name
-        FROM recordings r
-        LEFT JOIN library_files lf ON lf.recording_id = r.id
-        LEFT JOIN works fw ON fw.id = lf.work_id
-        LEFT JOIN artists fa ON fa.id = fw.artist_id
-        WHERE r.id IN (
-            SELECT id FROM recordings WHERE work_id = %s
-            UNION
-            SELECT recording_id FROM library_files
-            WHERE work_id = %s AND recording_id IS NOT NULL
-        )
-        ORDER BY r.id, lf.file_path
-        """,
-        (work_id, work_id),
-    )
-    rec_rows = await rec_cur.fetchall()
-
-    recordings_map: dict[str, dict[str, Any]] = {}
-    for row in rec_rows:
-        rid = row["rec_id"]
-        if rid not in recordings_map:
-            recordings_map[rid] = {
-                "id": rid,
-                "title": row["rec_title"],
-                "version_type": row["rec_version_type"] or "original",
-                "duration_ms": row["rec_duration_ms"],
-                "files": [],
-            }
-        if row["file_id"] is not None:
-            recordings_map[rid]["files"].append(
-                _file_info(
-                    row,
-                    duration_ms=row.get("file_duration_ms"),
-                    other_work=_other_work(row, work_id),
-                )
+def _performance_info(
+    performance: PerformanceView, copies: Mapping[UUID, PageFile]
+) -> PerformanceInfo:
+    return PerformanceInfo(
+        id=performance.id,
+        credit=_credited(performance.credit),
+        credit_text=performance.credit_text,
+        version_type=performance.version_type,
+        default=performance.default,
+        preferred_copy_id=performance.preferred_copy_id,
+        lines=performance.lines,
+        copies=[
+            CopyInfo(
+                file=_file_info(copies[c.file_id]),
+                pins=[PinnedLineInfo(**asdict(pin)) for pin in c.pins],
             )
-
-    recordings = [
-        RecordingDetail(
-            id=rec["id"],
-            title=rec["title"],
-            version_type=rec["version_type"],
-            duration_ms=rec["duration_ms"],
-            files=rec["files"],
-        )
-        for rec in recordings_map.values()
-    ]
-
-    orphan_cur = await conn.execute(
-        """
-        SELECT
-            lf.id AS file_id,
-            lf.file_path,
-            lf.format,
-            lf.bitrate,
-            lf.duration_ms,
-            lf.track_title,
-            lf.release_title,
-            lf.enrichment_status,
-            lf.file_status
-        FROM library_files lf
-        WHERE lf.work_id = %s AND lf.recording_id IS NULL
-        ORDER BY lf.file_path
-        """,
-        (work_id,),
+            for c in performance.copies
+        ],
     )
-    orphan_rows = await orphan_cur.fetchall()
-    if orphan_rows:
-        orphan_files = [_file_info(row, duration_ms=row.get("duration_ms")) for row in orphan_rows]
-        recordings.append(
-            RecordingDetail(
-                id=f"orphan:{work_id}",
-                title=work_title,
-                version_type="original",
-                duration_ms=None,
-                files=orphan_files,
-            )
-        )
-
-    return recordings
 
 
-async def _work_song_master(conn: AsyncConnection[Any], work_id: str) -> SongMasterInfo | None:
-    """Return the persisted song master for a real work, or None."""
-    sm_cur = await conn.execute(
-        "SELECT * FROM song_masters WHERE work_id = %s",
-        (work_id,),
-    )
-    sm_row = await sm_cur.fetchone()
-    if sm_row is None:
+def _master_flag(flag: MasterFlag | None) -> MasterFlagInfo | None:
+    if flag is None:
         return None
-    return SongMasterInfo(
-        id=sm_row["id"],
-        preferred_file_id=sm_row["preferred_file_id"],
-        selection_method=sm_row["selection_method"],
-        score=sm_row.get("score"),
-        updated_at=sm_row["updated_at"],
+    return MasterFlagInfo(
+        master_file_id=flag.master_file_id,
+        version_type=flag.version_type.value,
+        plain_file_ids=list(flag.plain_file_ids),
     )
 
 
-async def _work_format_overrides(
-    conn: AsyncConnection[Any], work_id: str
-) -> list[FormatOverrideInfo]:
-    """Return a real work's format overrides, never its version entries, by format name."""
-    fo_cur = await conn.execute(
-        "SELECT * FROM format_overrides WHERE work_id = %s AND format_name IS NOT NULL"
-        " ORDER BY format_name",
-        (work_id,),
-    )
-    fo_rows = await fo_cur.fetchall()
-    return [
-        FormatOverrideInfo(
-            id=row["id"],
-            format_name=row["format_name"],
-            preferred_file_id=row["preferred_file_id"],
-            notes=row.get("notes"),
-            created_at=row["created_at"],
-        )
-        for row in fo_rows
-    ]
-
-
-async def _real_work_detail(conn: AsyncConnection[Any], work_id: str) -> WorkDetail:
-    """Return WorkDetail for a real (non-synthetic) work id; raise 404 if missing."""
-    # A merged-away id answers its merged work (3b S3, Q19); a redirect names a live work.
-    work_cur = await conn.execute(
-        """SELECT id, title, artist_id FROM works
-           WHERE id = COALESCE((SELECT new_id FROM work_redirects WHERE old_id = %s), %s)""",
-        (work_id, work_id),
-    )
-    work_row = await work_cur.fetchone()
-    if work_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
-        )
-    work_id = str(work_row["id"])
-
-    recordings = await _work_recordings(conn, work_id, work_row["title"])
-    song_master = await _work_song_master(conn, work_id)
-    format_overrides = await _work_format_overrides(conn, work_id)
-    versions = await _work_versions(conn, work_id)
-
+def _work_detail(detail: WorkDetailPage) -> WorkDetail:
+    master = detail.song_master
     return WorkDetail(
-        id=work_row["id"],
-        title=work_row["title"],
-        artist_id=work_row["artist_id"],
-        recordings=recordings,
-        song_master=song_master,
-        format_overrides=format_overrides,
-        versions=versions.versions,
-        master_flag=versions.master_flag,
+        id=detail.id,
+        title=detail.title,
+        artist_id=detail.artist_id,
+        artists=_credited(detail.page.artists),
+        recordings=[
+            RecordingDetail(
+                id=r.id,
+                title=r.title,
+                version_type=r.version_type,
+                duration_ms=r.duration_ms,
+                files=[_file_info(f) for f in r.files],
+            )
+            for r in detail.recordings
+        ],
+        song_master=None if master is None else SongMasterInfo(**asdict(master)),
+        format_overrides=[FormatOverrideInfo(**asdict(o)) for o in detail.format_overrides],
+        versions=[version_info(v) for v in detail.versions],
+        master_flag=_master_flag(detail.master_flag),
+        performances=[_performance_info(p, detail.copies) for p in detail.page.performances],
+        acts=[ActInfo(**asdict(a)) for a in detail.page.acts],
     )
 
 
@@ -495,97 +435,31 @@ def version_info(version: WorkVersion) -> WorkVersionInfo:
     )
 
 
-async def _work_versions(conn: AsyncConnection[Any], work_id: str) -> WorkVersions:
-    versions, flag = await versions_service.work_versions(AsyncVersionEntryReader(conn), work_id)
-    return WorkVersions(
-        versions=[version_info(v) for v in versions],
-        master_flag=None
-        if flag is None
-        else MasterFlagInfo(
-            master_file_id=flag.master_file_id,
-            version_type=flag.version_type.value,
-            plain_file_ids=list(flag.plain_file_ids),
-        ),
-    )
-
-
-async def _synthetic_work_detail(
-    conn: AsyncConnection[Any], work_id: str, artist_id: str, track_title: str
-) -> WorkDetail:
-    """Return WorkDetail for a synthetic id decoded into (artist_id, track_title).
-
-    There is no work or recording row to back this: every matching
-    library_files row becomes one file of a single synthesized recording.
-    """
-    file_cur = await conn.execute(
-        """
-        SELECT
-            lf.id AS file_id, lf.file_path, lf.format, lf.bitrate,
-            lf.duration_ms, lf.track_title, lf.release_title,
-            lf.enrichment_status, lf.file_status, lf.recording_id
-        FROM library_files lf
-        WHERE (lf.album_artist_mbid = %s OR lf.artist_mbid = %s)
-          AND lf.track_title = %s
-        ORDER BY lf.file_path
-        """,
-        (artist_id, artist_id, track_title),
-    )
-    file_rows = await file_cur.fetchall()
-
-    if not file_rows:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work {work_id} not found",
-        )
-
-    files = [_file_info(row, duration_ms=row.get("duration_ms")) for row in file_rows]
-
-    recordings = [
-        RecordingDetail(
-            id=work_id,
-            title=track_title,
-            version_type="original",
-            duration_ms=file_rows[0].get("duration_ms") if file_rows else None,
-            files=files,
-        )
-    ]
-
-    return WorkDetail(
-        id=work_id,
-        title=track_title,
-        artist_id=artist_id,
-        recordings=recordings,
-        song_master=None,
-        format_overrides=[],
-    )
-
-
 # ---------------------------------------------------------------------------
-# Routes — work detail
+# Routes — reads, through the work page service (3b PR 5a)
 # ---------------------------------------------------------------------------
 
 
 @router.get("/works/{work_id}", response_model=WorkDetail)
-async def get_work_detail(work_id: str, conn: DbConn, _token: Token) -> WorkDetail:
-    """Return a work with its recordings, files, master, and format overrides."""
-    synthetic = decode_synthetic_work_id(work_id)
-    if synthetic is None:
-        return await _real_work_detail(conn, work_id)
-    artist_id, track_title = synthetic
-    return await _synthetic_work_detail(conn, work_id, artist_id, track_title)
+async def get_work_detail(work_id: str, repos: PageRepos, _token: Token) -> WorkDetail:
+    """Return a work with its performances, recordings, files, master and format overrides."""
+    try:
+        detail = await pages.work_detail(work_id, repos)
+    except CurationWorkNotFoundError as missing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(missing)) from missing
+    return _work_detail(detail)
 
 
 @router.get("/works/{work_id}/versions", response_model=WorkVersions)
-async def get_work_versions(work_id: str, conn: DbConn, _token: Token) -> WorkVersions:
+async def get_work_versions(work_id: str, repos: PageRepos, _token: Token) -> WorkVersions:
     """The version texts of the work's matched lines and entries, and the master flag (S5)."""
-    if decode_synthetic_work_id(work_id) is not None:
-        return WorkVersions(versions=[], master_flag=None)
-    cur = await conn.execute("SELECT 1 FROM works WHERE id = %s", (work_id,))
-    if await cur.fetchone() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Work {work_id} not found"
-        )
-    return await _work_versions(conn, work_id)
+    try:
+        versions, flag = await pages.work_versions(work_id, repos)
+    except CurationWorkNotFoundError as missing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(missing)) from missing
+    return WorkVersions(
+        versions=[version_info(v) for v in versions], master_flag=_master_flag(flag)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +481,11 @@ _REFUSAL_STATUS: dict[type[WorkCurationError], int] = {
     VersionTextNotListedError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     VersionTextMappedError: status.HTTP_409_CONFLICT,
     VersionArtistNotFoundError: status.HTTP_404_NOT_FOUND,
+    PerformanceNotOnWorkError: status.HTTP_404_NOT_FOUND,
+    DefaultPerformanceCopyError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    CopyNotInPerformanceError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    PreferredCopyMissingError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    PinNotOnWorkError: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 _REFUSALS = tuple(_REFUSAL_STATUS)
 
@@ -819,3 +698,32 @@ def reassign_file_work(
     except _REFUSALS as refused:
         raise _refused(refused) from refused
     return ReassignResponse(old_work_id=moved.old_work_id, old_work_deleted=moved.old_work_deleted)
+
+
+@router.put(
+    "/works/{work_id}/performances/{performance_id}/preferred-copy",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def prefer_work_copy(
+    _token: Token, work_id: str, performance_id: UUID, body: PreferCopyRequest, repos: ChoiceRepos
+) -> None:
+    """Prefer this copy: the copy a stored performance's lines play (3b PR 5a, D41 c)."""
+    try:
+        prefer_copy(work_id, performance_id, body.file_id, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+
+
+@router.post("/works/{work_id}/pins/release", response_model=ReleasePinsResponse)
+def release_work_pins(
+    _token: Token, work_id: str, body: ReleasePinsRequest, repos: CurationRepos
+) -> ReleasePinsResponse:
+    """Release: the named lines leave their pins on the work's copies (3b PR 5a, D41 d, e)."""
+    try:
+        released = curation.release_line_pins(work_id, body.identity_ids, repos)
+    except _REFUSALS as refused:
+        raise _refused(refused) from refused
+    return ReleasePinsResponse(released=released)
+
+
+WorkDetail.model_rebuild()

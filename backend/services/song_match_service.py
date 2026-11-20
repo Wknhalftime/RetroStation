@@ -76,6 +76,10 @@ class SongMatchService:
         """The lines pin *file_id*, the file their master step played (3b S3, C72)."""
         self._matches.set_pins(match_ids, file_id)
 
+    def unpin(self, match_ids: list[UUID]) -> None:
+        """The matches pin nothing (Release on the work page, 3b PR 5a, D41 d)."""
+        self._matches.set_pins(match_ids, None)
+
     def release_pins(self, file_id: UUID) -> int:
         """No line pins *file_id* any more (3b D4, D14, D23); how many did."""
         return self._matches.release_pins_of_file(file_id)

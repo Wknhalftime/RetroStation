@@ -2,7 +2,7 @@ from dataclasses import replace
 from uuid import UUID
 
 from backend.domain.enums import TargetType
-from backend.domain.matching import Match
+from backend.domain.matching import Match, MatchPin
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 
@@ -65,6 +65,14 @@ class FakeMatchRepository(MatchRepository):
     def set_pins(self, match_ids: list[UUID], file_id: UUID | None) -> None:
         for match_id in match_ids:
             self.pins[match_id] = file_id
+
+    def pins_of_lines(self, identity_ids: list[UUID]) -> list[MatchPin]:
+        wanted = set(identity_ids)
+        return [
+            MatchPin(match_id=m.id, identity_id=m.identity_id, file_id=pinned)
+            for m in self._data.values()
+            if m.identity_id in wanted and (pinned := self.pins.get(m.id)) is not None
+        ]
 
     def release_pins_of_file(self, file_id: UUID) -> int:
         pinned = [m for m, f in self.pins.items() if f == file_id]

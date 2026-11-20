@@ -16,6 +16,8 @@ from backend.db.repositories.stream_cue_coverage import (
     COVERAGE_READ_BOUNDS,
     BoundedCueCoverageRepository,
 )
+from backend.db.repositories.version_entries import AsyncVersionEntryReader
+from backend.db.repositories.work_page import AsyncWorkPageReader
 from backend.db.sync_conn import commit_or_unavailable
 from backend.domain.liners import LinerStorageError
 from backend.domain.streaming import ClipStorageError, StreamTiming
@@ -52,6 +54,7 @@ from backend.services.version_entry_service import VersionEntryRepos
 from backend.services.work_curation_service import WorkCurationRepos
 from backend.services.work_merge_service import WorkMergeRepos
 from backend.services.work_move_service import WorkMoveRepos
+from backend.services.work_page_service import WorkPageRepos
 
 logger = structlog.get_logger()
 
@@ -313,6 +316,13 @@ def get_liner_cue_ports(repos: SyncRepos) -> LinerCuePorts:
         folder=liner_folder(get_settings().stream_work_dir),
         commit=_liner_commit(repos),
     )
+
+
+def get_work_page_repos(
+    conn: Annotated[AsyncConnection[Any], Depends(get_db_connection)],
+) -> WorkPageRepos:
+    """The work page's readers, on the read route's async connection (3b PR 5a)."""
+    return WorkPageRepos(pages=AsyncWorkPageReader(conn), versions=AsyncVersionEntryReader(conn))
 
 
 def get_master_choice_repos(repos: SyncRepos) -> MasterChoiceRepos:

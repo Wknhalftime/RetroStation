@@ -1,7 +1,11 @@
 # serializer version: 1
 # name: test_rich_real_work_detail_snapshot
   dict({
+    'acts': list([
+    ]),
     'artist_id': 'a-snapshot-rich',
+    'artists': list([
+    ]),
     'format_overrides': list([
       dict({
         'created_at': '<TIMESTAMP>',
@@ -20,6 +24,8 @@
     ]),
     'id': 'w-snapshot-rich',
     'master_flag': None,
+    'performances': list([
+    ]),
     'recordings': list([
       dict({
         'duration_ms': None,
@@ -96,11 +102,17 @@
 # ---
 # name: test_synthetic_work_detail_snapshot
   dict({
+    'acts': list([
+    ]),
     'artist_id': 'a-snapshot-synthetic',
+    'artists': list([
+    ]),
     'format_overrides': list([
     ]),
     'id': 'syn_YS1zbmFwc2hvdC1zeW50aGV0aWM6U25hcHNob3QgU3ludGhldGljIFRyYWNr',
     'master_flag': None,
+    'performances': list([
+    ]),
     'recordings': list([
       dict({
         'duration_ms': 456000,

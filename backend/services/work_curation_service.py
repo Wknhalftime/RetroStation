@@ -1,4 +1,5 @@
-"""The Library's works writes: merge, split, reassign, format overrides, the master delete.
+"""The Library's works writes: merge, split, reassign, format overrides, the master delete, and
+the work page's release of pinned lines (3b PR 5a).
 
 Moved from ``routers/library/works.py`` in phase 0c (C75), with the router's behaviour,
 oddities included: the master recalculation replaces a manual pick that is no longer a present
@@ -10,8 +11,11 @@ the caller's transaction (a sync route's ``SyncRepos``) and commits nothing; eac
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
+
+import structlog
 
 from backend.domain.catalog import Recording, Work
 from backend.domain.credit_picks import WorkCredits
@@ -29,6 +33,7 @@ from backend.domain.curation import (
     MergeResult,
     MergeTargetInSourcesError,
     NewFormatOverride,
+    PinNotOnWorkError,
     ReassignResult,
     SongMaster,
     SongMasterNotFoundError,
@@ -54,6 +59,8 @@ from backend.services.master_selection_service import score_file_row
 from backend.services.performance_service import move_out, place
 from backend.services.pin_upkeep import release_pins
 from backend.services.song_match_service import SongMatchService
+
+logger = structlog.get_logger()
 
 _NOTHING_MERGED = MergeResult(merged_file_count=0, deleted_work_count=0, dropped_override_count=0)
 
@@ -473,3 +480,31 @@ def delete_master(work_id: str, song_masters: SongMasterRepository) -> None:
     if song_masters.get_by_work(work_id) is None:
         raise SongMasterNotFoundError(f"No master found for work {work_id}")
     song_masters.delete_by_work(work_id)
+
+
+# --- release on the work page --------------------------------------------------------------------
+
+
+def release_line_pins(work_id: str, identity_ids: Sequence[UUID], repos: WorkCurationRepos) -> int:
+    """Release on the work page (3b PR 5a; S8, D41 d, e): each named line's pins on copies of
+    the work go, logged, and the lines take the normal path; how many lines. Nothing is
+    released when one of them pins no copy of the work."""
+    _work(work_id, repos.works)
+    lines = sorted(set(identity_ids))
+    held: dict[UUID, list[UUID]] = {line: [] for line in lines}
+    for pin in repos.matches.pins_of_lines(lines):
+        pinned = repos.files.get_by_id(pin.file_id)
+        if pinned is not None and pinned.work_id == work_id:
+            held[pin.identity_id].append(pin.match_id)
+    unpinned = [str(line) for line, match_ids in held.items() if not match_ids]
+    if unpinned:
+        raise PinNotOnWorkError(f"Line {', '.join(unpinned)} pins no copy of work {work_id}")
+    SongMatchService(repos.matches).unpin([m for match_ids in held.values() for m in match_ids])
+    logger.info(
+        "pins_released",
+        work_id=work_id,
+        identity_ids=[str(line) for line in lines],
+        lines=len(lines),
+        reason="released on the work page",
+    )
+    return len(lines)
