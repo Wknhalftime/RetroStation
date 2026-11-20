@@ -1002,7 +1002,7 @@ returns the row it finds).
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
 | `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment (pass 4 takes the `pending` files with no MBID tags whose work's artist has one, `list_untagged_with_linked_artist`; a file it cannot decide stays `pending`) |
-| `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a) | MB enrichment |
+| `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a); for `works`, also enrichment's MBID claim on a local work (AUD-R103) | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names, the artist's own and its active log-name links' (AUD-R026, in part superseded by AUD-R036) |
 | `library_files.artist_mbid` of a name holding two or more real MBIDs, one with no artist or no `shared_name` row; `library_files.credit` of a present file holding two or more real MBIDs, one with no artist (phase 2a S14) | scan / watcher upsert; the artist credits backfill | the artist identity sweep, last in a scan, in the scan's own task (no hand-off), and once from the backfill |
@@ -1081,6 +1081,20 @@ returns the row it finds).
   cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
   enrichment's recording search are batched 100 per request; the recordings phase's
   `lookup_recording` stays one call per recording because only it carries work relations.
+- **Enrichment keeps a song's copies on one work** (AUD-R103). Every path that learns a
+  recording's MusicBrainz work goes through one step in `library_enrichment_service`
+  (`_performed_work`): the per-release and per-recording passes, the untagged pass and the
+  recordings phase's lookup apply. When no work holds the MBID yet, the local work of the first
+  linked file (by id) that is the same song (same artist, title equal by grouping's exact path,
+  `grouping_service.exact_title_key`) takes it (`WorkRepository.claim_mbid`), so the copies
+  enrichment cannot link stay with it. Where a work already holds the MBID, the file moves alone
+  and the pair is left for review: works are never merged automatically. The recording is put
+  on its work through the guarded `link_work`, so a held version slot leaves it off the work
+  instead of raising. Grouping prefers the MusicBrainz work on an equal score.
+- **A local work a move empties is deleted** (AUD-R103). `work_move_service._settle_work`
+  first drops grouping's file-less recordings of it, then `delete_if_empty` decides as before:
+  a match, a format override or another recording still keeps the work. MusicBrainz works keep
+  their recordings.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
   enrichment pair, the local-artist linking, the matching re-check and the artist credits
   backfill, `task_failure_telemetry`,
@@ -1111,7 +1125,7 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R103.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R104.
 
 ## Retired (C70, AUD-R045)
 

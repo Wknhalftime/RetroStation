@@ -7,6 +7,7 @@ from uuid import UUID
 
 import structlog
 
+from backend.domain.enums import CatalogSource
 from backend.domain.library import LibraryFile
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
@@ -102,7 +103,19 @@ def _settle_work(work_id: str, repos: WorkMoveRepos) -> bool:
     an invalid one becomes the automatic pick, and with no present file left
     the master is removed.
     """
+    _drop_grouping_recordings_of_emptied_local_work(work_id, repos)
     if repos.works.delete_if_empty(work_id):
         return True
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     return False
+
+
+def _drop_grouping_recordings_of_emptied_local_work(work_id: str, repos: WorkMoveRepos) -> None:
+    """A local work no file is on loses grouping's file-less recordings, so they no longer
+    keep it alive (AUD-R103, L1). A MusicBrainz work keeps them."""
+    work = repos.works.get_by_id(work_id)
+    if work is None or work.origin != CatalogSource.LOCAL:
+        return
+    if repos.files.get_by_work(work_id):
+        return
+    repos.works.drop_fileless_grouping_recordings(work_id)

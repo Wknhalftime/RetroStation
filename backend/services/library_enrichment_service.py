@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import structlog
 
-from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS, MusicBrainzId, Recording
-from backend.domain.enums import EnrichmentStatus, VersionType
+from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS, MusicBrainzId, Recording, Work
+from backend.domain.enums import CatalogSource, EnrichmentStatus, VersionType
 from backend.domain.library import LibraryFile
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_file_enrichment import LibraryFileEnrichmentRepository
@@ -16,6 +17,7 @@ from backend.repositories.performances import PerformanceRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.works import WorkRepository
+from backend.services.grouping_service import exact_title_key
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistCredit, MbRecording, MbRelation, MbRelease
 from backend.services.normalization import extract_version_info, normalize_artist
@@ -150,34 +152,101 @@ def recording_version_type(rec_data: MbRecording) -> VersionType:
     return version_type
 
 
+@dataclass(frozen=True)
+class PerformedWork:
+    """The work a recording performs, and whether a local work just took its MBID."""
+
+    work_id: str
+    claimed: bool
+
+
+def _same_song_local_work(work: Work, artist_id: str, work_title: str) -> bool:
+    """Whether *work* is the local work of this song: local, no MBID, the artist the step
+    gives the work, and a title equal by grouping's exact path (AUD-R103, R1)."""
+    return (
+        work.origin == CatalogSource.LOCAL
+        and work.mbid is None
+        and work.artist_id == artist_id
+        and exact_title_key(work.title) == exact_title_key(work_title)
+    )
+
+
+def _performed_work(
+    work_mbid: str,
+    work_title: str,
+    artist_id: str,
+    files: Sequence[LibraryFile],
+    repos: EnrichmentRepos,
+) -> PerformedWork:
+    """The work holding *work_mbid*; else the local work of the first file (by id) that is
+    this song's, which takes the MBID so every copy on it stays with it (AUD-R103, R1); else
+    a new MusicBrainz work. Works are never merged: where one holds the MBID, the caller's
+    per-file move stays and a pair waits for the merge list."""
+    existing = repos.works.get_id_by_mbid(work_mbid)
+    if existing is not None:
+        return PerformedWork(existing, claimed=False)
+    for library_file in sorted(files, key=lambda f: f.id):
+        work = repos.works.get_by_id(library_file.work_id) if library_file.work_id else None
+        if work is None or not _same_song_local_work(work, artist_id, work_title):
+            continue
+        if repos.works.claim_mbid(work.id, work_mbid, work_title):
+            logger.info(
+                "local_work_took_mbid",
+                work_id=work.id,
+                work_mbid=work_mbid,
+                file_id=str(library_file.id),
+            )
+            return PerformedWork(work.id, claimed=True)
+    work_id = repos.works.upsert_from_mb(mbid=work_mbid, title=work_title, artist_id=artist_id)
+    return PerformedWork(work_id, claimed=False)
+
+
+def _put_recording_on_work(
+    recording_id: str, performed: PerformedWork, repos: EnrichmentRepos
+) -> bool:
+    """Put the recording on its work where the version slot is free (C1); whether it is.
+
+    A local work that just took the MBID drops grouping's recordings no file holds first, so
+    the MusicBrainz recording can take the slot a lone copy's grouping recording held.
+    """
+    if performed.claimed:
+        repos.works.drop_fileless_grouping_recordings(performed.work_id)
+    return repos.recordings.link_work(recording_id, performed.work_id)
+
+
 def _upsert_recording_with_work(
     rec_mbid: str,
     rec_data: MbRecording,
     artist_id: str | None,
     repos: EnrichmentRepos,
-) -> str | None:
-    """Extract work from rec_data relations, upsert work + recording; return work_id or None."""
+    *,
+    files: Sequence[LibraryFile] = (),
+) -> PerformedWork | None:
+    """Upsert the recording, without its work (C1), and resolve the work it performs.
+
+    *files* are the ones the caller links; a local work of theirs may take the MBID
+    (:func:`_performed_work`). The caller links them to the recording, then puts the
+    recording on the work (:func:`_put_recording_on_work`), so a version slot another
+    recording holds leaves it off the work instead of raising on
+    ``uq_recordings_work_version``.
+    """
     relations: list[MbRelation] = rec_data.get("relations", [])
     work_info = _extract_work_from_relations(relations)
-    work_id: str | None = None
+    performed: PerformedWork | None = None
     if work_info and artist_id is not None:
         work_mbid, work_title = work_info
-        work_id = repos.works.upsert_from_mb(
-            mbid=work_mbid,
-            title=work_title,
-            artist_id=artist_id,
-        )
+        performed = _performed_work(work_mbid, work_title, artist_id, files, repos)
 
     repos.recordings.upsert(
         Recording(
             id=rec_mbid,
             title=rec_data.get("title", ""),
-            work_id=work_id,
+            work_id=None,
             duration_ms=rec_data.get("length"),
             version_type=recording_version_type(rec_data),
         )
     )
-    return work_id
+    return performed
 
 
 def _mark_files_failed(pending_files: list[LibraryFile], files: LibraryFileRepository) -> None:
@@ -276,19 +345,20 @@ def apply_recording_lookup(
     ):
         marked_live = repos.recordings.update_version_type(recording.id, VersionType.LIVE)
 
-    work_id = _upsert_performed_work(rec_data, repos)
+    files = sorted(repos.files.get_by_recording(recording.id), key=lambda f: f.id)
+    performed = _upsert_performed_work(rec_data, files, repos)
     recording_linked = False
     files_moved = 0
-    if work_id is not None:
-        if recording.work_id != work_id:
-            recording_linked = repos.recordings.link_work(recording.id, work_id)
-        for library_file in repos.files.get_by_recording(recording.id):
-            if library_file.work_id != work_id:
-                _move_file_to_work(library_file, work_id, repos)
+    if performed is not None:
+        if recording.work_id != performed.work_id:
+            recording_linked = _put_recording_on_work(recording.id, performed, repos)
+        for library_file in files:
+            if library_file.work_id != performed.work_id:
+                _move_file_to_work(library_file, performed.work_id, repos)
                 files_moved += 1
 
     return RecordingLookupApplied(
-        work_id=work_id,
+        work_id=performed.work_id if performed is not None else None,
         recording_linked=recording_linked,
         files_moved=files_moved,
         marked_live=marked_live,
@@ -301,8 +371,11 @@ def performed_work_of(rec_data: MbRecording) -> tuple[str, str] | None:
     return _extract_work_from_relations(rec_data.get("relations", []))
 
 
-def _upsert_performed_work(rec_data: MbRecording, repos: EnrichmentRepos) -> str | None:
-    """Upsert the work the payload's performance relation names, under its track artist."""
+def _upsert_performed_work(
+    rec_data: MbRecording, files: Sequence[LibraryFile], repos: EnrichmentRepos
+) -> PerformedWork | None:
+    """The work the payload's performance relation names, under its track artist
+    (:func:`_performed_work`)."""
     work_info = performed_work_of(rec_data)
     if work_info is None:
         return None
@@ -310,7 +383,7 @@ def _upsert_performed_work(rec_data: MbRecording, repos: EnrichmentRepos) -> str
     if artist_id is None:
         return None
     work_mbid, work_title = work_info
-    return repos.works.upsert_from_mb(mbid=work_mbid, title=work_title, artist_id=artist_id)
+    return _performed_work(work_mbid, work_title, artist_id, files, repos)
 
 
 def _resolve_track_recording(
@@ -395,12 +468,17 @@ def _enrich_one_file(
         repos.files.update_recording_link(library_file.id, None, EnrichmentStatus.FAILED)
         return False
 
-    work_id = _upsert_recording_with_work(
-        resolved_mbid, release.recording_map[resolved_mbid], release.artist_id, repos
+    performed = _upsert_recording_with_work(
+        resolved_mbid,
+        release.recording_map[resolved_mbid],
+        release.artist_id,
+        repos,
+        files=[library_file],
     )
     _link_file_to_recording(library_file, resolved_mbid, repos.files)
-    if work_id is not None:
-        _move_file_to_work(library_file, work_id, repos)
+    if performed is not None:
+        _put_recording_on_work(resolved_mbid, performed, repos)
+        _move_file_to_work(library_file, performed.work_id, repos)
     return True
 
 
@@ -498,14 +576,17 @@ def enrich_files_by_recording(
         return 0
 
     artist_id = _upsert_artist_from_credits(rec_data.get("artist-credit", []), repos.artists)
-    work_id = _upsert_recording_with_work(recording_mbid, rec_data, artist_id, repos)
+    performed = _upsert_recording_with_work(
+        recording_mbid, rec_data, artist_id, repos, files=pending_files
+    )
 
-    enriched_count = 0
     for library_file in pending_files:
         _link_file_to_recording(library_file, recording_mbid, repos.files)
-        if work_id is not None:
-            _move_file_to_work(library_file, work_id, repos)
-        enriched_count += 1
+    if performed is not None:
+        _put_recording_on_work(recording_mbid, performed, repos)
+        for library_file in pending_files:
+            _move_file_to_work(library_file, performed.work_id, repos)
+    enriched_count = len(pending_files)
 
     logger.info(
         "enrich_by_recording_complete",
