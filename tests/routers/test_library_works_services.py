@@ -376,8 +376,12 @@ def test_release_refuses_a_line_that_pins_no_copy_of_the_work(
 def test_release_of_an_unknown_work_is_not_found(client: TestClient, db_conn: Conn) -> None:
     sugar = Sugar(db_conn)
     db_conn.commit()
+    unknown = f"work-{uuid4()}"
 
-    assert release(client, f"work-{uuid4()}", sugar.line).status_code == 404
+    response = release(client, unknown, sugar.line)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == f"Work {unknown} not found"
     assert pins_of(db_conn, sugar.line) == {sugar.merged}
 
 
@@ -540,6 +544,7 @@ def test_prefer_refuses_a_performance_of_another_work(client: TestClient, db_con
     response = prefer_copy(client, elsewhere, duet.duet, duet.duet_mp3)
 
     assert response.status_code == 404
+    assert str(duet.duet) in response.json()["detail"]
     assert cp.preferred_of(db_conn, duet.duet) == duet.duet_flac
 
 
