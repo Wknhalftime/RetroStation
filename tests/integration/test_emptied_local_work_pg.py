@@ -18,7 +18,7 @@ import psycopg
 import pytest
 from psycopg.rows import DictRow, dict_row
 
-from backend.domain.broadcast import BroadcastArtist
+from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
 from backend.domain.catalog import Recording
 from backend.domain.enums import EnrichmentStatus, TargetType
 from backend.services.library_enrichment_service import (
@@ -126,10 +126,19 @@ def test_an_emptied_local_work_something_still_points_at_stays(
             artist = repos.broadcast_artists.upsert(
                 BroadcastArtist(id=uuid4(), original_name="U2", normalized_name=str(uuid4()))
             )
+            song = repos.broadcast_identities.upsert(
+                BroadcastTrackIdentity(
+                    id=uuid4(),
+                    broadcast_artist_id=artist.id,
+                    original_title=_TITLE,
+                    normalized_title=_TITLE.lower(),
+                    normalized_signature=str(uuid4()),
+                )
+            )
             conn.execute(
-                """INSERT INTO matches (artist_id, library_file_id, target_id, target_type)
+                """INSERT INTO matches (identity_id, library_file_id, target_id, target_type)
                    VALUES (%s, %s, %s, %s)""",
-                (artist.id, file_id, local, TargetType.WORK.value),
+                (song.id, file_id, local, TargetType.WORK.value),
             )
         conn.commit()
 
