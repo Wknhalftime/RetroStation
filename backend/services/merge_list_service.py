@@ -1,9 +1,11 @@
 """The merge list: the page, Library Status's count and Apply (work merges phase 3b PR 4; SPEC
-S2, D6, D15, D26-D28, E3, E5; scope Q11-Q13, Q22; design C57, C58, C74; AUD-R080).
+S2, D6, D15, D26-D28, D37, E3, E5; scope Q11-Q13, Q22; design C57, C58, C74; AUD-R080).
 
-Stateless (Q13): the page plans every group again, previews each group's guarded merge in a
-savepoint that is always undone (D27), and shows what it would change. Apply plans again and
-merges each group Lance saw, as he saw it, through the guard, committing after each (D26).
+Stateless (Q13): the page plans every group again and shows one page of them, 50 at a time,
+most played first (D37). It previews each of the page's groups' guarded merge in a savepoint
+that is always undone (D27 as D37 amends it) and shows what it would change. Apply plans again
+and merges each group of the page Lance saw, as he saw it, through the guard, committing after
+each (D26).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from dataclasses import dataclass, replace
 import structlog
 
 from backend.domain.merge_list import (
+    PAGE_SIZE,
     ApplyReport,
     DuplicateView,
     GroupOutcome,
@@ -92,20 +95,25 @@ def _view(planned: PlannedGroup, page: _PageReads, repos: MergeListRepos) -> Gro
     )
 
 
-def page(repos: MergeListRepos) -> MergeListPage:
-    """Every planned group with its works, flags, changes and last failure; the recordings
-    still under two works; the empty works kept."""
+def page(repos: MergeListRepos, offset: int = 0, limit: int = PAGE_SIZE) -> MergeListPage:
+    """One page of the planned groups, most played first (D37), each with its works, flags,
+    changes (previewed for this page's groups only) and last failure; the recordings still under
+    two works; the empty works kept."""
     planned = plan(repos.merge_list, repos.settings)
-    ids = planned.work_ids()
+    on_page = planned.groups[offset : offset + limit]
+    ids = [w for g in on_page for w in (g.target_id, *g.source_ids)]
     duplicates = repos.performances.duplicate_recordings()
     shown = repos.merge_list.works_shown(ids + [w for d in duplicates for w in d.work_ids])
     reads = _PageReads(
         shown={w: replace(v, plays=planned.plays.get(w, 0)) for w, v in shown.items()},
         rejections=repos.merge_list.rejections(ids),
-        failures=repos.merge_list.failures([g.target_id for g in planned.groups]),
+        failures=repos.merge_list.failures([g.target_id for g in on_page]),
     )
     return MergeListPage(
-        groups=tuple(_view(g, reads, repos) for g in planned.groups),
+        total=len(planned.groups),
+        offset=offset,
+        limit=limit,
+        groups=tuple(_view(g, reads, repos) for g in on_page),
         duplicates=tuple(
             DuplicateView(
                 d.recording_mbid,

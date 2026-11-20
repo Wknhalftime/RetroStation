@@ -109,9 +109,18 @@ class DuplicateView:
 
 @dataclass(frozen=True)
 class MergeListPage:
+    """One page of the planned groups (D37), with *total* counting every planned group, and the
+    other two sections whole."""
+
     groups: tuple[GroupView, ...]
     duplicates: tuple[DuplicateView, ...]
     kept_works: tuple[EmptyWork, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+PAGE_SIZE = 50  # D37: groups a page, and the most one page holds
 
 
 @dataclass(frozen=True)

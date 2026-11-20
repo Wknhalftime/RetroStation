@@ -58,6 +58,8 @@ export const MergeListSchema = z.object({
     z.object({ work_id: z.string(), title: z.string(), references: z.array(z.string()) })
   ),
   total: z.number(),
+  offset: z.number(),
+  limit: z.number(),
 });
 
 export const MergeListCountSchema = z.object({

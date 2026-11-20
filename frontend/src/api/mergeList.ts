@@ -25,10 +25,16 @@ const AFFECTED_KEYS = [
   ["library", "credit-picks"],
 ] as const;
 
-export function useMergeList() {
+// D37: 50 groups a page.
+export const MERGE_LIST_PAGE = 50;
+
+export function useMergeList(offset: number) {
   return useQuery<MergeList>({
-    queryKey: LIST_KEY,
-    queryFn: async () => MergeListSchema.parse(await apiFetch<unknown>(BASE)),
+    queryKey: [...LIST_KEY, offset],
+    queryFn: async () =>
+      MergeListSchema.parse(
+        await apiFetch<unknown>(`${BASE}?offset=${offset}&limit=${MERGE_LIST_PAGE}`)
+      ),
   });
 }
 

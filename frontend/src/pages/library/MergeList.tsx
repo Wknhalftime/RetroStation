@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
-import { useApplyMergeList, useMergeList, type SeenMergeGroup } from "@/api/mergeList";
+import {
+  MERGE_LIST_PAGE,
+  useApplyMergeList,
+  useMergeList,
+  type SeenMergeGroup,
+} from "@/api/mergeList";
 import type {
   ApplyMergeListResult,
   MergeChange,
@@ -155,11 +160,29 @@ function Group({
   );
 }
 
+function lastPageOffset(total: number): number {
+  return Math.max(0, Math.floor((total - 1) / MERGE_LIST_PAGE) * MERGE_LIST_PAGE);
+}
+
 export function MergeList() {
-  const { data, isLoading, isError, error: loadError } = useMergeList();
+  const [offset, setOffset] = useState(0);
+  const { data, isLoading, isError, error: loadError } = useMergeList(offset);
   const apply = useApplyMergeList();
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+
+  // D37: a page an Apply emptied steps back to the last page that has groups.
+  const emptied = data !== undefined && data.groups.length === 0 && data.offset > 0;
+  const stepBackTo = emptied ? lastPageOffset(data.total) : null;
+  useEffect(() => {
+    if (stepBackTo !== null) setOffset(stepBackTo);
+  }, [stepBackTo]);
+
+  const goTo = (next: number) => {
+    setSkipped(new Set());
+    setTicked(new Set());
+    setOffset(next);
+  };
 
   if (isLoading) {
     return (
@@ -223,14 +246,35 @@ export function MergeList() {
           {summary(apply.data, data)}
         </p>
       )}
-      {data.groups.length === 0 ? (
+      {data.total === 0 ? (
         <p className="mb-6 text-sm text-gray-400">Nothing to merge.</p>
+      ) : data.groups.length === 0 ? (
+        <p className="mb-6 text-sm text-gray-400">Nothing left on this page.</p>
       ) : (
         <>
-          <div className="mb-3 flex items-center gap-3">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
             <button type="button" disabled={apply.isPending} onClick={applyAll}>
               Apply
             </button>
+            <button
+              type="button"
+              disabled={apply.isPending || data.offset === 0}
+              onClick={() => goTo(Math.max(0, data.offset - MERGE_LIST_PAGE))}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={apply.isPending || data.offset + data.limit >= data.total}
+              onClick={() => goTo(data.offset + MERGE_LIST_PAGE)}
+            >
+              Next
+            </button>
+            <span className="text-sm text-gray-500">
+              {`Groups ${(data.offset + 1).toLocaleString()}–${(
+                data.offset + data.groups.length
+              ).toLocaleString()} of ${data.total.toLocaleString()}`}
+            </span>
             <span className="text-sm text-gray-500">
               {(data.groups.length - skipped.size).toLocaleString()} to merge,{" "}
               {skipped.size.toLocaleString()} to skip

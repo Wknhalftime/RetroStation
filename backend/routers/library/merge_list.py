@@ -8,11 +8,12 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_token, get_merge_list_commit, get_merge_list_repos
 from backend.domain.merge_list import (
+    PAGE_SIZE,
     ApplyReport,
     GroupFlag,
     GroupOutcome,
@@ -105,6 +106,8 @@ class MergeListPage(BaseModel):
     duplicates: list[DuplicateInfo]
     kept_works: list[KeptWorkInfo]
     total: int
+    offset: int
+    limit: int
 
 
 class MergeListCount(BaseModel):
@@ -211,10 +214,16 @@ def _not_ready(refused: CreditsNotReadyError) -> HTTPException:
 
 
 @router.get("/merge-list", response_model=MergeListPage)
-def get_merge_list(_token: Token, repos: Repos) -> MergeListPage:
-    """Every planned group, the recordings under two works, the empty works kept (S2, D15)."""
+def get_merge_list(
+    _token: Token,
+    repos: Repos,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=PAGE_SIZE)] = PAGE_SIZE,
+) -> MergeListPage:
+    """One page of the planned groups (D37), the recordings under two works, the empty works
+    kept (S2, D15)."""
     try:
-        page = service.page(repos)
+        page = service.page(repos, offset, limit)
     except CreditsNotReadyError as refused:
         raise _not_ready(refused) from refused
     return MergeListPage(
@@ -232,7 +241,9 @@ def get_merge_list(_token: Token, repos: Repos) -> MergeListPage:
             )
             for k in page.kept_works
         ],
-        total=len(page.groups),
+        total=page.total,
+        offset=page.offset,
+        limit=page.limit,
     )
 
 

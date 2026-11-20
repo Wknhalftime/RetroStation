@@ -83,9 +83,6 @@ class Plan:
     groups: tuple[PlannedGroup, ...]
     plays: Mapping[str, int]
 
-    def work_ids(self) -> list[str]:
-        return [w for g in self.groups for w in (g.target_id, *g.source_ids)]
-
 
 def plan(merge_list: MergeListRepository, settings: UserSettingRepository) -> Plan:
     """Every planned group, most played first, with each work's matched plays."""

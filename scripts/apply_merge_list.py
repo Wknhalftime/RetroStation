@@ -123,6 +123,11 @@ def _allowlist(
             for key in sorted(airplay_snapshot.override_key(row) for row in overrides)
         ]
         lines.append(("work-detail", target, "the merged work"))
+        # D35: a sampled merged-away id now answers its target's detail (PR 3's redirect).
+        lines += [
+            ("work-detail", source, "merged into the work it now redirects to")
+            for source in result.source_ids
+        ]
         for artist in sorted(
             set().union(*(artists.get(w, set()) for w in (target, *result.source_ids)))
         ):
