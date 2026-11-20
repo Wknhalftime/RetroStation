@@ -341,13 +341,17 @@ def test_an_existing_musicbrainz_work_takes_only_the_linked_copy(migrated_db: st
     [
         ("Pride", "Pride (In the Name of Love)"),
         ("Another Brick in the Wall, Part 1", "Another Brick in the Wall, Part 2"),
+        ("Love Song", "Love Songs"),
     ],
-    ids=["near-title", "other-part"],
+    ids=["near-title", "other-part", "close-title"],
 )
 def test_no_claim_when_the_titles_differ_by_groupings_exact_rule(
     migrated_db: str, tag_title: str, mb_title: str
 ) -> None:
-    """A near title or another part keeps today's path: a new MusicBrainz work: T5."""
+    """A near title or another part keeps today's path: a new MusicBrainz work: T5.
+
+    "Love Song" against "Love Songs" scores about 96 in grouping's fuzzy match (threshold
+    90): only the exact path, not the fuzzy score, decides a claim."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         lone = add_file(
@@ -379,8 +383,9 @@ def test_no_claim_when_the_titles_differ_by_groupings_exact_rule(
         ("Another Brick in the Wall, Pt. II", "Another Brick in the Wall (Part 2)"),
         ("dont stop believin", "Don’t Stop Believin’"),
         ("PRIDE (in the name of love)", "Pride (In the Name of Love)"),
+        ("Pride (In The Name Of Love)", "Pride (In the Name of Love) (Live)"),
     ],
-    ids=["part-spelling", "punctuation", "case"],
+    ids=["part-spelling", "punctuation", "case", "version-suffix"],
 )
 def test_claim_when_the_titles_are_equal_by_groupings_exact_rule(
     migrated_db: str, tag_title: str, mb_title: str
@@ -443,8 +448,8 @@ def test_the_first_copy_by_id_claims_and_the_other_copy_joins_it(migrated_db: st
     """Copies of one recording on two local works: the first file by id has its work claim
     the MBID; the other file then finds the MBID taken and moves onto it: T8.
 
-    The claiming work has the higher work id, so the rule is the file's order, not the
-    work's."""
+    The claiming work has the higher work id, the first file by id is stored second and its
+    path sorts last, so only the files' id order picks it."""
     first_file = UUID("00000000-0000-4000-8000-0000000f0001")
     second_file = UUID("00000000-0000-4000-8000-0000000f0002")
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
@@ -458,8 +463,8 @@ def test_the_first_copy_by_id_claims_and_the_other_copy_joins_it(migrated_db: st
         )
         repos.recordings.upsert(Recording(id=_RECORDING, title=_MB_TITLE))
         for file_id, work_id, path in (
-            (first_file, claiming, "/music/a.flac"),
-            (second_file, other, "/music/b.flac"),
+            (second_file, other, "/music/a.flac"),
+            (first_file, claiming, "/music/b.flac"),
         ):
             add_file(
                 repos,
@@ -486,6 +491,55 @@ def test_the_first_copy_by_id_claims_and_the_other_copy_joins_it(migrated_db: st
         row = work_row(conn, claiming)
         assert row is not None and row["mbid"] == _WORK
         assert work_row(conn, other) is None, "the emptied local work is deleted"
+
+
+def test_a_later_copy_claims_when_the_first_copys_work_does_not_qualify(
+    migrated_db: str,
+) -> None:
+    """The claim goes to the first file by id whose work qualifies: T8b.
+
+    The first copy sits on a MusicBrainz work of another MBID (MusicBrainz holds two works for
+    the song), the second on the song's local work. The local work takes the MBID, and the
+    first copy then moves onto it, as a per-file move does today."""
+    other_mbid = "00000000-0000-4000-8000-0000000e0005"
+    first_file = UUID("00000000-0000-4000-8000-0000000f0001")
+    second_file = UUID("00000000-0000-4000-8000-0000000f0002")
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
+        elsewhere = repos.works.upsert_from_mb(
+            mbid=other_mbid, title=_MB_TITLE, artist_id=artist_id
+        )
+        local = repos.works.create_local(_TAG_TITLE, artist_id)
+        repos.recordings.upsert(Recording(id=_RECORDING, title=_MB_TITLE))
+        for file_id, work_id, path in (
+            (first_file, elsewhere, "/music/a.flac"),
+            (second_file, local, "/music/b.flac"),
+        ):
+            add_file(
+                repos,
+                path,
+                artist="U2",
+                title=_TAG_TITLE,
+                recording_mbid=_RECORDING,
+                file_id=file_id,
+            )
+            repos.library_files.update_work_id(file_id, work_id)
+            repos.library_files.update_recording_link(
+                file_id, _RECORDING, EnrichmentStatus.ENRICHED
+            )
+        conn.commit()
+
+        recording = repos.recordings.get_by_id(_RECORDING)
+        assert recording is not None
+        applied = apply_recording_lookup(recording, _pride_payload(), enrichment_repos(repos))
+        conn.commit()
+
+        assert applied.work_id == local
+        assert stored(repos, first_file).work_id == local
+        assert stored(repos, second_file).work_id == local
+        row = work_row(conn, local)
+        assert row is not None and row["mbid"] == _WORK
 
 
 def test_a_held_version_slot_on_an_existing_work_does_not_stop_the_link(

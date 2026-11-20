@@ -19,7 +19,8 @@ import pytest
 from psycopg.rows import DictRow, dict_row
 
 from backend.domain.broadcast import BroadcastArtist
-from backend.domain.enums import TargetType
+from backend.domain.catalog import Recording
+from backend.domain.enums import EnrichmentStatus, TargetType
 from backend.services.library_enrichment_service import (
     apply_recording_lookup,
     enrich_by_recording_batch,
@@ -139,10 +140,47 @@ def test_an_emptied_local_work_something_still_points_at_stays(
         assert work_row(conn, local) is not None
 
 
+def _move_repos(repos: RepositoryFactory) -> WorkMoveRepos:
+    return WorkMoveRepos(
+        files=repos.library_files,
+        works=repos.works,
+        song_masters=repos.song_masters,
+        matches=repos.matches,
+    )
+
+
+def _relink_to_its_musicbrainz_recording(repos: RepositoryFactory, file_id: UUID) -> None:
+    """What enrichment pass 1 does: the file points at its MusicBrainz recording, which
+    leaves grouping's recording without files."""
+    repos.recordings.upsert(Recording(id=_RECORDING, title=_TITLE))
+    repos.library_files.update_recording_link(file_id, _RECORDING, EnrichmentStatus.ENRICHED)
+
+
+def test_any_move_that_empties_a_local_work_deletes_it(migrated_db: str) -> None:
+    """T11b: L1 lives where every move settles the work it left (``move_file_to_work``), not
+    only in enrichment."""
+    with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
+        repos = RepositoryFactory(conn)
+        copy = add_file(repos, "/music/U2/x.flac", artist="U2", title=_TITLE)
+        local = group_like_the_scan(repos, copy)
+        assert len(recordings_on(conn, local)) == 1
+        local_row = work_row(conn, local)
+        assert local_row is not None
+        elsewhere = repos.works.create_local("Somewhere Else", local_row["artist_id"])
+        _relink_to_its_musicbrainz_recording(repos, copy.id)
+        conn.commit()
+
+        move_file_to_work(stored(repos, copy.id), elsewhere, _move_repos(repos))
+        conn.commit()
+
+        assert work_row(conn, local) is None
+        assert recordings_on(conn, local) == []
+
+
 def test_a_musicbrainz_work_keeps_grouping_recordings_when_emptied(migrated_db: str) -> None:
     """T13: L1 is for local works only. A file grouped onto a MusicBrainz work by title gets
-    a grouping recording there; when the file moves away, the work and that recording stay,
-    as before."""
+    a grouping recording there; once the file points at another recording and moves away,
+    that file-less recording and the work stay, as before."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         artist_id = repos.artists.upsert_musicbrainz_artist(
@@ -154,18 +192,10 @@ def test_a_musicbrainz_work_keeps_grouping_recordings_when_emptied(migrated_db: 
         grouping_recordings = recordings_on(conn, mb_work)
         assert len(grouping_recordings) == 1
         elsewhere = repos.works.create_local("Somewhere Else", artist_id)
+        _relink_to_its_musicbrainz_recording(repos, copy.id)
         conn.commit()
 
-        move_file_to_work(
-            stored(repos, copy.id),
-            elsewhere,
-            WorkMoveRepos(
-                files=repos.library_files,
-                works=repos.works,
-                song_masters=repos.song_masters,
-                matches=repos.matches,
-            ),
-        )
+        move_file_to_work(stored(repos, copy.id), elsewhere, _move_repos(repos))
         conn.commit()
 
         assert work_row(conn, mb_work) is not None
