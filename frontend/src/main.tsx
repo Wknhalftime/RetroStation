@@ -60,6 +60,7 @@ const router = createBrowserRouter([
         path: "library/artists/:artist_id/works/:work_id",
         element: <AssociatedWorks />,
       },
+      { path: "library/works/:work_id", element: <AssociatedWorks /> },
       { path: "library/files/:file_id/cues", element: <CueEditor /> },
       { path: "matcher", element: <MatcherBrowser /> },
       { path: "matcher/scanner", element: <ScannerActions /> },
