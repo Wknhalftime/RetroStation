@@ -219,9 +219,10 @@ class LinkDecision:
 
 @dataclass
 class Work:
+    """A song. Its artists are its performances' credits (3b S7); it names none itself."""
+
     id: str  # local UUID (str); MusicBrainz ID lives in the separate `mbid` field
     title: str
-    artist_id: str  # FK to Artist.id (local UUID, not an MBID)
     needs_enhancement: bool = True
     enhanced_at: datetime | None = None
     enhancement_error: str | None = None
@@ -235,7 +236,6 @@ class WorkReference(StrEnum):
     the list names them."""
 
     RECORDING = "recording"
-    MATCH = "match"
     WORK_MATCH = "work_match"
     FORMAT_OVERRIDE = "format_override"
     VERSION_ENTRY = "version_entry"

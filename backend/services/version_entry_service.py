@@ -63,8 +63,8 @@ class DismissSelection:
 class UnmappedItem:
     version: WorkVersion
     work_title: str
-    artist_id: str
-    artist_name: str
+    # 3b S7, R7: the work's credited artists, (artist id or None, name), master's first.
+    artists: tuple[tuple[str | None, str], ...]
 
 
 @dataclass(frozen=True)
@@ -214,6 +214,13 @@ async def work_versions(
     return work_page_order(versions), master_flag(master_id, master_title, files.get(work_id, []))
 
 
+def _credited(pairs: object) -> tuple[tuple[str | None, str], ...]:
+    """The reader's (artist id, name) pairs, typed."""
+    if not isinstance(pairs, list):
+        return ()
+    return tuple((None if a is None else str(a), str(n)) for a, n in pairs)
+
+
 async def unmapped_page(reader: VersionPageReader, offset: int, limit: int) -> UnmappedPage:
     """S7: every unmapped version over all works, by plays, then work title and text."""
     versions, _ = await _read_versions(reader, None)
@@ -223,8 +230,7 @@ async def unmapped_page(reader: VersionPageReader, offset: int, limit: int) -> U
         UnmappedItem(
             version=v,
             work_title=str(titles[v.work_id]["title"]),
-            artist_id=str(titles[v.work_id]["artist_id"]),
-            artist_name=str(titles[v.work_id]["artist_name"]),
+            artists=_credited(titles[v.work_id]["artists"]),
         )
         for v in listed
         if v.work_id in titles

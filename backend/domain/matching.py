@@ -96,7 +96,8 @@ class MatchPin:
 @dataclass
 class Match:
     """A song's match: a broadcast line to a file or a work. Since phase 1c's 0046 every match
-    is a song's; a log name's artists are its links (M35, AUD-R035)."""
+    is a song's; a log name's artists are its links (M35, AUD-R035). A line's work is its
+    file's work: a match stores none since 3b PR 5b (S7)."""
 
     id: UUID
     confidence_score: float
@@ -105,7 +106,6 @@ class Match:
     library_file_id: UUID | None = None
     target_id: str | None = None
     target_type: TargetType | None = None
-    work_id: str | None = None
     trace_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

@@ -29,6 +29,10 @@ class PerformanceRepository(ABC):
     def file_for_performance(self, file_id: UUID) -> FileForPerformance | None: ...
 
     @abstractmethod
+    def default_performance(self, work_id: str) -> UUID | None:
+        """The performance holding the work's master's file (C71), if any."""
+
+    @abstractmethod
     def duplicate_recordings(self) -> list[DuplicateRecording]:
         """Each recording MBID under two or more works, by MBID, its works by id (3b S5)."""
 
@@ -53,9 +57,14 @@ class PerformanceRepository(ABC):
         """Whether any performance credits the artist (3b D19)."""
 
     @abstractmethod
+    def artists_credited_on(self, work_ids: list[str]) -> set[str]:
+        """The artists the works' performances credit, a credit by MBID alone as the artist
+        holding it (a merge's artist candidates, 3b R5)."""
+
+    @abstractmethod
     def uncredited(self, after: UUID | None, limit: int) -> list[tuple[UUID, WorkArtist | None]]:
         """Performances with no credit, in id order, after *after*, with their work's artist
-        (3b D1's run-once step)."""
+        from 0055's seed (3b D1's run-once step; D38)."""
 
     @abstractmethod
     def work_of(self, performance_id: UUID) -> str | None:
@@ -74,8 +83,14 @@ class PerformanceRepository(ABC):
     def stored_lines(self, performance_id: UUID) -> list[StoredLine]: ...
 
     @abstractmethod
-    def files_waiting(self, after: UUID | None, limit: int) -> list[UUID]:
-        """Files on a work with no performance, in id order, after *after*."""
+    def files_waiting(self, after: UUID | None, limit: int) -> list[tuple[UUID, WorkArtist | None]]:
+        """Files on a work with no performance, in id order, after *after*, each with its
+        work's artist from 0055's seed (3a's build; 3b D38)."""
+
+    @abstractmethod
+    def drop_seed(self) -> None:
+        """Drop 0055's seed, in the caller's transaction (D1's step, as it sets its marker;
+        3b D49)."""
 
     @abstractmethod
     def stranded_preferred_copies(self) -> list[UUID]:

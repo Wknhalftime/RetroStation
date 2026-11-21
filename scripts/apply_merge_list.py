@@ -76,8 +76,15 @@ def _held(conn: Conn) -> dict[str, tuple[str | None, str | None]]:
 
 
 def _artists(conn: Conn, work_ids: Sequence[str]) -> dict[str, set[str]]:
+    # D32 by credits (3b S7): the artists each work's performances credit.
     rows = conn.execute(
-        "SELECT id, artist_id FROM works WHERE id = ANY(%s)", (list(work_ids),)
+        """SELECT DISTINCT p.work_id AS id, COALESCE(pc.artist_id, held.id) AS artist_id
+             FROM performances p
+             JOIN performance_credits pc ON pc.performance_id = p.id
+             LEFT JOIN artists held ON pc.artist_id IS NULL AND held.mbid = pc.mbid
+            WHERE p.work_id = ANY(%s)
+              AND COALESCE(pc.artist_id, held.id) IS NOT NULL""",
+        (list(work_ids),),
     ).fetchall()
     found: dict[str, set[str]] = {}
     for r in rows:

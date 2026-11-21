@@ -1107,7 +1107,6 @@ def match_identities_for_playlist(
                 library_file_id=result.library_file_id,
                 confidence_score=result.confidence_score,
                 match_tier=result.tier,
-                work_id=result.work_id or None,
             )
             if shown
             else None,

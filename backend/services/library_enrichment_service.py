@@ -160,13 +160,14 @@ class PerformedWork:
     claimed: bool
 
 
-def _same_song_local_work(work: Work, artist_id: str, work_title: str) -> bool:
-    """Whether *work* is the local work of this song: local, no MBID, the artist the step
-    gives the work, and a title equal by grouping's exact path (AUD-R103, R1)."""
+def _same_song_local_work(work: Work, crediting: set[str], work_title: str) -> bool:
+    """Whether *work* is the local work of this song: local, no MBID, among *crediting* (the
+    works whose performances credit the step's artist, by id or MBID; 3b R3), and a title
+    equal by grouping's exact path (AUD-R103, R1)."""
     return (
         work.origin == CatalogSource.LOCAL
         and work.mbid is None
-        and work.artist_id == artist_id
+        and work.id in crediting
         and exact_title_key(work.title) == exact_title_key(work_title)
     )
 
@@ -185,9 +186,10 @@ def _performed_work(
     existing = repos.works.get_id_by_mbid(work_mbid)
     if existing is not None:
         return PerformedWork(existing, claimed=False)
+    crediting = {w.id for w in repos.works.works_crediting(artist_id)}
     for library_file in sorted(files, key=lambda f: f.id):
         work = repos.works.get_by_id(library_file.work_id) if library_file.work_id else None
-        if work is None or not _same_song_local_work(work, artist_id, work_title):
+        if work is None or not _same_song_local_work(work, crediting, work_title):
             continue
         if repos.works.claim_mbid(work.id, work_mbid, work_title):
             logger.info(
@@ -197,7 +199,7 @@ def _performed_work(
                 file_id=str(library_file.id),
             )
             return PerformedWork(work.id, claimed=True)
-    work_id = repos.works.upsert_from_mb(mbid=work_mbid, title=work_title, artist_id=artist_id)
+    work_id = repos.works.upsert_from_mb(mbid=work_mbid, title=work_title)
     return PerformedWork(work_id, claimed=False)
 
 

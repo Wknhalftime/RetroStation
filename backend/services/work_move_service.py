@@ -9,6 +9,7 @@ import structlog
 
 from backend.domain.enums import CatalogSource
 from backend.domain.library import LibraryFile
+from backend.domain.performances import WorkArtist
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.matches import MatchRepository
 from backend.repositories.performances import PerformanceRepository
@@ -38,22 +39,23 @@ def place_ungrouped_file(
     file_id: UUID,
     work_id: str,
     files: LibraryFileRepository,
-    matches: MatchRepository,
+    matches: MatchRepository,  # unused since 3b PR 5b (a match names no work, S7); callers pass it
     performances: PerformanceRepository | None = None,
+    *,
+    artist: WorkArtist | None = None,
 ) -> None:
-    """Give a file with no work the work grouping chose; its matches take that work too.
+    """Give a file with no work the work grouping chose, and its performance there: *artist*,
+    the one grouping picked, is whom it counts as when it has no credit of its own (3b D1).
 
-    A match stores its file's work when it is made, so one made while the file
-    had no work has none. The file left no work, so there is no master to settle.
+    The file left no work, so there is no master to settle.
     """
     files.update_work_id(file_id, work_id)
-    SongMatchService(matches).follow_file(file_id, work_id)
     if performances is not None:
-        assign_performance(file_id, performances)
+        assign_performance(file_id, performances, default=artist)
 
 
 def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRepos) -> None:
-    """Attach a file to another work; its matches follow it.
+    """Attach a file to another work.
 
     The work the file joins gets (or re-picks) an auto song master from the
     files on it, and each version text on the file's lines as seen, never a
@@ -70,7 +72,6 @@ def move_file_to_work(library_file: LibraryFile, work_id: str, repos: WorkMoveRe
         release_pins(library_file.id, repos.matches, why="file moved to another work")
     repos.files.update_work_id(library_file.id, work_id)
     song_matches = SongMatchService(repos.matches)
-    song_matches.follow_file(library_file.id, work_id)
     place([library_file.id], left, repos.performances, song_matches)
     reselect_master_from_files(work_id, repos.song_masters, repos.files)
     if previous_work_id is not None:

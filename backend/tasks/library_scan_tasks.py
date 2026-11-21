@@ -403,6 +403,7 @@ def _run_scan(
                     repos.library_files,
                     repos.matches,
                     repos.performances,
+                    artist=result.artist,
                 )
                 if result.recording_id:
                     repos.library_files.update_recording_link(

@@ -29,7 +29,7 @@ from backend.domain.work_page import (
     WorkLine,
 )
 
-_WORK = """SELECT id, title, artist_id FROM works
+_WORK = """SELECT id, title FROM works
            WHERE id = COALESCE((SELECT new_id FROM work_redirects WHERE old_id = %s), %s)"""
 
 _RECORDINGS = """
@@ -37,11 +37,10 @@ SELECT r.id AS rec_id, r.title AS rec_title, r.version_type AS rec_version_type,
        r.duration_ms AS rec_duration_ms,
        lf.id AS file_id, lf.file_path, lf.format, lf.bitrate, lf.duration_ms AS file_duration_ms,
        lf.track_title, lf.release_title, lf.enrichment_status, lf.file_status,
-       lf.work_id AS file_work_id, fw.title AS file_work_title, fa.name AS file_work_artist_name
+       lf.work_id AS file_work_id, fw.title AS file_work_title
   FROM recordings r
   LEFT JOIN library_files lf ON lf.recording_id = r.id
   LEFT JOIN works fw ON fw.id = lf.work_id
-  LEFT JOIN artists fa ON fa.id = fw.artist_id
  WHERE r.id IN (
      SELECT id FROM recordings WHERE work_id = %s
      UNION
@@ -188,7 +187,7 @@ class AsyncWorkPageReader:
         row = await cur.fetchone()
         if row is None:
             return None
-        return WorkHead(id=str(row["id"]), title=row["title"], artist_id=str(row["artist_id"]))
+        return WorkHead(id=str(row["id"]), title=row["title"])
 
     async def exists(self, work_id: str) -> bool:
         cur = await self._conn.execute("SELECT 1 FROM works WHERE id = %s", (work_id,))
@@ -210,7 +209,6 @@ class AsyncWorkPageReader:
                 other = OtherWork(
                     id=str(row["file_work_id"]),
                     title=row["file_work_title"],
-                    artist_name=row["file_work_artist_name"],
                     artists=others.get(str(row["file_work_id"]), ()),
                 )
             files.append(_file(row, "file_duration_ms", other))

@@ -12,6 +12,7 @@ from backend.domain.catalog import Work
 from backend.domain.curation import SongMaster
 from backend.domain.enums import CatalogSource, SelectionMethod
 from backend.domain.library import LibraryFile
+from backend.domain.performances import WorkArtist
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.recordings import RecordingRepository
@@ -31,10 +32,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GroupingResult:
-    """Return type for assign_work — carries both work and recording IDs."""
+    """Return type for assign_work: the work and recording, and the artist grouping picked for
+    the file by its artist tag (3b D1; None for a shortcut, which reads no tag)."""
 
     work_id: str
     recording_id: str | None = None
+    artist: WorkArtist | None = None
 
 
 def _dynamic_threshold(title_length: int) -> float:
@@ -159,6 +162,14 @@ def _musicbrainz_first(work: Work) -> tuple[bool, str]:
     return work.origin != CatalogSource.MUSICBRAINZ, work.id
 
 
+def _picked(artist_id: str, raw_artist: str, artist_repo: ArtistCatalogRepository) -> WorkArtist:
+    """The artist ``upsert_local_artist`` picked, as a performance's credit names it."""
+    artist = artist_repo.get_by_id(artist_id)
+    if artist is None:
+        return WorkArtist(id=artist_id, mbid=None, name=raw_artist)
+    return WorkArtist(id=artist.id, mbid=artist.mbid, name=artist.name)
+
+
 def _create_local_work(
     file: LibraryFile,
     base_title: str,
@@ -166,24 +177,25 @@ def _create_local_work(
     artist_repo: ArtistCatalogRepository,
     work_repo: WorkRepository,
     song_master_repo: SongMasterRepository,
-) -> str:
-    """Create a local artist + work + song master; return the new work_id.
+) -> tuple[str, WorkArtist]:
+    """Create a local artist + work + song master; return the new work_id and the artist.
 
     Belt-and-braces idempotency: even after artist upsert, check whether an
-    existing work for this artist already normalizes to the same title. This
-    guards against fuzzy_match returning None due to a threshold miss on a
-    title that would normalize identically (the Alice In Chains 'Would?'
-    duplication pattern).
+    existing work crediting this artist already normalizes to the same title
+    (3b PR 5b: by its performances' credits). This guards against fuzzy_match
+    returning None due to a threshold miss on a title that would normalize
+    identically (the Alice In Chains 'Would?' duplication pattern).
     """
     raw_artist = file.audio.artist_name or ""
     artist_id = artist_repo.upsert_local_artist(raw_artist, norm_artist)
+    picked = _picked(artist_id, raw_artist, artist_repo)
     norm_base = normalize_title(base_title)
     same_title = [
-        w for w in work_repo.get_by_artist(artist_id) if normalize_title(w.title) == norm_base
+        w for w in work_repo.works_crediting(artist_id) if normalize_title(w.title) == norm_base
     ]
     if same_title:
-        return min(same_title, key=_musicbrainz_first).id
-    work_id = work_repo.create_local(base_title, artist_id)
+        return min(same_title, key=_musicbrainz_first).id, picked
+    work_id = work_repo.create_local(base_title)
     song_master_repo.upsert(
         SongMaster(
             id=uuid4(),
@@ -192,7 +204,7 @@ def _create_local_work(
             selection_method=SelectionMethod.AUTO,
         ),
     )
-    return work_id
+    return work_id, picked
 
 
 def grouping_shortcut(
@@ -251,14 +263,28 @@ def find_or_create_work(
     Reads the tags only, not the audio-hash or recording-MBID shortcuts of
     :func:`assign_work`, so it can re-place a file whose current work is wrong.
     """
+    return _work_and_artist(
+        file, artist_repo=artist_repo, work_repo=work_repo, song_master_repo=song_master_repo
+    )[0]
+
+
+def _work_and_artist(
+    file: LibraryFile,
+    *,
+    artist_repo: ArtistCatalogRepository,
+    work_repo: WorkRepository,
+    song_master_repo: SongMasterRepository,
+) -> tuple[str, WorkArtist | None]:
+    """:func:`find_or_create_work`'s work, and the artist grouping picks there: the artist of
+    the file's name a matched work's performances credit (3b R1), else the new work's."""
     base_title, _ = extract_version_info(file.audio.track_title or "")
     norm_artist = normalize_artist(file.audio.artist_name or "")
     work_id = _fuzzy_match_work(normalize_title(base_title), norm_artist, work_repo)
     if work_id is None:
-        work_id = _create_local_work(
+        return _create_local_work(
             file, base_title, norm_artist, artist_repo, work_repo, song_master_repo
         )
-    return work_id
+    return work_id, work_repo.credited_artist(work_id, norm_artist)
 
 
 def assign_work(
@@ -287,7 +313,7 @@ def assign_work(
         return shortcut
 
     _, version_type = extract_version_info(raw_title)
-    work_id = find_or_create_work(
+    work_id, artist = _work_and_artist(
         file,
         artist_repo=artist_repo,
         work_repo=work_repo,
@@ -309,4 +335,4 @@ def assign_work(
         },
     )
 
-    return GroupingResult(work_id=work_id, recording_id=recording_id)
+    return GroupingResult(work_id=work_id, recording_id=recording_id, artist=artist)

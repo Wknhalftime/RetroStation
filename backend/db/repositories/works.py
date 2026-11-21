@@ -14,6 +14,7 @@ from backend.db.repositories._pg_utils import (
 )
 from backend.domain.catalog import CatalogStorageError, EmptyWork, Work, WorkReference
 from backend.domain.enums import CatalogSource, TargetType
+from backend.domain.performances import WorkArtist
 from backend.repositories.works import WorkRepository
 
 logger = structlog.get_logger()
@@ -22,7 +23,6 @@ logger = structlog.get_logger()
 # deletion rule and the kept list read the same SQL.
 _REFERENCES: dict[WorkReference, str] = {
     WorkReference.RECORDING: "EXISTS (SELECT 1 FROM recordings r WHERE r.work_id = w.id)",
-    WorkReference.MATCH: "EXISTS (SELECT 1 FROM matches m WHERE m.work_id = w.id)",
     WorkReference.WORK_MATCH: (
         "EXISTS (SELECT 1 FROM matches m WHERE m.target_type = %(work)s AND m.target_id = w.id)"
     ),
@@ -40,6 +40,34 @@ _REFERENCES: dict[WorkReference, str] = {
     ),
 }
 
+# The (work, artist, position) of every credit, a credit by MBID alone naming the artist that
+# holds the MBID (3a's D1): a work's artists are its performances' credits (3b S7). A UNION of
+# the two indexed paths, not one OR across the join.
+_CREDITED = """
+SELECT p.work_id, a.id AS artist_id, a.mbid, a.name, a.normalized_name, pc.position
+  FROM performance_credits pc
+  JOIN performances p ON p.id = pc.performance_id
+  JOIN artists a ON a.id = pc.artist_id
+UNION ALL
+SELECT p.work_id, a.id, a.mbid, a.name, a.normalized_name, pc.position
+  FROM performance_credits pc
+  JOIN performances p ON p.id = pc.performance_id
+  JOIN artists a ON pc.artist_id IS NULL AND a.mbid = pc.mbid
+"""
+
+# The works holding a file of the normalized name (%(name)s) whose performance credits an MBID
+# no artist holds: a name with one MBID makes no artist for it (2a D6), so grouping knows such a
+# credit by the name its files carry (3b PR 5b's reading of R1). Without it, tagged copies of one
+# song would each make a work.
+_UNHELD_OF_NAME = """
+SELECT f.work_id
+  FROM library_files f
+  JOIN performance_credits pc ON pc.performance_id = f.performance_id
+ WHERE f.normalized_artist_name = %(name)s
+   AND pc.artist_id IS NULL
+   AND NOT EXISTS (SELECT 1 FROM artists h WHERE h.mbid = pc.mbid)
+"""
+
 
 @translate_lost_connection(CatalogStorageError)
 class PgWorkRepository(WorkRepository):
@@ -50,7 +78,6 @@ class PgWorkRepository(WorkRepository):
         return Work(
             id=row["id"],
             title=row["title"],
-            artist_id=row["artist_id"],
             needs_enhancement=row["needs_enhancement"],
             enhanced_at=row.get("enhanced_at"),
             enhancement_error=row.get("enhancement_error"),
@@ -61,11 +88,11 @@ class PgWorkRepository(WorkRepository):
 
     def upsert(self, work: Work) -> Work:
         self._conn.execute(
-            """INSERT INTO works (id, title, artist_id)
-               VALUES (%s, %s, %s)
+            """INSERT INTO works (id, title)
+               VALUES (%s, %s)
                ON CONFLICT (id) DO UPDATE SET
                  title = EXCLUDED.title""",
-            (work.id, work.title, work.artist_id),
+            (work.id, work.title),
         )
         row = self._conn.execute("SELECT * FROM works WHERE id = %s", (work.id,)).fetchone()
         if row is None:
@@ -76,11 +103,25 @@ class PgWorkRepository(WorkRepository):
         row = self._conn.execute("SELECT * FROM works WHERE id = %s", (mbid,)).fetchone()
         return self._row_to_model(row) if row else None
 
-    def get_by_artist(self, artist_id: str) -> list[Work]:
+    def works_crediting(self, artist_id: str) -> list[Work]:
         rows = self._conn.execute(
-            "SELECT * FROM works WHERE artist_id = %s", (artist_id,)
+            f"""SELECT * FROM works
+                WHERE id IN (SELECT c.work_id FROM ({_CREDITED}) c WHERE c.artist_id = %s)
+                ORDER BY id""",  # noqa: S608 (a constant)
+            (artist_id,),
         ).fetchall()
         return [self._row_to_model(r) for r in rows]
+
+    def credited_artist(self, work_id: str, normalized_name: str) -> WorkArtist | None:
+        row = self._conn.execute(
+            f"""SELECT c.artist_id, c.mbid, c.name FROM ({_CREDITED}) c
+                WHERE c.work_id = %s AND c.normalized_name = %s
+                ORDER BY c.position, c.artist_id LIMIT 1""",  # noqa: S608 (a constant)
+            (work_id, normalized_name),
+        ).fetchone()
+        if row is None:
+            return None
+        return WorkArtist(id=str(row["artist_id"]), mbid=row["mbid"], name=str(row["name"]))
 
     def list_needing_enhancement(self) -> list[Work]:
         # Mirrors PgArtistRepository.list_unenhanced: rows with a populated
@@ -109,22 +150,16 @@ class PgWorkRepository(WorkRepository):
             (format_embedding(embedding), mbid),
         )
 
-    def create_local(self, title: str, artist_id: str) -> str:
+    def create_local(self, title: str) -> str:
         work_id = str(uuid4())
         self._conn.execute(
-            """INSERT INTO works
-                   (id, title, artist_id, origin, needs_enhancement)
-               VALUES (%s, %s, %s, 'local', FALSE)""",
-            (work_id, title, artist_id),
+            """INSERT INTO works (id, title, origin, needs_enhancement)
+               VALUES (%s, %s, 'local', FALSE)""",
+            (work_id, title),
         )
         return work_id
 
-    def upsert_from_mb(
-        self,
-        mbid: str,
-        title: str,
-        artist_id: str,
-    ) -> str:
+    def upsert_from_mb(self, mbid: str, title: str) -> str:
         row = self._conn.execute(
             "SELECT id FROM works WHERE mbid = %s FOR UPDATE",
             (mbid,),
@@ -133,11 +168,9 @@ class PgWorkRepository(WorkRepository):
             return cast(str, row["id"])
         work_id = str(uuid4())
         self._conn.execute(
-            """INSERT INTO works
-                   (id, title, artist_id, mbid, origin,
-                    needs_enhancement)
-               VALUES (%s, %s, %s, %s, 'musicbrainz', TRUE)""",
-            (work_id, title, artist_id, mbid),
+            """INSERT INTO works (id, title, mbid, origin, needs_enhancement)
+               VALUES (%s, %s, %s, 'musicbrainz', TRUE)""",
+            (work_id, title, mbid),
         )
         return work_id
 
@@ -242,20 +275,20 @@ class PgWorkRepository(WorkRepository):
         normalized_artist_name: str,
         limit: int = 100,
     ) -> list[tuple[str, str]]:
-        # Join through `artists.normalized_name` so orphan works (no attached
-        # library_files yet) still appear as fuzzy-match candidates — this is
-        # what prevents a second, byte-identical work from being created when
-        # local grouping can't find the first. Names are unique only without
-        # an MBID (C41), so this sees the works of every artist of the name
-        # (M18); `artists.normalized_name` has a plain index (migration 0047).
+        # The works whose performances credit an artist of the name (3b S7, R1), and those whose
+        # files of the name hold a credit no artist holds (_UNHELD_OF_NAME). Names are unique
+        # only without an MBID (C41), so this sees the works of every artist of the name (M18);
+        # `artists.normalized_name` (0047) and `library_files.normalized_artist_name` (0011)
+        # have plain indexes.
         rows = self._conn.execute(
-            """SELECT w.id, w.title
-               FROM works w
-               JOIN artists a ON a.id = w.artist_id
-               WHERE a.normalized_name = %s
-               ORDER BY w.title
-               LIMIT %s""",
-            (normalized_artist_name, limit),
+            f"""SELECT w.id, w.title
+                FROM works w
+                WHERE w.id IN (SELECT c.work_id FROM ({_CREDITED}) c
+                               WHERE c.normalized_name = %(name)s)
+                   OR w.id IN ({_UNHELD_OF_NAME})
+                ORDER BY w.title
+                LIMIT %(limit)s""",  # noqa: S608 (constants)
+            {"name": normalized_artist_name, "limit": limit},
         ).fetchall()
         if len(rows) >= limit:
             logger.warning(

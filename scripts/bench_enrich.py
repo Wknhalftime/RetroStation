@@ -409,7 +409,16 @@ _FINGERPRINT_QUERIES: dict[str, str] = {
         SELECT id, title, work_id, duration_ms, version_type
           FROM recordings ORDER BY id
     """,
-    "works": "SELECT id, title, artist_id, origin FROM works ORDER BY id",
+    # A work's artists are its performances' credits (3b S7).
+    "works": """
+        SELECT w.id, w.title, w.origin,
+               (SELECT string_agg(COALESCE(pc.artist_id, pc.mbid), ','
+                                  ORDER BY p.id, pc.position)
+                  FROM performances p
+                  JOIN performance_credits pc ON pc.performance_id = p.id
+                 WHERE p.work_id = w.id) AS artists
+          FROM works w ORDER BY w.id
+    """,
     "artists": "SELECT id, name, sort_name, mbid FROM artists ORDER BY id",
 }
 

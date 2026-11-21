@@ -69,18 +69,29 @@ def main() -> None:
         params: list[object] = []
         artist_clause = ""
         if args.artist:
-            artist_clause = "AND a.normalized_name = %s"
+            artist_clause = (
+                "AND EXISTS (SELECT 1 FROM performances p"
+                " JOIN performance_credits pc ON pc.performance_id = p.id"
+                " JOIN artists a ON a.id = pc.artist_id"
+                " OR (pc.artist_id IS NULL AND a.mbid = pc.mbid)"
+                " WHERE p.work_id = w.id AND a.normalized_name = %s)"
+            )
             params.append(args.artist.lower())
         rows = conn.execute(
             f"""
-            SELECT w.id, w.title, a.name AS artist,
+            SELECT w.id, w.title, COALESCE(wa.names, '') AS artist,
                    array_agg(lf.track_title ORDER BY lf.file_path) AS track_titles
               FROM works w
-              JOIN artists a ON a.id = w.artist_id
               JOIN library_files lf ON lf.work_id = w.id
+              LEFT JOIN LATERAL (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name) AS names
+                 FROM performances p
+                 JOIN performance_credits pc ON pc.performance_id = p.id
+                 JOIN artists a ON a.id = pc.artist_id
+                      OR (pc.artist_id IS NULL AND a.mbid = pc.mbid)
+                WHERE p.work_id = w.id) wa ON true
              WHERE w.origin = 'local' {artist_clause}
-             GROUP BY w.id, w.title, a.name
-             ORDER BY a.name, w.title
+             GROUP BY w.id, w.title, wa.names
+             ORDER BY artist, w.title
             """,
             params,
         ).fetchall()

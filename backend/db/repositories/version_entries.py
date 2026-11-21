@@ -127,16 +127,32 @@ SELECT sm.preferred_file_id, lf.track_title
   JOIN library_files lf ON lf.id = sm.preferred_file_id
  WHERE sm.work_id = %(work)s"""
 
+# The works the group's performances credit (3b S7, R7): a work's artists are its credits, a
+# credit by MBID alone naming the artist that holds the MBID.
 _GROUP_WORKS = f"""
 WITH grp AS ({ARTIST_GROUP_SQL})
-SELECT w.id FROM works w WHERE w.artist_id IN (SELECT id FROM grp)"""
+SELECT DISTINCT p.work_id AS id
+  FROM performances p
+  JOIN performance_credits pc ON pc.performance_id = p.id
+  LEFT JOIN artists held ON pc.artist_id IS NULL AND held.mbid = pc.mbid
+ WHERE COALESCE(pc.artist_id, held.id) IN (SELECT id FROM grp)"""
 
 _ARTIST_EXISTS = "SELECT 1 FROM artists WHERE id = %(id)s"
 
+# Each work's title and credited artists, the master's performance first, named as the work
+# page names them (3b R7).
 _WORK_TITLES = """
-SELECT w.id, w.title, w.artist_id, a.name AS artist_name
-  FROM works w JOIN artists a ON a.id = w.artist_id
- WHERE w.id = ANY(%(works)s)"""
+SELECT w.id, w.title, COALESCE(pc.artist_id, held.id) AS artist_id,
+       COALESCE(pc.credited_name, a.name, held.name, pc.mbid) AS artist_name
+  FROM works w
+  LEFT JOIN song_masters sm ON sm.work_id = w.id
+  LEFT JOIN library_files mf ON mf.id = sm.preferred_file_id
+  LEFT JOIN performances p ON p.work_id = w.id
+  LEFT JOIN performance_credits pc ON pc.performance_id = p.id
+  LEFT JOIN artists a ON a.id = pc.artist_id
+  LEFT JOIN artists held ON pc.artist_id IS NULL AND held.mbid = pc.mbid
+ WHERE w.id = ANY(%(works)s)
+ ORDER BY w.id, (mf.performance_id = p.id) DESC NULLS LAST, p.id, pc.position"""
 
 _MAP = """
 INSERT INTO format_overrides (work_id, version_text, preferred_file_id)
@@ -275,5 +291,12 @@ class AsyncVersionEntryReader:
         return UUID(str(row["preferred_file_id"])), row["track_title"]
 
     async def work_titles(self, work_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Each work's ``title`` and ``artists``: its credited (id, name) pairs, once each."""
         cur = await self._conn.execute(_WORK_TITLES, {"works": work_ids})
-        return {str(row["id"]): dict(row) for row in await cur.fetchall()}
+        works: dict[str, dict[str, Any]] = {}
+        for row in await cur.fetchall():
+            work = works.setdefault(str(row["id"]), {"title": row["title"], "artists": []})
+            pair = (row["artist_id"], row["artist_name"])
+            if row["artist_name"] is not None and pair not in work["artists"]:
+                work["artists"].append(pair)
+        return works

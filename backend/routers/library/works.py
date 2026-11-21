@@ -85,7 +85,6 @@ class OtherWorkRef(BaseModel):
 
     id: str
     title: str
-    artist_name: str
     artists: list[str] = []
 
 
@@ -163,7 +162,6 @@ class WorkVersions(BaseModel):
 class WorkDetail(BaseModel):
     id: str
     title: str
-    artist_id: str
     recordings: list[RecordingDetail]
     song_master: SongMasterInfo | None
     format_overrides: list[FormatOverrideInfo]
@@ -344,7 +342,6 @@ def _file_info(file: PageFile) -> FileInfo:
         else OtherWorkRef(
             id=other.id,
             title=other.title,
-            artist_name=other.artist_name,
             artists=list(other.artists),
         ),
     )
@@ -390,7 +387,6 @@ def _work_detail(detail: WorkDetailPage) -> WorkDetail:
     return WorkDetail(
         id=detail.id,
         title=detail.title,
-        artist_id=detail.artist_id,
         artists=_credited(detail.page.artists),
         recordings=[
             RecordingDetail(

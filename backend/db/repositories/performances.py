@@ -82,11 +82,8 @@ class PgPerformanceRepository(PerformanceRepository):
     def file_for_performance(self, file_id: UUID) -> FileForPerformance | None:
         row = self._conn.execute(
             """SELECT f.id, f.work_id, f.performance_id, f.recording_mbid, f.track_title,
-                      f.duration_ms, f.credit, a.id AS work_artist_id,
-                      a.mbid AS work_artist_mbid, a.name AS work_artist_name
+                      f.duration_ms, f.credit
                FROM library_files f
-               LEFT JOIN works w ON w.id = f.work_id
-               LEFT JOIN artists a ON a.id = w.artist_id
                WHERE f.id = %s""",
             (file_id,),
         ).fetchone()
@@ -100,8 +97,16 @@ class PgPerformanceRepository(PerformanceRepository):
             title=row["track_title"],
             length_ms=row["duration_ms"],
             credit=_credit(row["credit"]),
-            default_artist=_work_artist(row),
         )
+
+    def default_performance(self, work_id: str) -> UUID | None:
+        row = self._conn.execute(
+            """SELECT f.performance_id FROM song_masters sm
+               JOIN library_files f ON f.id = sm.preferred_file_id
+               WHERE sm.work_id = %s""",
+            (work_id,),
+        ).fetchone()
+        return None if row is None else _uuid(row["performance_id"])
 
     def duplicate_recordings(self) -> list[DuplicateRecording]:
         rows = self._conn.execute(
@@ -191,6 +196,19 @@ class PgPerformanceRepository(PerformanceRepository):
             ),
         )
 
+    def artists_credited_on(self, work_ids: list[str]) -> set[str]:
+        if not work_ids:
+            return set()
+        rows = self._conn.execute(
+            """SELECT COALESCE(pc.artist_id, a.id) AS artist_id
+               FROM performances p
+               JOIN performance_credits pc ON pc.performance_id = p.id
+               LEFT JOIN artists a ON pc.artist_id IS NULL AND a.mbid = pc.mbid
+               WHERE p.work_id = ANY(%s)""",
+            (list(work_ids),),
+        ).fetchall()
+        return {str(r["artist_id"]) for r in rows if r["artist_id"] is not None}
+
     def credits_artist(self, artist_id: str) -> bool:
         row = self._conn.execute(
             "SELECT EXISTS (SELECT 1 FROM performance_credits WHERE artist_id = %s) AS credited",
@@ -203,8 +221,8 @@ class PgPerformanceRepository(PerformanceRepository):
             """SELECT p.id, a.id AS work_artist_id, a.mbid AS work_artist_mbid,
                       a.name AS work_artist_name
                FROM performances p
-               JOIN works w ON w.id = p.work_id
-               LEFT JOIN artists a ON a.id = w.artist_id
+               LEFT JOIN work_artist_seed s ON s.work_id = p.work_id
+               LEFT JOIN artists a ON a.id = s.artist_id
                WHERE NOT EXISTS (SELECT 1 FROM performance_credits c
                                  WHERE c.performance_id = p.id)
                  AND (%s::uuid IS NULL OR p.id > %s::uuid)
@@ -261,15 +279,22 @@ class PgPerformanceRepository(PerformanceRepository):
         ).fetchall()
         return [StoredLine(match_id=UUID(str(r["id"])), line_work_id=r["work_id"]) for r in rows]
 
-    def files_waiting(self, after: UUID | None, limit: int) -> list[UUID]:
+    def files_waiting(self, after: UUID | None, limit: int) -> list[tuple[UUID, WorkArtist | None]]:
         rows = self._conn.execute(
-            """SELECT id FROM library_files
-               WHERE work_id IS NOT NULL AND performance_id IS NULL
-                 AND (%s::uuid IS NULL OR id > %s::uuid)
-               ORDER BY id LIMIT %s""",
+            """SELECT f.id, a.id AS work_artist_id, a.mbid AS work_artist_mbid,
+                      a.name AS work_artist_name
+               FROM library_files f
+               LEFT JOIN work_artist_seed s ON s.work_id = f.work_id
+               LEFT JOIN artists a ON a.id = s.artist_id
+               WHERE f.work_id IS NOT NULL AND f.performance_id IS NULL
+                 AND (%s::uuid IS NULL OR f.id > %s::uuid)
+               ORDER BY f.id LIMIT %s""",
             (after, after, limit),
         ).fetchall()
-        return [UUID(str(r["id"])) for r in rows]
+        return [(UUID(str(r["id"])), _work_artist(r)) for r in rows]
+
+    def drop_seed(self) -> None:
+        self._conn.execute("DROP TABLE IF EXISTS work_artist_seed")
 
     def stranded_preferred_copies(self) -> list[UUID]:
         rows = self._conn.execute(

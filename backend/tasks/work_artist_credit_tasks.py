@@ -2,7 +2,9 @@
 merges phase 3b PR 2, SPEC D1, D17's Q3, D20; AUD-R078).
 
 After 3a's build is done (its marker), each performance with no credit gets one, its work's
-artist (none for a placeholder). Batches commit as they go; its own done-marker ends it. It makes
+artist from 0055's seed (none for a placeholder or an unseeded work; 3b D38). Batches commit as
+they go; its own done-marker ends it, and the seed is dropped in the marker's transaction (D49):
+the one run-once step that changes the schema. It makes
 no MusicBrainz call and moves no file. Nothing queues it: the cutover and the gate run it by
 name, after the build and before any merge. On the live data it credits almost nothing, since
 the build already credits each performance it makes (D20).
@@ -68,6 +70,8 @@ def credit_work_artists_task() -> dict[str, object]:
                 handle.report_running(
                     progress_data={"processed": credited[0], "total": 0, "current_item": ""}
                 )
+            # D49: the seed's last reader is done; it goes with the marker, in one commit.
+            repos.performances.drop_seed()
             marker = UserSetting(WORK_ARTISTS_CREDITED_SETTING, datetime.now(UTC).isoformat())
             repos.user_settings.upsert(marker)
             conn.commit()

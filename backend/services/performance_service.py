@@ -69,29 +69,44 @@ def file_key(file: FileForPerformance, default: frozenset[str]) -> PerformanceKe
 
 
 def _uncredited_as(
-    file: FileForPerformance, came_from: UUID | None, performances: PerformanceRepository
+    work_id: str,
+    came_from: UUID | None,
+    default: WorkArtist | None,
+    performances: PerformanceRepository,
 ) -> tuple[frozenset[str], list[NewCredit]]:
     """Who a file with no credit of its own counts as, and the credits a performance it starts
-    gets: the performance it left (3b D18: a moved untagged copy keeps its act), else its work's
-    artist (D1)."""
+    gets: the performance it left (3b D18: a moved untagged copy keeps its act), else *default*
+    (grouping's pick for a new file, 0055's seed for the build; D1, D38), else its work's default
+    act, the credits of the performance holding the master's file (3b PR 5b's reading)."""
     carried = performances.carried(came_from) if came_from is not None else None
     if carried is not None and carried.artists:
         return carried.artists, list(carried.credits)
-    return default_artists(file.default_artist), default_credits(file.default_artist)
+    if default is not None:
+        return default_artists(default), default_credits(default)
+    held = performances.default_performance(work_id)
+    act = performances.carried(held) if held is not None else None
+    if act is not None:
+        return act.artists, list(act.credits)
+    return frozenset(), []
 
 
 def assign_performance(
-    file_id: UUID, performances: PerformanceRepository, *, came_from: UUID | None = None
+    file_id: UUID,
+    performances: PerformanceRepository,
+    *,
+    came_from: UUID | None = None,
+    default: WorkArtist | None = None,
 ) -> UUID | None:
     """Find or create the file's performance in its current work (S2's rule); idempotent.
-    *came_from* is the performance the file just left, if any (3b D18)."""
+    *came_from* is the performance the file just left, if any (3b D18); *default* the artist a
+    new file with no credit counts as, if its writer knows one (D1, D38)."""
     file = performances.file_for_performance(file_id)
     if file is None or file.work_id is None:
         return None
     if file.performance_id is not None:
         return file.performance_id
-    default, default_credit = _uncredited_as(file, came_from, performances)
-    key = file_key(file, default)
+    default_key, default_credit = _uncredited_as(file.work_id, came_from, default, performances)
+    key = file_key(file, default_key)
     found = find_performance(key, performances.candidates(file.work_id))
     if found is None:
         tagged = sorted(tag_artists(file.credit))
