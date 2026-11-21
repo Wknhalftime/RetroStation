@@ -107,14 +107,20 @@ SELECT p.work_id, COALESCE(pc.credited_name, a.name, held.name, pc.mbid) AS name
 """
 
 # The lines whose best match's file is on the work, and each station's resolution of one of its
-# plays (the guarded merge's rule, ``work_merges.py``).
+# plays (the guarded merge's rule, ``work_merges.py``). The candidates are a UNION of the two
+# indexed paths to the work's files (SPEC D48): one OR across the joined tables scanned both.
 _LINES = """
 WITH candidates AS (
-    SELECT DISTINCT m.identity_id
-      FROM matches m
-      JOIN library_files f ON f.id = m.library_file_id
-      LEFT JOIN recordings r ON r.id = f.recording_id
-     WHERE f.work_id = %(work)s OR r.work_id = %(work)s
+    SELECT m.identity_id
+      FROM library_files f
+      JOIN matches m ON m.library_file_id = f.id
+     WHERE f.work_id = %(work)s
+    UNION
+    SELECT m.identity_id
+      FROM recordings r
+      JOIN library_files f ON f.recording_id = r.id
+      JOIN matches m ON m.library_file_id = f.id
+     WHERE r.work_id = %(work)s
 ), lines AS (
     SELECT ti.id, ti.original_title, ti.broadcast_artist_id, best.pinned_file_id
       FROM candidates c
