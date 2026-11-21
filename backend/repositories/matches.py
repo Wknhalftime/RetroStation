@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from backend.domain.matching import Match
+from backend.domain.matching import Match, MatchPin
 
 
 class MatchRepository(ABC):
@@ -74,4 +74,9 @@ class MatchRepository(ABC):
     @abstractmethod
     def release_pins_of_file(self, file_id: UUID) -> int:
         """No match pins *file_id* any more; how many did."""
+        ...
+
+    @abstractmethod
+    def pins_of_lines(self, identity_ids: list[UUID]) -> list[MatchPin]:
+        """Each pin a match of the lines *identity_ids* holds (3b PR 5a, D41 d)."""
         ...

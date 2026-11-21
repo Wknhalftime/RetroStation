@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FormatOverrideInfo, RecordingDetail } from "@/lib/schemas/works";
@@ -14,6 +14,8 @@ interface FormatOverridePanelProps {
   onDelete: (oid: string) => void;
   isAdding?: boolean;
   isDeleting?: boolean;
+  /** 3b PR 5a (D41 f): shown in the add form, for the format typed. */
+  notice?: (formatName: string) => ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,7 @@ export function FormatOverridePanel({
   onDelete,
   isAdding = false,
   isDeleting = false,
+  notice,
 }: FormatOverridePanelProps) {
   const [showForm, setShowForm] = useState(false);
   const [formatName, setFormatName] = useState("");
@@ -80,7 +83,15 @@ export function FormatOverridePanel({
 
       {/* Add form */}
       {showForm && (
-        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
+        <form
+          aria-label="Add override"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSave();
+          }}
+          className="border-b border-gray-100 bg-gray-50 px-4 py-3 space-y-3"
+        >
+          {notice?.(formatName.trim())}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Format name */}
             <div>
@@ -148,7 +159,7 @@ export function FormatOverridePanel({
               Cancel
             </button>
           </div>
-        </div>
+        </form>
       )}
 
       {/* Overrides list */}

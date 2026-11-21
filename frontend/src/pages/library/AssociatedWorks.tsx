@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
-import { WorkFilesTable } from "@/components/domain/works/WorkFilesTable";
+import { CopyRow } from "@/components/domain/works/CopyRow";
+import { PerformanceList } from "@/components/domain/works/PerformanceList";
+import { SetMasterDialog } from "@/components/domain/works/SetMasterDialog";
+import { TwoActsNotice } from "@/components/domain/works/TwoActsNotice";
 import { FormatOverridePanel } from "@/components/domain/works/FormatOverridePanel";
 import { WorkVersionsPanel } from "@/components/domain/works/WorkVersionsPanel";
 import {
@@ -11,32 +15,69 @@ import {
   useRevertMaster,
   useCreateFormatOverride,
   useDeleteFormatOverride,
+  usePreferCopy,
+  useReleasePins,
 } from "@/api/works";
 import { useArtistDetail } from "@/api/artists";
+import type { FileInfo } from "@/lib/schemas/works";
 import { errorText } from "@/lib/errors";
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// The work page (phase 3b PR 5a; SPEC S8, D41): the work's performances, each with its credit
+// and copies, in place of "Recordings & Files"; Set master on each copy, asking first about the
+// pins of the copy it replaces (C72); Prefer this copy; pinned lines with Release; the
+// two-acts notice. At /library/works/:work_id its back link is the Library; at an artist's
+// address, that artist.
+
+const SECTION_HEADING = "mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500";
+
+function CopySection({
+  label,
+  files,
+  masterFileId,
+  isManual,
+  onSetMaster,
+}: {
+  label: string;
+  files: FileInfo[];
+  masterFileId: string | null;
+  isManual: boolean;
+  onSetMaster: (fileId: string) => void;
+}) {
+  if (files.length === 0) return null;
+  return (
+    <section
+      aria-label={label}
+      className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+    >
+      <div className="bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-800">{label}</div>
+      <ul>
+        {files.map((file) => (
+          <CopyRow
+            key={file.id}
+            file={file}
+            isMaster={file.id === masterFileId}
+            isManual={isManual}
+            onSetMaster={onSetMaster}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function AssociatedWorks() {
-  const { artist_id, work_id } = useParams<{
-    artist_id: string;
-    work_id: string;
-  }>();
+  const { artist_id, work_id } = useParams<{ artist_id: string; work_id: string }>();
 
   const { data: work, isLoading: workLoading, isError: workError } = useWorkDetail(work_id);
-
   const { data: artist } = useArtistDetail(artist_id);
 
   const setMaster = useSetMaster(work_id ?? "");
   const revertMaster = useRevertMaster(work_id ?? "");
   const createOverride = useCreateFormatOverride(work_id ?? "");
   const deleteOverride = useDeleteFormatOverride(work_id ?? "");
-
-  // ---------------------------------------------------------------------------
-  // Loading / error states
-  // ---------------------------------------------------------------------------
+  const preferCopy = usePreferCopy(work_id ?? "");
+  const releasePins = useReleasePins(work_id ?? "");
+  const [replacing, setReplacing] = useState<string | null>(null);
 
   if (workLoading) {
     return (
@@ -54,28 +95,60 @@ export function AssociatedWorks() {
     );
   }
 
-  // A merged-away id answers its merged work: the URL follows (3b S3, Q19).
+  // A merged-away id answers its merged work: the URL follows (3b S3, Q19), at either address.
   if (work.id !== work_id) {
-    return <Navigate to={`/library/artists/${artist_id}/works/${work.id}`} replace />;
+    const to = artist_id
+      ? `/library/artists/${artist_id}/works/${work.id}`
+      : `/library/works/${work.id}`;
+    return <Navigate to={to} replace />;
   }
 
-  // ---------------------------------------------------------------------------
-  // Derived values
-  // ---------------------------------------------------------------------------
-
+  const performances = work.performances ?? [];
+  const acts = work.acts ?? [];
   const masterFileId = work.song_master?.preferred_file_id ?? null;
-  const masterError = setMaster.error ?? revertMaster.error;
+  const isManual = work.song_master?.selection_method === "manual";
+  const files = work.recordings.flatMap((r) => r.files);
+  const copies = performances.flatMap((p) => p.copies);
+  const inPerformance = new Set(copies.map((c) => c.file.id));
+  const notYet = files.filter((f) => !f.other_work && !inPerformance.has(f.id));
+  const elsewhere = files.filter((f) => f.other_work);
+  const masterPins = copies.find((c) => c.file.id === masterFileId)?.pins ?? [];
+  const pathOf = (fileId: string | null) =>
+    [...copies.map((c) => c.file), ...files].find((f) => f.id === fileId)?.file_path ?? "";
 
-  const chooseMaster = (fileId: string) => {
+  const resetErrors = () => {
+    setMaster.reset();
     revertMaster.reset();
+    preferCopy.reset();
+    releasePins.reset();
+  };
+  const chooseMaster = (fileId: string) => {
+    resetErrors();
+    if (fileId !== masterFileId && masterPins.length > 0) {
+      setReplacing(fileId);
+      return;
+    }
     setMaster.mutate({ preferred_file_id: fileId });
   };
+  const confirmMaster = async (release: string[]) => {
+    const chosen = replacing;
+    setReplacing(null);
+    if (chosen === null) return;
+    if (release.length > 0) {
+      try {
+        await releasePins.mutateAsync(release);
+      } catch {
+        return; // the alert says why; no master is set
+      }
+    }
+    setMaster.mutate({ preferred_file_id: chosen });
+  };
   const revertToAuto = () => {
-    setMaster.reset();
+    resetErrors();
     revertMaster.mutate();
   };
-  const masterMethod = work.song_master?.selection_method ?? null;
 
+  const masterError = setMaster.error ?? revertMaster.error;
   const masterBannerText = work.song_master
     ? [
         `Selection: ${work.song_master.selection_method}`,
@@ -85,28 +158,24 @@ export function AssociatedWorks() {
         .filter(Boolean)
         .join("  ·  ")
     : null;
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const credited = (work.artists ?? []).map((a) => a.name).join(", ");
+  const twoActs = acts.length >= 2;
 
   return (
     <div className="space-y-6">
-      {/* Back link */}
       <div>
         <Link
-          to={`/library/artists/${artist_id}`}
+          to={artist_id ? `/library/artists/${artist_id}` : "/library"}
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="h-4 w-4" />
-          {artist?.name ?? "Artist"}
+          {artist_id ? (artist?.name ?? "Artist") : "Library"}
         </Link>
       </div>
 
-      {/* Page header */}
       <PageHeader
         title={work.title}
-        description={artist?.name}
+        description={credited || artist?.name}
         actions={
           work.song_master ? (
             <button
@@ -122,7 +191,6 @@ export function AssociatedWorks() {
         }
       />
 
-      {/* Master info banner */}
       {masterBannerText && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
           <span className="font-medium">Master file: </span>
@@ -130,31 +198,68 @@ export function AssociatedWorks() {
         </div>
       )}
 
-      {/* Why the last master change failed */}
       {masterError && (
         <p role="alert" className="rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
           Could not change the master file: {errorText(masterError)}
         </p>
       )}
+      {preferCopy.error && (
+        <p role="alert" className="rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          Could not prefer the copy: {errorText(preferCopy.error)}
+        </p>
+      )}
+      {releasePins.error && (
+        <p role="alert" className="rounded-md bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          Could not release the line: {errorText(releasePins.error)}
+        </p>
+      )}
 
-      {/* Files table */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-          Recordings &amp; Files
-        </h2>
-        <WorkFilesTable
-          recordings={work.recordings}
+      {replacing !== null && (
+        <SetMasterDialog
+          pins={masterPins}
+          oldPath={pathOf(masterFileId)}
+          newPath={pathOf(replacing)}
+          busy={releasePins.isPending || setMaster.isPending}
+          onConfirm={(release) => void confirmMaster(release)}
+          onCancel={() => setReplacing(null)}
+        />
+      )}
+
+      <section className="space-y-4">
+        <h2 className={SECTION_HEADING}>Performances</h2>
+        <PerformanceList
+          performances={performances}
           masterFileId={masterFileId}
-          masterMethod={masterMethod}
+          isManual={isManual}
+          onSetMaster={chooseMaster}
+          onPrefer={(performanceId, fileId) => {
+            resetErrors();
+            preferCopy.mutate({ performanceId, fileId });
+          }}
+          onRelease={(identityId) => {
+            resetErrors();
+            releasePins.mutate([identityId]);
+          }}
+          busy={preferCopy.isPending || releasePins.isPending}
+        />
+        <CopySection
+          label="Not in a performance yet"
+          files={notYet}
+          masterFileId={masterFileId}
+          isManual={isManual}
+          onSetMaster={chooseMaster}
+        />
+        <CopySection
+          label="On other works"
+          files={elsewhere}
+          masterFileId={masterFileId}
+          isManual={isManual}
           onSetMaster={chooseMaster}
         />
       </section>
 
-      {/* Format overrides */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-          Format Overrides
-        </h2>
+        <h2 className={SECTION_HEADING}>Format Overrides</h2>
         <FormatOverridePanel
           overrides={work.format_overrides}
           recordings={work.recordings}
@@ -162,16 +267,17 @@ export function AssociatedWorks() {
           onDelete={(oid) => deleteOverride.mutate({ oid })}
           isAdding={createOverride.isPending}
           isDeleting={deleteOverride.isPending}
+          notice={twoActs ? (format) => <TwoActsNotice acts={acts} format={format} /> : undefined}
         />
       </section>
 
-      {/* Versions (phase 2b S6), beside the format overrides */}
       <section>
         <WorkVersionsPanel
           workId={work_id ?? ""}
           versions={work.versions ?? []}
           masterFlag={work.master_flag ?? null}
           recordings={work.recordings}
+          notice={twoActs ? <TwoActsNotice acts={acts} /> : undefined}
         />
       </section>
     </div>

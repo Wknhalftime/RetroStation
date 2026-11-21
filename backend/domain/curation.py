@@ -92,6 +92,26 @@ class VersionArtistNotFoundError(WorkCurationError):
     """The artist whose versions Dismiss all names does not exist."""
 
 
+class PerformanceNotOnWorkError(WorkCurationError):
+    """The performance a work page write names is not one of the work's (3b PR 5a, S8)."""
+
+
+class DefaultPerformanceCopyError(WorkCurationError):
+    """Prefer this copy names the default performance, whose copy Set master picks (C71)."""
+
+
+class CopyNotInPerformanceError(WorkCurationError):
+    """The file Prefer this copy names is not a copy of the performance."""
+
+
+class PreferredCopyMissingError(WorkCurationError):
+    """The copy Prefer this copy names is missing from disk."""
+
+
+class PinNotOnWorkError(WorkCurationError):
+    """A line Release names pins no copy of the work (3b PR 5a, D41 d)."""
+
+
 @dataclass(frozen=True)
 class MergeResult:
     merged_file_count: int

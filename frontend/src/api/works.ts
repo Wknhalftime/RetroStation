@@ -164,3 +164,42 @@ export function useDeleteFormatOverride(workId: string) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Mutations — the work page's copies and pins (3b PR 5a; D41 c, d, e)
+// ---------------------------------------------------------------------------
+
+interface PreferCopyVariables {
+  performanceId: string;
+  fileId: string;
+}
+
+/** Prefer this copy: the copy a stored performance's lines play. */
+export function usePreferCopy(workId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, PreferCopyVariables>({
+    mutationFn: ({ performanceId, fileId }) =>
+      apiFetch<void>(
+        `/api/v1/library/works/${workId}/performances/${performanceId}/preferred-copy`,
+        { method: "PUT", body: JSON.stringify({ file_id: fileId }) }
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workKey(workId) });
+    },
+  });
+}
+
+/** Release: the lines leave their pins on the work's copies. */
+export function useReleasePins(workId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ released: number }, Error, string[]>({
+    mutationFn: (identityIds) =>
+      apiFetch<{ released: number }>(`/api/v1/library/works/${workId}/pins/release`, {
+        method: "POST",
+        body: JSON.stringify({ identity_ids: identityIds }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workKey(workId) });
+    },
+  });
+}

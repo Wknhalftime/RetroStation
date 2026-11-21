@@ -84,6 +84,15 @@ SONG_UNDECIDED_STATUSES: tuple[MatchStatus, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class MatchPin:
+    """One match's pin (3b S3, C72): the match, its line, and the file it pins."""
+
+    match_id: UUID
+    identity_id: UUID
+    file_id: UUID
+
+
 @dataclass
 class Match:
     """A song's match: a broadcast line to a file or a work. Since phase 1c's 0046 every match

@@ -11,7 +11,7 @@ from backend.db.repositories._version_entry_states import (
     ON_CONFLICT_KEEP_STATE,
 )
 from backend.domain.enums import MatchTier, TargetType
-from backend.domain.matching import Match, MatchingStorageError
+from backend.domain.matching import Match, MatchingStorageError, MatchPin
 from backend.repositories.matches import MatchRepository
 
 # The version texts of the lines a file plays for, by play_file_resolution's rule (0050): the
@@ -154,6 +154,22 @@ class PgMatchRepository(MatchRepository):
         self._conn.execute(
             "UPDATE matches SET pinned_file_id = %s WHERE id = ANY(%s)", (file_id, match_ids)
         )
+
+    def pins_of_lines(self, identity_ids: list[UUID]) -> list[MatchPin]:
+        rows = self._conn.execute(
+            """SELECT id, identity_id, pinned_file_id FROM matches
+               WHERE identity_id = ANY(%s) AND pinned_file_id IS NOT NULL
+               ORDER BY identity_id, id""",
+            (identity_ids,),
+        ).fetchall()
+        return [
+            MatchPin(
+                match_id=UUID(str(r["id"])),
+                identity_id=UUID(str(r["identity_id"])),
+                file_id=UUID(str(r["pinned_file_id"])),
+            )
+            for r in rows
+        ]
 
     def release_pins_of_file(self, file_id: UUID) -> int:
         cur = self._conn.execute(

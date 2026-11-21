@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useDismissVersions, useMapVersions, useUnmapVersions } from "@/api/versions";
 import type { RecordingDetail } from "@/lib/schemas/works";
 import type { MasterFlag, WorkVersion } from "@/lib/schemas/versions";
@@ -12,6 +12,8 @@ interface WorkVersionsPanelProps {
   versions: WorkVersion[];
   masterFlag: MasterFlag | null;
   recordings: RecordingDetail[];
+  /** 3b PR 5a (D41 f): shown beside the map control. */
+  notice?: ReactNode;
 }
 
 const STATE_LABEL = { unmapped: "Unmapped", mapped: "Mapped", dismissed: "Dismissed" } as const;
@@ -29,6 +31,7 @@ export function WorkVersionsPanel({
   versions,
   masterFlag,
   recordings,
+  notice,
 }: WorkVersionsPanelProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [fileId, setFileId] = useState("");
@@ -179,27 +182,30 @@ export function WorkVersionsPanel({
               ))}
             </ul>
 
-            <div className="flex items-center gap-2">
-              <select
-                aria-label="Map to file"
-                value={fileId}
-                onChange={(e) => setFileId(e.target.value)}
-                className="rounded-md border border-gray-300 px-2 py-1 text-sm"
-              >
-                <option value="">Select a file...</option>
-                {mappable.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                disabled={busy || selected.size === 0 || !fileId}
-                onClick={mapSelected}
-              >
-                Map selected
-              </button>
+            <div role="group" aria-label="Map versions" className="space-y-2">
+              {notice}
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label="Map to file"
+                  value={fileId}
+                  onChange={(e) => setFileId(e.target.value)}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-sm"
+                >
+                  <option value="">Select a file...</option>
+                  {mappable.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={busy || selected.size === 0 || !fileId}
+                  onClick={mapSelected}
+                >
+                  Map selected
+                </button>
+              </div>
             </div>
 
             {otherRows.length > 0 && (
