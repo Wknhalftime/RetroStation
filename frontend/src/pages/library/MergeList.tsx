@@ -26,7 +26,6 @@ const JOINS: Record<string, string> = {
 
 const REFERENCES: Record<string, string> = {
   recording: "recording",
-  match: "match",
   work_match: "match on the work",
   format_override: "format override",
   version_entry: "version entry",

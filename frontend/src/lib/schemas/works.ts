@@ -9,8 +9,7 @@ import { MasterFlagSchema, WorkVersionSchema } from "@/lib/schemas/versions";
 export const OtherWorkRefSchema = z.object({
   id: z.string(),
   title: z.string(),
-  artist_name: z.string(),
-  // 3b PR 5a (D41 h): the work's credited artists.
+  // 3b PR 5a (D41 h): the work's credited artists; its only artists since 5b (S7).
   artists: z.array(z.string()).optional(),
 });
 
@@ -135,7 +134,6 @@ export type Act = z.infer<typeof ActSchema>;
 export const WorkDetailSchema = z.object({
   id: z.string(),
   title: z.string(),
-  artist_id: z.string(),
   recordings: z.array(RecordingDetailSchema),
   song_master: SongMasterInfoSchema.nullable(),
   format_overrides: z.array(FormatOverrideInfoSchema),

@@ -36,8 +36,8 @@ export const UnmappedVersionSchema = WorkVersionSchema.omit({
 }).extend({
   work_id: z.string(),
   work_title: z.string(),
-  artist_id: z.string(),
-  artist_name: z.string(),
+  // 3b PR 5b (S7, R7): the work's credited artists; a work names none of its own.
+  artists: z.array(z.object({ id: z.string().nullable(), name: z.string() })),
 });
 
 export const UnmappedVersionPageSchema = z.object({

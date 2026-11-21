@@ -9,6 +9,7 @@ import {
   useUnmappedVersions,
 } from "@/api/versions";
 import type { UnmappedVersion } from "@/lib/schemas/versions";
+import { NO_CREDITED_ARTIST } from "@/components/domain/works/credits";
 
 // Versions phase 2b PR 3, SPEC S7 (C62): every unmapped version text, by plays.
 
@@ -138,7 +139,7 @@ export function UnmappedVersions() {
                       onChange={() => toggle(v)}
                     />
                   </td>
-                  <td>{v.artist_name}</td>
+                  <td>{v.artists.map((a) => a.name).join(", ") || NO_CREDITED_ARTIST}</td>
                   <td>{v.work_title}</td>
                   <td>
                     {v.version_text} {v.new && <span className="text-indigo-700">New</span>}
@@ -179,10 +180,7 @@ export function UnmappedVersions() {
                     >
                       Dismiss
                     </button>
-                    <Link
-                      to={`/library/artists/${v.artist_id}/works/${v.work_id}`}
-                      aria-label={`Open ${v.work_title}`}
-                    >
+                    <Link to={`/library/works/${v.work_id}`} aria-label={`Open ${v.work_title}`}>
                       Open work
                     </Link>
                   </td>
