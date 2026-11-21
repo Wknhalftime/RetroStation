@@ -279,13 +279,15 @@ class PgWorkRepository(WorkRepository):
         # files of the name hold a credit no artist holds (_UNHELD_OF_NAME). Names are unique
         # only without an MBID (C41), so this sees the works of every artist of the name (M18);
         # `artists.normalized_name` (0047) and `library_files.normalized_artist_name` (0011)
-        # have plain indexes.
+        # have plain indexes. One IN over a UNION, so both indexed paths drive the read: an OR
+        # of two INs scanned every work in parallel, 88 ms a name on the dev copy (SPEC D53).
         rows = self._conn.execute(
             f"""SELECT w.id, w.title
                 FROM works w
                 WHERE w.id IN (SELECT c.work_id FROM ({_CREDITED}) c
-                               WHERE c.normalized_name = %(name)s)
-                   OR w.id IN ({_UNHELD_OF_NAME})
+                               WHERE c.normalized_name = %(name)s
+                               UNION
+                               {_UNHELD_OF_NAME})
                 ORDER BY w.title
                 LIMIT %(limit)s""",  # noqa: S608 (constants)
             {"name": normalized_artist_name, "limit": limit},

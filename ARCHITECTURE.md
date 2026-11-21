@@ -915,17 +915,22 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   `routers/library/artists.py` for an async reader (R9): the port `ArtistWorksReader`
   (`repositories/artist_works.py`), the adapter `AsyncArtistWorksReader`
   (`db/repositories/artist_works.py`, whose `_WORK_ARTISTS` is the rule), wired by
-  `get_artist_works_reader`; the list pages its artists first and reads their works after. An Unmapped versions item names its work's credited `artists`,
-  and an artist page's Dismiss all takes the works its group is credited on (R7). The work
+  `get_artist_works_reader`. The list pages its artists first, then reads only those groups'
+  credits, by artist id and by held MBID, both indexed (SPEC D53: building every credit pair
+  first took 325 ms a page on the dev copy). An Unmapped versions item names its work's
+  credited `artists`, and an artist page's Dismiss all takes the works its group is credited
+  on (R7). The work
   page's header and "On other works" name the credited artists, "No credited artist" when
   there are none and the address names no artist (D47, D50; `credits.ts`). Enrichment's MBID
   claim needs the local work's credits to hold the artist (R3); the untagged pass searches with
   the MBID of the file's own performance credit (R4).
 - **Grouping (R1).** A file's candidates are the works whose performances credit an artist of
-  its normalized name, and (a reading) the works whose files of that name hold a credit of an
-  MBID no artist holds: a name with one MBID makes no artist for it (2a D6), and without this
+  its normalized name, and (D51) the works whose files of that name hold a credit of an MBID
+  no artist holds: a name with one MBID makes no artist for it (2a D6), and without this
   tagged copies of one song would each make a work (`_UNHELD_OF_NAME` in
-  `db/repositories/works.py`). #258's tie order stays. The artist grouping picks is the one of
+  `db/repositories/works.py`). The two sets are one `IN (... UNION ...)` so their indexes
+  drive the read (SPEC D53: an `OR` of two `IN`s scanned every work, 88 ms a name on the dev
+  copy). #258's tie order stays. The artist grouping picks is the one of
   the name the chosen work credits, else `upsert_local_artist`'s for a new work;
   `GroupingResult.artist` carries it to `assign_performance(default=)`.
 - **A file with no credit of its own** counts as the performance it left (D18), else the

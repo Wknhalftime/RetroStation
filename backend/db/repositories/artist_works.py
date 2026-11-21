@@ -4,6 +4,7 @@ PR 5b; SPEC S7, scope note R6, R9: they left ``routers/library/artists.py``, whi
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -22,18 +23,42 @@ _WORK_ARTISTS = """
      WHERE COALESCE(pc.artist_id, held.id) IS NOT NULL
 """
 
-# A page of listed artists' works, each work under the root of each credited artist's group,
-# and the files on them (the list's work and file counts, and its new-version counts' works).
-_LISTED_WORKS_SQL = f"""
+# The list's works read (its work and file counts, and its new-version counts' works) is three
+# small reads, each sized by its array, so the planner takes the indexes: the page's groups, their
+# credits, the files on their works. One query filtering after _WORK_ARTISTS built every credit
+# pair took 325 ms a page on the dev copy, and one joining the merge walk into the credits still
+# planned for every credit and every file, the walk's estimate being far too high (SPEC D53).
+
+# Each group on the page: a root merged into no one, and the members whose root it is (the one
+# merge walk, MERGE_ROOTS_CTE, 2a S11), with each member's MBID.
+_PAGE_GROUPS_SQL = f"""
     WITH RECURSIVE {MERGE_ROOTS_CTE}
-    SELECT w.root_id, array_agg(DISTINCT w.work_id) AS work_ids,
-           COUNT(DISTINCT lf.id) AS file_count
-      FROM (SELECT DISTINCT COALESCE(r.primary_id, wa.artist_id) AS root_id, wa.work_id
-              FROM ({_WORK_ARTISTS}) wa
-              LEFT JOIN merge_roots r ON r.artist_id = wa.artist_id
-             WHERE COALESCE(r.primary_id, wa.artist_id) = ANY(%(ids)s)) w
-      LEFT JOIN library_files lf ON lf.work_id = w.work_id
-     GROUP BY w.root_id
+    SELECT a.id AS artist_id, a.id AS root_id, a.mbid
+      FROM artists a
+     WHERE a.id = ANY(%(ids)s)
+       AND NOT EXISTS (SELECT 1 FROM merge_roots merged WHERE merged.artist_id = a.id)
+    UNION ALL
+    SELECT r.artist_id, r.primary_id, a.mbid
+      FROM merge_roots r JOIN artists a ON a.id = r.artist_id
+     WHERE r.primary_id = ANY(%(ids)s)
+"""
+
+# The works the members are credited on: by artist id, and by MBID for a credit no artist id
+# names (3a's D1; the MBID's one holder is the member).
+_MEMBER_CREDITS_SQL = """
+    SELECT pc.artist_id, NULL::text AS mbid, p.work_id
+      FROM performance_credits pc JOIN performances p ON p.id = pc.performance_id
+     WHERE pc.artist_id = ANY(%(artists)s)
+    UNION ALL
+    SELECT NULL::text, pc.mbid, p.work_id
+      FROM performance_credits pc JOIN performances p ON p.id = pc.performance_id
+     WHERE pc.artist_id IS NULL AND pc.mbid = ANY(%(mbids)s)
+"""
+
+# The files on each work; a file is on one work, so a group's files are its works' sum.
+_WORK_FILES_SQL = """
+    SELECT work_id, count(*) AS files FROM library_files
+     WHERE work_id = ANY(%(works)s) GROUP BY work_id
 """
 
 # The works any member of the group is credited on (3b S7, R6), with the members credited.
@@ -68,12 +93,28 @@ class AsyncArtistWorksReader(ArtistWorksReader):
     async def listed_works(self, root_ids: list[str]) -> dict[str, ListedWorks]:
         if not root_ids:
             return {}
-        cur = await self._conn.execute(_LISTED_WORKS_SQL, {"ids": root_ids})
+        cur = await self._conn.execute(_PAGE_GROUPS_SQL, {"ids": root_ids})
+        members = await cur.fetchall()
+        root_of = {str(m["artist_id"]): str(m["root_id"]) for m in members}
+        root_of_mbid = {str(m["mbid"]): str(m["root_id"]) for m in members if m["mbid"]}
+        cur = await self._conn.execute(
+            _MEMBER_CREDITS_SQL, {"artists": list(root_of), "mbids": list(root_of_mbid)}
+        )
+        works: dict[str, set[str]] = defaultdict(set)
+        for row in await cur.fetchall():
+            artist = row["artist_id"]
+            root = root_of[str(artist)] if artist is not None else root_of_mbid[str(row["mbid"])]
+            works[root].add(str(row["work_id"]))
+        every = sorted({w for found in works.values() for w in found})
+        files: dict[str, int] = {}
+        if every:
+            cur = await self._conn.execute(_WORK_FILES_SQL, {"works": every})
+            files = {str(r["work_id"]): int(r["files"]) for r in await cur.fetchall()}
         return {
-            str(row["root_id"]): ListedWorks(
-                work_ids=tuple(str(w) for w in row["work_ids"]), file_count=row["file_count"]
+            root: ListedWorks(
+                work_ids=tuple(sorted(found)), file_count=sum(files.get(w, 0) for w in found)
             )
-            for row in await cur.fetchall()
+            for root, found in works.items()
         }
 
     async def group_works(self, member_ids: list[str]) -> list[GroupWork]:
