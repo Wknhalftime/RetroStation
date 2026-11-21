@@ -45,8 +45,10 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = "0044_log_name_links"
 MIGRATION = ROOT / "backend" / "db" / "migrations" / f"{VERSION}.sql"
 ROLLBACK = ROOT / "backend" / "db" / f"rollback_{VERSION}.sql"
-# The rollbacks of the migrations since 0044, newest first (phase 1c, S10).
+# The rollbacks of the migrations since 0044 that touch its tables, newest first (phase 1c,
+# S10; 3b PR 5b's 0055 brings works.artist_id back, which 0044's rollback reads).
 LATER_ROLLBACKS = (
+    ROOT / "backend" / "db" / "rollback_0055_work_artists_from_credits.sql",
     ROOT / "backend" / "db" / "rollback_0046_drop_artist_rows.sql",
     ROOT / "backend" / "db" / "rollback_0045_link_demotion.sql",
 )

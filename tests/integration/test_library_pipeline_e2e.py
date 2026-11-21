@@ -44,6 +44,7 @@ from backend.services.identity_matching_service import (
 from backend.services.ingestion_service import ingest_csv
 from backend.services.normalization import normalize_title
 from tests.fakes.mb_client import FakeMbClient
+from tests.integration.song_together_seed import credit_work
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "KAZR-FakeData.csv"
 
@@ -151,20 +152,21 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
         target_title = metallica_identities[0]["original_title"]
 
         # --- Step 4: Insert canonical Artist + Work + Recording + library file ---
-        # matches.work_id is FK to works(id), so the auto-matcher can only
-        # persist a work_id that exists in works(). Seed a real Work (which
-        # itself FKs to artists.id), link the Recording to it, and set
-        # lib_file.work_id so the persisted match row's work_id is satisfied.
+        # A match line's work is its file's work (3b PR 5b, S7), so the
+        # auto-matcher can only report a work the file is on. Seed a real Work,
+        # link the Recording to it, and set lib_file.work_id.
         # The artist_matching rule above linked Metallica's broadcast row to
         # "mbid-metallica-lib", which no catalog artist held, so the link
         # points at a stub artist of that MBID (phase 1a S6).
         # ResolvedArtistMbidStrategy reads the stub's mbid back as the real
-        # MBID and proceeds to the library lookup. The work goes on the stub.
+        # MBID and proceeds to the library lookup. The work goes on the stub:
+        # a performance of it credits the stub (a work's artists since S7).
         work_mbid = "mbid-work-" + uuid4().hex[:8]
         conn.execute(
-            "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-            (work_mbid, target_title, linked_artist_id),
+            "INSERT INTO works (id, title) VALUES (%s, %s)",
+            (work_mbid, target_title),
         )
+        credit_work(conn, work_mbid, linked_artist_id)
         recording_mbid = "mbid-rec-" + uuid4().hex[:8]
         recording = Recording(
             id=recording_mbid,
@@ -231,5 +233,5 @@ def test_library_pipeline_auto_match(migrated_db: str) -> None:
 
         # work_ids returned should contain the seeded work_mbid — the
         # auto-matcher emits real works(id) refs only (no recording_id
-        # stand-ins) since matches.work_id is FK to works(id).
+        # stand-ins): the works of the matched files.
         assert work_mbid in work_ids

@@ -30,8 +30,7 @@ function item(work: string, title: string, text: string, overrides: Record<strin
   return {
     work_id: work,
     work_title: title,
-    artist_id: "a-metallica",
-    artist_name: "Metallica",
+    artists: [{ id: "a-metallica", name: "Metallica" }],
     version_text: text,
     version_type: "live",
     reads_as_version: true,
@@ -156,7 +155,8 @@ describe("UnmappedVersions: the list", () => {
     render(<UnmappedVersions />, { wrapper });
 
     const link = await screen.findByRole("link", { name: "Open One" });
-    expect(link.getAttribute("href")).toBe("/library/artists/a-metallica/works/w-one");
+    // A work has no artist of its own since 3b PR 5b (S7); its page has its own address.
+    expect(link.getAttribute("href")).toBe("/library/works/w-one");
   });
 
   it("shows neither rows nor the empty note while it loads", async () => {

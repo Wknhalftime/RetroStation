@@ -29,7 +29,7 @@ class SongMatchService:
         if suggestion is not None:
             self._matches.create(suggestion)
 
-    def match_by_hand(self, identity_id: UUID, file_id: UUID, work_id: str | None) -> None:
+    def match_by_hand(self, identity_id: UUID, file_id: UUID) -> None:
         """The curator's pick replaces the song's matches (Resolve)."""
         self._matches.delete_for_identity(identity_id)
         self._matches.create(
@@ -38,7 +38,6 @@ class SongMatchService:
                 identity_id=identity_id,
                 library_file_id=file_id,
                 target_type=TargetType.LIBRARY_FILE,
-                work_id=work_id,
                 confidence_score=1.0,
                 match_tier=MatchTier.MANUAL,
             )
@@ -52,17 +51,10 @@ class SongMatchService:
         """Delete every match naming the file; the identity id of each match deleted."""
         return self._matches.delete_for_file(file_id)
 
-    def follow_file(self, file_id: UUID, work_id: str | None) -> None:
-        """Point every match on the file at the work the file now belongs to."""
-        self._matches.move_to_work(file_id, work_id)
-
     def follow_works(self, work_ids: list[str], target_id: str) -> None:
-        """Point every match at *work_ids*, as its target or its file's work, at *target_id*."""
+        """Point every match whose target is one of *work_ids* at *target_id* (a line on a file
+        follows its file's work by itself since 3b PR 5b, S7)."""
         self._matches.move_matches_of_works(work_ids, target_id)
-
-    def release_work(self, work_id: str) -> None:
-        """Point each match still on *work_id* at its file's current work (or none)."""
-        self._matches.release_work_matches(work_id)
 
     def hand_off_performance(self, match_ids: list[UUID], performance_id: UUID) -> None:
         """The lines store *performance_id* instead (phase 3a, E3, D5)."""

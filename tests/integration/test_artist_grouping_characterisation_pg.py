@@ -2,17 +2,20 @@
 change phase 2a makes on purpose (C41, M33, AUD-R041).
 
 The scan groups a file by its artist name as written plus its base title, and upserts its
-artist by that name alone, so a work stays on a name-based artist until 3b. An artist MBID tag
-makes an artist only when the name holds several MBIDs (2a S14). Each test scans tagged
-copies of a fixture file and reads the result only through each file's work and the Library's
-artist routes (the artist list, and an artist's works list), never ``works.artist_id``:
+artist by that name alone, while a work's artists are its performances' credits (3b PR 5b,
+S7): a tagged file's work credits its MBIDs. An artist MBID tag makes an artist only when the
+name holds several MBIDs (2a S14). Each test scans tagged copies of a fixture file and reads
+the result only through each file's work and the Library's artist routes (the artist list, and
+an artist's works list), never ``works.artist_id``:
 
-- a tagged file whose name exists as a name-only artist joins that artist;
-- two tagged files with one name and different MBIDs: each MBID gets an artist, and the
-  name-only artist keeps one work per title;
+- a tagged file whose name exists as a name-only artist credits its MBID, not that artist;
+- two tagged files with one name and different MBIDs: each MBID gets an artist its works
+  credit, a title both recorded is one work crediting both, and the name-only artist
+  lists none;
 - an untagged file for a name that has an MBID artist joins the MBID artist;
-- a tag holding two MBIDs keeps one artist named by the whole text, and the file keeps only
-  the first MBID (the Library's file list finds it by that MBID only).
+- a tag holding two MBIDs keeps one artist named by the whole text, but the work credits both
+  MBIDs, and the file keeps only the first MBID (the Library's file list finds it by that MBID
+  only).
 """
 
 from __future__ import annotations
@@ -152,8 +155,11 @@ def works_of(client: TestClient, artist_id: str) -> list[tuple[str, str]]:
 def test_tagged_file_joins_a_name_only_artist(
     conn: Conn, client: TestClient, tmp_path: Path
 ) -> None:
-    """S2: the name exists as a name-only artist; a file tagged with an MBID joins it, and the
-    artist keeps no MBID."""
+    """S2: the name exists as a name-only artist; a file tagged with an MBID gets a work that
+    credits its MBID, not that artist (a work's artists are its performances' credits, 3b PR 5b,
+    S7). One MBID makes no artist (2a D6), so the list shows the name-only artist with its own
+    work only (the pages stay the credits alone, SPEC D52), and the artist keeps no MBID.
+    """
     root = tmp_path / "library"
     tagged(root / "untagged.mp3", "Shared Name", "Morning Light")
     full_scan(conn, root)
@@ -161,20 +167,19 @@ def test_tagged_file_joins_a_name_only_artist(
     full_scan(conn, root)
 
     work = works_by_file(conn)
-    assert summary(client) == {("Shared Name", None, "local", 2, 2)}
-    assert works_listed(client, "Shared Name") == [
-        (work["tagged.mp3"], "Evening Rain"),
-        (work["untagged.mp3"], "Morning Light"),
-    ]
+    assert summary(client) == {("Shared Name", None, "local", 1, 1)}
+    assert works_listed(client, "Shared Name") == [(work["untagged.mp3"], "Morning Light")]
 
 
 def test_one_name_two_mbids_each_get_an_artist(
     conn: Conn, client: TestClient, tmp_path: Path
 ) -> None:
     """Phase 2a S14: the Alice Cooper band and singer, told apart only by their MBID tags, each
-    get an artist. The name-only artist keeps the works (until 3b), and a title both recorded
-    is one work holding both files. An MBID artist lists 0 works, and its page falls back on
-    the titles of its files."""
+    get an artist, and a title both recorded is one work holding both files (grouping finds it
+    by the files' name while no artist holds the MBIDs, SPEC D51). A work's artists
+    are its performances' credits (3b PR 5b, S7): each MBID artist lists the works its files'
+    performances credit, the shared title under both, and the name-only artist lists none.
+    """
     root = tmp_path / "library"
     tagged(root / "schools-out.mp3", "Alice Cooper", "School's Out", ALICE_BAND)
     tagged(root / "poison.mp3", "Alice Cooper", "Poison", ALICE_SINGER)
@@ -185,16 +190,12 @@ def test_one_name_two_mbids_each_get_an_artist(
     work = works_by_file(conn)
     assert work["wheels-band.mp3"] == work["wheels-singer.mp3"]
     assert summary(client) == {
-        ("Alice Cooper", None, "local", 3, 4),
-        ("Alice Cooper", ALICE_BAND, "musicbrainz", 0, 0),
-        ("Alice Cooper", ALICE_SINGER, "musicbrainz", 0, 0),
+        ("Alice Cooper", None, "local", 0, 0),
+        ("Alice Cooper", ALICE_BAND, "musicbrainz", 2, 3),
+        ("Alice Cooper", ALICE_SINGER, "musicbrainz", 2, 3),
     }
     by_mbid = {a["mbid"]: a["id"] for a in artists(client)}
-    assert works_of(client, by_mbid[None]) == [
-        (work["poison.mp3"], "Poison"),
-        (work["schools-out.mp3"], "School's Out"),
-        (work["wheels-band.mp3"], "Under My Wheels"),
-    ]
+    assert works_of(client, by_mbid[None]) == []
     assert [title for _, title in works_of(client, by_mbid[ALICE_BAND])] == [
         "School's Out",
         "Under My Wheels",
@@ -234,15 +235,17 @@ def test_untagged_file_joins_the_mbid_artist_of_its_name(
 
 
 def test_tag_with_two_mbids(conn: Conn, client: TestClient, tmp_path: Path) -> None:
-    """S2: a tag holding two MBIDs. The artist is the whole text, never split; the file keeps
-    the first MBID only, so the Library's file list finds it by that one."""
+    """S2: a tag holding two MBIDs. The artist grouping upserts is the whole text, never split,
+    but the work credits both MBIDs (a work's artists are its performances' credits, 3b PR 5b,
+    S7), whose artists are unnamed stubs the list leaves out, so the whole-text artist lists no
+    work (the pages stay the credits alone, SPEC D52). The file keeps the first MBID only, so
+    the Library's file list finds it by that one."""
     root = tmp_path / "library"
     tagged(root / "duet.mp3", "Duet A & Duet B", "Duet Song", DUET_A, DUET_B)
     full_scan(conn, root)
 
-    work = works_by_file(conn)
-    assert summary(client) == {("Duet A & Duet B", None, "local", 1, 1)}
-    assert works_listed(client, "Duet A & Duet B") == [(work["duet.mp3"], "Duet Song")]
+    assert summary(client) == {("Duet A & Duet B", None, "local", 0, 0)}
+    assert works_listed(client, "Duet A & Duet B") == []
 
     def files_tagged(mbid: str) -> list[str]:
         response = client.get("/api/v1/library/files", params={"artist_mbid": mbid})

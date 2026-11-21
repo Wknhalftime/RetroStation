@@ -24,7 +24,6 @@ def _work(
     return Work(
         id=work_id,
         title=f"Work {work_id}",
-        artist_id="artist-uuid",
         needs_enhancement=needs_enhancement,
         enhancement_error=enhancement_error,
         mbid=None,

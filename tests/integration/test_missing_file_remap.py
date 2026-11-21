@@ -33,7 +33,10 @@ def test_remap_across_works_moves_matches_and_empties_the_old_work(migrated_db: 
 
         remap_missing_file(gone.id, target.id, reconciliation_repos(repos))
         row = conn.execute(
-            "SELECT library_file_id, work_id FROM matches WHERE identity_id = %s", (matched,)
+            """SELECT m.library_file_id, f.work_id FROM matches m
+               JOIN library_files f ON f.id = m.library_file_id
+               WHERE m.identity_id = %s""",  # a line's work is its file's (3b S7)
+            (matched,),
         ).fetchone()
         gone_left = repos.library_files.get_by_id(gone.id)
         old_work_left = repos.works.get_by_id(old_work)

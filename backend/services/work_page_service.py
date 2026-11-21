@@ -80,7 +80,6 @@ async def work_detail(work_id: str, repos: WorkPageRepos) -> WorkDetailPage:
     return WorkDetailPage(
         id=head.id,
         title=head.title,
-        artist_id=head.artist_id,
         recordings=tuple(recordings),
         song_master=master,
         format_overrides=tuple(await repos.pages.format_overrides(head.id)),
@@ -111,7 +110,6 @@ async def _synthetic_detail(
     return WorkDetailPage(
         id=work_id,
         title=title,
-        artist_id=artist_mbid,
         recordings=(recording,),
         song_master=None,
         format_overrides=(),

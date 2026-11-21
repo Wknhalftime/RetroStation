@@ -329,7 +329,6 @@ def settle_fold_across_works(
     """
     if left_work_id == survivor_work_id:
         return
-    SongMatchService(repos.matches).follow_file(survivor_id, survivor_work_id)
     if left_work_id is not None and survivor_work_id is not None:
         repos.format_overrides.move_to_work(survivor_id, left_work_id, survivor_work_id)
     if left_work_id is not None:

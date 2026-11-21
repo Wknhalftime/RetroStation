@@ -1,7 +1,8 @@
 """Fast (fake-repo) twins of tests/integration/test_match_work_follows_grouping.py.
 
 A match carries its file's work: grouping that gives a file its first work
-moves the file's matches too. The Postgres file is the authority.
+moves the file's matches too. Since 3b PR 5b (S7) a match stores no work, so a line's work is
+its file's work. The Postgres file is the authority.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ def _repos() -> WorkMoveRepos:
 
 
 def _work(repos: WorkMoveRepos, work_id: str) -> str:
-    repos.works.upsert(Work(id=work_id, title=work_id, artist_id="a1", origin=CatalogSource.LOCAL))
+    repos.works.upsert(Work(id=work_id, title=work_id, origin=CatalogSource.LOCAL))
     return work_id
 
 
@@ -42,7 +43,7 @@ def _file(repos: WorkMoveRepos, work_id: str | None) -> LibraryFile:
     )
 
 
-def _match(repos: WorkMoveRepos, file_id: UUID, work_id: str | None) -> Match:
+def _match(repos: WorkMoveRepos, file_id: UUID) -> Match:
     return repos.matches.create(
         Match(
             id=uuid4(),
@@ -50,7 +51,6 @@ def _match(repos: WorkMoveRepos, file_id: UUID, work_id: str | None) -> Match:
             match_tier=MatchTier.MANUAL,
             identity_id=uuid4(),
             library_file_id=file_id,
-            work_id=work_id,
         )
     )
 
@@ -59,7 +59,7 @@ def test_placing_an_ungrouped_file_moves_its_matches_to_the_work() -> None:
     repos = _repos()
     work = _work(repos, "kiss")
     file = _file(repos, None)
-    match = _match(repos, file.id, None)
+    match = _match(repos, file.id)
 
     place_ungrouped_file(file.id, work, repos.files, repos.matches)
 
@@ -67,4 +67,6 @@ def test_placing_an_ungrouped_file_moves_its_matches_to_the_work() -> None:
     assert placed is not None and placed.work_id == work
     assert match.identity_id is not None
     moved = repos.matches.get_by_identity(match.identity_id)
-    assert moved is not None and moved.work_id == work
+    assert moved is not None and moved.library_file_id is not None
+    line_file = repos.files.get_by_id(moved.library_file_id)
+    assert line_file is not None and line_file.work_id == work

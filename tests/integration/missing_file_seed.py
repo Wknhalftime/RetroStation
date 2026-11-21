@@ -52,8 +52,8 @@ def full_scan(conn: Conn, root: Path) -> None:
 
 
 def work(repos: RepositoryFactory, title: str = "Kiss") -> str:
-    """A local work by Prince."""
-    return repos.works.create_local(title, repos.artists.upsert_local_artist("Prince", "prince"))
+    """A local work (Prince's once its files' performances credit him; 3b S7)."""
+    return repos.works.create_local(title)
 
 
 def library_file(
@@ -97,8 +97,9 @@ def identity(repos: RepositoryFactory, status: MatchStatus = MatchStatus.AUTO_MA
 
 
 def match(conn: Conn, identity_id: UUID, file_id: UUID, work_id: str | None = None) -> None:
-    """An identity match naming *file_id*."""
+    """An identity match naming *file_id*. *work_id* is kept for its callers and unused:
+    a line's work is its file's since 3b PR 5b (S7)."""
     conn.execute(
-        "INSERT INTO matches (identity_id, library_file_id, work_id) VALUES (%s, %s, %s)",
-        (identity_id, file_id, work_id),
+        "INSERT INTO matches (identity_id, library_file_id) VALUES (%s, %s)",
+        (identity_id, file_id),
     )

@@ -136,10 +136,7 @@ def _song(
         "INSERT INTO artists (id, name, sort_name) VALUES (%s, 'Artist', 'Artist')",
         (mbid_artist,),
     )
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, 'Song', %s)",
-        (mbid_work, mbid_artist),
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, 'Song')", (mbid_work,))
     conn.execute(
         """INSERT INTO library_files (id, file_path, work_id, audio_hash, duration_ms,
                                       file_status)

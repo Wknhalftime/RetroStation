@@ -17,6 +17,7 @@ from backend.services.normalization import normalize_artist
 from backend.services.repository_factory import RepositoryFactory
 from tests.integration.song_together_seed import (
     add_file,
+    credit_work,
     group_like_the_scan,
     insert_local_work,
 )
@@ -34,7 +35,8 @@ def test_a_tie_in_the_fuzzy_match_goes_to_the_musicbrainz_work(migrated_db: str)
         repos = RepositoryFactory(conn)
         artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
         local = insert_local_work(conn, _LOW_ID, title, artist_id)
-        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=title, artist_id=artist_id)
+        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=title)
+        credit_work(conn, mb_work, artist_id)  # U2's by its credits (3b S7)
         assert local < mb_work, "the local work would win today's id tie-break"
         new_copy = add_file(repos, "/music/U2/new.flac", artist="U2", title=title)
 
@@ -47,8 +49,9 @@ def test_a_better_score_still_wins_over_the_musicbrainz_work(migrated_db: str) -
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
-        local = repos.works.create_local("Love Song", artist_id)
-        repos.works.upsert_from_mb(mbid=_WORK, title="Love Songs", artist_id=artist_id)
+        local = repos.works.create_local("Love Song")
+        credit_work(conn, local, artist_id)
+        credit_work(conn, repos.works.upsert_from_mb(mbid=_WORK, title="Love Songs"), artist_id)
         new_copy = add_file(repos, "/music/U2/love.flac", artist="U2", title="Love Song")
 
         assert group_like_the_scan(repos, new_copy) == local
@@ -64,11 +67,12 @@ def test_the_fallback_past_the_candidate_cap_prefers_the_musicbrainz_work(
         repos = RepositoryFactory(conn)
         artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
         for n in range(100):
-            repos.works.create_local(f"A{n:03d}", artist_id)
+            credit_work(conn, repos.works.create_local(f"A{n:03d}"), artist_id)
         # The local work is stored first (an unordered read meets it first) and has the
         # lower id (a lowest-id rule picks it): only the MusicBrainz preference passes.
         local = insert_local_work(conn, _LOW_ID, title, artist_id)
-        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=title, artist_id=artist_id)
+        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=title)
+        credit_work(conn, mb_work, artist_id)
         assert local < mb_work
         new_copy = add_file(repos, "/music/U2/zebra.flac", artist="U2", title=title)
 

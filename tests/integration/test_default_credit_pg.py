@@ -4,8 +4,10 @@ phase 3b PR 2, SPEC D1, D17 (scope Q4, Q5); design §6.2; AUD-R078).
 ``assign_performance`` (3a's S2, kept by every writer) now:
 
 - credits a new performance whose first file has no credit (untagged, or only placeholders) with
-  its work's artist (``works.artist_id``): position 0, the artist's id, its MBID if it has one,
-  its name as the credited name, ``main``. A placeholder work artist gives no credit (Q5);
+  the artist its writer gives (grouping's pick, or 0055's seed for the build; 3b PR 5b, S7, D38:
+  a work names no artist, so these tests pass the artist grouping would pick): position 0, the
+  artist's id, its MBID if it has one, its name as the credited name, ``main``. A placeholder
+  gives no credit (Q5);
 - compares credit artists, not MBIDs only: a credit counts as its MBID when known (the
   credit's, else its artist's), else as its artist id (Q4). An untagged file counts as its work's
   artist, so it joins a tagged performance of that artist when version and length agree
@@ -29,6 +31,7 @@ import pytest
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
+from backend.domain.performances import WorkArtist
 from backend.services.performance_service import assign_performance, reassign_retagged
 from backend.services.repository_factory import RepositoryFactory, work_curation_repos
 from backend.services.song_match_service import SongMatchService
@@ -69,11 +72,14 @@ def artist(conn: Conn, name: str, mbid: str | None = None) -> str:
     return artist_id
 
 
+# Each work's artist, as grouping would pick it for the work's files (a work names none).
+_ARTIST_OF: dict[str, str] = {}
+
+
 def work(conn: Conn, artist_id: str, title: str = "Poison") -> str:
     work_id = f"work-{title.lower()}-{artist_id}"
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)", (work_id, title, artist_id)
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, title))
+    _ARTIST_OF[work_id] = artist_id
     return work_id
 
 
@@ -107,9 +113,25 @@ def file_row(
     return fid(n)
 
 
+def picked(conn: Conn, file_id: UUID) -> WorkArtist | None:
+    """The artist grouping picks for the file: its work's, as it is now (an MBID gained
+    by promotion in place included)."""
+    row = conn.execute("SELECT work_id FROM library_files WHERE id = %s", (file_id,)).fetchone()
+    artist_id = _ARTIST_OF.get(str(row["work_id"])) if row is not None else None
+    if artist_id is None:
+        return None
+    artist = conn.execute(
+        "SELECT id, mbid, name FROM artists WHERE id = %s", (artist_id,)
+    ).fetchone()
+    assert artist is not None
+    return WorkArtist(id=artist["id"], mbid=artist["mbid"], name=artist["name"])
+
+
 def assign(conn: Conn, *file_ids: UUID) -> None:
     for file_id in file_ids:
-        assign_performance(file_id, RepositoryFactory(conn).performances)
+        assign_performance(
+            file_id, RepositoryFactory(conn).performances, default=picked(conn, file_id)
+        )
 
 
 def credits_of(conn: Conn, file_id: UUID) -> list[tuple[Any, ...]]:

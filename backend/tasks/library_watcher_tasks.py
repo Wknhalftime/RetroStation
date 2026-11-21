@@ -242,6 +242,7 @@ def library_scan_files_task(folder_paths: list[str], task_id: str) -> None:
                             repos.library_files,
                             repos.matches,
                             repos.performances,
+                            artist=grouping.artist,
                         )
                         if grouping.recording_id:
                             repos.library_files.update_recording_link(

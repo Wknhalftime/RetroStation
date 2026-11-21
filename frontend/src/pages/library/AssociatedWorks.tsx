@@ -21,6 +21,7 @@ import {
 import { useArtistDetail } from "@/api/artists";
 import type { FileInfo } from "@/lib/schemas/works";
 import { errorText } from "@/lib/errors";
+import { NO_CREDITED_ARTIST } from "@/components/domain/works/credits";
 
 // The work page (phase 3b PR 5a; SPEC S8, D41): the work's performances, each with its credit
 // and copies, in place of "Recordings & Files"; Set master on each copy, asking first about the
@@ -175,7 +176,7 @@ export function AssociatedWorks() {
 
       <PageHeader
         title={work.title}
-        description={credited || artist?.name}
+        description={credited || (artist_id ? artist?.name : NO_CREDITED_ARTIST)}
         actions={
           work.song_master ? (
             <button

@@ -6,18 +6,21 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.matches import PgMatchRepository
+from backend.db.repositories.performances import PgPerformanceRepository
 from backend.db.repositories.recordings import PgRecordingRepository
 from backend.db.repositories.song_masters import PgSongMasterRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.domain.curation import SongMaster
 from backend.domain.enums import SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.services.grouping_service import assign_work
+from backend.services.grouping_service import GroupingResult, assign_work
 from backend.services.normalization import normalize_artist, normalize_title
+from backend.services.work_move_service import place_ungrouped_file
 from tests.helpers import assert_grouping_invariants
 
 
@@ -37,6 +40,21 @@ def _make_file(
             normalized_artist_name=normalize_artist(artist),
             normalized_title=normalize_title(title),
         ),
+    )
+
+
+def _place_like_the_scan(
+    conn: psycopg.Connection[DictRow], file: LibraryFile, result: GroupingResult
+) -> None:
+    """Give the file its work and performance as the scan does: the performance credits the
+    artist grouping picked, which is how a later file of the artist finds the work (3b S7)."""
+    place_ungrouped_file(
+        file.id,
+        result.work_id,
+        PgLibraryFileRepository(conn),
+        PgMatchRepository(conn),
+        PgPerformanceRepository(conn),
+        artist=result.artist,
     )
 
 
@@ -81,7 +99,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, r1.work_id)
+            _place_like_the_scan(conn, f1, r1)
             conn.commit()
 
             r2 = assign_work(
@@ -92,7 +110,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f2.id, r2.work_id)
+            _place_like_the_scan(conn, f2, r2)
             conn.commit()
 
             r3 = assign_work(
@@ -103,7 +121,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f3.id, r3.work_id)
+            _place_like_the_scan(conn, f3, r3)
             conn.commit()
 
             assert r1 is not None
@@ -139,7 +157,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, r1.work_id)
+            _place_like_the_scan(conn, f1, r1)
             conn.commit()
 
             # Second file with identical hash but different path
@@ -189,7 +207,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, r1.work_id)
+            _place_like_the_scan(conn, f1, r1)
             conn.commit()
 
             # Simulate rescan: upsert same path/hash again
@@ -238,7 +256,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f_a.id, r_a.work_id)
+            _place_like_the_scan(conn, f_a, r_a)
             conn.commit()
 
             r_b = assign_work(
@@ -249,7 +267,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f_b.id, r_b.work_id)
+            _place_like_the_scan(conn, f_b, r_b)
             conn.commit()
 
             w_a = r_a.work_id
@@ -258,11 +276,7 @@ class TestGroupingE2E:
             # They may or may not get the same work depending on fuzzy
             # score. If they already matched, create a forced second work.
             if w_a == w_b:
-                artist_id = artist_repo.upsert_local_artist(
-                    "Stones",
-                    normalize_artist("Stones"),
-                )
-                w_b = work_repo.create_local("Paint It Blk", artist_id)
+                w_b = work_repo.create_local("Paint It Blk")
                 sm_repo.upsert(
                     SongMaster(
                         id=uuid4(),
@@ -344,7 +358,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f1.id, r1.work_id)
+            _place_like_the_scan(conn, f1, r1)
             conn.commit()
 
             r2 = assign_work(
@@ -355,7 +369,7 @@ class TestGroupingE2E:
                 recording_repo=rec_repo,
                 song_master_repo=sm_repo,
             )
-            file_repo.update_work_id(f2.id, r2.work_id)
+            _place_like_the_scan(conn, f2, r2)
             conn.commit()
 
             # Both should land in the same work (identical title)
@@ -364,14 +378,7 @@ class TestGroupingE2E:
             assert original_work_id is not None
 
             # Split f2 into a new work
-            artist_id = artist_repo.upsert_local_artist(
-                "Beatles",
-                normalize_artist("Beatles"),
-            )
-            new_work_id = work_repo.create_local(
-                "Eleanor Rigby (Live)",
-                artist_id,
-            )
+            new_work_id = work_repo.create_local("Eleanor Rigby (Live)")
             sm_repo.upsert(
                 SongMaster(
                     id=uuid4(),

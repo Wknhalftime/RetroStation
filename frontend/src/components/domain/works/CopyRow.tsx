@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Crown } from "lucide-react";
 import { cn, formatDuration } from "@/lib/utils";
 import type { FileInfo } from "@/lib/schemas/works";
+import { NO_CREDITED_ARTIST } from "./credits";
 
 // One copy of a song on the work page (3b PR 5a, S8): what the retired "Recordings & Files"
 // table showed of a file, with the crown that makes it the master; *extras* sit beside it
@@ -37,7 +38,7 @@ export function CopyRow({ file, isMaster, isManual, onSetMaster, extras, childre
   const otherWork = file.other_work ?? null;
   const otherArtists = otherWork?.artists?.length
     ? otherWork.artists.join(", ")
-    : otherWork?.artist_name;
+    : NO_CREDITED_ARTIST;
   return (
     <li aria-label={basename(file.file_path)} className="border-b border-gray-100 last:border-0">
       <div

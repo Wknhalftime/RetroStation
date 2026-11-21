@@ -44,8 +44,9 @@ class PerformanceKey:
 
 @dataclass(frozen=True)
 class WorkArtist:
-    """The artist a work names (``works.artist_id``): 3b's D1 credit for a performance whose
-    files have no credit of their own."""
+    """3b D1's credit for a new performance whose first file has no credit of its own: the
+    artist grouping picked for a new file, or the file's work's artist from 0055's seed when
+    3a's build places it (D38). ``works.artist_id`` itself retired in 3b PR 5b (S7)."""
 
     id: str
     mbid: str | None
@@ -63,8 +64,6 @@ class FileForPerformance:
     title: str | None
     length_ms: int | None
     credit: tuple[CreditPart, ...]
-    # 3b D1: its work's artist, whom it counts as when it has no credit of its own.
-    default_artist: WorkArtist | None = None
 
 
 @dataclass(frozen=True)

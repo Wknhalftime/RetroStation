@@ -524,6 +524,11 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
         mb_client=mb_client,
     )
 
+    def _line_work(library_file_id: UUID | None) -> str | None:
+        """A line's work is its file's work: a match stores none since 3b PR 5b (S7)."""
+        line_file = lib_repo.get_by_id(library_file_id) if library_file_id else None
+        return line_file.work_id if line_file is not None else None
+
     def _identity_state(identity_id: UUID) -> dict[str, object]:
         stored = identity_repo.get_by_id(identity_id)
         assert stored is not None
@@ -538,7 +543,7 @@ def test_match_identities_for_playlist_full_scenario_snapshot(
                     "library_file_id": str(persisted.library_file_id),
                     "confidence_score": persisted.confidence_score,
                     "match_tier": persisted.match_tier.value,
-                    "work_id": persisted.work_id,
+                    "work_id": _line_work(persisted.library_file_id),
                 }
                 if persisted is not None
                 else None

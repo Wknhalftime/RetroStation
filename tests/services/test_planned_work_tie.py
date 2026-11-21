@@ -22,21 +22,29 @@ def _repo_with_a_hundred_works() -> tuple[FakeWorkRepository, str]:
     works.set_artist_repo(artists)
     artist_id = artists.upsert_local_artist(_ARTIST, normalize_artist(_ARTIST))
     for n in range(100):
-        works.create_local(f"Aardvark {n:03d}", artist_id)
+        works.credit(works.create_local(f"Aardvark {n:03d}"), artist_id)
     return works, artist_id
+
+
+def _credited(works: FakeWorkRepository, work_id: str, artist_id: str) -> str:
+    """The work, credited to the artist by a performance of it (a work's artists, 3b S7)."""
+    works.credit(work_id, artist_id)
+    return work_id
 
 
 def test_exact_pass_prefers_the_musicbrainz_work() -> None:
     works, artist_id = _repo_with_a_hundred_works()
-    local = works.create_local("Zebra Crossing", artist_id)
-    musicbrainz = works.upsert_from_mb("00000000-mb-zebra", "Zebra Crossing", artist_id)
+    local = _credited(works, works.create_local("Zebra Crossing"), artist_id)
+    musicbrainz = _credited(
+        works, works.upsert_from_mb("00000000-mb-zebra", "Zebra Crossing"), artist_id
+    )
 
     assert planned_work("Zebra Crossing", _ARTIST, works) == musicbrainz != local
 
 
 def test_exact_pass_takes_the_lowest_id_between_local_works() -> None:
     works, artist_id = _repo_with_a_hundred_works()
-    first = works.create_local("Zebra Crossing", artist_id)
-    second = works.create_local("Zebra Crossing", artist_id)
+    first = _credited(works, works.create_local("Zebra Crossing"), artist_id)
+    second = _credited(works, works.create_local("Zebra Crossing"), artist_id)
 
     assert planned_work("Zebra Crossing", _ARTIST, works) == min(first, second)

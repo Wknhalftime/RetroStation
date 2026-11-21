@@ -22,6 +22,7 @@ from backend.domain.enums import CatalogSource, EnrichmentStatus, VersionType
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.library_enrichment_service import EnrichmentRepos, apply_recording_lookup
 from backend.services.repository_factory import RepositoryFactory
+from tests.integration.song_together_seed import credit_work
 
 pytestmark = pytest.mark.integration
 
@@ -33,10 +34,10 @@ _REC_B = "00000000-0000-4000-8000-00000000b004"
 
 def _seed(conn: psycopg.Connection[dict[str, Any]]) -> tuple[RepositoryFactory, str]:
     repos = RepositoryFactory(conn)
-    artist_id = repos.artists.upsert_musicbrainz_artist(
+    repos.artists.upsert_musicbrainz_artist(
         mbid=_ARTIST, name="Aerosmith", sort_name="Aerosmith", normalized_name="aerosmith"
     )
-    work_id = repos.works.upsert_from_mb(mbid=_WORK, title="Dream On", artist_id=artist_id)
+    work_id = repos.works.upsert_from_mb(mbid=_WORK, title="Dream On")
     repos.recordings.upsert(Recording(id=_REC_A, title="Dream On"))
     repos.recordings.upsert(Recording(id=_REC_B, title="Dream On (remastered)"))
     return repos, work_id
@@ -80,9 +81,7 @@ def test_update_version_type_refuses_a_slot_another_recording_holds(migrated_db:
 def test_update_duration_and_musicbrainz_work_listing(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos, work_id = _seed(conn)
-        local_work = repos.works.create_local(
-            "Dream On", repos.artists.upsert_local_artist("Aerosmith", "aerosmith")
-        )
+        local_work = repos.works.create_local("Dream On")
 
         repos.recordings.update_duration(_REC_A, 291000)
         a = repos.recordings.get_by_id(_REC_A)
@@ -104,7 +103,8 @@ def test_apply_recording_lookup_gives_the_local_work_the_mbid(
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         local_artist = repos.artists.upsert_local_artist("Aerosmith", "aerosmith")
-        local_work = repos.works.create_local("Dream On", local_artist)
+        local_work = repos.works.create_local("Dream On")
+        credit_work(conn, local_work, local_artist)  # the local work is Aerosmith's (S7)
         recording = repos.recordings.upsert(Recording(id=_REC_A, title="Dream On"))
         lf = repos.library_files.upsert(
             LibraryFile(

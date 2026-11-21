@@ -319,8 +319,8 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
 ## Artist identity: an artist per MBID, a name shared (phase 2a, C26, C41, C43, C69, M33, AUD-R041, AUD-R072, AUD-R073)
 
 Every MBID can be its own artist, so two acts called Alice Cooper stay two. Air play and the
-grouping of existing works don't change: a work keeps its artist until 3b (`upsert_from_mb`
-returns the row it finds).
+grouping of existing works don't change (`upsert_from_mb` returns the row it finds); a work kept
+its artist until 3b PR 5b, when its artists became its performances' credits (S7, AUD-R082).
 
 - **The index (C41, migration 0047):** `idx_artists_norm_name` is
   `UNIQUE (normalized_name) WHERE mbid IS NULL`: one name-only artist per name, and any number
@@ -402,9 +402,10 @@ returns the row it finds).
   name-only artist's own files carry that MBID. Enrichment names the stub, S13's row says so, and
   the linker records `duplicate` until Merge joins them.
 - **Further credits (S8, D5, AUD-R073):** enrichment upserts every credited artist, not just the
-  first, and a placeholder further credit gets none. The first credit and the work stay as before
-  until 3b. `upsert_further_credit` is narrower than S6: the name-only artist takes the MBID only
-  when the name's MBIDs are exactly this one. With none, a new artist goes beside it, because a
+  first, and a placeholder further credit gets none. The first credit and the work stayed as
+  before until 3b PR 5b, which ends that clause of AUD-R073 (AUD-R082: a work's artists are its
+  performances' credits). `upsert_further_credit` is narrower than S6: the name-only artist
+  takes the MBID only when the name's MBIDs are exactly this one. With none, a new artist goes beside it, because a
   further credit is new and no tag agrees.
 - **Known gap, accepted (D8):** a credit naming the MBID a tag was merged into makes a second artist
   beside the name-only one, because the tag's MBID isn't the credit's. The linker then looks up the
@@ -599,8 +600,9 @@ returns the row it finds).
 - `SongMatchService` (`services/song_match_service.py`) is the only code that calls the matches
   port's writes (D2): the auto-matcher's result (`record_result`), Resolve's manual match
   (`match_by_hand`), Reject's and Unmatch's clearing (`clear_song`), a deleted file's release
-  (`release_file`), and every move that carries a file's or a work's matches along
-  (`follow_file`, `follow_works`, `release_work`). It is sync over the port and commits
+  (`release_file`), and a works merge's re-point of the lines targeting a merged work
+  (`follow_works`). Since 3b PR 5b a match carries no work of its own (a line's work is its
+  file's, AUD-R083), so a file's move carries nothing along. It is sync over the port and commits
   nothing: it writes in the caller's transaction. Bundles that locked tests build by keyword
   keep their port field (`IdentityMatchingRepos(match_repo=...)`, `matches=` elsewhere), and
   their services wrap it in the service.
@@ -634,8 +636,9 @@ returns the row it finds).
   MBID, credited name, joining words, main or featured). An MBID no artist holds yet is
   credited by MBID, and readers find the artist on the MBID later (D1: no stub). Every
   performance credits someone (3b D1): one whose first file has no credit left after
-  placeholders credits its work's artist (`works.artist_id` until 3b PR 5) by id, with its MBID
-  if it has one; a placeholder work artist gives none. A file points
+  placeholders credits its work's artist (since 3b PR 5b: the artist its writer passes, else
+  the work's default act; see "A work's artists" below) by id, with its MBID if it has one; a
+  placeholder work artist gives none. A file points
   at its performance through `(performance_id, work_id)`, so a file and its performance always
   share a work; the key is checked per statement, so every `work_id` write clears
   `performance_id` in the same UPDATE. A performance's preferred copy is one of its own files
@@ -650,19 +653,26 @@ returns the row it finds).
   placeholders left out, each credit as its MBID when known (its own, else its artist's as it
   is now), else its artist id (3b D1, AUD-R078): two name-only acts stay apart, and an artist
   promoted in place keeps every key. A file with no credit of its own counts as the performance
-  it holds or leaves (3b D18), else as its work's artist, so an untagged copy joins its artist's
+  it holds or leaves (3b D18), else as its work's artist (since 3b PR 5b: grouping's pick, the
+  seed for the build, else the work's default act), so an untagged copy joins its artist's
   tagged performance when version and length agree.
 - **The build (`tasks/performance_build_tasks.py`).** A run-once task, after 2a's credit
   backfill marker: every file on a work, present or missing, in file-id order, in committed
   batches, so a stopped run resumes. Its own marker (`library.performances_built`) ends it;
   from then on the writers keep performances. It reports as `performances_build`. Nothing
-  queues it: the cutover and the gate run it by name.
+  queues it: the cutover and the gate run it by name. Since 3b PR 5b a file's work artist is
+  its work's row in `work_artist_seed` (D38), passed to `assign_performance`.
 - **D1's step (`tasks/work_artist_credit_tasks.py`, 3b PR 2).** A run-once task after the
   build's marker gives every performance with no credit its work's artist (none for a
-  placeholder), in committed batches, with no MusicBrainz call and no file moved. Its marker is
-  `library.work_artists_credited`; it reports as `work_artist_credits`. The build already
-  credits what it makes, so on the live data it credits almost nothing (3b D20); it covers
-  performances made before 3b. The merge planner (3b PR 4) waits for its marker.
+  placeholder; since 3b PR 5b, the work's row in `work_artist_seed`), in committed batches,
+  with no MusicBrainz call and no file moved. Its marker is `library.work_artists_credited`; it
+  reports as `work_artist_credits`. The build already credits what it makes, so on the live
+  data it credits almost nothing (3b D20); it covers performances made before 3b. The merge
+  planner (3b PR 4) waits for its marker.
+- **D1's step changes the schema (3b PR 5b, D49).** It is the one run-once step that does: in
+  the transaction that sets its marker it drops `work_artist_seed` (`drop_seed`,
+  `DROP TABLE IF EXISTS`), so a re-run, which finds the marker, is a no-op. The rollback is
+  `backend/db/rollback_0055_work_artists_from_credits.sql` (see "A work's artists" below).
 - **The writers (S3, `services/performance_service.py`)** keep one order: `leave` (re-pick a
   preferred copy that is leaving), the writer's own move, `assign_performance` for each file
   that now sits on a work (a moving file with no credit of its own keeps the act of the
@@ -894,6 +904,52 @@ returns the row it finds).
   `tests/domain/test_work_page.py` and the seven `AssociatedWorks.<aspect>.test.tsx` files
   (`performances`, `copyRow`, `preferredCopy`, `pins`, `setMasterPins`, `twoActs`, `address`).
 
+## A work's artists are its performances' credits (phase 3b PR 5b, S7, D19, D38, D47, D49, D50, AUD-R082-R088)
+
+- **The schema (0055).** `works.artist_id` and `matches.work_id` are gone, with their indexes
+  (AUD-R082, AUD-R083). A work's artists are the union of its performances' credits, a credit
+  by MBID alone naming the artist that holds the MBID; a work with no performance (no file) has
+  none (D42). A line's work is its file's work.
+- **Readers.** The artist list counts, and an artist's page lists, the works its performances
+  credit, a merged member's on its primary's (R6). These works reads left
+  `routers/library/artists.py` for an async reader (R9): the port `ArtistWorksReader`
+  (`repositories/artist_works.py`), the adapter `AsyncArtistWorksReader`
+  (`db/repositories/artist_works.py`, whose `_WORK_ARTISTS` is the rule), wired by
+  `get_artist_works_reader`. The list pages its artists first, then reads only those groups'
+  credits, by artist id and by held MBID, both indexed (SPEC D53: building every credit pair
+  first took 325 ms a page on the dev copy). An Unmapped versions item names its work's
+  credited `artists`, and an artist page's Dismiss all takes the works its group is credited
+  on (R7). The work
+  page's header and "On other works" name the credited artists, "No credited artist" when
+  there are none and the address names no artist (D47, D50; `credits.ts`). Enrichment's MBID
+  claim needs the local work's credits to hold the artist (R3); the untagged pass searches with
+  the MBID of the file's own performance credit (R4).
+- **Grouping (R1).** A file's candidates are the works whose performances credit an artist of
+  its normalized name, and (D51) the works whose files of that name hold a credit of an MBID
+  no artist holds: a name with one MBID makes no artist for it (2a D6), and without this
+  tagged copies of one song would each make a work (`_UNHELD_OF_NAME` in
+  `db/repositories/works.py`). The two sets are one `IN (... UNION ...)` so their indexes
+  drive the read (SPEC D53: an `OR` of two `IN`s scanned every work, 88 ms a name on the dev
+  copy). #258's tie order stays. The artist grouping picks is the one of
+  the name the chosen work credits, else `upsert_local_artist`'s for a new work;
+  `GroupingResult.artist` carries it to `assign_performance(default=)`.
+- **A file with no credit of its own** counts as the performance it left (D18), else the
+  artist its writer passes (grouping's pick; the seed for the build), else (a reading) its
+  work's default act, the credits of the performance holding the master's file; else no one.
+- **The seed (D38, D49).** 0055 copies each work's artist into `work_artist_seed` (work id,
+  artist id; both cascade) before it drops the column. Only the build (`files_waiting`) and
+  D1's step (`uncredited`) read it, and D1's step drops it when it sets its marker (above).
+  The rollback restores `works.artist_id` from the seed while it exists, else from each work's
+  default performance's first credit (NULL when neither), `matches.work_id` from each match's
+  file, and both indexes, then drops the seed.
+- **Merges (D19).** A merge deletes the local artists credited on its source works that nothing
+  names any more after it (`artists_credited_on`, `_delete_unused_local_artists`).
+- The checks are `tests/integration/test_work_artists_from_credits_pg.py`,
+  `tests/integration/test_work_artist_seed_pg.py`,
+  `tests/integration/test_merge_deletes_uncredited_artists_pg.py`,
+  `tests/audit/test_rulings_phase_3b_pr5b.py`, `AssociatedWorks.uncredited.test.tsx` and
+  `UnmappedVersions.credits.test.tsx` (AUD-R088).
+
 ## Derived counts kept by triggers
 
 - `station_identity_plays` (migration 0040) is COUNT(*) of `play_events` per (playlist's
@@ -1041,7 +1097,7 @@ returns the row it finds).
 | `track_identities.rejected_file_ids` | Reject / Unmatch (API), library_files.merge_into | song matching skips those files and their current works |
 | `library_files.indexed_at` / `missing_since` after the newest COMPLETED `matching_recheck` run's `started_at` (`progress_tracking`) | scan / watcher upsert and relocate (`indexed_at` moves only for a new, back-from-missing or size/mtime-changed file, AUD-R023 D11), `mark_missing` | targeted re-check (`rematch_undecided_task`) |
 | `library_files.audio_hash IS NULL` | scan / watcher upsert | hash backfill, cue analysis |
-| `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment (pass 4 takes the `pending` files with no MBID tags whose work's artist has one, `list_untagged_with_linked_artist`; a file it cannot decide stays `pending`) |
+| `library_files.enrichment_status` | scan / watcher, enrichment, retry button | library enrichment (pass 4 takes the `pending` files with no MBID tags whose own performance credit has one (3b PR 5b, R4), `list_untagged_with_linked_artist`; a file it cannot decide stays `pending`) |
 | `artists` / `works` / `recordings.needs_enhancement` | MusicBrainz upsert; stub artists (migration 0044, the artist matcher and Resolve, phase 1a); for `works`, also enrichment's MBID claim on a local work (AUD-R103) | MB enrichment |
 | `artists` with `origin = 'local'`, no `mbid`, and `mb_lookup_at` NULL or older than a present file's `indexed_at` | grouping (`upsert_local_artist`), the linker's stamp (`mb_lookup_at` / `mb_lookup_outcome`, migration 0037, AUD-R026, in part superseded by AUD-R036) | local-artist linking (`link_local_artists_task`) |
 | `artists.mb_lookup_outcome = 'linked'` with `mb_lookup_at` after the newest COMPLETED `matching_recheck` run's `started_at` | the linker | targeted re-check: the second source of its wave's names, the artist's own and its active log-name links' (AUD-R026, in part superseded by AUD-R036) |
@@ -1195,7 +1251,7 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `list_off_file_work` `MatchOffFileWork` | none | 0c | #212 | AUD-R057 | none |
 | `artist_has_match` | `LogNameLinkService.is_linked`: a log-name link in any state keeps a local artist | 1a | #214 | AUD-R058 | none |
 | `matches\.artist_id` `xor_match_target` `matches_artist_id_target_id_key` `idx_matches_artist\b` `check_log_name_links_copy` `_MATCHES_LINKS_SQL` | `log_name_links`; a match is a song's (`identity_id` NOT NULL, 0046) | 1c | #235 | AUD-R060 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_curation_scenarios_pg.py` `tests/scripts/gate_world.py` |
-| `MatchRepository(?:\([^)]*\))?\.get_by_artist` `match(?:_repo\|es)\.get_by_artist` `get_by_artist\(.*\) -> Match\b` | the name's links, through `LogNameLinkService`; `WorkRepository.get_by_artist` is another method and stays | 1c | #235 | AUD-R061 | `tests/matching_seed.py` |
+| `MatchRepository(?:\([^)]*\))?\.get_by_artist` `match(?:_repo\|es)\.get_by_artist` `get_by_artist\(.*\) -> Match\b` | the name's links, through `LogNameLinkService`; `WorkRepository.get_by_artist` was another method (retired in 3b PR 5b, AUD-R084) | 1c | #235 | AUD-R061 | `tests/matching_seed.py` |
 | `artist_candidates` | the name's suggested links (the queue's `candidates`, 1c S8) | 1c | #235 | AUD-R062 | `tests/integration/test_matches_song_only_pg.py` `tests/routers/test_matching.py` `tests/routers/test_queue_suggested_links.py` |
 | `resolved_artist_mbid` | none: read by nothing; a name's MBID is its linked artist's | 1c | #235 | AUD-R063 | `tests/integration/test_matches_song_only_pg.py` |
 | `split_artist_string` | none: a name holding several performers gets one link each (M9), from evidence in phase 4 | 1c | #235 | AUD-R064 | none |
@@ -1206,3 +1262,9 @@ expression in backticks (write `\|` for a pipe); use a pattern where a bare name
 | `links\.unlink_all\b` `LogNameLinkService\.unlink_all\b` `def unlink_all\(self, broadcast_artist_id\b` | `unlink_keeping_rejected` (Not an artist keeps the rejected pairs) | 1c | #235 | AUD-R069 | none |
 | `link_copy_stubs` | none: 0046's rollback recreates it empty for 0044's rollback | 1c | #235 | AUD-R070 | `tests/integration/test_matches_song_only_pg.py` `tests/integration/test_log_name_links_copy_pg.py` |
 | `\bwork_artist\s*[:=]` `\bcredit_mbids\b` | the performance's own credits: an untagged default carries its work's artist as a credit (3b D1), and the key compares `credit_artists` (AUD-R078) | 3b | PR 2 | AUD-R077 | none |
+| `idx_works_artist` `\b(?:w\|fw\|gw)\.artist_id\b` | a work's artists are its performances' credits; 0055 keeps each existing work's artist in `work_artist_seed` for 3a's build and D1's step, which drops it (D38, D49) | 3b | PR 5b | AUD-R082 | `tests/audit/test_rulings_phase_3b_pr5b.py` `tests/integration/test_work_artist_seed_pg.py` |
+| `idx_matches_work_id` `WorkReference\.MATCH\b` `\bfollow_file\b` `\brelease_work\b` `matches\.move_to_work\b` `\brelease_work_matches\b` | a line's work is its file's work; a match carries none | 3b | PR 5b | AUD-R083 | `tests/audit/test_rulings_phase_3b_pr5b.py` `tests/integration/test_work_artist_seed_pg.py` `tests/test_song_match_single_writer.py` |
+| `\bget_by_artist\b` | `WorkRepository.works_crediting` (the works an artist's credits name); `library_files.get_by_artist_mbid` is another method and stays | 3b | PR 5b | AUD-R084 | `tests/audit/test_rulings_phase_3b_pr5b.py` `tests/matching_seed.py` `tests/integration/test_matches_song_only_pg.py` |
+| `\bdelete_overrides_of_work\b` | none: an emptied work stays while an override points at it (D7) | 3b | PR 5b | AUD-R085 | `tests/audit/test_rulings_phase_3b_pr5b.py` |
+| `\bdelete_recordings_of_work\b` | `delete_fileless_recordings_of_work` (D16) | 3b | PR 5b | AUD-R086 | `tests/audit/test_rulings_phase_3b_pr5b.py` |
+| `dry_run_untagged_recordings` | none: its read before the untagged pass's first live run is done (D44) | 3b | PR 5b | AUD-R087 | `tests/audit/test_rulings_phase_3b_pr5b.py` |

@@ -5,6 +5,9 @@ A match stores its file's work when it is made (manual resolve reads
 matches with no work. Grouping later gave the file a work and left the
 matches behind (13 such manual matches in the dev DB on 2026-10-13, plus one
 left on the work its file moved away from).
+
+Since 3b PR 5b (S7) a match stores no work: a line's work is its file's work, so the match
+reads the work grouping gives its file.
 """
 
 from __future__ import annotations
@@ -68,9 +71,9 @@ def test_grouping_moves_a_match_made_before_the_file_had_a_work(
         ungrouped = repos.library_files.get_by_path(str(path))
         assert ungrouped is not None and ungrouped.work_id is None
         conn.execute(
-            """INSERT INTO matches (identity_id, library_file_id, target_type, work_id,
+            """INSERT INTO matches (identity_id, library_file_id, target_type,
                                     confidence_score, match_tier)
-               VALUES (%s, %s, 'library_file', NULL, 1.0, 'manual')""",
+               VALUES (%s, %s, 'library_file', 1.0, 'manual')""",
             (_identity(repos), ungrouped.id),
         )
         conn.commit()
@@ -80,7 +83,10 @@ def test_grouping_moves_a_match_made_before_the_file_had_a_work(
 
         grouped = repos.library_files.get_by_path(str(path))
         match = conn.execute(
-            "SELECT work_id FROM matches WHERE library_file_id = %s", (ungrouped.id,)
+            """SELECT f.work_id FROM matches m
+               LEFT JOIN library_files f ON f.id = m.library_file_id
+               WHERE m.library_file_id = %s""",
+            (ungrouped.id,),
         ).fetchone()
 
     assert grouped is not None and grouped.work_id is not None

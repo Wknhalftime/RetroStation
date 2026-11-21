@@ -33,9 +33,8 @@ pytestmark = pytest.mark.integration
 
 
 def _seed_work_with_file(repos: RepositoryFactory, tmp_path: Path) -> str:
-    """Create an artist/work/recording/library_file chain recalc can score."""
-    artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
-    work_id = repos.works.create_local("Battery", artist_id)
+    """Create a work/recording/library_file chain recalc can score."""
+    work_id = repos.works.create_local("Battery")
     recording_id = str(uuid4())
     repos.recordings.upsert(
         Recording(

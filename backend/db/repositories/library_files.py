@@ -337,18 +337,25 @@ class PgLibraryFileRepository(
         return bool(row["reach"]) if row else False
 
     def list_untagged_with_linked_artist(self) -> list[UntaggedCandidate]:
-        # `lf.*` carries the file's own artist_mbid tag (NULL or not); the artist row's
-        # MBID, the one the search needs, comes under its own name.
+        # `lf.*` carries the file's own artist_mbid tag (NULL or not); the MBID the search
+        # needs comes under its own name: the earliest credit of the file's performance that
+        # has one, the credit's own or its artist's (3b R4: a work names no artist since S7).
         rows = self._conn.execute(
-            """SELECT lf.*, a.mbid AS linked_artist_mbid
+            """SELECT lf.*, linked.mbid AS linked_artist_mbid
                FROM library_files lf
-               JOIN works w ON w.id = lf.work_id
-               JOIN artists a ON a.id = w.artist_id
+               CROSS JOIN LATERAL (
+                   SELECT COALESCE(pc.mbid, a.mbid) AS mbid
+                     FROM performance_credits pc
+                     LEFT JOIN artists a ON a.id = pc.artist_id
+                    WHERE pc.performance_id = lf.performance_id
+                      AND COALESCE(pc.mbid, a.mbid) IS NOT NULL
+                    ORDER BY pc.position
+                    LIMIT 1
+               ) linked
                WHERE lf.enrichment_status = %s
                  AND lf.file_status = 'present'
                  AND lf.recording_mbid IS NULL
                  AND lf.release_mbid IS NULL
-                 AND a.mbid IS NOT NULL
                ORDER BY lf.file_path""",
             (EnrichmentStatus.PENDING.value,),
         ).fetchall()

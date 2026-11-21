@@ -3,7 +3,6 @@
   dict({
     'acts': list([
     ]),
-    'artist_id': 'a-snapshot-rich',
     'artists': list([
     ]),
     'format_overrides': list([
@@ -104,7 +103,6 @@
   dict({
     'acts': list([
     ]),
-    'artist_id': 'a-snapshot-synthetic',
     'artists': list([
     ]),
     'format_overrides': list([

@@ -219,12 +219,6 @@ class PgWorkCurationRepository(WorkCurationRepository):
 
     # --- a work a file left ----------------------------------------------------------------
 
-    def delete_overrides_of_work(self, work_id: str) -> None:
-        self._conn.execute("DELETE FROM format_overrides WHERE work_id = %s", (work_id,))
-
-    def delete_recordings_of_work(self, work_id: str) -> None:
-        self._conn.execute("DELETE FROM recordings WHERE work_id = %s", (work_id,))
-
     def delete_fileless_recordings_of_work(self, work_id: str) -> None:
         self._conn.execute(
             """DELETE FROM recordings r WHERE r.work_id = %s

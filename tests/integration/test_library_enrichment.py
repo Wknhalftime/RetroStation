@@ -133,7 +133,7 @@ def test_enrich_by_release_links_recording() -> None:
     work = work_repo.get_by_id(_WORK_MBID)
     assert work is not None
     assert work.title == "Test Work"
-    assert work.artist_id == _ARTIST_MBID
+    # A work names no artist since 3b PR 5b (S7): its artists are its performances' credits.
 
     # Artist upserted
     artist = artist_repo.get_by_id(_ARTIST_MBID)
@@ -279,7 +279,7 @@ def test_enrich_by_release_moves_file_to_mb_work_and_reselects_master() -> None:
     song_master_repo = FakeSongMasterRepository()
     mb_client = FakeMbClient(releases={_RELEASE_MBID: _FAKE_RELEASE})
 
-    local_work = work_repo.create_local("Test Track", "local-artist")
+    local_work = work_repo.create_local("Test Track")
     lf = _grouped_file(local_work)
     library_file_repo.upsert(lf)
     song_master_repo.upsert(
@@ -318,7 +318,7 @@ def test_enrich_by_release_keeps_local_work_that_still_has_files() -> None:
     song_master_repo = FakeSongMasterRepository()
     mb_client = FakeMbClient(releases={_RELEASE_MBID: _FAKE_RELEASE})
 
-    local_work = work_repo.create_local("Test Track", "local-artist")
+    local_work = work_repo.create_local("Test Track")
     moving = _grouped_file(local_work)
     sibling = _grouped_file(local_work, release_mbid=None, recording_mbid=None)
     library_file_repo.upsert(moving)
@@ -374,7 +374,7 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
         }
     )
 
-    local_work = work_repo.create_local("Test Track", "local-artist")
+    local_work = work_repo.create_local("Test Track")
     lf = _grouped_file(local_work, release_mbid=None)
     library_file_repo.upsert(lf)
 
@@ -394,7 +394,8 @@ def test_enrich_by_recording_reselects_master_for_mb_work() -> None:
 
 
 def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
-    """A match on the moved file mirrors the file's new work, so the old work can go."""
+    """A match on the moved file reads the file's new work (a line's work is its file's
+    work since 3b PR 5b, S7), so the old work can go."""
     library_file_repo = FakeLibraryFileRepository()
     recording_repo = FakeRecordingRepository()
     work_repo = FakeWorkRepository()
@@ -404,7 +405,7 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
     match_repo = FakeMatchRepository()
     mb_client = FakeMbClient(releases={_RELEASE_MBID: _FAKE_RELEASE})
 
-    local_work = work_repo.create_local("Test Track", "local-artist")
+    local_work = work_repo.create_local("Test Track")
     lf = _grouped_file(local_work)
     library_file_repo.upsert(lf)
     identity_id = uuid4()
@@ -415,7 +416,6 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
             match_tier=MatchTier.LOCAL_FILE_FUZZY,
             identity_id=identity_id,
             library_file_id=lf.id,
-            work_id=local_work,
         )
     )
 
@@ -434,8 +434,9 @@ def test_enrich_by_release_moves_the_file_matches_to_the_mb_work() -> None:
 
     match = match_repo.get_by_identity(identity_id)
     assert match is not None
-    assert match.work_id == _WORK_MBID
     assert match.library_file_id == lf.id
+    line_file = library_file_repo.get_by_id(lf.id)
+    assert line_file is not None and line_file.work_id == _WORK_MBID
     assert work_repo.get_by_id(local_work) is None
 
 

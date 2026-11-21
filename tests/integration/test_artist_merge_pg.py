@@ -156,7 +156,19 @@ def _artist(conn: Conn, name: str, mbid: str | None = None) -> str:
 
 
 def _work(conn: Conn, artist_id: str, title: str) -> str:
-    work_id = PgWorkRepository(conn).create_local(title, artist_id)
+    """A work under *artist_id*: a performance of it credits the artist (3b PR 5b, S7)."""
+    work_id = PgWorkRepository(conn).create_local(title)
+    performance = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert performance is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (performance["id"], artist_id),
+    )
     conn.commit()
     return work_id
 
@@ -469,7 +481,8 @@ def test_links_credits_and_lookups_keep_the_real_artist(client: TestClient, conn
                 " ORDER BY id",
                 "SELECT * FROM matches ORDER BY id",
                 "SELECT * FROM artists ORDER BY id",
-                "SELECT id, artist_id FROM works ORDER BY id",
+                "SELECT performance_id, position, artist_id FROM performance_credits"
+                " ORDER BY performance_id, position",  # a work's artists (3b S7)
             )
         )
 

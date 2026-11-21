@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from backend.domain.catalog import EmptyWork, Work
 from backend.domain.enums import CatalogSource
+from backend.domain.performances import WorkArtist
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.library_files import LibraryFileRepository
 from backend.repositories.works import WorkRepository
@@ -15,6 +16,15 @@ class FakeWorkRepository(WorkRepository):
         # which is the artist repo's job; tests wire one in via set_artist_repo.
         self._artist_repo: ArtistCatalogRepository | None = None
         self._library_file_repo: LibraryFileRepository | None = None
+        # A work's artists are its performances' credits (3b S7); the fakes model no
+        # performances, so a test credits a work's artists with :meth:`credit`.
+        self._credits: dict[str, list[str]] = {}
+
+    def credit(self, work_id: str, artist_id: str) -> None:
+        """A performance of *work_id* credits *artist_id* (after any earlier credits)."""
+        credited = self._credits.setdefault(work_id, [])
+        if artist_id not in credited:
+            credited.append(artist_id)
 
     def upsert(self, work: Work) -> Work:
         self._data[work.id] = work
@@ -23,8 +33,20 @@ class FakeWorkRepository(WorkRepository):
     def get_by_id(self, mbid: str) -> Work | None:
         return self._data.get(mbid)
 
-    def get_by_artist(self, artist_id: str) -> list[Work]:
-        return [w for w in self._data.values() if w.artist_id == artist_id]
+    def works_crediting(self, artist_id: str) -> list[Work]:
+        return sorted(
+            (w for w in self._data.values() if artist_id in self._credits.get(w.id, [])),
+            key=lambda w: w.id,
+        )
+
+    def credited_artist(self, work_id: str, normalized_name: str) -> WorkArtist | None:
+        if self._artist_repo is None:
+            return None
+        for artist_id in self._credits.get(work_id, []):
+            artist = self._artist_repo.get_by_id(artist_id)
+            if artist is not None and artist.normalized_name == normalized_name:
+                return WorkArtist(id=artist.id, mbid=artist.mbid, name=artist.name)
+        return None
 
     def list_needing_enhancement(self) -> list[Work]:
         return [
@@ -39,18 +61,17 @@ class FakeWorkRepository(WorkRepository):
         if work := self._data.get(mbid):
             work.embedding = embedding
 
-    def create_local(self, title: str, artist_id: str) -> str:
+    def create_local(self, title: str) -> str:
         work_id = str(uuid4())
         self._data[work_id] = Work(
             id=work_id,
             title=title,
-            artist_id=artist_id,
             origin=CatalogSource.LOCAL,
             needs_enhancement=False,
         )
         return work_id
 
-    def upsert_from_mb(self, mbid: str, title: str, artist_id: str) -> str:
+    def upsert_from_mb(self, mbid: str, title: str) -> str:
         for work in self._data.values():
             if work.mbid == mbid:
                 return work.id
@@ -58,7 +79,6 @@ class FakeWorkRepository(WorkRepository):
         self._data[work_id] = Work(
             id=work_id,
             title=title,
-            artist_id=artist_id,
             mbid=mbid,
             origin=CatalogSource.MUSICBRAINZ,
             needs_enhancement=True,
@@ -114,9 +134,9 @@ class FakeWorkRepository(WorkRepository):
         normalized_artist_name: str,
         limit: int = 100,
     ) -> list[tuple[str, str]]:
-        # Mirrors PgWorkRepository's join on the name: every work of every artist of the name,
-        # with an MBID or not (phase 2a S5), including orphan works with no attached
-        # library_files. `get_by_normalized_name` answers only for the name-only artist.
+        # Mirrors PgWorkRepository: the works crediting any artist of the name, with an MBID
+        # or not (phase 2a S5; 3b S7). `get_by_normalized_name` answers only for the
+        # name-only artist.
         if self._artist_repo is None:
             return []
         artist_ids = {
@@ -124,7 +144,11 @@ class FakeWorkRepository(WorkRepository):
             for artist in self._artist_repo.list_all()
             if artist.normalized_name == normalized_artist_name
         }
-        result = [(w.id, w.title) for w in self._data.values() if w.artist_id in artist_ids]
+        result = [
+            (w.id, w.title)
+            for w in self._data.values()
+            if artist_ids & set(self._credits.get(w.id, []))
+        ]
         result.sort(key=lambda x: x[1])
         return result[:limit]
 

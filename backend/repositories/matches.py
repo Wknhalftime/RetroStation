@@ -39,26 +39,12 @@ class MatchRepository(ABC):
         dismissal or none, seen at the later time. *from_work_id* keeps its own."""
         ...
 
-    @abstractmethod
-    def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
-        """Point every match on the file at the work the file now belongs to.
-
-        ``matches.work_id`` mirrors ``library_files.work_id`` for the matched
-        file, so it follows the file whenever the file changes work.
-        """
-        ...
-
-    # The works merge's and a left work's statements (moved from the curation port in phase
-    # 3a PR 1, D2: only SongMatchService writes matches).
+    # The works merge's statement (moved from the curation port in phase 3a PR 1, D2: only
+    # SongMatchService writes matches).
 
     @abstractmethod
     def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
-        """Point every match at *work_ids*, as its target or its file's work, at *target_id*."""
-        ...
-
-    @abstractmethod
-    def release_work_matches(self, work_id: str) -> None:
-        """Point each match still on *work_id* at its file's current work (or none)."""
+        """Point every match whose target is one of *work_ids* at *target_id*."""
         ...
 
     @abstractmethod

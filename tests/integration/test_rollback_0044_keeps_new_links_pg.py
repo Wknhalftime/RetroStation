@@ -9,7 +9,9 @@ made from are left as they are. The locked ``test_log_name_links_copy_pg.py::tes
 pins the rest. Since phase 1c's 0046 the rollbacks run newest first, so 0046's (which puts the
 artist column of ``matches`` back) and 0045's run before this one, as the runbook has it. A
 reason the code before 1b cannot read (``LINK_REJECTED``) goes, and its name stays in review.
-Everything runs in one transaction, rolled back, so the test database keeps 0044 to 0046.
+3b PR 5b's 0055 is rolled back first (newest first): it brings back ``works.artist_id``, which
+this rollback reads. Everything runs in one transaction, rolled back, so the test database
+keeps 0044 to 0055.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ _DB = Path(__file__).resolve().parents[2] / "backend" / "db"
 ROLLBACK = _DB / "rollback_0044_log_name_links.sql"
 ROLLBACK_0045 = _DB / "rollback_0045_link_demotion.sql"
 ROLLBACK_0046 = _DB / "rollback_0046_drop_artist_rows.sql"
+ROLLBACK_0055 = _DB / "rollback_0055_work_artists_from_credits.sql"
 METALLICA = "65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab"
 
 
@@ -70,6 +73,7 @@ def test_links_since_0044_come_back_as_rows_and_unmatched_names_lose_theirs(
 ) -> None:
     conn = psycopg.connect(migrated_db, row_factory=dict_row)
     try:
+        conn.execute(ROLLBACK_0055.read_text(encoding="utf-8"))
         conn.execute(ROLLBACK_0046.read_text(encoding="utf-8"))
         links = PgLogNameLinkRepository(conn)
         metallica = _artist(conn, "Metallica", METALLICA)
@@ -152,6 +156,7 @@ def test_a_name_held_back_by_a_rejected_pair_stays_in_review_with_no_reason(
     back at pending the old matcher could link again a pair Lance rejected."""
     conn = psycopg.connect(migrated_db, row_factory=dict_row)
     try:
+        conn.execute(ROLLBACK_0055.read_text(encoding="utf-8"))
         conn.execute(ROLLBACK_0046.read_text(encoding="utf-8"))
         held_back = _name(conn, "CHASE", "needs_review")
         conn.execute(

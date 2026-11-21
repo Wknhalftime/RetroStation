@@ -7,7 +7,8 @@ One row per play event, every play included, with the columns ``play_event_id``,
 - the best match is the highest confidence, then the earliest ``created_at``, then the lowest
   match id, and a match without a file is never chosen. Its file is ``matched_file_id``;
 - the matched file is only the route to the work (D22): ``work_id`` is the matched file's own
-  ``library_files.work_id``, else its recording's work. ``matches.work_id`` plays no role;
+  ``library_files.work_id``, else its recording's work (a match carries no work since 3b
+  PR 5b, S7);
 - the work decides what plays: the override for the play's station ``format_name``, else the
   song master (``source`` is ``override`` or ``master``). There is no ``direct`` source and no
   per-level fallback: no work, or neither, leaves ``file_id``, ``file_status`` and ``source``
@@ -343,21 +344,6 @@ class TestFileWork:
             (override, "present", "override"),
             (master, "present", "master"),
         )
-
-    def test_stale_match_work_id_is_ignored(self, conn: Conn) -> None:
-        """Test A: ``matches.work_id`` pointing at another work plays no role."""
-        own_work, stale_work = seed.work(conn), seed.work(conn)
-        own_master = file_on_work(conn, own_work)
-        seed.song_master(conn, own_work, own_master)
-        seed.song_master(conn, stale_work, file_on_work(conn, stale_work))
-        matched = file_on_work(conn, own_work)
-        ident = seed.identity(conn)
-        match_id = seed.match(conn, ident, matched)
-        conn.execute("UPDATE matches SET work_id = %s WHERE id = %s", (stale_work, match_id))
-
-        event = _play_of(conn, ident)
-        assert route(conn, event) == (matched, own_work)
-        assert resolution(conn, event) == (own_master, "present", "master")
 
     def test_no_per_level_fallback_to_the_recording_work(self, conn: Conn) -> None:
         """Test B: the own work has no master or override, so the play has no master (D22).

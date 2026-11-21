@@ -400,7 +400,10 @@ def test_placeholders_are_never_credited(conn: Conn) -> None:
 
     assert credits_of(conn, fid(1)) == [(0, None, ONE, "Blondie", None, "main")]
     assert groups(conn, work) == [[fid(1), fid(4)], [fid(2), fid(3)]]
-    row = conn.execute("SELECT artist_id FROM works WHERE id = %s", (work,)).fetchone()
+    # The work's artist, as 0055's seed holds it (3b PR 5b, D38).
+    row = conn.execute(
+        "SELECT artist_id FROM work_artist_seed WHERE work_id = %s", (work,)
+    ).fetchone()
     assert row is not None
     assert credits_of(conn, fid(3)) == [(0, row["artist_id"], None, "Artist", None, "main")]
 

@@ -1,8 +1,8 @@
 """Integration: the untagged-file pass on Postgres.
 
-The candidate listing is a join (file -> work -> artist) the fakes only mirror,
-so Postgres is the authority for which files it lists; and a confident pick
-is then written through the real repositories: recording link, work move.
+The candidate listing is a join (file -> its performance's credit -> artist MBID, 3b R4)
+the fakes only mirror, so Postgres is the authority for which files it lists; and a
+confident pick is then written through the real repositories: recording link, work move.
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ from psycopg.rows import dict_row
 
 from backend.domain.enums import EnrichmentStatus, FileStatus
 from backend.domain.library import AudioMetadata, LibraryFile
+from backend.domain.performances import WorkArtist
 from backend.services.library_enrichment_service import EnrichmentRepos
+from backend.services.performance_service import assign_performance
 from backend.services.repository_factory import RepositoryFactory
 from backend.services.untagged_recording_service import enrich_untagged_pair, untagged_pairs
 from tests.fakes.mb_client import FakeMbClient
@@ -56,30 +58,45 @@ def _file(
     )
 
 
-def _seed(conn: psycopg.Connection[dict[str, Any]]) -> tuple[RepositoryFactory, str, str]:
+def _seed(
+    conn: psycopg.Connection[dict[str, Any]],
+) -> tuple[RepositoryFactory, str, WorkArtist]:
+    """The repos, a work, and the artist with an MBID its files' performances credit."""
     repos = RepositoryFactory(conn)
     linked = repos.artists.upsert_musicbrainz_artist(
         mbid=_ARTIST, name="Jesus Jones", sort_name="Jesus Jones", normalized_name="jesus jones"
     )
-    unlinked = repos.artists.upsert_local_artist("Nobody", "nobody")
-    return repos, repos.works.create_local("Right Here, Right Now", linked), unlinked
+    linked_artist = WorkArtist(id=linked, mbid=_ARTIST, name="Jesus Jones")
+    return repos, repos.works.create_local("Right Here, Right Now"), linked_artist
+
+
+def _add(repos: RepositoryFactory, lf: LibraryFile, credited: WorkArtist) -> LibraryFile:
+    """Store a file and give it its performance as the scan's grouping does: one crediting
+    *credited*, as the file has no credit of its own (3b D1). The listing reads that
+    credit's MBID (R4); a file with no work holds no performance."""
+    stored = repos.library_files.upsert(lf)
+    assign_performance(stored.id, repos.performances, default=credited)
+    return stored
 
 
 def test_lists_untagged_present_files_whose_artist_has_an_mbid(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, linked_work, unlinked = _seed(conn)
-        unlinked_work = repos.works.create_local("Right Here, Right Now", unlinked)
+        repos, linked_work, linked = _seed(conn)
+        unlinked = WorkArtist(
+            id=repos.artists.upsert_local_artist("Nobody", "nobody"), mbid=None, name="Nobody"
+        )
+        unlinked_work = repos.works.create_local("Right Here, Right Now")
         files = repos.library_files
 
-        b = files.upsert(_file("/m/b.flac", linked_work))
-        a = files.upsert(_file("/m/a.flac", linked_work))
-        files.upsert(_file("/m/i.flac", linked_work, status=EnrichmentStatus.FAILED))
-        files.upsert(_file("/m/c.flac", linked_work, recording_mbid=_REC))
-        files.upsert(_file("/m/d.flac", linked_work, release_mbid="some-release"))
-        files.upsert(_file("/m/e.flac", unlinked_work))
-        files.upsert(_file("/m/f.flac", linked_work, status=EnrichmentStatus.ENRICHED))
-        files.upsert(_file("/m/g.flac", None))
-        missing = files.upsert(_file("/m/h.flac", linked_work))
+        b = _add(repos, _file("/m/b.flac", linked_work), linked)
+        a = _add(repos, _file("/m/a.flac", linked_work), linked)
+        _add(repos, _file("/m/i.flac", linked_work, status=EnrichmentStatus.FAILED), linked)
+        _add(repos, _file("/m/c.flac", linked_work, recording_mbid=_REC), linked)
+        _add(repos, _file("/m/d.flac", linked_work, release_mbid="some-release"), linked)
+        _add(repos, _file("/m/e.flac", unlinked_work), unlinked)
+        _add(repos, _file("/m/f.flac", linked_work, status=EnrichmentStatus.ENRICHED), linked)
+        _add(repos, _file("/m/g.flac", None), linked)
+        missing = _add(repos, _file("/m/h.flac", linked_work), linked)
         files.mark_missing(missing.file_path)
 
         listed = files.list_untagged_with_linked_artist()
@@ -92,10 +109,12 @@ def test_confident_pick_links_the_recording_and_moves_the_file_to_its_work(
     migrated_db: str,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, linked_work, _ = _seed(conn)
-        sure = repos.library_files.upsert(_file("/m/sure.flac", linked_work))
-        unsure = repos.library_files.upsert(
-            _file("/m/unsure.flac", linked_work, title="International Bright Young Thing")
+        repos, linked_work, linked = _seed(conn)
+        sure = _add(repos, _file("/m/sure.flac", linked_work), linked)
+        unsure = _add(
+            repos,
+            _file("/m/unsure.flac", linked_work, title="International Bright Young Thing"),
+            linked,
         )
         enrichment_repos = EnrichmentRepos(
             files=repos.library_files,

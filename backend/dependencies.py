@@ -12,6 +12,7 @@ from psycopg import AsyncConnection
 
 from backend.config import BindHost, get_settings, is_internal_client
 from backend.db.pool import get_pool
+from backend.db.repositories.artist_works import AsyncArtistWorksReader
 from backend.db.repositories.stream_cue_coverage import (
     COVERAGE_READ_BOUNDS,
     BoundedCueCoverageRepository,
@@ -23,6 +24,7 @@ from backend.domain.liners import LinerStorageError
 from backend.domain.streaming import ClipStorageError, StreamTiming
 from backend.domain.system import StorageUnavailableError
 from backend.playout.peaks import PeakSettings, read_peaks
+from backend.repositories.artist_works import ArtistWorksReader
 from backend.repositories.stream_cue_coverage import CueCoverageRepository
 from backend.repositories.user_settings import UserSettingRepository
 from backend.services.artist_resolution_service import ArtistResolutionRepos
@@ -323,6 +325,13 @@ def get_work_page_repos(
 ) -> WorkPageRepos:
     """The work page's readers, on the read route's async connection (3b PR 5a)."""
     return WorkPageRepos(pages=AsyncWorkPageReader(conn), versions=AsyncVersionEntryReader(conn))
+
+
+def get_artist_works_reader(
+    conn: Annotated[AsyncConnection[Any], Depends(get_db_connection)],
+) -> ArtistWorksReader:
+    """The artist pages' works reads, on the read route's async connection (3b PR 5b, R9)."""
+    return AsyncArtistWorksReader(conn)
 
 
 def get_master_choice_repos(repos: SyncRepos) -> MasterChoiceRepos:

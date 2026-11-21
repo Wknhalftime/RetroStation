@@ -137,7 +137,6 @@ class WorkHead:
 
     id: str
     title: str
-    artist_id: str
 
 
 @dataclass(frozen=True)
@@ -146,7 +145,6 @@ class OtherWork:
 
     id: str
     title: str
-    artist_name: str
     artists: tuple[str, ...]
 
 
@@ -197,7 +195,6 @@ class WorkDetailPage:
 
     id: str
     title: str
-    artist_id: str
     recordings: tuple[PageRecording, ...]
     song_master: PageMaster | None
     format_overrides: tuple[PageOverride, ...]

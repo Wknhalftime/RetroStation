@@ -90,7 +90,21 @@ def _artist(conn: Conn, name: str) -> str:
 
 
 def _work(conn: Conn, title: str, artist_id: str) -> str:
-    return RepositoryFactory(conn).works.create_local(title, artist_id)
+    """A local work of *artist_id*: a performance of it credits the artist (a work's artists
+    are its performances' credits since 3b PR 5b, S7)."""
+    work_id = RepositoryFactory(conn).works.create_local(title)
+    held = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert held is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (held["id"], artist_id),
+    )
+    return work_id
 
 
 def _recording(
@@ -151,7 +165,8 @@ def _master(conn: Conn, work_id: str, file_id: UUID, method: SelectionMethod) ->
 
 
 def _line_match(conn: Conn, file_id: UUID, work_id: str) -> UUID:
-    """A song line's match to *file_id*, carrying the file's work."""
+    """A song line's match to *file_id* (*work_id* is the file's work; a match carries none
+    since 3b PR 5b, S7)."""
     factory = RepositoryFactory(conn)
     artist = factory.broadcast_artists.upsert(
         BroadcastArtist(id=uuid4(), original_name="NIRVANA", normalized_name=str(uuid4()))
@@ -166,10 +181,10 @@ def _line_match(conn: Conn, file_id: UUID, work_id: str) -> UUID:
         )
     )
     row = conn.execute(
-        """INSERT INTO matches (identity_id, library_file_id, target_type, work_id,
+        """INSERT INTO matches (identity_id, library_file_id, target_type,
                                 confidence_score, match_tier)
-           VALUES (%s, %s, 'library_file', %s, 1.0, 'manual') RETURNING id""",
-        (identity.id, file_id, work_id),
+           VALUES (%s, %s, 'library_file', 1.0, 'manual') RETURNING id""",
+        (identity.id, file_id),
     ).fetchone()
     assert row is not None
     return UUID(str(row["id"]))
@@ -214,7 +229,12 @@ def _overrides_of(conn: Conn, work_id: str) -> dict[str, UUID]:
 
 
 def _match_work(conn: Conn, match_id: UUID) -> str | None:
-    row = conn.execute("SELECT work_id FROM matches WHERE id = %s", (match_id,)).fetchone()
+    """The line's work: its file's (3b PR 5b, S7)."""
+    row = conn.execute(
+        """SELECT f.work_id FROM matches m JOIN library_files f ON f.id = m.library_file_id
+           WHERE m.id = %s""",
+        (match_id,),
+    ).fetchone()
     assert row is not None
     return row["work_id"]
 
@@ -347,12 +367,8 @@ def test_split_takes_a_file_to_a_work_of_its_own(conn: Conn) -> None:
     assert result.old_work_deleted is False
     new = _row(conn, "works", result.new_work_id)
     assert new is not None
-    assert (new["title"], new["artist_id"], new["origin"], new["needs_enhancement"]) == (
-        "Lithium",
-        artist,
-        "local",
-        False,
-    )
+    # The new work names no artist (3b PR 5b, S7): the file keeps its act (D18).
+    assert (new["title"], new["origin"], new["needs_enhancement"]) == ("Lithium", "local", False)
     copy = _recording_of(conn, live)
     assert copy not in (take, None)
     copied = _row(conn, "recordings", copy)

@@ -29,6 +29,11 @@ DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 VersionRepos = Annotated[VersionEntryRepos, Depends(get_version_entry_repos)]
 
 
+class UnmappedArtistInfo(BaseModel):
+    id: str | None
+    name: str
+
+
 class UnmappedVersionInfo(BaseModel):
     version_text: str
     version_type: str
@@ -41,8 +46,8 @@ class UnmappedVersionInfo(BaseModel):
     suggestion: VersionSuggestionInfo | None
     work_id: str
     work_title: str
-    artist_id: str
-    artist_name: str
+    # 3b S7, R7: the work's credited artists (a work names no artist of its own).
+    artists: list[UnmappedArtistInfo]
 
 
 class UnmappedVersionPage(BaseModel):
@@ -83,8 +88,7 @@ async def get_unmapped_versions(
                 **version_info(item.version).model_dump(exclude={"state", "mapped_file_id"}),
                 work_id=item.version.work_id,
                 work_title=item.work_title,
-                artist_id=item.artist_id,
-                artist_name=item.artist_name,
+                artists=[UnmappedArtistInfo(id=a, name=n) for a, n in item.artists],
             )
             for item in page.items
         ],

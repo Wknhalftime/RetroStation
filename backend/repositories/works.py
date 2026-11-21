@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
 from backend.domain.catalog import EmptyWork, Work
+from backend.domain.performances import WorkArtist
 
 
 class WorkRepository(ABC):
@@ -12,7 +13,15 @@ class WorkRepository(ABC):
     def get_by_id(self, mbid: str) -> Work | None: ...
 
     @abstractmethod
-    def get_by_artist(self, artist_id: str) -> list[Work]: ...
+    def works_crediting(self, artist_id: str) -> list[Work]:
+        """The works some performance of which credits the artist, by id (3b S7, R1)."""
+        ...
+
+    @abstractmethod
+    def credited_artist(self, work_id: str, normalized_name: str) -> WorkArtist | None:
+        """The artist of *normalized_name* the work's performances credit, the earliest-placed
+        one first (the artist grouping picks on a matched work; 3b R1)."""
+        ...
 
     @abstractmethod
     def list_needing_enhancement(self) -> list[Work]: ...
@@ -24,12 +33,13 @@ class WorkRepository(ABC):
     def update_embedding(self, mbid: str, embedding: list[float]) -> None: ...
 
     @abstractmethod
-    def create_local(self, title: str, artist_id: str) -> str:
-        """Create a local-origin work. Returns work id."""
+    def create_local(self, title: str) -> str:
+        """Create a local-origin work (its artists are its performances' credits, 3b S7).
+        Returns work id."""
         ...
 
     @abstractmethod
-    def upsert_from_mb(self, mbid: str, title: str, artist_id: str) -> str:
+    def upsert_from_mb(self, mbid: str, title: str) -> str:
         """Collision check with FOR UPDATE. Merge or create. Returns work id."""
         ...
 

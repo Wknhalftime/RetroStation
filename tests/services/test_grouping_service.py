@@ -9,6 +9,7 @@ from backend.domain.catalog import Recording
 from backend.domain.enums import AudioHashKind, VersionType
 from backend.domain.library import AudioHash, AudioMetadata, LibraryFile
 from backend.services.grouping_service import (
+    GroupingResult,
     _dynamic_threshold,
     assign_work,
 )
@@ -70,7 +71,8 @@ def _seed_file_in_work(
     )
     norm_artist = normalize_artist(artist_name)
     artist_id = repos["artist_repo"].upsert_local_artist(artist_name, norm_artist)
-    work_id = repos["work_repo"].create_local(track_title, artist_id)
+    work_id = repos["work_repo"].create_local(track_title)
+    repos["work_repo"].credit(work_id, artist_id)
     f = dataclasses.replace(
         f,
         work_id=work_id,
@@ -82,6 +84,17 @@ def _seed_file_in_work(
     )
     repos["library_file_repo"].upsert(f)
     return f, work_id
+
+
+def _assign_like_the_scan(file: LibraryFile, repos: dict) -> GroupingResult:
+    """assign_work, then the credit the scan's placing gives the work: the file's new
+    performance credits the artist grouping picked (3b S7, D1), which is how a later file of
+    the artist finds the work. The fakes model no performances, so the work is credited."""
+    result = assign_work(file, **repos)
+    assert result is not None
+    if result.artist is not None:
+        repos["work_repo"].credit(result.work_id, result.artist.id)
+    return result
 
 
 # --- Step 1: Hash shortcut ---
@@ -307,12 +320,12 @@ def test_no_version_creates_original_recording() -> None:
 
 def test_two_versions_share_work_separate_recordings() -> None:
     repos = _make_repos()
-    r1 = assign_work(
+    r1 = _assign_like_the_scan(
         _make_file(
             artist_name="Alanis",
             track_title="You Oughta Know",
         ),
-        **repos,
+        repos,
     )
     # Seed the first file so candidate lookup works
     f1 = _make_file(
@@ -377,7 +390,10 @@ def test_orphan_work_found_by_candidate_query() -> None:
         "Alice In Chains",
         norm_artist,
     )
-    existing_work = repos["work_repo"].create_local("Would?", artist_id)
+    existing_work = repos["work_repo"].create_local("Would?")
+    # A performance with no file (a stored one) credits the artist: a work's artists are its
+    # performances' credits (3b S7).
+    repos["work_repo"].credit(existing_work, artist_id)
 
     result = assign_work(
         _make_file(artist_name="Alice In Chains", track_title="Would?"),
@@ -390,19 +406,19 @@ def test_orphan_work_found_by_candidate_query() -> None:
 def test_create_local_work_idempotent_on_normalized_title() -> None:
     """Even if fuzzy-match scores below threshold, create_local short-circuits.
 
-    Belt-and-braces guard: _create_local_work does one last `get_by_artist`
+    Belt-and-braces guard: _create_local_work does one last `works_crediting`
     sweep comparing normalized titles before inserting.
     """
     repos = _make_repos()
-    # First assignment creates the work.
-    r1 = assign_work(
+    # First assignment creates the work (and the scan's placing credits its artist).
+    r1 = _assign_like_the_scan(
         _make_file(artist_name="Alice In Chains", track_title="Would?"),
-        **repos,
+        repos,
     )
     # Second assignment with the same normalized title MUST reuse, not create.
-    r2 = assign_work(
+    r2 = _assign_like_the_scan(
         _make_file(artist_name="Alice In Chains", track_title="Would?"),
-        **repos,
+        repos,
     )
     assert r1 is not None and r2 is not None
     assert r1.work_id == r2.work_id
@@ -414,7 +430,7 @@ def test_create_local_work_idempotent_on_normalized_title() -> None:
         )
         .id
     )
-    works = repos["work_repo"].get_by_artist(artist_id)
+    works = repos["work_repo"].works_crediting(artist_id)
     assert len(works) == 1
 
 
@@ -462,8 +478,9 @@ def test_different_part_numbers_are_different_works() -> None:
     ]
     work_ids = []
     for title in titles:
-        result = assign_work(_make_file(artist_name="Pink Floyd", track_title=title), **repos)
-        assert result is not None
+        result = _assign_like_the_scan(
+            _make_file(artist_name="Pink Floyd", track_title=title), repos
+        )
         work_ids.append(result.work_id)
     part_ii, part_1, part_2, part_3 = work_ids
     assert part_2 == part_ii
@@ -496,8 +513,7 @@ def test_short_title_part_spellings_share_a_work() -> None:
 def _group_in_order(repos: dict, artist: str, *titles: str) -> list[str]:
     work_ids = []
     for title in titles:
-        result = assign_work(_make_file(artist_name=artist, track_title=title), **repos)
-        assert result is not None
+        result = _assign_like_the_scan(_make_file(artist_name=artist, track_title=title), repos)
         work_ids.append(result.work_id)
     return work_ids
 

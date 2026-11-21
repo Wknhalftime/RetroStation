@@ -70,7 +70,7 @@ class _World:
             matches=FakeMatchRepository(),
             artists=FakeArtistRepository(),
         )
-        self.old = self.works.create_local("Test Track", "local-artist")
+        self.old = self.works.create_local("Test Track")
 
     def file(self, *, moving: bool, missing: bool = False) -> LibraryFile:
         """A file on the old work; *moving* ones carry the tags enrichment resolves."""

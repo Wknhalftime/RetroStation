@@ -89,8 +89,24 @@ class Busy:
                VALUES (%s, 'Labelle', 'labelle', 'tag')""",
             (self.local_act,),
         )
-        self.third = cp.work(conn, "Lady Marmalade", self.local_act)
-        cp.copy(conn, self.third, fmt="mp3", title="Lady Marmalade")
+        # 3b PR 5b (D19, R5): the local act is credited only by the third work's performance,
+        # a copy of LaBelle's recording. Merged, the copy joins LaBelle's performance, the
+        # emptied one goes with its credit, and the act, credited nowhere, goes too.
+        shared = "0b000000-0000-4000-8000-0000000000c9"
+        conn.execute(
+            "UPDATE performances SET recording_mbid = %s WHERE id = %s", (shared, world.labelle)
+        )
+        conn.execute(
+            "UPDATE library_files SET recording_mbid = %s WHERE id = %s",
+            (shared, world.labelle_master),
+        )
+        self.third = cp.work(conn, "Lady Marmalade")
+        third_copy = cp.copy(
+            conn, self.third, fmt="mp3", title="Lady Marmalade", recording_mbid=shared
+        )
+        cp.performance(
+            conn, self.third, [third_copy], credit=[self.local_act], recording_mbid=shared
+        )
 
     @property
     def sources(self) -> list[str]:

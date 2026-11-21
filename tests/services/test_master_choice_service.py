@@ -44,9 +44,7 @@ def _repos() -> MasterChoiceRepos:
 
 
 def _work(repos: MasterChoiceRepos, work_id: str) -> str:
-    repos.move.works.upsert(
-        Work(id=work_id, title="Bother", artist_id=work_id, origin=CatalogSource.LOCAL)
-    )
+    repos.move.works.upsert(Work(id=work_id, title="Bother", origin=CatalogSource.LOCAL))
     return work_id
 
 

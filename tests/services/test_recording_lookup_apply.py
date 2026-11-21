@@ -79,7 +79,7 @@ class _World:
             matches=FakeMatchRepository(),
             artists=FakeArtistRepository(),
         )
-        self.local_work = self.works.create_local("Dream On", "local-artist")
+        self.local_work = self.works.create_local("Dream On")
 
     def recording(
         self,
@@ -148,7 +148,7 @@ def test_a_taken_version_slot_moves_the_files_but_leaves_the_recording_unlinked(
     rec = w.recording()
     lf = w.file_on_local_work()
     w.recordings.upsert(Recording(id=_OTHER_REC, title="Dream On", work_id=_WORK))
-    w.works.upsert_from_mb(mbid=_WORK, title="Dream On", artist_id=_ARTIST)
+    w.works.upsert_from_mb(mbid=_WORK, title="Dream On")
 
     applied = apply_recording_lookup(rec, _payload(), w.repos)
 
@@ -161,7 +161,7 @@ def test_a_taken_version_slot_moves_the_files_but_leaves_the_recording_unlinked(
 
 def test_a_recording_already_on_the_payloads_work_is_left_alone() -> None:
     w = _World()
-    w.works.upsert_from_mb(mbid=_WORK, title="Dream On", artist_id=_ARTIST)
+    w.works.upsert_from_mb(mbid=_WORK, title="Dream On")
     rec = w.recording(work_id=_WORK)
     lf = w.file_on_local_work()
     w.files.update_work_id(lf.id, _WORK)

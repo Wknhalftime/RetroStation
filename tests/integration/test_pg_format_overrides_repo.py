@@ -5,11 +5,10 @@ from uuid import uuid4
 import psycopg
 from psycopg.rows import dict_row
 
-from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
 from backend.db.repositories.works import PgWorkRepository
-from backend.domain.catalog import Artist, Work
+from backend.domain.catalog import Work
 from backend.domain.curation import FormatOverride
 from backend.domain.library import LibraryFile
 
@@ -18,8 +17,8 @@ from backend.domain.library import LibraryFile
 # ---------------------------------------------------------------------------
 
 
-def _make_second_work(mbid: str, artist_id: str) -> Work:
-    return Work(id=mbid, title="Test Work 2", artist_id=artist_id)
+def _make_second_work(mbid: str) -> Work:
+    return Work(id=mbid, title="Test Work 2")
 
 
 # ---------------------------------------------------------------------------
@@ -27,12 +26,9 @@ def _make_second_work(mbid: str, artist_id: str) -> Work:
 # ---------------------------------------------------------------------------
 
 
-def _make_artist(mbid: str = "artist-fo-001") -> Artist:
-    return Artist(id=mbid, name="Test Artist", sort_name="Artist, Test")
-
-
-def _make_work(mbid: str = "work-fo-001", artist_id: str = "artist-fo-001") -> Work:
-    return Work(id=mbid, title="Test Work", artist_id=artist_id)
+def _make_work(mbid: str = "work-fo-001") -> Work:
+    """A work: it names no artist since 3b PR 5b (S7)."""
+    return Work(id=mbid, title="Test Work")
 
 
 def _make_file(file_path: str = "/music/track.flac", format: str = "flac") -> LibraryFile:
@@ -45,16 +41,14 @@ def _make_file(file_path: str = "/music/track.flac", format: str = "flac") -> Li
 
 def _seed_chain(
     conn: psycopg.Connection[dict],
-    artist_mbid: str = "artist-fo-001",
     work_mbid: str = "work-fo-001",
     file_path: str = "/music/track.flac",
-) -> tuple[str, str, LibraryFile]:
-    """Insert artist → work → library_file chain; return (artist_id, work_id, file)."""
-    PgArtistRepository(conn).upsert(_make_artist(artist_mbid))
-    PgWorkRepository(conn).upsert(_make_work(work_mbid, artist_id=artist_mbid))
+) -> tuple[str, LibraryFile]:
+    """Insert a work and a library_file; return (work_id, file)."""
+    PgWorkRepository(conn).upsert(_make_work(work_mbid))
     lf = PgLibraryFileRepository(conn).upsert(_make_file(file_path))
     conn.commit()
-    return artist_mbid, work_mbid, lf
+    return work_mbid, lf
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +59,7 @@ def _seed_chain(
 class TestCreateAndList:
     def test_create_returns_persisted_model(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             override = FormatOverride(
@@ -87,7 +81,7 @@ class TestCreateAndList:
 
     def test_list_by_work_returns_all_overrides(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
 
             # Need a second file for the second override
             lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/track.mp3", format="mp3"))
@@ -120,7 +114,7 @@ class TestCreateAndList:
 
     def test_list_by_work_empty(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, _ = _seed_chain(conn)
+            work_id, _ = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             results = repo.list_by_work(work_id)
@@ -130,7 +124,7 @@ class TestCreateAndList:
 class TestGet:
     def test_get_existing(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             override = FormatOverride(
@@ -149,7 +143,7 @@ class TestGet:
 
     def test_get_missing_returns_none(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, _ = _seed_chain(conn)
+            work_id, _ = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             result = repo.get(work_id, "nonexistent-format")
@@ -157,7 +151,7 @@ class TestGet:
 
     def test_get_wrong_work_returns_none(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             repo.create(
@@ -177,7 +171,7 @@ class TestGet:
 class TestDelete:
     def test_delete_removes_row(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
 
             repo = PgFormatOverrideRepository(conn)
             override_id = uuid4()
@@ -207,7 +201,7 @@ class TestDelete:
 
     def test_delete_only_removes_target(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            _, work_id, lf = _seed_chain(conn)
+            work_id, lf = _seed_chain(conn)
             lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/track.mp3", format="mp3"))
             conn.commit()
 
@@ -245,9 +239,9 @@ class TestMoveToWork:
         self, migrated_db: str
     ) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            artist_id, from_work, lf = _seed_chain(conn)
+            from_work, lf = _seed_chain(conn)
             to_work = "work-fo-002"
-            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            PgWorkRepository(conn).upsert(_make_second_work(to_work))
             conn.commit()
 
             repo = PgFormatOverrideRepository(conn)
@@ -274,9 +268,9 @@ class TestMoveToWork:
         self, migrated_db: str
     ) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            artist_id, from_work, lf = _seed_chain(conn)
+            from_work, lf = _seed_chain(conn)
             to_work = "work-fo-002"
-            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            PgWorkRepository(conn).upsert(_make_second_work(to_work))
             lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/other.flac"))
             conn.commit()
 
@@ -311,9 +305,9 @@ class TestMoveToWork:
 
     def test_only_moves_overrides_naming_the_given_file(self, migrated_db: str) -> None:
         with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-            artist_id, from_work, lf = _seed_chain(conn)
+            from_work, lf = _seed_chain(conn)
             to_work = "work-fo-002"
-            PgWorkRepository(conn).upsert(_make_second_work(to_work, artist_id))
+            PgWorkRepository(conn).upsert(_make_second_work(to_work))
             lf2 = PgLibraryFileRepository(conn).upsert(_make_file("/music/other.mp3", format="mp3"))
             conn.commit()
 

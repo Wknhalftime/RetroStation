@@ -45,22 +45,16 @@ class PgMatchRepository(MatchRepository):
             library_file_id=row.get("library_file_id"),
             target_id=row.get("target_id"),
             target_type=TargetType(row["target_type"]) if row.get("target_type") else None,
-            work_id=row.get("work_id"),
             trace_id=row.get("trace_id"),
             created_at=row["created_at"],
         )
 
     def create(self, match: Match) -> Match:
-        # Empty-string -> NULL because work_id is FK to works(id); the auto-
-        # matcher's _score_candidates returns "" when the picked candidate
-        # has no work_id, and "" would fail the FK on insert.
-        work_id = match.work_id or None
         self._conn.execute(
             """INSERT INTO matches
                (id, confidence_score, match_tier, identity_id,
-                library_file_id, target_id, target_type, work_id, trace_id,
-                created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                library_file_id, target_id, target_type, trace_id, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 match.id,
                 match.confidence_score,
@@ -69,7 +63,6 @@ class PgMatchRepository(MatchRepository):
                 match.library_file_id,
                 match.target_id,
                 match.target_type.value if match.target_type else None,
-                work_id,
                 match.trace_id,
                 match.created_at,
             ),
@@ -105,12 +98,6 @@ class PgMatchRepository(MatchRepository):
             {"to": to_work_id, "from": from_work_id, "file": str(file_id)},
         )
 
-    def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
-        self._conn.execute(
-            "UPDATE matches SET work_id = %s WHERE library_file_id = %s",
-            (work_id, str(file_id)),
-        )
-
     def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
         src = ", ".join("%s" for _ in work_ids)
         self._conn.execute(
@@ -120,24 +107,6 @@ class PgMatchRepository(MatchRepository):
             WHERE target_type = %s AND target_id IN ({src})
             """,
             [target_id, TargetType.WORK.value, *work_ids],
-        )
-        self._conn.execute(
-            f"UPDATE matches SET work_id = %s WHERE work_id IN ({src})",
-            [target_id, *work_ids],
-        )
-
-    def release_work_matches(self, work_id: str) -> None:
-        # matches.work_id is an FK without ON DELETE, so this must run before the work is
-        # deleted. A match without a file is left with a NULL work_id.
-        self._conn.execute(
-            """
-            UPDATE matches m
-            SET work_id = (
-                SELECT lf.work_id FROM library_files lf WHERE lf.id = m.library_file_id
-            )
-            WHERE m.work_id = %s
-            """,
-            (work_id,),
         )
 
     def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:

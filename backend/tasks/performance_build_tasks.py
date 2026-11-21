@@ -59,11 +59,11 @@ def build_performances_task() -> dict[str, object]:
             repos = RepositoryFactory(conn)
             after: UUID | None = None
             while batch := repos.performances.files_waiting(after, BATCH_SIZE):
-                for file_id in batch:
-                    assign_performance(file_id, repos.performances)
+                for file_id, seeded in batch:
+                    assign_performance(file_id, repos.performances, default=seeded)
                 conn.commit()
                 built[0] += len(batch)
-                after = batch[-1]
+                after = batch[-1][0]
                 handle.report_running(
                     progress_data={"processed": built[0], "total": 0, "current_item": ""}
                 )

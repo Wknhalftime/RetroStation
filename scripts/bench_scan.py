@@ -289,30 +289,45 @@ _FINGERPRINT_QUERIES: dict[str, str] = {
                f.track_number, f.disc_number, f.duration_ms, f.bitrate,
                f.raw_metadata::text AS raw_metadata, f.artist_name,
                f.normalized_artist_name, f.normalized_title, f.file_size, f.file_mtime_ns,
-               w.title AS work_title, wa.name AS work_artist,
+               w.title AS work_title, wa.names AS work_artist,
                r.title AS recording_title, r.version_type AS recording_version
           FROM library_files f
           LEFT JOIN works w ON w.id = f.work_id
-          LEFT JOIN artists wa ON wa.id = w.artist_id
+          LEFT JOIN LATERAL (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name) AS names
+                 FROM performances p
+                 JOIN performance_credits pc ON pc.performance_id = p.id
+                 JOIN artists a ON a.id = pc.artist_id
+                      OR (pc.artist_id IS NULL AND a.mbid = pc.mbid)
+                WHERE p.work_id = w.id) wa ON true
           LEFT JOIN recordings r ON r.id = f.recording_id
          ORDER BY f.file_path
     """,
-    # Works are identified by (artist, title) since ids are random per run.
+    # Works are identified by (credited artists, title) since ids are random per run.
     "works": """
-        SELECT a.name AS artist, a.normalized_name, w.title, w.origin,
+        SELECT wa.names AS artist, w.title, w.origin,
                pf.file_path AS preferred_file
           FROM works w
-          JOIN artists a ON a.id = w.artist_id
+          LEFT JOIN LATERAL (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name) AS names
+                 FROM performances p
+                 JOIN performance_credits pc ON pc.performance_id = p.id
+                 JOIN artists a ON a.id = pc.artist_id
+                      OR (pc.artist_id IS NULL AND a.mbid = pc.mbid)
+                WHERE p.work_id = w.id) wa ON true
           LEFT JOIN song_masters sm ON sm.work_id = w.id
           LEFT JOIN library_files pf ON pf.id = sm.preferred_file_id
-         ORDER BY a.name, w.title, pf.file_path
+         ORDER BY wa.names, w.title, pf.file_path
     """,
     "recordings": """
-        SELECT a.name AS artist, w.title AS work, r.title, r.version_type
+        SELECT wa.names AS artist, w.title AS work, r.title, r.version_type
           FROM recordings r
           JOIN works w ON w.id = r.work_id
-          JOIN artists a ON a.id = w.artist_id
-         ORDER BY a.name, w.title, r.title, r.version_type
+          LEFT JOIN LATERAL (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name) AS names
+                 FROM performances p
+                 JOIN performance_credits pc ON pc.performance_id = p.id
+                 JOIN artists a ON a.id = pc.artist_id
+                      OR (pc.artist_id IS NULL AND a.mbid = pc.mbid)
+                WHERE p.work_id = w.id) wa ON true
+         ORDER BY wa.names, w.title, r.title, r.version_type
     """,
     "library_folders": """
         SELECT f.full_path, f.name, f.folder_hash, p.full_path AS parent

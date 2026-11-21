@@ -40,7 +40,6 @@ def _work(repos: ReconciliationRepos, work_id: str) -> None:
         Work(
             id=work_id,
             title="Ezekiel 25:17",
-            artist_id="a1",
             origin=CatalogSource.LOCAL,
             needs_enhancement=False,
         )

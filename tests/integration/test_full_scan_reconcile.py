@@ -45,8 +45,7 @@ def _full_scan(conn: psycopg.Connection[dict[str, object]], root: Path) -> None:
 
 def _link_to_work(repos: RepositoryFactory, file_path: Path) -> str:
     """Give an indexed file a work link of its own (not the grouping pass's)."""
-    artist_id = repos.artists.upsert_local_artist("Prince", "prince")
-    work_id = repos.works.create_local("Kiss (linked by hand)", artist_id)
+    work_id = repos.works.create_local("Kiss (linked by hand)")
     repos.library_files.update_work_id(_id_of(repos, file_path), work_id)
     return work_id
 

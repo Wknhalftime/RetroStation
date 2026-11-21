@@ -171,18 +171,16 @@ def persist_manual_match(
     """Replace the song's matches with the manual match, inside the caller's transaction.
 
     Returns the picked file's ``library_files.work_id`` (or ``None`` if it is unset) so the
-    caller can dispatch a post-commit master-selection recalc. ``recording_id`` is
-    intentionally NOT consulted as a fallback: ``matches.work_id`` is FK to ``works(id)``
-    and a recording_id (which lives in ``recordings(id)``) would fail the FK on insert.
-    Migration 0011 already backfills ``library_files.work_id`` from ``recordings.work_id``
-    at scan time, so a NULL here means the underlying work is genuinely unknown.
+    caller can dispatch a post-commit master-selection recalc. The match itself stores no
+    work: a line's work is its file's (3b PR 5b, S7). Migration 0011 already backfills
+    ``library_files.work_id`` from ``recordings.work_id`` at scan time, so a NULL here means
+    the underlying work is genuinely unknown.
     """
     picked = repos.files.get_by_id(library_file_id)
     if picked is None:
         raise LibraryFileNotFoundError(f"library_file_id {library_file_id} does not exist")
-    derived_work_id: str | None = picked.work_id or None
-    repos.song_matches.match_by_hand(identity_id, library_file_id, derived_work_id)
-    return derived_work_id
+    repos.song_matches.match_by_hand(identity_id, library_file_id)
+    return picked.work_id or None
 
 
 def recalculate_for_work_sync(

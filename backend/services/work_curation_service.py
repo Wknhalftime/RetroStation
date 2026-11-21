@@ -139,14 +139,13 @@ def _recalculate_master(work_id: str, repos: WorkCurationRepos) -> None:
 def _settle_left_work(work_id: str, repos: WorkCurationRepos) -> bool:
     """Settle the work a file just left; whether it was deleted.
 
-    With files left, its master is re-picked. With none, a match still on it follows its file
-    to that file's work and its file-less recordings go, as before; then the one deletion rule
-    decides (3b D7, D16; C53): nothing else pointing at it, it goes with its master; else it
-    stays, listed for Lance, losing only a master left on another work's file."""
+    With files left, its master is re-picked. With none, its file-less recordings go, as
+    before; then the one deletion rule decides (3b D7, D16; C53): nothing else pointing at it,
+    it goes with its master; else it stays, listed for Lance, losing only a master left on
+    another work's file."""
     if repos.files.get_by_work(work_id):
         _recalculate_master(work_id, repos)
         return False
-    SongMatchService(repos.matches).release_work(work_id)
     repos.curation.delete_fileless_recordings_of_work(work_id)
     if repos.works.delete_if_empty(work_id):
         return True
@@ -177,16 +176,16 @@ def _consolidate_recordings(
 
 
 def _delete_unused_local_artists(artist_ids: set[str], repos: WorkCurationRepos) -> None:
-    """Delete each local artist left with no work, no log-name link in any state (AUD-R035,
-    which changes AUD-R004; phase 1a S11), no merge on either side (phase 2a S11) and no
-    performance crediting it (3b D19: the source's act still performs a copy of the merged
-    work)."""
+    """Delete each local artist no performance credits any more, with no log-name link in any
+    state (AUD-R035, which changes AUD-R004; phase 1a S11) and no merge on either side (phase
+    2a S11). A work's artists are its performances' credits, so the "no work" condition went
+    with ``works.artist_id`` (3b S7, D19)."""
     links = LogNameLinkService(repos.links, repos.artists)
-    for artist_id in artist_ids:
+    for artist_id in sorted(artist_ids):
         artist = repos.artists.get_by_id(artist_id)
         if artist is None or artist.origin != CatalogSource.LOCAL:
             continue
-        if repos.works.get_by_artist(artist_id) or repos.merges.is_merged(artist_id):
+        if repos.merges.is_merged(artist_id):
             continue
         if repos.performances is not None and repos.performances.credits_artist(artist_id):
             continue
@@ -302,7 +301,7 @@ def merge_works(
     """Fold the source works into the target: files, overrides of both kinds, version-entry
     states (combined, D6), recordings, matches; the sources and their masters go. The merged
     work keeps the hand-picked master 3b's S3 picks, else its master is re-picked (D8)."""
-    target = _work(target_id, repos.works)
+    _work(target_id, repos.works)
     if target_id in source_work_ids:
         raise MergeTargetInSourcesError("Target work ID must not appear in source_work_ids")
     sources = _existing_works(source_work_ids, repos.works) if source_work_ids else []
@@ -310,6 +309,8 @@ def merge_works(
         return _NOTHING_MERGED
 
     source_ids = [work.id for work in sources]
+    # 3b R5: the merge's artist candidates are those its sources' performances credit.
+    acts = repos.performances.artists_credited_on(source_ids) if repos.performances else set()
     kept = _hand_picked_master(target_id, source_ids, repos)
     held = repos.lines.master_lines([target_id, *source_ids]) if repos.lines is not None else []
     moving = [f.id for work_id in source_ids for f in repos.files.get_by_work(work_id)]
@@ -328,7 +329,7 @@ def merge_works(
         _carry_master(kept, target_id, repos)
     _recalculate_master(target_id, repos)
     _hold_lines(target_id, held, repos)
-    _delete_unused_local_artists({work.artist_id for work in sources} - {target.artist_id}, repos)
+    _delete_unused_local_artists(acts, repos)
     return MergeResult(
         merged_file_count=merged, deleted_work_count=deleted, dropped_override_count=dropped
     )
@@ -338,15 +339,15 @@ def merge_works(
 
 
 def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> SplitResult:
-    """Move a file onto a new work of its own (same title and artist), with a copy of its
-    recording and each version text on its lines as seen (D6); the work it left is deleted
-    if emptied, else its master is re-picked. Overrides stay behind (D1)."""
+    """Move a file onto a new work of its own (same title; the file keeps its act, 3b D18),
+    with a copy of its recording and each version text on its lines as seen (D6); the work it
+    left is deleted if emptied, else its master is re-picked. Overrides stay behind (D1)."""
     work = _work(work_id, repos.works)
     file = repos.files.get_by_id(file_id)
     if file is None or file.work_id != work_id:
         raise CurationFileNotOnWorkError(f"File {file_id} does not belong to work {work_id}")
 
-    new_work_id = repos.works.create_local(work.title, work.artist_id)
+    new_work_id = repos.works.create_local(work.title)
     if file.recording_id is not None:
         old = repos.recordings.get_by_id(file.recording_id)
         copy = Recording(
@@ -363,7 +364,6 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
     release_pins(file_id, repos.matches, why="file split off")
     repos.files.update_work_id(file_id, new_work_id)
     song_matches = SongMatchService(repos.matches)
-    song_matches.follow_file(file_id, new_work_id)
     place([file_id], left, repos.performances, song_matches)
     repos.matches.see_version_states(file_id, work_id, new_work_id)
     repos.curation.store_split_master(uuid4(), new_work_id, file_id)
@@ -421,7 +421,6 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
     release_pins(file_id, repos.matches, why="file reassigned")
     repos.files.update_work_id(file_id, work_id)
     song_matches = SongMatchService(repos.matches)
-    song_matches.follow_file(file_id, work_id)
     place([file_id], left, repos.performances, song_matches)
     _recalculate_master(work_id, repos)
     left_deleted = False

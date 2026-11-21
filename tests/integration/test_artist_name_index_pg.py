@@ -24,8 +24,9 @@ stays as it is, and the name gets one ``different_acts`` row. No link moves.
 S14: the sweep, last in every scan. Each MBID of a name holding several gets an artist, with the
 spelling most of its files carry, and the name gets one ``shared_name`` row holding the MBIDs and
 the shared titles. It reads ``library_files``, so a re-tag, a tag in a later scan and a fuzzy join
-all reach it. Works stay where grouping put them until 3b. A repeat updates a row and never its
-``state``. Each name is its own transaction. Any other single-MBID file gets no artist (D6).
+all reach it. Works stay where grouping put them, and a work's artists are its performances'
+credits (3b PR 5b, S7). A repeat updates a row and never its ``state``. Each name is its own
+transaction. Any other single-MBID file gets no artist (D6).
 """
 
 from __future__ import annotations
@@ -176,12 +177,17 @@ def _file(
 
 
 def _artists(conn: Conn, normalized_name: str = ALICE) -> list[tuple[str | None, str, int]]:
-    """The artists of the name, name-only first: (MBID, origin, works)."""
+    """The artists of the name, name-only first: (MBID, origin, works its credits name;
+    3b PR 5b, S7)."""
     rows = conn.execute(
-        """SELECT a.mbid, a.origin, count(w.id) AS works
-             FROM artists a LEFT JOIN works w ON w.artist_id = a.id
+        """SELECT a.mbid, a.origin,
+                  (SELECT count(DISTINCT p.work_id)
+                     FROM performance_credits pc
+                     JOIN performances p ON p.id = pc.performance_id
+                    WHERE pc.artist_id = a.id
+                       OR (pc.artist_id IS NULL AND pc.mbid = a.mbid)) AS works
+             FROM artists a
             WHERE a.normalized_name = %s
-            GROUP BY a.id
             ORDER BY a.mbid NULLS FIRST""",
         (normalized_name,),
     ).fetchall()
@@ -212,9 +218,35 @@ def _works_by_file(conn: Conn) -> dict[str, str]:
 
 
 def _artist_of_work(conn: Conn, work_id: str) -> str:
-    row = conn.execute("SELECT artist_id FROM works WHERE id = %s", (work_id,)).fetchone()
+    """The artist the work's first performance credits first (3b PR 5b, S7)."""
+    row = conn.execute(
+        """SELECT COALESCE(pc.artist_id, held.id) AS artist_id
+             FROM performance_credits pc
+             JOIN performances p ON p.id = pc.performance_id
+             LEFT JOIN artists held ON pc.artist_id IS NULL AND held.mbid = pc.mbid
+            WHERE p.work_id = %s
+            ORDER BY p.id, pc.position LIMIT 1""",
+        (work_id,),
+    ).fetchone()
     assert row is not None
     return str(row["artist_id"])
+
+
+def _credited_work(conn: Conn, title: str, artist_id: str) -> str:
+    """A local work an artist's performance credits (a work's artists since 3b PR 5b, S7)."""
+    work_id = PgWorkRepository(conn).create_local(title)
+    held = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert held is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (held["id"], artist_id),
+    )
+    return work_id
 
 
 def _insert_artist(conn: Conn, name: str, mbid: str | None) -> str:
@@ -307,9 +339,9 @@ def test_the_candidate_join_sees_every_artist_of_the_name(conn: Conn) -> None:
     whichever artist of the name holds it (M18)."""
     works = PgWorkRepository(conn)
     expected = {
-        works.create_local("Poison", _insert_artist(conn, "Alice Cooper", BAND)),
-        works.create_local("Elected", _insert_artist(conn, "Alice Cooper", SINGER)),
-        works.create_local("Hey Stoopid", _insert_artist(conn, "Alice Cooper", None)),
+        _credited_work(conn, "Poison", _insert_artist(conn, "Alice Cooper", BAND)),
+        _credited_work(conn, "Elected", _insert_artist(conn, "Alice Cooper", SINGER)),
+        _credited_work(conn, "Hey Stoopid", _insert_artist(conn, "Alice Cooper", None)),
     }
 
     candidates = works.get_candidates_by_normalized_artist(ALICE)
@@ -1020,16 +1052,17 @@ def test_a_name_only_artist_is_kept_on_a_name_holding_several(conn: Conn) -> Non
 
 
 def test_untagged_shared_name(conn: Conn, tmp_path: Path) -> None:
-    """A name holding two MBIDs meets untagged files. A new title goes to a work of the
-    name-only artist. A title already held joins that work, whichever artist of the name holds
-    it (M18), so no second work is made."""
+    """A name holding two MBIDs meets untagged files. A new title goes to a new work crediting
+    the name-only artist. A title already held joins that work, whichever artist of the name its
+    performances credit (M18), and counts as that artist, so no second work is made (a work's
+    artists are its performances' credits, 3b PR 5b, S7)."""
     root = tmp_path / "library"
     tagged(root / "band.mp3", "Alice Cooper", "School's Out", BAND)
     tagged(root / "singer.mp3", "Alice Cooper", "Poison", SINGER)
     full_scan(conn, root)
     band = PgArtistRepository(conn).get_by_mbid(BAND)
     assert band is not None
-    held_by_an_mbid_artist = PgWorkRepository(conn).create_local("Under My Wheels", band.id)
+    held_by_an_mbid_artist = _credited_work(conn, "Under My Wheels", band.id)
     conn.commit()
 
     tagged(root / "new-title.mp3", "Alice Cooper", "Feed My Frankenstein")
@@ -1044,9 +1077,9 @@ def test_untagged_shared_name(conn: Conn, tmp_path: Path) -> None:
     assert work["held-by-name-only.mp3"] == work["singer.mp3"]
     assert work["held-by-mbid-artist.mp3"] == held_by_an_mbid_artist
     assert _artists(conn) == [
-        (None, "local", 3),
-        (BAND, "musicbrainz", 1),
-        (SINGER, "musicbrainz", 0),
+        (None, "local", 1),
+        (BAND, "musicbrainz", 2),
+        (SINGER, "musicbrainz", 1),
     ]
 
 
@@ -1070,9 +1103,9 @@ def test_the_result_does_not_depend_on_which_file_the_scan_reaches_first(
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 3),
-        (BAND, "musicbrainz", 0),
-        (SINGER, "musicbrainz", 0),
+        (None, "local", 1),
+        (BAND, "musicbrainz", 1),
+        (SINGER, "musicbrainz", 1),
     ]
 
 
@@ -1098,9 +1131,9 @@ def test_after_a_promotion_the_new_files_go_name_only_in_either_order(
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 2),
+        (None, "local", 1),
         (BAND, "musicbrainz", 1),
-        (SINGER, "musicbrainz", 0),
+        (SINGER, "musicbrainz", 1),
     ]
 
 
@@ -1186,9 +1219,10 @@ def test_a_stub_gets_no_row_when_only_mbid_artists_hold_the_name(conn: Conn) -> 
 
 
 def test_shared_name_makes_each_artist(conn: Conn, tmp_path: Path) -> None:
-    """Every MBID of the name gets an artist with the spelling most of its files carry, and the
-    works stay on the name-only artist (until 3b). One row holds the MBIDs and the titles files
-    under two or more of them share, compared by ``normalize_title``."""
+    """Every MBID of the name gets an artist with the spelling most of its files carry, and a
+    work's artists are its performances' credits (3b PR 5b, S7): each tagged file's work credits
+    its MBID's artist, the untagged file's the name-only artist. One row holds the MBIDs and the
+    titles files under two or more of them share, compared by ``normalize_title``."""
     root = tmp_path / "library"
     tagged(root / "1.mp3", "ALICE COOPER", "Elected", BAND)
     tagged(root / "2.mp3", "Alice Cooper", "School's Out", BAND)
@@ -1201,9 +1235,9 @@ def test_shared_name_makes_each_artist(conn: Conn, tmp_path: Path) -> None:
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 6),
-        (BAND, "musicbrainz", 0),
-        (SINGER, "musicbrainz", 0),
+        (None, "local", 1),
+        (BAND, "musicbrainz", 3),
+        (SINGER, "musicbrainz", 3),
     ]
     repo = PgArtistRepository(conn)
     band, singer = repo.get_by_mbid(BAND), repo.get_by_mbid(SINGER)
@@ -1258,16 +1292,16 @@ def test_tag_in_a_later_scan(conn: Conn, tmp_path: Path) -> None:
     root = tmp_path / "library"
     tagged(root / "first.mp3", "Alice Cooper", "School's Out", BAND)
     full_scan(conn, root)
-    assert _artists(conn) == [(None, "local", 1)]
+    assert _artists(conn) == [(None, "local", 0)]
     assert _suggestions(conn) == []
 
     tagged(root / "later.mp3", "Alice Cooper", "Poison", SINGER)
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 2),
-        (BAND, "musicbrainz", 0),
-        (SINGER, "musicbrainz", 0),
+        (None, "local", 0),
+        (BAND, "musicbrainz", 1),
+        (SINGER, "musicbrainz", 1),
     ]
     assert sorted(_shared_name_row(conn)["candidates"]) == sorted([BAND, SINGER])
 
@@ -1286,9 +1320,9 @@ def test_retag_of_a_grouped_file(conn: Conn, tmp_path: Path) -> None:
 
     assert _works_by_file(conn) == works_before
     assert _artists(conn) == [
-        (None, "local", 2),
-        (BAND, "musicbrainz", 0),
-        (SINGER, "musicbrainz", 0),
+        (None, "local", 0),
+        (BAND, "musicbrainz", 1),
+        (SINGER, "musicbrainz", 1),
     ]
     assert sorted(_shared_name_row(conn)["candidates"]) == sorted([BAND, SINGER])
 
@@ -1317,8 +1351,8 @@ def test_fuzzy_join_still_writes_the_row(
     assert local_upserts == []
     assert _artists(conn, "joined") == [
         (None, "local", 1),
-        (BAND, "musicbrainz", 0),
-        (SINGER, "musicbrainz", 0),
+        (BAND, "musicbrainz", 1),
+        (SINGER, "musicbrainz", 1),
     ]
     row = _shared_name_row(conn, "joined")
     assert sorted(row["candidates"]) == sorted([BAND, SINGER])
@@ -1374,7 +1408,7 @@ def test_a_single_mbid_makes_no_artist(conn: Conn, tmp_path: Path) -> None:
 
     full_scan(conn, root)
 
-    assert _artists(conn, "solo") == [(None, "local", 5)]
+    assert _artists(conn, "solo") == [(None, "local", 2)]
     assert _suggestions(conn) == []
 
 
@@ -1392,13 +1426,15 @@ def test_a_known_mbid_is_left_as_it_is(conn: Conn, tmp_path: Path) -> None:
 
     assert _named_row(conn, known) == ("Alice Cooper Band", "alice cooper band")
     assert _named_row(conn, stub.id) == (SINGER, None)
-    assert _artists(conn) == [(None, "local", 2)]
+    assert _artists(conn) == [(None, "local", 0)]
     assert sorted(_shared_name_row(conn)["candidates"]) == sorted([BAND, SINGER])
 
 
 def test_a_later_mbid_leaves_a_promoted_artist_its_works(conn: Conn, tmp_path: Path) -> None:
     """An upsert promoted the name while it held one MBID. A second MBID gets its own artist
-    beside it, the promoted artist keeps its works, and the new file goes name-only (S7)."""
+    beside it, and the promoted artist keeps its works. Grouping picks a new name-only artist
+    for the new file (S7), but its work credits its own MBID (a work's artists are its
+    performances' credits, 3b PR 5b, S7)."""
     root = tmp_path / "library"
     tagged(root / "first.mp3", "Alice Cooper", "School's Out", BAND)
     full_scan(conn, root)
@@ -1410,9 +1446,9 @@ def test_a_later_mbid_leaves_a_promoted_artist_its_works(conn: Conn, tmp_path: P
     full_scan(conn, root)
 
     assert _artists(conn) == [
-        (None, "local", 1),
+        (None, "local", 0),
         (BAND, "musicbrainz", 1),
-        (SINGER, "musicbrainz", 0),
+        (SINGER, "musicbrainz", 1),
     ]
 
 
@@ -1543,7 +1579,7 @@ def test_a_failed_read_does_not_fail_the_scan(
             full_scan(conn, root)
 
     assert any(e["log_level"] == "warning" for e in events)
-    assert _artists(conn) == [(None, "local", 2)]
+    assert _artists(conn) == [(None, "local", 0)]
 
     full_scan(conn, root)
 

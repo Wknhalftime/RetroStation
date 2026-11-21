@@ -71,7 +71,14 @@ def group_like_the_scan(repos: RepositoryFactory, library_file: LibraryFile) -> 
         song_master_repo=repos.song_masters,
     )
     assert result is not None
-    place_ungrouped_file(library_file.id, result.work_id, repos.library_files, repos.matches)
+    place_ungrouped_file(
+        library_file.id,
+        result.work_id,
+        repos.library_files,
+        repos.matches,
+        repos.performances,
+        artist=result.artist,
+    )
     if result.recording_id:
         repos.library_files.update_recording_link(
             library_file.id, result.recording_id, EnrichmentStatus.PENDING
@@ -115,7 +122,7 @@ def recording_payload(
 
 def work_row(conn: psycopg.Connection[Any], work_id: str) -> dict[str, Any] | None:
     row: dict[str, Any] | None = conn.execute(
-        """SELECT id, title, artist_id, mbid, origin, needs_enhancement
+        """SELECT id, title, mbid, origin, needs_enhancement
            FROM works WHERE id = %s""",
         (work_id,),
     ).fetchone()
@@ -124,7 +131,11 @@ def work_row(conn: psycopg.Connection[Any], work_id: str) -> dict[str, Any] | No
 
 def works_of_artist(conn: psycopg.Connection[Any], artist_id: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = conn.execute(
-        "SELECT id, title, mbid, origin FROM works WHERE artist_id = %s ORDER BY id",
+        """SELECT id, title, mbid, origin FROM works w
+            WHERE EXISTS (SELECT 1 FROM performances p
+                          JOIN performance_credits pc ON pc.performance_id = p.id
+                          WHERE p.work_id = w.id AND pc.artist_id = %s)
+            ORDER BY id""",
         (artist_id,),
     ).fetchall()
     return rows
@@ -143,10 +154,39 @@ def insert_local_work(
     conn: psycopg.Connection[Any], work_id: str, title: str, artist_id: str
 ) -> str:
     """A local work with a chosen id, as grouping's ``create_local`` makes one (for tests that
-    need the ids in a known order)."""
+    need the ids in a known order), under *artist_id*: a performance of it credits the
+    artist (3b PR 5b, S7)."""
     conn.execute(
-        """INSERT INTO works (id, title, artist_id, origin, needs_enhancement)
-           VALUES (%s, %s, %s, 'local', FALSE)""",
-        (work_id, title, artist_id),
+        """INSERT INTO works (id, title, origin, needs_enhancement)
+           VALUES (%s, %s, 'local', FALSE)""",
+        (work_id, title),
     )
+    credit_work(conn, work_id, artist_id)
     return work_id
+
+
+def credit_work(conn: psycopg.Connection[Any], work_id: str, artist_id: str) -> None:
+    """A performance of *work_id* crediting *artist_id*: a work is an artist's by its
+    performances' credits since 3b PR 5b (S7)."""
+    row = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert row is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (row["id"], artist_id),
+    )
+
+
+def credited_artists(conn: psycopg.Connection[Any], work_id: str) -> set[str]:
+    """The artists the work's performances credit (a work's artists since 3b PR 5b, S7)."""
+    rows = conn.execute(
+        """SELECT pc.artist_id FROM performance_credits pc
+           JOIN performances p ON p.id = pc.performance_id
+           WHERE p.work_id = %s AND pc.artist_id IS NOT NULL""",
+        (work_id,),
+    ).fetchall()
+    return {str(r["artist_id"]) for r in rows}

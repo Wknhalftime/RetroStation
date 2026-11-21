@@ -41,8 +41,10 @@ def test_lists_untagged_present_files_whose_artist_has_an_mbid() -> None:
     )
     linked = artists.upsert_musicbrainz_artist(_MBID, "Jesus Jones", "Jesus Jones", "jesus jones")
     unlinked = artists.upsert_local_artist("Nobody", "nobody")
-    linked_work = works.create_local("Right Here, Right Now", linked)
-    unlinked_work = works.create_local("Right Here, Right Now", unlinked)
+    linked_work = works.create_local("Right Here, Right Now")
+    works.credit(linked_work, linked)
+    unlinked_work = works.create_local("Right Here, Right Now")
+    works.credit(unlinked_work, unlinked)
 
     second = files.upsert(_file("/b.flac", linked_work))
     wanted = files.upsert(_file("/a.flac", linked_work))

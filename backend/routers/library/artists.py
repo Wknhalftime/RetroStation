@@ -8,7 +8,13 @@ from pydantic import BaseModel
 
 from backend.db.repositories.artist_merges import ARTIST_GROUP_SQL, MERGE_ROOTS_CTE
 from backend.db.repositories.version_entries import AsyncVersionEntryReader
-from backend.dependencies import SyncRepos, get_current_token, get_db_connection
+from backend.dependencies import (
+    SyncRepos,
+    get_artist_works_reader,
+    get_current_token,
+    get_db_connection,
+)
+from backend.domain.artist_page import GroupWork
 from backend.domain.catalog import (
     SPECIAL_PURPOSE_MBIDS,
     ArtistMerge,
@@ -17,6 +23,7 @@ from backend.domain.catalog import (
 )
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
 from backend.domain.system import StorageUnavailableError
+from backend.repositories.artist_works import ArtistWorksReader
 from backend.services.artist_merge_service import merge_artist, unmerge_artist
 from backend.services.version_entry_service import new_counts
 
@@ -79,6 +86,8 @@ def _artist_search_fragments(
 
 DbConn = Annotated[AsyncConnection[Any], Depends(get_db_connection)]
 Token = Annotated[str, Depends(get_current_token)]
+# The works reads, by credits through merge roots (3b PR 5b, S7, R6; moved out by R9).
+WorksReader = Annotated[ArtistWorksReader, Depends(get_artist_works_reader)]
 
 
 class ArtistSummary(BaseModel):
@@ -138,6 +147,7 @@ class MergeIn(BaseModel):
 @router.get("/artists", response_model=PaginatedArtists)
 async def list_artists(
     conn: DbConn,
+    works_reader: WorksReader,
     _token: Token,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -166,25 +176,9 @@ async def list_artists(
 
     items_sql = f"""
         WITH RECURSIVE {MERGE_ROOTS_CTE}
-        SELECT
-            a.id,
-            a.name,
-            a.sort_name,
-            a.disambiguation,
-            a.mbid,
-            a.origin,
-            COUNT(DISTINCT w.id)  AS work_count,
-            COUNT(DISTINCT lf.id) AS file_count
+        SELECT a.id, a.name, a.sort_name, a.disambiguation, a.mbid, a.origin
         FROM artists a
-        LEFT JOIN (
-            -- each work under the root of its artist's group: the artist itself, unmerged
-            SELECT gw.id, COALESCE(r.primary_id, gw.artist_id) AS root_id
-              FROM works gw LEFT JOIN merge_roots r ON r.artist_id = gw.artist_id
-        ) w ON w.root_id = a.id
-        LEFT JOIN library_files lf ON lf.work_id = w.id
         {where_clause}
-        GROUP BY a.id, a.name, a.sort_name, a.disambiguation,
-                 a.mbid, a.origin
         {order_clause}
         LIMIT %s OFFSET %s
     """
@@ -193,73 +187,30 @@ async def list_artists(
     items_cur = await conn.execute(items_sql, items_params)
     rows = await items_cur.fetchall()
 
-    page_works = await _page_work_ids(conn, [str(row["id"]) for row in rows])
+    # Each listed artist's works and files, by credits under its group's root (3b S7, R6).
+    listed = await works_reader.listed_works([str(row["id"]) for row in rows])
     counts = await new_counts(
-        AsyncVersionEntryReader(conn), sorted({w for ws in page_works.values() for w in ws})
+        AsyncVersionEntryReader(conn), sorted({w for ws in listed.values() for w in ws.work_ids})
     )
-    items = [
-        ArtistSummary(
-            id=row["id"],
-            name=row["name"],
-            sort_name=row["sort_name"],
-            disambiguation=row.get("disambiguation"),
-            work_count=row["work_count"],
-            file_count=row["file_count"],
-            mbid=row.get("mbid"),
-            origin=row.get("origin", "local"),
-            new_version_count=sum(counts.get(w, 0) for w in page_works.get(str(row["id"]), [])),
+    items = []
+    for row in rows:
+        works = listed.get(str(row["id"]))
+        work_ids = works.work_ids if works is not None else ()
+        items.append(
+            ArtistSummary(
+                id=row["id"],
+                name=row["name"],
+                sort_name=row["sort_name"],
+                disambiguation=row.get("disambiguation"),
+                work_count=len(work_ids),
+                file_count=works.file_count if works is not None else 0,
+                mbid=row.get("mbid"),
+                origin=row.get("origin", "local"),
+                new_version_count=sum(counts.get(w, 0) for w in work_ids),
+            )
         )
-        for row in rows
-    ]
     return PaginatedArtists(items=items, total=total)
 
-
-# The works of a page of listed artists, each under the root of its artist's group (the list's
-# own rule): read by works.artist_id for the page's artists and their merged members only.
-_PAGE_WORKS_SQL = f"""
-    WITH RECURSIVE {MERGE_ROOTS_CTE}
-    SELECT COALESCE(r.primary_id, w.artist_id) AS root_id, w.id
-      FROM works w
-      LEFT JOIN merge_roots r ON r.artist_id = w.artist_id
-     WHERE (w.artist_id = ANY(%(ids)s)
-            OR w.artist_id IN (SELECT m.artist_id FROM merge_roots m
-                                WHERE m.primary_id = ANY(%(ids)s)))
-       AND COALESCE(r.primary_id, w.artist_id) = ANY(%(ids)s)
-"""
-
-
-async def _page_work_ids(conn: AsyncConnection[Any], artist_ids: list[str]) -> dict[str, list[str]]:
-    """New-version counts (D5) need each listed artist's works; read for the page only, so the
-    list's own query keeps its two counts."""
-    if not artist_ids:
-        return {}
-    cur = await conn.execute(_PAGE_WORKS_SQL, {"ids": artist_ids})
-    found: dict[str, list[str]] = {}
-    for row in await cur.fetchall():
-        found.setdefault(str(row["root_id"]), []).append(str(row["id"]))
-    return found
-
-
-_GROUP_WORKS_SQL = """
-    SELECT
-        w.id,
-        w.title,
-        w.mbid,
-        w.origin,
-        w.artist_id,
-        COUNT(DISTINCT lf.id) AS recording_count,
-        COUNT(DISTINCT sm.id) AS master_count,
-        array_agg(DISTINCT r.version_type)
-            FILTER (WHERE r.version_type IS NOT NULL)
-            AS version_types
-    FROM works w
-    LEFT JOIN library_files lf ON lf.work_id = w.id
-    LEFT JOIN song_masters sm ON sm.work_id = w.id
-    LEFT JOIN recordings r ON r.work_id = w.id
-    WHERE w.artist_id = ANY(%s)
-    GROUP BY w.id, w.title, w.mbid, w.origin, w.artist_id
-    ORDER BY w.title
-"""
 
 # Files by MBID, one entry per (MBID, title) holding a file on none of the given works: an artist
 # with no works shows its files this way, and so does a merged member (2a's question A). An entry
@@ -276,25 +227,21 @@ _FILES_BY_MBID_SQL = """
 """
 
 
-async def _group_works(
-    conn: AsyncConnection[Any], member_ids: list[str]
-) -> tuple[list[WorkSummary], set[str]]:
-    """The works of every member of the group, by title, and the members that own one."""
-    cur = await conn.execute(_GROUP_WORKS_SQL, (member_ids,))
-    rows = await cur.fetchall()
-    works = [
+def _summaries(works: list[GroupWork]) -> tuple[list[WorkSummary], set[str]]:
+    """The group's works as the page lists them, and the members credited on one."""
+    summaries = [
         WorkSummary(
-            id=row["id"],
-            title=row["title"],
-            recording_count=row["recording_count"],
-            has_master=row["master_count"] > 0,
-            mbid=row.get("mbid"),
-            origin=row.get("origin", "local"),
-            version_types=row.get("version_types") or [],
+            id=work.id,
+            title=work.title,
+            recording_count=work.recording_count,
+            has_master=work.has_master,
+            mbid=work.mbid,
+            origin=work.origin,
+            version_types=list(work.version_types),
         )
-        for row in rows
+        for work in works
     ]
-    return works, {str(row["artist_id"]) for row in rows}
+    return summaries, {artist for work in works for artist in work.credited}
 
 
 async def _files_by_mbid(
@@ -319,7 +266,9 @@ async def _files_by_mbid(
 
 
 @router.get("/artists/{artist_id}", response_model=ArtistDetail)
-async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> ArtistDetail:
+async def get_artist_detail(
+    artist_id: str, conn: DbConn, works_reader: WorksReader, _token: Token
+) -> ArtistDetail:
     """Return an artist with a summary of its works.
 
     Phase 2a S11 (M33): a merged artist names its group's root primary in ``merged_into`` (the
@@ -347,7 +296,7 @@ async def get_artist_detail(artist_id: str, conn: DbConn, _token: Token) -> Arti
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Artist {artist_id} not found",
         )
-    works, owners = await _group_works(conn, [str(row["id"]) for row in group])
+    works, owners = _summaries(await works_reader.group_works([str(row["id"]) for row in group]))
     by_file = sorted(
         str(row["mbid"])
         for row in group

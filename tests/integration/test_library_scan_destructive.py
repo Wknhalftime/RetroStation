@@ -45,8 +45,7 @@ def _scan(repos: RepositoryFactory, folder: Path | str) -> None:
 
 def _link_to_work(repos: RepositoryFactory, file_path: Path) -> str:
     """Give an indexed file the work link the grouping pass would build."""
-    artist_id = repos.artists.upsert_local_artist("Prince", "prince")
-    work_id = repos.works.create_local("Kiss", artist_id)
+    work_id = repos.works.create_local("Kiss")
     lf = repos.library_files.get_by_path(str(file_path))
     assert lf is not None
     repos.library_files.update_work_id(lf.id, work_id)
