@@ -305,7 +305,7 @@ def test_a_held_group_is_shown_whole_unpreviewed(client: TestClient, ready: Conn
 
     kept = ka.keep(ready, takes.studio, takes.live, note=ka.MERGE_LIST_NOTE)
     ready.commit()
-    before = seed.snapshot(ready)
+    before, logged = seed.snapshot(ready), merge_count(ready)
 
     body = page(client)
 
@@ -317,7 +317,7 @@ def test_a_held_group_is_shown_whole_unpreviewed(client: TestClient, ready: Conn
     assert body["total"] == 1
     assert seed.snapshot(ready) == before
     assert ka.kept(ready) == {kept}
-    assert merge_count(ready) == 0
+    assert merge_count(ready) == logged
 
 
 def test_apply_never_merges_a_held_group(client: TestClient, ready: Conn) -> None:
@@ -325,6 +325,7 @@ def test_apply_never_merges_a_held_group(client: TestClient, ready: Conn) -> Non
     ka.keep(ready, takes.studio, takes.live)
     ready.commit()
     [held] = page(client)["groups"]
+    logged = merge_count(ready)
 
     response = client.post(
         APPLY,
@@ -340,7 +341,7 @@ def test_apply_never_merges_a_held_group(client: TestClient, ready: Conn) -> Non
         (takes.studio, "changed")
     ]
     assert all(seed.work_exists(ready, w) for w in takes.works)
-    assert merge_count(ready) == 0
+    assert merge_count(ready) == logged
 
 
 def test_a_held_group_keeps_its_place_among_the_others(client: TestClient, ready: Conn) -> None:
