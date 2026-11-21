@@ -7,6 +7,7 @@ import {
   type ApplyMergeListResult,
   type MergeList,
   type MergeListCount,
+  type WorkPair,
 } from "@/lib/schemas/mergeList";
 
 // Work merges phase 3b PR 4 (S2, D6, D28): the merge list, its count on Library Status, Apply.
@@ -49,6 +50,36 @@ export interface SeenMergeGroup {
   target_id: string;
   source_ids: string[];
   approvals: { station_id: string; identity_id: string; file_id: string | null }[];
+}
+
+// PR 5c (D55): keep every pair of a group's works apart; the list and its count reload.
+export function useKeepApart() {
+  const queryClient = useQueryClient();
+  return useMutation<unknown, Error, string[]>({
+    mutationFn: async (workIds) =>
+      apiFetch<unknown>(`${BASE}/keep-apart`, {
+        method: "POST",
+        body: JSON.stringify({ work_ids: workIds }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MERGE_LIST_KEY });
+    },
+  });
+}
+
+// PR 5c (D55, Q3): keep one pair apart no more.
+export function useUndoKeepApart() {
+  const queryClient = useQueryClient();
+  return useMutation<unknown, Error, WorkPair>({
+    mutationFn: async (pair) =>
+      apiFetch<unknown>(`${BASE}/kept-apart/undo`, {
+        method: "POST",
+        body: JSON.stringify(pair),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: MERGE_LIST_KEY });
+    },
+  });
 }
 
 export function useApplyMergeList() {
