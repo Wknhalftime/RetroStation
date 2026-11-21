@@ -34,14 +34,14 @@ RETIRED = [
     ("AUD-R083", "WorkReference.MATCH"),
     ("AUD-R083", "follow_file("),
     ("AUD-R083", "release_work("),
-    ("AUD-R083", "move_to_work("),
+    ("AUD-R083", "matches.move_to_work("),
     ("AUD-R083", "release_work_matches("),
     ("AUD-R084", "get_by_artist("),
     ("AUD-R085", "delete_overrides_of_work("),
     ("AUD-R086", "delete_recordings_of_work("),
     ("AUD-R087", "dry_run_untagged_recordings"),
 ]
-KEPT = ["get_by_artist_mbid(", "release_line_pins("]
+KEPT = ["get_by_artist_mbid(", "release_line_pins(", "format_overrides.move_to_work("]
 
 
 def _rows_of(ruling: str) -> list[RetiredRow]:

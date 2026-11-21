@@ -9,8 +9,10 @@ the union of its performances' credits, through artist merges where it counts by
   performance (no file) is under none (D42);
 - R1: grouping finds a file's work among the works whose performances credit an artist of the
   file's artist name, a MusicBrainz work first on a tie (#258's order); with none it makes a
-  local work, and the file's new performance credits the artist grouping picked (D1); a file a
-  writer moves before it held any performance takes its new work's default act (a reading);
+  local work, and the file's new performance credits the artist grouping picked (D1); a credit
+  of an MBID no artist holds is found by the name its files carry, so tagged copies of one song
+  share a work (a reading); a file a writer moves before it held any performance takes its new
+  work's default act (a reading);
 - R4: the untagged pass searches with the MBID of the file's own performance credit;
 - R7: an Unmapped versions item names its work's credited artists, and an artist page's Dismiss
   all takes the works its group's performances credit;
@@ -19,7 +21,9 @@ the union of its performances' credits, through artist merges where it counts by
 
 from __future__ import annotations
 
+import asyncio
 import shutil
+import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +34,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from huey.storage import MemoryStorage
-from mutagen.id3 import ID3, TIT2, TPE1
+from mutagen.id3 import ID3, TIT2, TPE1, TXXX
 from psycopg.rows import DictRow, dict_row
 
 from backend.config import get_settings
@@ -44,6 +48,10 @@ from tests.routers import version_pages_seed as broadcast
 
 pytestmark = pytest.mark.integration
 
+# psycopg's async pool needs the selector event loop on Windows (as tests/routers/conftest.py).
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 type Conn = psycopg.Connection[DictRow]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +59,7 @@ AUDIO = ROOT / "tests" / "fixtures" / "audio" / "well_tagged.mp3"
 ARTISTS = "/api/v1/library/artists"
 NETTLES_MBID = "0a000000-0000-4000-8000-0000000000e1"
 BON_JOVI_MBID = "0a000000-0000-4000-8000-0000000000e2"
+RATT_MBID = "0a000000-0000-4000-8000-0000000000e4"
 
 
 @pytest.fixture
@@ -178,6 +187,15 @@ def tagged_mp3(folder: Path, name: str, artist_name: str, title: str) -> Path:
     tags = ID3()
     tags.add(TPE1(encoding=3, text=artist_name))
     tags.add(TIT2(encoding=3, text=title))
+    tags.save(str(path))
+    return path
+
+
+def mbid_mp3(folder: Path, name: str, artist_name: str, title: str, artist_mbid: str) -> Path:
+    """An MP3 tagged with its artist, title and one artist MBID."""
+    path = tagged_mp3(folder, name, artist_name, title)
+    tags = ID3(str(path))
+    tags.add(TXXX(encoding=3, desc="MusicBrainz Artist Id", text=[artist_mbid]))
     tags.save(str(path))
     return path
 
@@ -346,6 +364,43 @@ def test_a_file_whose_artist_is_credited_nowhere_gets_a_new_work_crediting_it(
     ).fetchone()
     assert picked is not None and picked["name"] == "Warrant"
     assert credited_ids(conn, scanned["performance_id"]) == [picked["id"]]
+
+
+def held_mbids(conn: Conn) -> list[str]:
+    rows = conn.execute("SELECT mbid FROM artists WHERE mbid IS NOT NULL").fetchall()
+    return [r["mbid"] for r in rows]
+
+
+def test_tagged_copies_of_an_mbid_no_artist_holds_share_a_work(conn: Conn, tmp_path: Path) -> None:
+    """Lock request reading (R1): a name with one MBID makes no artist for it (2a D6), so a tagged
+    file's performance credits the MBID alone, held by no artist. Grouping still finds that work
+    by the name its files carry: two tagged copies of one song make one work, not two."""
+    library = tmp_path / "library"
+    mbid_mp3(library, "round-1.mp3", "Ratt", "Round And Round", RATT_MBID)
+    mbid_mp3(library, "round-2.mp3", "Ratt", "Round And Round", RATT_MBID)
+
+    full_scan(conn, library)
+
+    first, second = file_by_name(conn, "round-1.mp3"), file_by_name(conn, "round-2.mp3")
+    assert RATT_MBID not in held_mbids(conn)
+    assert first["work_id"] is not None
+    assert second["work_id"] == first["work_id"]
+
+
+def test_a_later_tagged_copy_of_an_mbid_no_artist_holds_joins_its_work(
+    conn: Conn, tmp_path: Path
+) -> None:
+    """The same across scans: the copy a later scan finds joins the first copy's work."""
+    library = tmp_path / "library"
+    mbid_mp3(library, "round-1.mp3", "Ratt", "Round And Round", RATT_MBID)
+    full_scan(conn, library)
+    first = file_by_name(conn, "round-1.mp3")
+
+    mbid_mp3(library, "round-2.mp3", "Ratt", "Round And Round", RATT_MBID)
+    full_scan(conn, library)
+
+    assert RATT_MBID not in held_mbids(conn)
+    assert file_by_name(conn, "round-2.mp3")["work_id"] == first["work_id"]
 
 
 def test_a_moved_file_that_held_no_performance_takes_its_new_works_default_act(
