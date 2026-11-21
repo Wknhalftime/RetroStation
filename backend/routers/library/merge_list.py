@@ -1,5 +1,6 @@
 """The merge list: the Library page of planned work merges, its count and Apply (work merges
-phase 3b PR 4; SPEC S2, D6, D15, D26-D28, E3, E5; scope Q11-Q13, Q22; AUD-R080)."""
+phase 3b PR 4; SPEC S2, D6, D15, D26-D28, E3, E5; scope Q11-Q13, Q22; AUD-R080), and Lance's
+"Keep apart" marks (PR 5c; SPEC D40, D55, D56, D58; AUD-R089)."""
 
 from __future__ import annotations
 
@@ -18,10 +19,13 @@ from backend.domain.merge_list import (
     GroupFlag,
     GroupOutcome,
     GroupView,
+    KeepApartTooFewWorksError,
+    KeepApartWorkNotFoundError,
+    KeptApartView,
     SeenGroup,
     WorkView,
 )
-from backend.domain.work_merge_planner import CreditsNotReadyError
+from backend.domain.work_merge_planner import CreditsNotReadyError, WorkPair
 from backend.domain.work_merges import MergeApproval, MergeChange
 from backend.services import merge_list_service as service
 from backend.services.merge_list_service import MergeListRepos
@@ -74,6 +78,11 @@ class FailureInfo(BaseModel):
     logged_at: datetime | None
 
 
+class PairInfo(BaseModel):
+    first_work_id: str
+    second_work_id: str
+
+
 class GroupInfo(BaseModel):
     target_id: str
     source_ids: list[str]
@@ -83,6 +92,21 @@ class GroupInfo(BaseModel):
     flags: list[FlagInfo]
     changes: list[ChangeInfo]
     failed: FailureInfo | None
+    held: list[PairInfo]
+
+
+class KeptWorkNameInfo(BaseModel):
+    work_id: str
+    title: str
+    artists: list[str]
+
+
+class KeptApartInfo(BaseModel):
+    first: KeptWorkNameInfo
+    second: KeptWorkNameInfo
+    kept_at: datetime
+    note: str
+    musicbrainz_links: bool
 
 
 class NamedWorkInfo(BaseModel):
@@ -105,6 +129,7 @@ class MergeListPage(BaseModel):
     groups: list[GroupInfo]
     duplicates: list[DuplicateInfo]
     kept_works: list[KeptWorkInfo]
+    kept_apart: list[KeptApartInfo]
     total: int
     offset: int
     limit: int
@@ -114,6 +139,20 @@ class MergeListCount(BaseModel):
     total: int
     duplicates: int
     kept_works: int
+    kept_apart: int
+
+
+class KeepApartRequest(BaseModel):
+    work_ids: list[str] = Field(min_length=2)
+
+
+class KeepApartResult(BaseModel):
+    kept: list[PairInfo]
+
+
+class UndoKeepApartRequest(BaseModel):
+    first_work_id: str
+    second_work_id: str
 
 
 class ApprovalInfo(BaseModel):
@@ -206,6 +245,25 @@ def _group(g: GroupView) -> GroupInfo:
             if g.failed is None
             else FailureInfo(error=g.failed.error, logged_at=g.failed.logged_at)
         ),
+        held=[_pair(p) for p in g.held],
+    )
+
+
+def _pair(p: WorkPair) -> PairInfo:
+    return PairInfo(first_work_id=p.first_work_id, second_work_id=p.second_work_id)
+
+
+def _named(w: WorkView) -> KeptWorkNameInfo:
+    return KeptWorkNameInfo(work_id=w.work_id, title=w.title, artists=list(w.artists))
+
+
+def _kept(k: KeptApartView) -> KeptApartInfo:
+    return KeptApartInfo(
+        first=_named(k.first),
+        second=_named(k.second),
+        kept_at=k.kept_at,
+        note=k.note,
+        musicbrainz_links=k.musicbrainz_links,
     )
 
 
@@ -241,6 +299,7 @@ def get_merge_list(
             )
             for k in page.kept_works
         ],
+        kept_apart=[_kept(k) for k in page.kept_apart],
         total=page.total,
         offset=page.offset,
         limit=page.limit,
@@ -255,8 +314,29 @@ def get_merge_list_count(_token: Token, repos: Repos) -> MergeListCount:
     except CreditsNotReadyError as refused:
         raise _not_ready(refused) from refused
     return MergeListCount(
-        total=counted.total, duplicates=counted.duplicates, kept_works=counted.kept_works
+        total=counted.total,
+        duplicates=counted.duplicates,
+        kept_works=counted.kept_works,
+        kept_apart=counted.kept_apart,
     )
+
+
+@router.post("/merge-list/keep-apart", response_model=KeepApartResult)
+def keep_apart(_token: Token, body: KeepApartRequest, repos: Repos) -> KeepApartResult:
+    """Keep every pair of a group's works apart (D55)."""
+    try:
+        pairs = service.keep_apart(body.work_ids, repos)
+    except KeepApartWorkNotFoundError as missing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(missing)) from missing
+    except KeepApartTooFewWorksError as few:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(few)) from few
+    return KeepApartResult(kept=[_pair(p) for p in pairs])
+
+
+@router.post("/merge-list/kept-apart/undo", status_code=status.HTTP_204_NO_CONTENT)
+def undo_keep_apart(_token: Token, body: UndoKeepApartRequest, repos: Repos) -> None:
+    """Keep one pair apart no more (D55); a pair that isn't kept is no error (Q3)."""
+    service.undo_keep_apart(body.first_work_id, body.second_work_id, repos)
 
 
 def _seen(g: SeenGroupInfo) -> SeenGroup:

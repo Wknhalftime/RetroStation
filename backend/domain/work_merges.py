@@ -11,6 +11,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from backend.domain.curation import MergeResult
+from backend.domain.work_merge_planner import WorkPair
 
 
 class WorkMergeError(Exception):
@@ -93,9 +94,11 @@ class MergeDone:
 
 @dataclass(frozen=True)
 class MergeRefused:
-    """The merge was undone: these changes wait for Lance's approval (C74)."""
+    """The merge was undone: these changes wait for Lance's approval (C74). Or it never ran:
+    the group holds works Lance keeps apart (PR 5c, Q6), named in ``kept_apart``."""
 
     changes: tuple[MergeChange, ...]
+    kept_apart: tuple[WorkPair, ...] = ()
 
 
 type LineKey = tuple[UUID, UUID]

@@ -33,7 +33,10 @@ BEGIN
         ('format_overrides', ARRAY['id'], false, 9),
         ('version_entry_states', ARRAY['work_id', 'version_text'], false, 10),
         ('matches', ARRAY['id'], false, 11),
-        ('credit_pick_proposals', ARRAY['id'], false, 12);
+        ('credit_pick_proposals', ARRAY['id'], false, 12),
+        ('work_keep_apart', ARRAY['first_work_id', 'second_work_id'], false, 13);
+    -- A table a later rollback dropped (0056's work_keep_apart) has nothing to restore.
+    DELETE FROM merge_restore_keys WHERE to_regclass(table_name) IS NULL;
 
     FOR m IN SELECT id FROM work_merges WHERE status = 'merged' ORDER BY seq DESC LOOP
         -- Preferred copies point into files about to move back: clear them first.

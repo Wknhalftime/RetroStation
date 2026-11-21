@@ -17,6 +17,8 @@ DROP TRIGGER IF EXISTS work_merge_capture ON format_overrides;
 DROP TRIGGER IF EXISTS work_merge_capture ON version_entry_states;
 DROP TRIGGER IF EXISTS work_merge_capture ON matches;
 DROP TRIGGER IF EXISTS work_merge_capture ON credit_pick_proposals;
+-- 3b PR 5c's 0056 captures the "Keep apart" marks too (a missing table is skipped).
+DROP TRIGGER IF EXISTS work_merge_capture ON work_keep_apart;
 DROP FUNCTION IF EXISTS work_merge_capture();
 
 DROP TABLE IF EXISTS work_redirects;

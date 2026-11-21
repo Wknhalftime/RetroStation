@@ -6,6 +6,10 @@ through the air-play view, calls ``merge_works`` (which pins or stores what it c
 again, and keeps the merge only when every change was approved. A merge that goes through is
 logged with its reason and approvals, and its merged-away ids redirect; one that fails is
 undone alone and logged as failed.
+
+A group holding two works Lance keeps apart (PR 5c, D40) is never merged for a late MusicBrainz
+work link (E4) or the merge list (behind Apply's plan): it is refused before anything runs, and
+logged as ``work_merge_kept_apart``. The Library's merge goes through (D57).
 """
 
 from __future__ import annotations
@@ -14,9 +18,11 @@ from dataclasses import dataclass
 
 import structlog
 
+from backend.domain.work_merge_planner import WorkPair
 from backend.domain.work_merges import (
     MergeChange,
     MergeDone,
+    MergeReason,
     MergeRefused,
     WorkMergeFailedError,
     WorkMergeGroup,
@@ -29,6 +35,9 @@ from backend.services.work_curation_service import WorkCurationRepos, merge_work
 
 logger = structlog.get_logger()
 
+# PR 5c (Q6): the reasons a kept pair refuses; the Library's own merge goes through (D57).
+_KEPT_APART_REFUSES = frozenset({MergeReason.WORK_LINK, MergeReason.MERGE_LIST})
+
 
 @dataclass(frozen=True)
 class WorkMergeRepos:
@@ -38,6 +47,16 @@ class WorkMergeRepos:
 
 def guarded_merge(group: WorkMergeGroup, repos: WorkMergeRepos) -> MergeDone | MergeRefused:
     """Merge the group if nothing that plays changes unapproved; else undo it and say what."""
+    kept = _kept_apart(group, repos)
+    if kept:
+        logger.warning(
+            "work_merge_kept_apart",
+            target_id=group.target_id,
+            source_ids=list(group.source_ids),
+            reason=group.reason.value,
+            pairs=[[p.first_work_id, p.second_work_id] for p in kept],
+        )
+        return MergeRefused((), kept_apart=kept)
     try:
         return repos.log.in_savepoint(lambda: _attempt(group, repos))
     except WorkMergeStorageError as failure:
@@ -50,6 +69,13 @@ def guarded_merge(group: WorkMergeGroup, repos: WorkMergeRepos) -> MergeDone | M
             error=str(failure),
         )
         raise WorkMergeFailedError(f"Merge into {group.target_id} failed: {failure}") from failure
+
+
+def _kept_apart(group: WorkMergeGroup, repos: WorkMergeRepos) -> tuple[WorkPair, ...]:
+    marks = repos.curation.keep_apart
+    if marks is None or group.reason not in _KEPT_APART_REFUSES:
+        return ()
+    return tuple(marks.pairs_among([group.target_id, *group.source_ids]))
 
 
 def preview(group: WorkMergeGroup, repos: WorkMergeRepos) -> tuple[MergeChange, ...]:
