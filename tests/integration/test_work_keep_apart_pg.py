@@ -46,6 +46,7 @@ from backend.services.work_curation_service import (
     reassign_file,
     split_file_off,
 )
+from backend.services.work_move_service import WorkMoveRepos, move_file_to_work
 from tests.integration import credit_picks_seed as cp
 from tests.integration import keep_apart_seed as ka
 from tests.integration import work_merge_seed as seed
@@ -233,6 +234,42 @@ def test_a_split_that_empties_its_work_marks_nothing(conn: Conn) -> None:
     split = split_file_off(work_id, only, repos(conn))
 
     assert split.old_work_deleted is True
+    assert ka.kept(conn) == set()
+
+
+def test_enrichments_move_marks_nothing(conn: Conn) -> None:
+    """Only Lance's split and reassign mark (Q7): enrichment moving a copy to another work is
+    no decision of his."""
+    world = TwoWorks(conn)
+    factory = RepositoryFactory(conn)
+    moving = factory.library_files.get_by_id(world.source_copy)
+    assert moving is not None
+
+    move_file_to_work(
+        moving,
+        world.target,
+        WorkMoveRepos(
+            files=factory.library_files,
+            works=factory.works,
+            song_masters=factory.song_masters,
+            matches=factory.matches,
+            performances=factory.performances,
+        ),
+    )
+
+    assert seed.work_of(conn, world.source_copy) == world.target
+    assert ka.kept(conn) == set()
+
+
+def test_the_one_deletion_rule_still_deletes_a_marked_empty_work(conn: Conn) -> None:
+    """R5: a mark isn't one of the references that keep an emptied work (it cascades), so the
+    sweep's rule deletes the work, and its marks go with it."""
+    emptied = cp.work(conn, "Always (Demo)")
+    ka.keep(conn, emptied, other_work(conn))
+
+    assert RepositoryFactory(conn).works.delete_if_empty(emptied) is True
+
+    assert not seed.work_exists(conn, emptied)
     assert ka.kept(conn) == set()
 
 
