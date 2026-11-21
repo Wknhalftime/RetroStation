@@ -65,12 +65,13 @@ def assert_grouping_invariants(conn: psycopg.Connection[Any]) -> None:
         == 0
     ), "Invariant 5 violated: dangling matches targeting deleted work"
 
-    # 6. No orphaned local artists
+    # 6. No orphaned local artists: each is credited by some performance (a work's artists are
+    # its performances' credits since 3b PR 5b, S7)
     assert (
         count(
             "SELECT 1 FROM artists a "
-            "LEFT JOIN works w ON w.artist_id = a.id "
-            "WHERE a.origin = 'local' AND w.id IS NULL"
+            "WHERE a.origin = 'local' "
+            "AND NOT EXISTS (SELECT 1 FROM performance_credits pc WHERE pc.artist_id = a.id)"
         )
         == 0
     ), "Invariant 6 violated: orphaned local artist"

@@ -22,6 +22,7 @@ from backend.domain.curation import FormatOverride, SongMaster
 from backend.domain.enums import EnrichmentStatus, SelectionMethod
 from backend.domain.library import AudioMetadata, LibraryFile, LibraryQuarantine
 from backend.domain.synthetic_work_id import encode as encode_synthetic_work_id
+from tests.integration.song_together_seed import credit_work
 from tests.matching_seed import seed_pg_link
 
 # ---------------------------------------------------------------------------
@@ -37,8 +38,9 @@ def _make_artist(mbid: str, name: str = "Test Artist", sort_name: str | None = N
     )
 
 
-def _make_work(mbid: str, title: str, artist_id: str) -> Work:
-    return Work(id=mbid, title=title, artist_id=artist_id)
+def _make_work(mbid: str, title: str) -> Work:
+    """A work: it names no artist since 3b PR 5b (S7); a performance's credit does."""
+    return Work(id=mbid, title=title)
 
 
 def _make_recording(mbid: str, title: str, work_id: str | None = None) -> Recording:
@@ -87,11 +89,13 @@ def _seed_canonical_chain(
     artist_name: str = "Test Artist",
     sort_name: str | None = None,
 ) -> tuple[Artist, Work, Recording, LibraryFile]:
-    """Insert artist → work → recording → library_file chain."""
+    """Insert artist → work → recording → library_file chain; a performance of the work
+    credits the artist (a work's artists are its performances' credits, 3b S7)."""
     artist = PgArtistRepository(conn).upsert(
         _make_artist(artist_mbid, name=artist_name, sort_name=sort_name)
     )
-    work = PgWorkRepository(conn).upsert(_make_work(work_mbid, "Test Work", artist_id=artist_mbid))
+    work = PgWorkRepository(conn).upsert(_make_work(work_mbid, "Test Work"))
+    credit_work(conn, work_mbid, artist_mbid)
     recording = PgRecordingRepository(conn).upsert(
         _make_recording(recording_mbid, "Test Recording", work_id=work_mbid)
     )
@@ -401,7 +405,7 @@ class TestWorkDetail:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == work.id
-        assert data["artist_id"] == "a-001"
+        assert [a["id"] for a in data["artists"]] == ["a-001"]  # its credits (3b S7)
         assert len(data["recordings"]) == 1
         rec = data["recordings"][0]
         assert rec["id"] == recording.id
@@ -463,7 +467,7 @@ class TestWorkDetail:
 
     def test_recording_with_no_files(self, client, db_conn) -> None:
         PgArtistRepository(db_conn).upsert(_make_artist("a-001"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work", artist_id="a-001"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work"))
         PgRecordingRepository(db_conn).upsert(
             _make_recording("r-001", "A Recording", work_id="w-001")
         )
@@ -477,9 +481,7 @@ class TestWorkDetail:
     def test_surfaces_files_with_null_recording_id(self, client, db_conn) -> None:
         """Files linked to a work but not yet matched to a recording are surfaced."""
         PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w-orphan-detail", "Orphan Work", artist_id="a-orphan")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w-orphan-detail", "Orphan Work"))
         lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/orphan_detail.flac",
@@ -541,7 +543,7 @@ class TestWorkDetail:
         to bypass the domain default that ``PgRecordingRepository`` would apply.
         """
         PgArtistRepository(db_conn).upsert(_make_artist("a-emptyver"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-emptyver", "A Work", artist_id="a-emptyver"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-emptyver", "A Work"))
         db_conn.execute(
             "INSERT INTO recordings (id, title, work_id, version_type) VALUES (%s, %s, %s, %s)",
             ("r-emptyver", "A Recording", "w-emptyver", ""),
@@ -608,7 +610,7 @@ class TestWorkDetailSynthetic:
         data = resp.json()
         assert data["id"] == synthetic_id
         assert data["title"] == "Synthetic Track"
-        assert data["artist_id"] == "a-albumartist"
+        assert "artist_id" not in data  # the detail names no artist id since 3b PR 5b (S7)
         assert data["song_master"] is None
         assert data["format_overrides"] == []
         assert len(data["recordings"]) == 1
@@ -773,7 +775,7 @@ class TestSetMaster:
 
     def test_delete_master_not_found(self, client, db_conn) -> None:
         PgArtistRepository(db_conn).upsert(_make_artist("a-001"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work", artist_id="a-001"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work"))
         db_conn.commit()
 
         resp = client.delete("/api/v1/library/works/w-001/master")
@@ -790,7 +792,7 @@ class TestSetMaster:
         )
         # A file tied to a different work.
         PgArtistRepository(db_conn).upsert(_make_artist("a-other"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-other", "Other", artist_id="a-other"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-other", "Other"))
         foreign_lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/foreign.flac",
@@ -824,8 +826,10 @@ def _seed_shared_recording(conn: psycopg.Connection) -> tuple[LibraryFile, Libra
     files = PgLibraryFileRepository(conn)
     artists.upsert(_make_artist("a-ss", name="Stone Sour"))
     artists.upsert(_make_artist("a-ct", name="Corey Taylor"))
-    works.upsert(_make_work("w-ss", "Bother", artist_id="a-ss"))
-    works.upsert(_make_work("w-ct", "Bother", artist_id="a-ct"))
+    works.upsert(_make_work("w-ss", "Bother"))
+    works.upsert(_make_work("w-ct", "Bother"))
+    credit_work(conn, "w-ss", "a-ss")
+    credit_work(conn, "w-ct", "a-ct")
     PgRecordingRepository(conn).upsert(_make_recording("r-shared", "Bother"))
     promo = files.upsert(_make_file("/m/promo.flac", recording_id="r-shared", work_id="w-ss"))
     album = files.upsert(_make_file("/m/album.flac", recording_id="r-shared", work_id="w-ct"))
@@ -844,12 +848,11 @@ class TestFileShownFromAnotherWork:
         assert resp.status_code == 200
         files = {f["id"]: f for r in resp.json()["recordings"] for f in r["files"]}
         assert files[str(promo.id)]["other_work"] is None
-        # 3b PR 5a (D41 h): named by its credited artists too; this one has no performance yet.
+        # 3b PR 5a (D41 h): named by its credited artists; since 5b (S7) only by them.
         assert files[str(album.id)]["other_work"] == {
             "id": "w-ct",
             "title": "Bother",
-            "artist_name": "Corey Taylor",
-            "artists": [],
+            "artists": ["Corey Taylor"],
         }
 
     def test_crowning_it_moves_it_onto_the_work_as_manual_master(self, client, db_conn) -> None:
@@ -956,7 +959,7 @@ class TestFormatOverrides:
 
     def test_delete_format_override_not_found(self, client, db_conn) -> None:
         PgArtistRepository(db_conn).upsert(_make_artist("a-001"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work", artist_id="a-001"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-001", "A Work"))
         db_conn.commit()
 
         resp = client.delete(f"/api/v1/library/works/w-001/format-overrides/{uuid4()}")
@@ -1017,7 +1020,7 @@ class TestFormatOverrides:
             file_path="/m/fo_reject_a.flac",
         )
         PgArtistRepository(db_conn).upsert(_make_artist("a-fo-other"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-fo-other", "Other", artist_id="a-fo-other"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-fo-other", "Other"))
         foreign_lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/fo_foreign.flac",
@@ -1196,16 +1199,10 @@ def _seed_match_for_work(conn: psycopg.Connection, work_id: str) -> str:
     return str(match_id)
 
 
-def _seed_match_for_file(
-    conn: psycopg.Connection,
-    file_id: UUID,
-    work_id: str,
-) -> str:
-    """Insert a matches row resolved to ``file_id`` with ``work_id`` set.
+def _seed_match_for_file(conn: psycopg.Connection, file_id: UUID) -> str:
+    """Insert a matches row resolved to ``file_id``.
 
-    This is the shape automatic and manual resolution write since migration
-    0024: ``matches.work_id`` is a real FK to works, so any endpoint that
-    deletes a work must first move these rows off it.
+    Since 3b PR 5b (S7) a match stores no work: its line's work is its file's work.
     """
     suffix = uuid4().hex[:8]
     ba_id = uuid4()
@@ -1222,8 +1219,8 @@ def _seed_match_for_file(
     )
     match_id = uuid4()
     conn.execute(
-        "INSERT INTO matches (id, identity_id, library_file_id, work_id) VALUES (%s, %s, %s, %s)",
-        (match_id, ti_id, file_id, work_id),
+        "INSERT INTO matches (id, identity_id, library_file_id) VALUES (%s, %s, %s)",
+        (match_id, ti_id, file_id),
     )
     conn.commit()
     return str(match_id)
@@ -1249,8 +1246,11 @@ def _artist_exists(conn: psycopg.Connection, artist_id: str) -> bool:
 
 
 def _match_work_id(conn: psycopg.Connection, match_id: str) -> str | None:
+    """The match line's work: its file's work since 3b PR 5b (S7)."""
     row = conn.execute(
-        "SELECT work_id FROM matches WHERE id = %s",
+        """SELECT f.work_id FROM matches m
+           LEFT JOIN library_files f ON f.id = m.library_file_id
+           WHERE m.id = %s""",
         (match_id,),
     ).fetchone()
     assert row is not None
@@ -1825,9 +1825,7 @@ class TestReassignFileWork:
                 work_id="w1-reassign",
             )
         )
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-reassign", "Other Work", artist_id="a-reassign")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-reassign", "Other Work"))
         PgRecordingRepository(db_conn).upsert(
             _make_recording("r2-reassign", "Other Recording", work_id="w2-reassign")
         )
@@ -1880,7 +1878,7 @@ class TestReassignFileWork:
                 work_id="w1-keep",
             )
         )
-        PgWorkRepository(db_conn).upsert(_make_work("w2-keep", "Other Work", artist_id="a-keep"))
+        PgWorkRepository(db_conn).upsert(_make_work("w2-keep", "Other Work"))
         PgRecordingRepository(db_conn).upsert(
             _make_recording("r2-keep", "Other Recording", work_id="w2-keep")
         )
@@ -1935,9 +1933,7 @@ class TestReassignFileWork:
         )
         # w2 has r2 (same version_type "original") with its own file, so
         # reassign will route lf_a onto r2 and leave r1 orphaned in w1.
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-last-reassign", "New Work", artist_id="a-last-reassign")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-last-reassign", "New Work"))
         PgRecordingRepository(db_conn).upsert(
             _make_recording("r2-last-reassign", "New Recording", work_id="w2-last-reassign")
         )
@@ -1974,9 +1970,9 @@ class TestReassignFileWork:
         current_work_id must still resolve via library_files (not the recordings
         join), so the now-empty old work is deleted.
         """
-        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
-        PgWorkRepository(db_conn).upsert(_make_work("w1-orphan", "Old Work", artist_id=artist.id))
-        PgWorkRepository(db_conn).upsert(_make_work("w2-orphan", "New Work", artist_id=artist.id))
+        PgArtistRepository(db_conn).upsert(_make_artist("a-orphan"))
+        PgWorkRepository(db_conn).upsert(_make_work("w1-orphan", "Old Work"))
+        PgWorkRepository(db_conn).upsert(_make_work("w2-orphan", "New Work"))
         lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/orphan.flac",
@@ -2023,9 +2019,7 @@ class TestReassignFileWork:
                 work_id="w1-nullkeep",
             )
         )
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-nullkeep", "Other Work", artist_id="a-nullkeep")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-nullkeep", "Other Work"))
         db_conn.commit()
 
         resp = client.patch(
@@ -2080,7 +2074,7 @@ class TestReassignFileWork:
     def test_current_work_id_none_skips_old_work_cleanup(self, client, db_conn) -> None:
         """A file with no current work (work_id NULL) has nothing to clean up."""
         PgArtistRepository(db_conn).upsert(_make_artist("a-nowork"))
-        PgWorkRepository(db_conn).upsert(_make_work("w-target-nowork", "Target", "a-nowork"))
+        PgWorkRepository(db_conn).upsert(_make_work("w-target-nowork", "Target"))
         lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/nowork.flac",
@@ -2125,9 +2119,7 @@ class TestReassignFileWork:
         # Target work has no recording with version_type "original" yet, so the
         # tgt_rec branch cannot fire; is_shared must, since lf_b still points
         # at r1-shared.
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-shared", "Target Work", artist_id="a-shared")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-shared", "Target Work"))
         db_conn.commit()
 
         resp = client.patch(
@@ -2166,16 +2158,17 @@ class TestReassignFileWork:
 
 
 # ---------------------------------------------------------------------------
-# Tests — matches.work_id follows its file through merge / split / reassign
+# Tests — a match's work follows its file through merge / split / reassign
 # ---------------------------------------------------------------------------
 
 
 class TestMatchWorkIdFollowsFile:
-    """``matches.work_id`` (0024) is an FK to works with no ON DELETE.
+    """``matches.work_id`` (0024) was an FK to works with no ON DELETE.
 
     Before the fix none of the three endpoints moved it, so deleting the
     emptied work failed with a ForeignKeyViolation (a 500), and a match
-    whose file moved kept pointing at the old work.
+    whose file moved kept pointing at the old work. Since 3b PR 5b (S7) the
+    column is gone: a line's work is its file's work, which these pin.
     """
 
     def test_merge_moves_matches_to_the_target(self, client, db_conn) -> None:
@@ -2193,7 +2186,7 @@ class TestMatchWorkIdFollowsFile:
             recording_mbid="r-mm-source",
             file_path="/m/mm_s.flac",
         )
-        match_id = _seed_match_for_file(db_conn, lf.id, "w-mm-source")
+        match_id = _seed_match_for_file(db_conn, lf.id)
 
         resp = client.post(
             "/api/v1/library/works/w-mm-target/merge",
@@ -2224,8 +2217,8 @@ class TestMatchWorkIdFollowsFile:
             )
         )
         db_conn.commit()
-        moved = _seed_match_for_file(db_conn, lf_a.id, "w-ms")
-        stays = _seed_match_for_file(db_conn, lf_b.id, "w-ms")
+        moved = _seed_match_for_file(db_conn, lf_a.id)
+        stays = _seed_match_for_file(db_conn, lf_b.id)
 
         resp = client.post(
             "/api/v1/library/works/w-ms/split",
@@ -2248,7 +2241,7 @@ class TestMatchWorkIdFollowsFile:
             recording_mbid="r-msl",
             file_path="/m/msl.flac",
         )
-        match_id = _seed_match_for_file(db_conn, lf.id, "w-msl")
+        match_id = _seed_match_for_file(db_conn, lf.id)
 
         resp = client.post(
             "/api/v1/library/works/w-msl/split",
@@ -2271,9 +2264,9 @@ class TestMatchWorkIdFollowsFile:
             recording_mbid="r1-mr",
             file_path="/m/mr.flac",
         )
-        PgWorkRepository(db_conn).upsert(_make_work("w2-mr", "Other", artist_id="a-mr"))
+        PgWorkRepository(db_conn).upsert(_make_work("w2-mr", "Other"))
         db_conn.commit()
-        match_id = _seed_match_for_file(db_conn, lf.id, "w1-mr")
+        match_id = _seed_match_for_file(db_conn, lf.id)
 
         resp = client.patch(
             f"/api/v1/library/files/{lf.id}/work",
@@ -2283,43 +2276,6 @@ class TestMatchWorkIdFollowsFile:
         assert resp.status_code == 200
         assert resp.json()["old_work_deleted"] is True
         assert _match_work_id(db_conn, match_id) == "w2-mr"
-
-    def test_emptied_work_releases_a_stale_match_to_its_files_work(
-        self,
-        client,
-        db_conn,
-    ) -> None:
-        """A match can name a work its file no longer belongs to.
-
-        When that work is emptied and deleted, the match is realigned to the
-        work its file is actually on rather than blocking the delete.
-        """
-        _, _, _, lf = _seed_canonical_chain(
-            db_conn,
-            artist_mbid="a-mst",
-            work_mbid="w1-mst",
-            recording_mbid="r1-mst",
-            file_path="/m/mst_a.flac",
-        )
-        _, _, _, elsewhere = _seed_canonical_chain(
-            db_conn,
-            artist_mbid="a-mst",
-            work_mbid="w3-mst",
-            recording_mbid="r3-mst",
-            file_path="/m/mst_c.flac",
-        )
-        PgWorkRepository(db_conn).upsert(_make_work("w2-mst", "Other", artist_id="a-mst"))
-        db_conn.commit()
-        stale = _seed_match_for_file(db_conn, elsewhere.id, "w1-mst")
-
-        resp = client.patch(
-            f"/api/v1/library/files/{lf.id}/work",
-            json={"work_id": "w2-mst"},
-        )
-
-        assert resp.status_code == 200
-        assert resp.json()["old_work_deleted"] is True
-        assert _match_work_id(db_conn, stale) == "w3-mst"
 
 
 # ---------------------------------------------------------------------------
@@ -2333,13 +2289,9 @@ class TestRecalculateSongMasterOrphans:
 
     def test_auto_master_picks_null_recording_file(self, client, db_conn) -> None:
         """When a work's only file has recording_id NULL, auto picks it."""
-        artist = PgArtistRepository(db_conn).upsert(_make_artist("a-auto-orphan"))
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w1-auto-orphan", "Old Work", artist_id=artist.id)
-        )
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-auto-orphan", "New Work", artist_id=artist.id)
-        )
+        PgArtistRepository(db_conn).upsert(_make_artist("a-auto-orphan"))
+        PgWorkRepository(db_conn).upsert(_make_work("w1-auto-orphan", "Old Work"))
+        PgWorkRepository(db_conn).upsert(_make_work("w2-auto-orphan", "New Work"))
         lf = PgLibraryFileRepository(db_conn).upsert(
             _make_file(
                 "/m/auto_orphan.flac",
@@ -2399,9 +2351,7 @@ class TestRecalculateSongMasterOrphans:
                 selection_method=SelectionMethod.MANUAL,
             )
         )
-        PgWorkRepository(db_conn).upsert(
-            _make_work("w2-manual-orphan", "Other Work", artist_id="a-manual-orphan")
-        )
+        PgWorkRepository(db_conn).upsert(_make_work("w2-manual-orphan", "Other Work"))
         db_conn.commit()
 
         # Reassign the other (enriched) file out of w1 — this triggers a
@@ -2443,7 +2393,7 @@ class TestOldWorkLeftWithOnlyMissingFiles:
         db_conn.execute(
             "UPDATE library_files SET file_status = 'missing' WHERE id = %s", (gone.id,)
         )
-        PgWorkRepository(db_conn).upsert(_make_work(f"w2-{suffix}", "Other", f"a-{suffix}"))
+        PgWorkRepository(db_conn).upsert(_make_work(f"w2-{suffix}", "Other"))
         PgSongMasterRepository(db_conn).upsert(
             SongMaster(
                 id=uuid4(),

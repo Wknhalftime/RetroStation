@@ -133,7 +133,7 @@ def test_enrich_by_release_over_a_multi_medium_release_with_mixed_files(
     song_masters = FakeSongMasterRepository()
     matches = FakeMatchRepository()
 
-    local_work_a = works.create_local("Song A", "local-artist-placeholder")
+    local_work_a = works.create_local("Song A")
     files.upsert(_pending_file(_FILE_A, _REC_A, work_id=local_work_a))
     song_masters.upsert(
         SongMaster(
@@ -200,8 +200,10 @@ def test_enrich_by_release_over_a_multi_medium_release_with_mixed_files(
         if (rec := recordings.get_by_id(rec_id)) is not None
     }
 
+    # A work names no artist since 3b PR 5b (S7): its artists are its performances' credits,
+    # which the fakes do not model.
     work_states = {
-        work_id: {"title": work.title, "artist_id": work.artist_id, "origin": work.origin.value}
+        work_id: {"title": work.title, "origin": work.origin.value}
         for work_id in (_WORK_A, _WORK_C)
         if (work := works.get_by_id(work_id)) is not None
     }

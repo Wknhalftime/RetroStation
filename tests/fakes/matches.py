@@ -10,7 +10,8 @@ from backend.repositories.matches import MatchRepository
 class FakeMatchRepository(MatchRepository):
     def __init__(self) -> None:
         self._data: dict[UUID, Match] = {}
-        # set_library_file_repo for release_work_matches, which reads each match's file.
+        # Wired by set_library_file_repo; kept for the bundles that wire it (nothing reads it
+        # since 3b PR 5b retired the match's own work, AUD-R083).
         self._library_file_repo: LibraryFileRepository | None = None
         # Phase 3a: the performance each match stores, by match id (PostgreSQL holds it).
         self.stored_performances: dict[UUID, UUID | None] = {}
@@ -36,27 +37,10 @@ class FakeMatchRepository(MatchRepository):
         # Version-entry states live in PostgreSQL only; the integration tests check them.
         return None
 
-    def move_to_work(self, file_id: UUID, work_id: str | None) -> None:
-        for match_id, match in list(self._data.items()):
-            if match.library_file_id == file_id:
-                self._data[match_id] = replace(match, work_id=work_id)
-
     def move_matches_of_works(self, work_ids: list[str], target_id: str) -> None:
         for match in list(self._data.values()):
             if match.target_type == TargetType.WORK and match.target_id in work_ids:
-                self._data[match.id] = match = replace(match, target_id=target_id)
-            if match.work_id in work_ids:
-                self._data[match.id] = replace(match, work_id=target_id)
-
-    def release_work_matches(self, work_id: str) -> None:
-        files = self._library_file_repo
-        for match in [m for m in self._data.values() if m.work_id == work_id]:
-            file = (
-                files.get_by_id(match.library_file_id)
-                if files is not None and match.library_file_id is not None
-                else None
-            )
-            self._data[match.id] = replace(match, work_id=file.work_id if file else None)
+                self._data[match.id] = replace(match, target_id=target_id)
 
     def set_stored_performance(self, match_ids: list[UUID], performance_id: UUID | None) -> None:
         for match_id in match_ids:

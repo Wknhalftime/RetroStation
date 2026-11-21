@@ -1,5 +1,5 @@
 """The works fake's candidate lookup mirrors ``PgWorkRepository``'s join on the name (phase 2a S5):
-it lists the works of every artist of the name, with an MBID or not. Not locked."""
+it lists the works crediting every artist of the name (3b S7), with an MBID or not. Not locked."""
 
 from __future__ import annotations
 
@@ -28,9 +28,11 @@ def test_candidates_are_the_works_of_every_artist_of_the_name() -> None:
     for artist in (_artist("name-only", None), _artist("band", "mbid-b"), _artist("x", "mbid-s")):
         artists.upsert(artist)
     artists.upsert(Artist(id="other", name="Other", sort_name="Other", normalized_name="other"))
-    poison = works.create_local("Poison", "name-only")
-    elected = works.create_local("Elected", "band")
-    works.create_local("Not Hers", "other")
+    poison = works.create_local("Poison")
+    works.credit(poison, "name-only")
+    elected = works.create_local("Elected")
+    works.credit(elected, "band")
+    works.credit(works.create_local("Not Hers"), "other")
 
     candidates = works.get_candidates_by_normalized_artist("alice cooper")
 

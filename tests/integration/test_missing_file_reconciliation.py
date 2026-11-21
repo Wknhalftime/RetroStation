@@ -73,16 +73,19 @@ def _identity(repos: RepositoryFactory) -> UUID:
     return identity.id
 
 
-def _match(conn: psycopg.Connection[DictRow], identity: UUID, file_id: UUID, work: str) -> None:
+def _match(conn: psycopg.Connection[DictRow], identity: UUID, file_id: UUID) -> None:
     conn.execute(
-        "INSERT INTO matches (identity_id, library_file_id, work_id) VALUES (%s, %s, %s)",
-        (identity, file_id, work),
+        "INSERT INTO matches (identity_id, library_file_id) VALUES (%s, %s)",
+        (identity, file_id),
     )
 
 
 def _matches_of(conn: psycopg.Connection[DictRow], file_id: UUID) -> list[tuple[str, str]]:
+    """The file's matches, each with its line's work: its file's work since 3b PR 5b (S7)."""
     rows = conn.execute(
-        "SELECT identity_id, work_id FROM matches WHERE library_file_id = %s ORDER BY identity_id",
+        """SELECT m.identity_id, f.work_id FROM matches m
+           LEFT JOIN library_files f ON f.id = m.library_file_id
+           WHERE m.library_file_id = %s ORDER BY m.identity_id""",
         (file_id,),
     ).fetchall()
     return [(str(r["identity_id"]), r["work_id"]) for r in rows]
@@ -94,14 +97,13 @@ def test_same_work_fold_moves_matches_master_and_drops_a_duplicate_match(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        work = repos.works.create_local("Ezekiel 25:17")
         old = _file(repos, str(tmp_path / "old.flac"), work, missing=True)
         new = _file(repos, str(tmp_path / "new.flac"), work, missing=False)
         shared, moving = _identity(repos), _identity(repos)
-        _match(conn, shared, old.id, work)
-        _match(conn, shared, new.id, work)
-        _match(conn, moving, old.id, work)
+        _match(conn, shared, old.id)
+        _match(conn, shared, new.id)
+        _match(conn, moving, old.id)
         repos.song_masters.upsert(
             SongMaster(
                 id=uuid4(),
@@ -130,13 +132,12 @@ def test_cross_work_fold_moves_matches_to_the_new_work_and_deletes_the_old_one(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
-        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old_work = repos.works.create_local("Ezekiel 25 17")
+        new_work = repos.works.create_local("Ezekiel 25:17")
         old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
         new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
         identity = _identity(repos)
-        _match(conn, identity, old.id, old_work)
+        _match(conn, identity, old.id)
         repos.song_masters.upsert(
             SongMaster(
                 id=uuid4(),
@@ -169,9 +170,8 @@ def test_cross_work_fold_moves_the_format_override_to_the_new_work(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
-        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old_work = repos.works.create_local("Ezekiel 25 17")
+        new_work = repos.works.create_local("Ezekiel 25:17")
         old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
         new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
         repos.format_overrides.create(
@@ -197,9 +197,8 @@ def test_cross_work_fold_keeps_the_new_works_own_override_for_the_same_format(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
-        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old_work = repos.works.create_local("Ezekiel 25 17")
+        new_work = repos.works.create_local("Ezekiel 25:17")
         old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
         new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
         kept_id = uuid4()
@@ -235,14 +234,13 @@ def test_cross_work_fold_keeps_an_old_work_that_still_has_a_recording(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        old_work = repos.works.create_local("Ezekiel 25 17", artist_id)
-        new_work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        old_work = repos.works.create_local("Ezekiel 25 17")
+        new_work = repos.works.create_local("Ezekiel 25:17")
         repos.recordings.upsert(Recording(id=str(uuid4()), title="Ezekiel", work_id=old_work))
         old = _file(repos, str(tmp_path / "old.flac"), old_work, missing=True)
         new = _file(repos, str(tmp_path / "new.flac"), new_work, missing=False)
         identity = _identity(repos)
-        _match(conn, identity, old.id, old_work)
+        _match(conn, identity, old.id)
 
         result = reconcile_missing_after_scan(conn, repos)
 
@@ -280,8 +278,7 @@ def test_one_failing_fold_does_not_stop_the_others(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        work = repos.works.create_local("Ezekiel 25:17")
         bad_old, _ = _foldable_pair(repos, tmp_path, work, "a.flac", "rec-a")
         good_old, good_new = _foldable_pair(repos, tmp_path, work, "b.flac", "rec-b")
         conn.commit()
@@ -310,8 +307,7 @@ def test_a_move_overtaken_since_planning_counts_as_stale(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        work = repos.works.create_local("Ezekiel 25:17")
         old, new = _foldable_pair(repos, tmp_path, work, "a.flac", "rec-a")
         plan = plan_for_library(repos.library_files)
         repos.library_files.mark_missing(new.file_path)
@@ -328,8 +324,7 @@ def test_reconciliation_repicks_a_master_stranded_on_a_missing_file(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        work = repos.works.create_local("Ezekiel 25:17")
         gone = _file(repos, str(tmp_path / "gone.flac"), work, missing=True)
         on_disk = repos.library_files.upsert(
             LibraryFile(
@@ -369,8 +364,7 @@ def test_plan_pairs_a_missing_row_with_its_audio_twin_despite_new_tags(
     audio = AudioHash(AudioHashKind.FLAC_MD5, "f" * 32)
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        work = repos.works.create_local("Ezekiel 25:17", artist_id)
+        work = repos.works.create_local("Ezekiel 25:17")
         old = repos.library_files.upsert(
             replace(_file(repos, str(tmp_path / "old.flac"), work, missing=False), audio_hash=audio)
         )
@@ -424,8 +418,7 @@ def test_plan_pairs_a_moved_file_whose_release_title_was_repunctuated(
     )
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Mariah Carey", "mariah carey")
-        work = repos.works.create_local("Heartbreaker", artist_id)
+        work = repos.works.create_local("Heartbreaker")
         old = _promo_file(
             repos, str(tmp_path / "14 Mariah Carey - Heartbreaker.flac"), work, before
         )

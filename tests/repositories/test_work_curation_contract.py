@@ -6,9 +6,10 @@ work_curation.py`` over the other fakes' rows) and on PostgreSQL, so the fake ca
 from the SQL. The service's own behaviour is pinned in
 ``tests/services/test_work_curation_service.py``.
 
-The merge's and a left work's statements on ``matches``, ``move_matches_of_works`` and
-``release_work_matches``, live on the matches port since phase 3a PR 1, which only
-``SongMatchService`` calls (D2); their cases stay here, run on that port.
+The merge's statement on ``matches``, ``move_matches_of_works``, lives on the matches port
+since phase 3a PR 1, which only ``SongMatchService`` calls (D2); its case stays here, run on
+that port. A match stores no work since 3b PR 5b (S7): a line's work is its file's work, so
+the port's release of a left work's matches retired with it (AUD-R083).
 """
 
 from __future__ import annotations
@@ -162,8 +163,9 @@ def ports(request: pytest.FixtureRequest) -> Iterator[Ports]:
 # --- seeds and reads ---------------------------------------------------------------------------
 
 
-def _work(ports: Ports, title: str = "Lithium", artist: str = "Nirvana") -> str:
-    return ports.works.create_local(title, ports.artists.upsert_local_artist(artist, artist))
+def _work(ports: Ports, title: str = "Lithium") -> str:
+    """A local work: it names no artist since 3b PR 5b (S7)."""
+    return ports.works.create_local(title)
 
 
 def _file(
@@ -213,7 +215,6 @@ def _line(
     ports: Ports,
     *,
     file_id: UUID | None = None,
-    work_id: str | None = None,
     target: str | None = None,
 ) -> UUID:
     """A song line's match (to a file, or to a work as its target); its identity id."""
@@ -227,7 +228,6 @@ def _line(
             library_file_id=file_id,
             target_id=target,
             target_type=TargetType.WORK if target is not None else TargetType.LIBRARY_FILE,
-            work_id=work_id,
         )
     )
     return identity
@@ -249,6 +249,12 @@ def _match(ports: Ports, identity: UUID) -> Match:
     match = ports.matches.get_by_identity(identity)
     assert match is not None
     return match
+
+
+def _line_work(ports: Ports, identity: UUID) -> str | None:
+    """A line's work: its file's work since 3b PR 5b (S7)."""
+    file_id = _match(ports, identity).library_file_id
+    return _work_of(ports, file_id) if file_id is not None else None
 
 
 def _master(ports: Ports, work_id: str) -> tuple[UUID, str, int | None] | None:
@@ -310,17 +316,18 @@ def test_recordings_are_listed_moved_and_folded(ports: Ports) -> None:
 
 
 def test_matches_follow_and_works_and_artists_go(ports: Ports) -> None:
-    target, source = _work(ports), _work(ports, "source", "Solo")
+    target, source = _work(ports), _work(ports, "source")
     file_id = _file(ports, source, "song")
-    on_file = _line(ports, file_id=file_id, work_id=source)
+    on_file = _line(ports, file_id=file_id)
     on_work = _line(ports, target=source)
     elsewhere = _line(ports, target=target)
 
     ports.matches.move_matches_of_works([source], target)
-    assert (_match(ports, on_file).work_id, _match(ports, on_work).target_id) == (target, target)
+    assert _match(ports, on_work).target_id == target
     assert _match(ports, elsewhere).target_id == target
 
     ports.curation.move_files_of_works([source], target)
+    assert _line_work(ports, on_file) == target  # the file's move carries its line (S7)
     assert ports.curation.delete_works([source, source, "no-such-work"]) == 1
     assert ports.works.get_by_id(source) is None
 
@@ -367,22 +374,6 @@ def test_recording_copy_file_recording_and_split_master(ports: Ports) -> None:
     master = ports.song_masters.get_by_work(work)
     assert master is not None and master.id == master_id
     assert _master(ports, work) == (two, "auto", None)
-
-
-def test_a_left_work_is_cleared(ports: Ports) -> None:
-    left, other = _work(ports), _work(ports, "other")
-    moved = _file(ports, other, "moved")
-    on_moved = _line(ports, file_id=moved, work_id=left)  # left behind on the old work
-    _override(ports, left, "mp3", _file(ports, left, "stays"), EARLY)
-    take = _recording(ports, left)
-
-    ports.matches.release_work_matches(left)
-    ports.curation.delete_overrides_of_work(left)
-    ports.curation.delete_recordings_of_work(left)
-
-    assert _match(ports, on_moved).work_id == other
-    assert ports.overrides.list_by_work(left) == []
-    assert ports.recordings.get_by_id(take) is None
 
 
 # --- the master recalculation's statements -------------------------------------------------------
@@ -467,11 +458,6 @@ def test_edge_cases_the_fake_and_the_sql_agree_on(ports: Ports) -> None:
     stored = ports.song_masters.get_by_work(second)
     assert stored is not None and stored.id == fresh
     assert _master(ports, second) == (b, "auto", 3)
-
-    # A match with no file, released from its work, is left with none.
-    no_file = _line(ports, work_id=first, target=first)
-    ports.matches.release_work_matches(first)
-    assert _match(ports, no_file).work_id is None
 
     # A candidate carries the file's stored release status and type.
     tagged = _file(ports, target, "tagged", release=(ReleaseStatus.PROMOTION, ReleaseType.ALBUM))

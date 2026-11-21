@@ -24,8 +24,7 @@ pytestmark = pytest.mark.integration
 
 def _linked_file(repos: RepositoryFactory, path: str) -> LibraryFile:
     """A file the way it looks after grouping + enrichment have run."""
-    artist_id = repos.artists.upsert_local_artist("Prince", "prince")
-    work_id = repos.works.create_local("Kiss", artist_id)
+    work_id = repos.works.create_local("Kiss")
     recording_id = repos.recordings.get_or_create_local(
         work_id,
         VersionType.ORIGINAL.value,

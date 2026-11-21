@@ -54,10 +54,9 @@ def test_lists_only_works_whose_missing_master_has_a_present_alternative(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
-        stranded = repos.works.create_local("Battery", artist_id)
-        only_missing = repos.works.create_local("Orion", artist_id)
-        on_disk = repos.works.create_local("One", artist_id)
+        stranded = repos.works.create_local("Battery")
+        only_missing = repos.works.create_local("Orion")
+        on_disk = repos.works.create_local("One")
 
         _master(repos, stranded, _file(repos, tmp_path / "a.flac", stranded, missing=True))
         _file(repos, tmp_path / "b.flac", stranded, missing=False)
@@ -71,8 +70,7 @@ def test_lists_only_works_whose_missing_master_has_a_present_alternative(
 def test_lists_in_work_id_order(migrated_db: str, tmp_path: Path) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
-        works = [repos.works.create_local(f"Track {i}", artist_id) for i in range(3)]
+        works = [repos.works.create_local(f"Track {i}") for i in range(3)]
         for i, work in enumerate(works):
             _master(repos, work, _file(repos, tmp_path / f"{i}-old.flac", work, missing=True))
             _file(repos, tmp_path / f"{i}-new.flac", work, missing=False)
@@ -86,8 +84,7 @@ def test_leaves_a_manual_master_on_a_missing_file_to_the_user(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
-        work = repos.works.create_local("Battery", artist_id)
+        work = repos.works.create_local("Battery")
         gone = _file(repos, tmp_path / "a.flac", work, missing=True)
         _file(repos, tmp_path / "b.flac", work, missing=False)
         _master(repos, work, gone, SelectionMethod.MANUAL)

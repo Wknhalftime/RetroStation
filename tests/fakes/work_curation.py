@@ -137,14 +137,6 @@ class FakeWorkCurationRepository(WorkCurationRepository):
 
     # --- a work a file left ----------------------------------------------------------------
 
-    def delete_overrides_of_work(self, work_id: str) -> None:
-        for override_id in [o.id for o in self._overrides.values() if o.work_id == work_id]:
-            del self._overrides[override_id]
-
-    def delete_recordings_of_work(self, work_id: str) -> None:
-        for recording_id in [r.id for r in self._recordings.values() if r.work_id == work_id]:
-            del self._recordings[recording_id]
-
     def delete_fileless_recordings_of_work(self, work_id: str) -> None:
         held = {f.recording_id for f in self._files.values()}
         for recording_id in [

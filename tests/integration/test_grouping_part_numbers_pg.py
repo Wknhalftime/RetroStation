@@ -18,6 +18,7 @@ from psycopg.rows import dict_row
 from backend.domain.library import AudioMetadata, LibraryFile
 from backend.services.grouping_service import assign_work
 from backend.services.repository_factory import RepositoryFactory
+from backend.services.work_move_service import place_ungrouped_file
 
 pytestmark = pytest.mark.integration
 
@@ -47,7 +48,16 @@ def test_grouping_against_postgres_keeps_parts_apart(migrated_db: str, tmp_path:
                 song_master_repo=repos.song_masters,
             )
             assert result is not None
-            repos.library_files.update_work_id(lf.id, result.work_id)
+            # As the scan places it: the file's performance credits the artist grouping
+            # picked, so the next part finds the work through its credits (3b S7).
+            place_ungrouped_file(
+                lf.id,
+                result.work_id,
+                repos.library_files,
+                repos.matches,
+                repos.performances,
+                artist=result.artist,
+            )
             work_ids.append(result.work_id)
 
         part_ii, part_1, part_2, part_3 = work_ids

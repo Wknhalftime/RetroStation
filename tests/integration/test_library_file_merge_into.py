@@ -76,8 +76,7 @@ def test_merge_into_moves_references_and_deletes_the_stale_row(
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Seal", "seal")
-        work_id = repos.works.create_local("Kiss from a Rose", artist_id)
+        work_id = repos.works.create_local("Kiss from a Rose")
         stale = _file(repos, str(tmp_path / "Seal - Kiss from a Rose.flac"), work_id)
         keeper = _file(repos, str(tmp_path / "Seal - Kiss From a Rose.flac"), work_id)
 

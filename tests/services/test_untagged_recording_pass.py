@@ -79,7 +79,8 @@ class _World:
         artist_id = self.artists.upsert_musicbrainz_artist(
             _ARTIST, "Jesus Jones", "Jesus Jones", "jesus jones"
         )
-        self.local_work = self.works.create_local("Right Here, Right Now", artist_id)
+        self.local_work = self.works.create_local("Right Here, Right Now")
+        self.works.credit(self.local_work, artist_id)
 
     def file(self, title: str, duration_ms: int = 183_000) -> LibraryFile:
         lf = LibraryFile(

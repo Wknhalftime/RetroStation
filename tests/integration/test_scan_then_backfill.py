@@ -92,10 +92,14 @@ def _snapshot(conn: Conn, root: Path) -> list[tuple[Any, ...]]:
     rows = conn.execute(
         """SELECT f.file_path, f.audio_hash, f.format, f.enrichment_status, f.file_status,
                   f.track_title, f.artist_name, f.file_size, f.file_mtime_ns,
-                  w.title AS work, a.name AS work_artist
+                  w.title AS work,
+                  (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name)
+                     FROM performances p
+                     JOIN performance_credits pc ON pc.performance_id = p.id
+                     JOIN artists a ON a.id = pc.artist_id
+                    WHERE p.work_id = f.work_id) AS work_artists
              FROM library_files f
              LEFT JOIN works w ON w.id = f.work_id
-             LEFT JOIN artists a ON a.id = w.artist_id
             WHERE starts_with(f.file_path, %s)
             ORDER BY f.file_path""",
         (str(root),),

@@ -108,7 +108,8 @@ def test_rich_real_work_detail_snapshot(
     PgArtistRepository(db_conn).upsert(
         Artist(id=_ARTIST_ID, name="Snapshot Artist", sort_name="Snapshot Artist")
     )
-    PgWorkRepository(db_conn).upsert(Work(id=_WORK_ID, title="Snapshot Work", artist_id=_ARTIST_ID))
+    # A work names no artist since 3b PR 5b (S7); the detail has no artist_id.
+    PgWorkRepository(db_conn).upsert(Work(id=_WORK_ID, title="Snapshot Work"))
     PgRecordingRepository(db_conn).upsert(
         Recording(id=_REC_WITH_FILES, title="Recording With Files", work_id=_WORK_ID)
     )

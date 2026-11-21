@@ -1,9 +1,9 @@
 """Integration: PgWorkRepository.delete_if_empty only removes an unreferenced work.
 
 Enrichment calls it on the local work a file just left for a MusicBrainz work.
-``matches`` (work_id and target_id), ``format_overrides`` and ``recordings``
-also point at works, so a work they still reference must survive rather than
-trip the FK.
+``matches`` (target_id), ``format_overrides`` and ``recordings`` also point at
+works, so a work they still reference must survive rather than trip the FK. A
+match stores no work_id since 3b PR 5b (S7): a line's work is its file's work.
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ def _match(
     repos: RepositoryFactory,
     file_id: UUID,
     *,
-    work_id: str | None = None,
     target_id: str | None = None,
 ) -> None:
     """A song's match naming *file_id* (every match is a song's since 1c's 0046)."""
@@ -59,16 +58,15 @@ def _match(
         )
     )
     conn.execute(
-        """INSERT INTO matches (identity_id, library_file_id, work_id, target_id, target_type)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (song.id, file_id, work_id, target_id, TargetType.WORK.value if target_id else None),
+        """INSERT INTO matches (identity_id, library_file_id, target_id, target_type)
+           VALUES (%s, %s, %s, %s)""",
+        (song.id, file_id, target_id, TargetType.WORK.value if target_id else None),
     )
 
 
-def _setup(conn: psycopg.Connection[DictRow]) -> tuple[RepositoryFactory, str, str]:
+def _setup(conn: psycopg.Connection[DictRow]) -> tuple[RepositoryFactory, str]:
     repos = RepositoryFactory(conn)
-    artist_id = repos.artists.upsert_local_artist("Metallica", "metallica")
-    return repos, repos.works.create_local("Battery", artist_id), artist_id
+    return repos, repos.works.create_local("Battery")
 
 
 def test_deletes_unreferenced_work_and_its_song_master(
@@ -76,8 +74,8 @@ def test_deletes_unreferenced_work_and_its_song_master(
     tmp_path: Path,
 ) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, work, artist_id = _setup(conn)
-        other = repos.works.create_local("Orion", artist_id)
+        repos, work = _setup(conn)
+        other = repos.works.create_local("Orion")
         elsewhere = _file(repos, tmp_path, other)
         repos.song_masters.upsert(
             SongMaster(
@@ -96,7 +94,7 @@ def test_deletes_unreferenced_work_and_its_song_master(
 
 def test_keeps_work_with_a_file(migrated_db: str, tmp_path: Path) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, work, _ = _setup(conn)
+        repos, work = _setup(conn)
         _file(repos, tmp_path, work)
 
         assert repos.works.delete_if_empty(work) is False
@@ -105,21 +103,17 @@ def test_keeps_work_with_a_file(migrated_db: str, tmp_path: Path) -> None:
 
 def test_keeps_work_a_match_points_at(migrated_db: str, tmp_path: Path) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, by_work_id, artist_id = _setup(conn)
-        by_target = repos.works.create_local("Orion", artist_id)
+        repos, by_target = _setup(conn)
         moved = _file(repos, tmp_path, None)
-        _match(conn, repos, moved.id, work_id=by_work_id)
         _match(conn, repos, moved.id, target_id=by_target)
 
-        assert repos.works.delete_if_empty(by_work_id) is False
         assert repos.works.delete_if_empty(by_target) is False
-        assert repos.works.get_by_id(by_work_id) is not None
         assert repos.works.get_by_id(by_target) is not None
 
 
 def test_keeps_work_with_a_format_override(migrated_db: str, tmp_path: Path) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, work, _ = _setup(conn)
+        repos, work = _setup(conn)
         moved = _file(repos, tmp_path, None)
         conn.execute(
             """INSERT INTO format_overrides (work_id, format_name, preferred_file_id)
@@ -133,7 +127,7 @@ def test_keeps_work_with_a_format_override(migrated_db: str, tmp_path: Path) -> 
 
 def test_keeps_work_with_a_recording(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
-        repos, work, _ = _setup(conn)
+        repos, work = _setup(conn)
         repos.recordings.upsert(Recording(id=str(uuid4()), title="Battery", work_id=work))
 
         assert repos.works.delete_if_empty(work) is False
