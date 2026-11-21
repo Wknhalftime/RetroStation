@@ -1,18 +1,19 @@
-"""A work's artists are its performances' credits (work merges phase 3b PR 5b, SPEC S7, D42;
-scope note R1, R4, R6, R7; AUD-R082, AUD-R088), on PostgreSQL.
+"""A work's artists are its performances' credits (work merges phase 3b PR 5b, SPEC S7, D42,
+D51, D52; scope note R1, R4, R6, R7; AUD-R082, AUD-R088), on PostgreSQL.
 
 ``works.artist_id`` is gone (S7, C70). Every reader that asked a work for its artist now reads
 the union of its performances' credits, through artist merges where it counts by artist:
 
 - R6: the artist list counts, and an artist's page lists, the works its performances credit,
   a merged member's on its primary's. A work crediting two acts is under both; a work with no
-  performance (no file) is under none (D42);
+  performance (no file) is under none (D42); a work whose only credit is an MBID no artist
+  holds is under none either (D52: the pages stay the credits alone);
 - R1: grouping finds a file's work among the works whose performances credit an artist of the
   file's artist name, a MusicBrainz work first on a tie (#258's order); with none it makes a
   local work, and the file's new performance credits the artist grouping picked (D1); a credit
   of an MBID no artist holds is found by the name its files carry, so tagged copies of one song
-  share a work (a reading); a file a writer moves before it held any performance takes its new
-  work's default act (a reading);
+  share a work (D51, grouping only); a file a writer moves before it held any performance takes
+  its new work's default act (a reading);
 - R4: the untagged pass searches with the MBID of the file's own performance credit;
 - R7: an Unmapped versions item names its work's credited artists, and an artist page's Dismiss
   all takes the works its group's performances credit;
@@ -60,6 +61,7 @@ ARTISTS = "/api/v1/library/artists"
 NETTLES_MBID = "0a000000-0000-4000-8000-0000000000e1"
 BON_JOVI_MBID = "0a000000-0000-4000-8000-0000000000e2"
 RATT_MBID = "0a000000-0000-4000-8000-0000000000e4"
+UNHELD_MBID = "0a000000-0000-4000-8000-0000000000e5"
 
 
 @pytest.fixture
@@ -291,6 +293,27 @@ def test_a_merged_members_credited_works_are_on_its_primarys_page(
     assert list_work_counts(app_client)[heart] == 2
 
 
+def test_a_work_whose_only_credit_is_an_unheld_mbid_is_on_no_page(
+    app_client: TestClient, conn: Conn
+) -> None:
+    """SPEC D52 (Lance, 2026-11-21): the pages stay the credits alone. A work whose only credit
+    is an MBID no artist holds is on no artist page and in no count, even beside a name-only
+    artist of the name its files carry; it shows once an artist holds the MBID."""
+    shared = artist(conn, "Shared Name")
+    untagged = work(conn, "Morning Light")
+    held_file(conn, untagged, performance(conn, untagged, shared), title="Morning Light")
+    tagged = work(conn, "Evening Rain")
+    held_file(conn, tagged, performance(conn, tagged, mbid=UNHELD_MBID), title="Evening Rain")
+    conn.commit()
+
+    assert page_works(app_client, shared) == {untagged}
+    assert sum(list_work_counts(app_client).values()) == 1
+
+    holder = artist(conn, "Shared Name (MusicBrainz)", mbid=UNHELD_MBID)
+    conn.commit()
+    assert page_works(app_client, holder) == {tagged}
+
+
 # --- R1: grouping through credits -----------------------------------------------------------------
 
 
@@ -372,9 +395,10 @@ def held_mbids(conn: Conn) -> list[str]:
 
 
 def test_tagged_copies_of_an_mbid_no_artist_holds_share_a_work(conn: Conn, tmp_path: Path) -> None:
-    """Lock request reading (R1): a name with one MBID makes no artist for it (2a D6), so a tagged
-    file's performance credits the MBID alone, held by no artist. Grouping still finds that work
-    by the name its files carry: two tagged copies of one song make one work, not two."""
+    """SPEC D51 (Lance, 2026-11-21): a name with one MBID makes no artist for it (2a D6), so a
+    tagged file's performance credits the MBID alone, held by no artist. Grouping still finds
+    that work by the name its files carry: two tagged copies of one song make one work, not two.
+    """
     library = tmp_path / "library"
     mbid_mp3(library, "round-1.mp3", "Ratt", "Round And Round", RATT_MBID)
     mbid_mp3(library, "round-2.mp3", "Ratt", "Round And Round", RATT_MBID)
@@ -390,7 +414,7 @@ def test_tagged_copies_of_an_mbid_no_artist_holds_share_a_work(conn: Conn, tmp_p
 def test_a_later_tagged_copy_of_an_mbid_no_artist_holds_joins_its_work(
     conn: Conn, tmp_path: Path
 ) -> None:
-    """The same across scans: the copy a later scan finds joins the first copy's work."""
+    """SPEC D51, across scans: the copy a later scan finds joins the first copy's work."""
     library = tmp_path / "library"
     mbid_mp3(library, "round-1.mp3", "Ratt", "Round And Round", RATT_MBID)
     full_scan(conn, library)
