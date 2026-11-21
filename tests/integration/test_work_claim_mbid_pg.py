@@ -14,7 +14,6 @@ from psycopg.rows import dict_row
 
 from backend.domain.catalog import Recording
 from backend.domain.enums import EnrichmentStatus, VersionType
-from backend.services.normalization import normalize_artist
 from backend.services.repository_factory import RepositoryFactory
 from tests.integration.song_together_seed import add_file, recordings_on, work_row
 
@@ -28,8 +27,7 @@ _MB_RECORDING = "00000000-0000-4000-8000-0000000c1003"
 def test_claim_mbid_makes_a_local_work_the_musicbrainz_work(migrated_db: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
-        local = repos.works.create_local("Pride (In The Name Of Love)", artist_id)
+        local = repos.works.create_local("Pride (In The Name Of Love)")
 
         assert repos.works.claim_mbid(local, _WORK, "Pride (In the Name of Love)") is True
 
@@ -39,7 +37,6 @@ def test_claim_mbid_makes_a_local_work_the_musicbrainz_work(migrated_db: str) ->
         assert row["origin"] == "musicbrainz"
         assert row["title"] == "Pride (In the Name of Love)"
         assert row["needs_enhancement"] is True
-        assert row["artist_id"] == artist_id
         assert repos.works.get_id_by_mbid(_WORK) == local
 
 
@@ -47,9 +44,8 @@ def test_claim_mbid_makes_a_local_work_the_musicbrainz_work(migrated_db: str) ->
 def test_claim_mbid_refuses_without_raising(migrated_db: str, case: str) -> None:
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
-        local = repos.works.create_local("One", artist_id)
-        held_by = repos.works.upsert_from_mb(mbid=_HELD, title="One", artist_id=artist_id)
+        local = repos.works.create_local("One")
+        held_by = repos.works.upsert_from_mb(mbid=_HELD, title="One")
         target, mbid = {
             "musicbrainz-work": (held_by, _WORK),
             "mbid-held-elsewhere": (local, _HELD),
@@ -75,9 +71,8 @@ def test_drop_fileless_grouping_recordings_keeps_held_and_musicbrainz_ones(
     work's are untouched."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
-        work = repos.works.create_local("One", artist_id)
-        other = repos.works.create_local("Two", artist_id)
+        work = repos.works.create_local("One")
+        other = repos.works.create_local("Two")
         fileless = repos.recordings.get_or_create_local(work, VersionType.ORIGINAL.value, "One")
         held = repos.recordings.get_or_create_local(work, VersionType.LIVE.value, "One (Live)")
         copy = add_file(repos, "/music/U2/one-live.flac", artist="U2", title="One (Live)")

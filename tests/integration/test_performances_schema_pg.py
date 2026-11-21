@@ -33,7 +33,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -131,9 +131,12 @@ def indexes(conn: Conn, table: str) -> set[tuple[str, ...]]:
 
 
 def an_artist(conn: Conn) -> str:
-    row = conn.execute("SELECT artist_id FROM works WHERE id = %s", (seed.work(conn),)).fetchone()
-    assert row is not None
-    return str(row["artist_id"])
+    artist_id = f"artist-{uuid4()}"
+    conn.execute(
+        "INSERT INTO artists (id, name, sort_name) VALUES (%s, %s, %s)",
+        (artist_id, "Artist", "Artist"),
+    )
+    return artist_id
 
 
 # --- the tables -----------------------------------------------------------------------------------

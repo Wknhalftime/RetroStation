@@ -150,18 +150,19 @@ def test_a_placeholder_in_a_further_credit_gets_no_artist(
     assert repos.artists.get_by_mbid(UNKNOWN) is None
 
 
-def test_the_work_keeps_its_first_credited_artist() -> None:
+def test_the_work_names_no_artist() -> None:
+    """AUD-R073 ("a work keeps its first-credited artist until 3b") ended with 3b PR 5b's S7:
+    the work enrichment makes names no artist (its artists are its performances' credits),
+    and every credited artist is upserted all the same."""
     repos = _repos()
 
     _by_recording(repos, CREDITS)
 
-    first = repos.artists.get_by_mbid(FIRST)
-    assert first is not None
-    [work] = repos.works.get_by_artist(first.id)
-    assert work.artist_id == first.id
-    second = repos.artists.get_by_mbid(SECOND)
-    assert second is not None
-    assert repos.works.get_by_artist(second.id) == []
+    [work] = repos.works.list_needing_enhancement()
+    assert work.mbid is not None
+    assert not hasattr(work, "artist_id")
+    assert repos.artists.get_by_mbid(FIRST) is not None
+    assert repos.artists.get_by_mbid(SECOND) is not None
 
 
 def test_three_credits() -> None:
@@ -281,4 +282,3 @@ def test_the_first_usable_credit_is_the_first() -> None:
     assert second is not None
     assert first.id == first_only
     assert second.id != second_only
-    assert [work.artist_id for work in repos.works.get_by_artist(first.id)] == [first.id]

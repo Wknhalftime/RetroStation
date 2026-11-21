@@ -99,16 +99,24 @@ def identity(
 
 
 def work(conn: Conn) -> str:
+    """An act and a work. The work names no artist since 3b PR 5b (S7): a work's artists
+    are its performances' credits. While 0055's seed is there (until D1's step drops it), the
+    act is the work's seeded artist, as 0055 copies it (D38)."""
     artist_id = f"artist-{uuid4()}"
     conn.execute(
         "INSERT INTO artists (id, name, sort_name) VALUES (%s, %s, %s)",
         (artist_id, "Artist", "Artist"),
     )
     work_id = f"work-{uuid4()}"
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-        (work_id, "Work", artist_id),
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, "Work"))
+    seeded = conn.execute(
+        "SELECT to_regclass('work_artist_seed') IS NOT NULL AS present"
+    ).fetchone()
+    if seeded is not None and seeded["present"]:
+        conn.execute(
+            "INSERT INTO work_artist_seed (work_id, artist_id) VALUES (%s, %s)",
+            (work_id, artist_id),
+        )
     return work_id
 
 

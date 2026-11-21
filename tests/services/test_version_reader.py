@@ -235,6 +235,9 @@ def _group(repos: dict[str, Any], artist: str, title: str) -> tuple[str, str, Ve
     )
     result = assign_work(lf, **repos)
     assert result is not None and result.recording_id is not None
+    if result.artist is not None:
+        # The scan's performance step credits grouping's pick (3b PR 5b, S7, R1).
+        repos["work_repo"].credit(result.work_id, result.artist.id)
     recording = repos["recording_repo"].get_by_id(result.recording_id)
     assert recording is not None
     return result.work_id, result.recording_id, recording.version_type

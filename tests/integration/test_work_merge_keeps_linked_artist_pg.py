@@ -36,7 +36,21 @@ def _artist(conn: Conn, name: str) -> str:
 
 
 def _work(conn: Conn, title: str, artist_id: str) -> str:
-    return RepositoryFactory(conn).works.create_local(title, artist_id)
+    """A work of *artist_id*: a performance credits it (3b PR 5b, S7; the merge deletes the
+    source works with their performances, so their acts are credited nowhere after)."""
+    work_id = RepositoryFactory(conn).works.create_local(title)
+    held = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert held is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (held["id"], artist_id),
+    )
+    return work_id
 
 
 def _log_name(conn: Conn, name: str) -> BroadcastArtist:

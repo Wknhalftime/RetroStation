@@ -263,14 +263,30 @@ def test_evidence_counts_each_tag_value_on_present_files_most_files_first(
 def test_link_gives_the_artist_its_mbid_in_place(migrated_db: str) -> None:
     with _connect(migrated_db) as conn:
         artist_id = _local(conn, "NIRVANA")
-        work_id = PgWorkRepository(conn).create_local("Lithium", artist_id)
+        work_id = PgWorkRepository(conn).create_local("Lithium")
+        held = conn.execute(
+            """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+               RETURNING id""",
+            (work_id,),
+        ).fetchone()
+        assert held is not None
+        conn.execute(
+            """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+               VALUES (%s, 0, %s, 'main')""",
+            (held["id"], artist_id),
+        )
         broadcast = _broadcast(conn, "NIRVANA", MatchStatus.AUTO_MATCHED)
         _artist_match(conn, broadcast, artist_id)
 
         written = PgArtistLinkingRepository(conn).link(artist_id, _candidate())
 
         row = _row(conn, artist_id)
-        work = conn.execute("SELECT artist_id FROM works WHERE id = %s", (work_id,)).fetchone()
+        # The work's performance still credits the artist, promoted in place (3b PR 5b, S7).
+        work = conn.execute(
+            """SELECT pc.artist_id FROM performance_credits pc
+               JOIN performances p ON p.id = pc.performance_id WHERE p.work_id = %s""",
+            (work_id,),
+        ).fetchone()
         targets = conn.execute(
             "SELECT artist_id AS target_id FROM log_name_links WHERE broadcast_artist_id = %s",
             (broadcast.id,),

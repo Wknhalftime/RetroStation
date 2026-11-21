@@ -179,10 +179,8 @@ def _insert_canonical_artist(conn: psycopg.Connection, artist_id: str) -> str:
 
 
 def _insert_work(conn: psycopg.Connection, work_id: str, artist_id: str) -> str:
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-        (work_id, f"Work {work_id}", artist_id),
-    )
+    # *artist_id* is unused since 3b PR 5b: a work names no artist (S7).
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, f"Work {work_id}"))
     conn.commit()
     return work_id
 
@@ -1011,9 +1009,9 @@ class TestResolveIdentity:
 # ---------------------------------------------------------------------------
 # TestResolveIdentityWorkId — migration 0024 wiring
 #
-# Pins the manual-resolve work_id derivation (matches.work_id == the picked
+# Pins the manual-resolve work_id derivation (the line's work is the picked
 # library_file's work_id, or NULL if it is unset — recording_id is NOT a
-# fallback because matches.work_id is FK to works(id)), the post-commit
+# fallback; a match carries no work since 3b PR 5b, S7), the post-commit
 # recalculate_song_masters dispatch, and the failure semantics on both sides
 # of the commit boundary.
 # ---------------------------------------------------------------------------
@@ -1046,7 +1044,9 @@ class TestResolveIdentityWorkId:
         assert resp.status_code == 200
 
         match_row = db_conn.execute(
-            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+            "SELECT f.work_id FROM matches m LEFT JOIN library_files f ON f.id = m.library_file_id"
+            " WHERE m.identity_id = %s",
+            (identity.id,),
         ).fetchone()
         assert match_row is not None
         assert match_row["work_id"] == work_id
@@ -1086,7 +1086,9 @@ class TestResolveIdentityWorkId:
         assert resp.status_code == 200
 
         match_row = db_conn.execute(
-            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+            "SELECT f.work_id FROM matches m LEFT JOIN library_files f ON f.id = m.library_file_id"
+            " WHERE m.identity_id = %s",
+            (identity.id,),
         ).fetchone()
         assert match_row is not None
         assert match_row["work_id"] is None
@@ -1117,7 +1119,9 @@ class TestResolveIdentityWorkId:
         assert resp.status_code == 200
 
         match_row = db_conn.execute(
-            "SELECT work_id FROM matches WHERE identity_id = %s", (identity.id,)
+            "SELECT f.work_id FROM matches m LEFT JOIN library_files f ON f.id = m.library_file_id"
+            " WHERE m.identity_id = %s",
+            (identity.id,),
         ).fetchone()
         assert match_row is not None
         assert match_row["work_id"] is None
@@ -1149,7 +1153,8 @@ class TestResolveIdentityWorkId:
 
         # Match write was durable — recalc failure must not roll it back.
         match_row = db_conn.execute(
-            "SELECT work_id, library_file_id FROM matches WHERE identity_id = %s",
+            "SELECT f.work_id, m.library_file_id FROM matches m"
+            " LEFT JOIN library_files f ON f.id = m.library_file_id WHERE m.identity_id = %s",
             (identity.id,),
         ).fetchone()
         assert match_row is not None
@@ -1196,7 +1201,8 @@ class TestResolveIdentityWorkId:
         assert resp.status_code == 200
 
         match_row = db_conn.execute(
-            "SELECT work_id, library_file_id FROM matches WHERE identity_id = %s",
+            "SELECT f.work_id, m.library_file_id FROM matches m"
+            " LEFT JOIN library_files f ON f.id = m.library_file_id WHERE m.identity_id = %s",
             (identity.id,),
         ).fetchone()
         assert match_row is not None

@@ -72,11 +72,7 @@ def _master_of(repos: RepositoryFactory, work_id: str) -> tuple[UUID, SelectionM
 
 
 def _two_works(repos: RepositoryFactory) -> tuple[str, str]:
-    artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-    return (
-        repos.works.create_local("Ezekiel 25 17", artist_id),
-        repos.works.create_local("Ezekiel 25:17", artist_id),
-    )
+    return repos.works.create_local("Ezekiel 25 17"), repos.works.create_local("Ezekiel 25:17")
 
 
 @pytest.mark.parametrize("old_method", [SelectionMethod.MANUAL, SelectionMethod.AUTO])
@@ -134,8 +130,7 @@ def test_no_master_points_outside_its_work_after_a_mixed_reconciliation(
     """(c) Invariant over one run holding every kind of fold at once."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Samuel L. Jackson", "samuel l jackson")
-        works = [repos.works.create_local(f"Work {i}", artist_id) for i in range(6)]
+        works = [repos.works.create_local(f"Work {i}") for i in range(6)]
         manual_old, auto_old, emptied, same, target_a, target_b = works
         # Cross-work, MANUAL master, old work keeps a present file.
         m1 = _file(repos, tmp_path / "old" / "1.flac", manual_old, "rec-1", missing=True)

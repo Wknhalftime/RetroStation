@@ -409,7 +409,12 @@ describe("MergeList: the other two sections", () => {
         },
       ],
       kept_works: [
-        { work_id: "w-kept", title: "Lithium (old)", references: ["format_override", "match"] },
+        // A match on the work, since 3b PR 5b's matches carry no work (R8).
+        {
+          work_id: "w-kept",
+          title: "Lithium (old)",
+          references: ["format_override", "work_match"],
+        },
       ],
       total: 0,
     };

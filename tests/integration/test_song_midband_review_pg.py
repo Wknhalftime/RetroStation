@@ -170,7 +170,7 @@ def _state(conn: Conn, song: BroadcastTrackIdentity) -> dict[str, Any]:
 
 def _rows(conn: Conn, song: BroadcastTrackIdentity) -> list[tuple[Any, ...]]:
     found = conn.execute(
-        """SELECT id, library_file_id, confidence_score, match_tier, work_id
+        """SELECT id, library_file_id, confidence_score, match_tier
              FROM matches WHERE identity_id = %s ORDER BY confidence_score, id""",
         (song.id,),
     ).fetchall()
@@ -499,7 +499,7 @@ def test_a_demoted_songs_plays_stop_resolving_until_approved(migrated_db: str) -
             (ARTIST, ARTIST),
         )
         conn.execute(
-            "INSERT INTO works (id, title, artist_id) VALUES ('d14-work', %s, 'd14-artist')",
+            "INSERT INTO works (id, title) VALUES ('d14-work', %s)",
             ("Hot For Teacher",),
         )
         conn.execute(

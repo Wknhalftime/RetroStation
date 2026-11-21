@@ -2,7 +2,8 @@
 phase 3b PR 2, SPEC D1, D17 (scope Q3, Q5); design §5 Work, §6.9; AUD-R078), on PostgreSQL.
 
 After 3a's build has finished (its done-marker), the task gives every performance that has no
-credit one credit, its work's artist (``works.artist_id``): position 0, the artist's id, its
+credit one credit, its work's artist from 0055's seed (3b PR 5b, D38; a work names no artist
+since S7), dropping the seed with its marker (D49): position 0, the artist's id, its
 MBID if it has one, its name as the credited name, no joining words, ``main``. A performance
 whose work's artist is a placeholder (``SPECIAL_PURPOSE_MBIDS``) stays without one (Q5, as 3a).
 A performance with any credit is left as it is.
@@ -33,8 +34,11 @@ from backend.services.repository_factory import RepositoryFactory
 from backend.services.song_match_service import SongMatchService
 from backend.tasks import huey_app, work_artist_credit_tasks
 from backend.tasks.work_artist_credit_tasks import credit_work_artists_task
+from tests.integration import work_artist_seed_table as seed_table
+from tests.integration.work_artist_seed_table import seed_table_kept  # noqa: F401
 
-pytestmark = pytest.mark.integration
+# D1's step drops 0055's seed with its marker (D49): the table is put back after each test.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("seed_table_kept")]
 
 type Conn = psycopg.Connection[DictRow]
 
@@ -88,10 +92,11 @@ def artist(conn: Conn, name: str, mbid: str | None = None) -> str:
 
 
 def work(conn: Conn, artist_id: str, title: str = "Always") -> str:
+    """A work whose artist 0055's seed holds, while the seed is there."""
     work_id = f"work-{title.lower()}-{artist_id}"
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)", (work_id, title, artist_id)
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, title))
+    if seed_table.exists(conn):
+        seed_table.seed(conn, work_id, artist_id)
     return work_id
 
 

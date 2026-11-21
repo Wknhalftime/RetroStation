@@ -106,10 +106,9 @@ def test_lists_unmapped_versions(client: TestClient, db_conn: Conn) -> None:
     ]
     assert (body["total"], body["new_total"]) == (4, 4)
     first = body["items"][0]
-    assert {k: first[k] for k in ("work_id", "artist_id", "artist_name", "version_type")} == {
+    assert {k: first[k] for k in ("work_id", "artists", "version_type")} == {
         "work_id": one,
-        "artist_id": metallica,
-        "artist_name": "Metallica",
+        "artists": [{"id": metallica, "name": "Metallica"}],  # credited (3b S7, R7)
         "version_type": "live",
     }
     assert (first["stations"], first["first_seen"], first["first_station"]) == (

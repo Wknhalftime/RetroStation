@@ -37,9 +37,8 @@ class _World:
 
 def _seed(conn: psycopg.Connection[Any]) -> _World:
     factory = RepositoryFactory(conn)
-    artist = factory.artists.upsert_local_artist("Nirvana", "nirvana")
-    work = factory.works.create_local("Lithium", artist)
-    other_work = factory.works.create_local("Breed", artist)
+    work = factory.works.create_local("Lithium")
+    other_work = factory.works.create_local("Breed")
 
     def file(work_id: str, name: str) -> UUID:
         row = LibraryFile(id=uuid4(), file_path=rf"D:\m\{name}.mp3", format="mp3", work_id=work_id)

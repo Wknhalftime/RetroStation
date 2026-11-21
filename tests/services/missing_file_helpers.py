@@ -48,7 +48,6 @@ def add_work(repos: ReconciliationRepos, work_id: str = "w1") -> str:
         Work(
             id=work_id,
             title="Kiss",
-            artist_id="a1",
             origin=CatalogSource.LOCAL,
             needs_enhancement=False,
         )

@@ -5,7 +5,6 @@ A work with no files is deleted only when nothing points at it: ``delete_if_empt
 the one rule. Its song master goes with it, as today. What keeps an empty work:
 
 - ``recording``: a recording of the work;
-- ``match``: a match carrying the work (``matches.work_id``);
 - ``work_match``: a match whose target is the work;
 - ``format_override`` and ``version_entry``: an override row of either kind;
 - ``stored_performance``: a performance of the work that a match stores (Q17: 3a deletes an
@@ -106,14 +105,6 @@ def refer(conn: Conn, work_id: str, kind: WorkReference) -> None:
     """Point one thing of *kind* at the empty work *work_id*."""
     if kind is WorkReference.RECORDING:
         recording(conn, work_id)
-    elif kind is WorkReference.MATCH:
-        line = cp.line(conn, "Lithium", None)
-        conn.execute(
-            """INSERT INTO matches (identity_id, library_file_id, target_type, work_id,
-                                    confidence_score)
-               VALUES (%s, %s, 'library_file', %s, 0.9)""",
-            (line, elsewhere(conn), work_id),
-        )
     elif kind is WorkReference.WORK_MATCH:
         line = cp.line(conn, "Lithium", None)
         conn.execute(

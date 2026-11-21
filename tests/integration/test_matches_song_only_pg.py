@@ -10,7 +10,8 @@ list of its stubs for its rollback, goes. S11: ``broadcast_artists.artist_candid
 ``broadcast_artists.resolved_artist_mbid`` go; the second exists only on the dev database, so
 every drop uses IF EXISTS. Song rows are untouched. The domain follows: ``Match`` has no artist
 column and needs its song, and ``get_by_artist`` leaves ``MatchRepository``, its PostgreSQL
-class and its fake (``WorkRepository.get_by_artist`` is another method and stays).
+class and its fake (``WorkRepository.get_by_artist`` was another method; it retired in 3b PR 5b,
+AUD-R084).
 
 ``backend/db/rollback_0046_drop_artist_rows.sql`` puts back the column, the CHECK, the UNIQUE,
 the foreign key, the index, an empty ``link_copy_stubs`` and an empty ``artist_candidates``
@@ -58,6 +59,9 @@ MIGRATION = ROOT / "backend" / "db" / "migrations" / f"{VERSION}.sql"
 ROLLBACK = ROOT / "backend" / "db" / f"rollback_{VERSION}.sql"
 ROLLBACK_0045 = ROOT / "backend" / "db" / "rollback_0045_link_demotion.sql"
 ROLLBACK_0044 = ROOT / "backend" / "db" / "rollback_0044_log_name_links.sql"
+# 3b PR 5b's 0055, rolled back first: it brings back works.artist_id, which 0044's rollback
+# reads, and matches.work_id, a song row's column before 0046.
+ROLLBACK_0055 = ROOT / "backend" / "db" / "rollback_0055_work_artists_from_credits.sql"
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
 ROW_COLUMNS = ("id", "artist_id", "target_id", "target_type", "confidence_score", "match_tier")
@@ -77,9 +81,11 @@ SONG_COLUMNS = (
 
 @contextmanager
 def before_the_drop(url: str) -> Iterator[Conn]:
-    """The test database without 0046, in one transaction that is rolled back at the end."""
+    """The test database without 0055 and 0046 (newest first), in one transaction that is
+    rolled back at the end."""
     conn = psycopg.connect(url, row_factory=dict_row)
     try:
+        conn.execute(ROLLBACK_0055.read_text(encoding="utf-8"))
         conn.execute(ROLLBACK.read_text(encoding="utf-8"))
         yield conn
     finally:

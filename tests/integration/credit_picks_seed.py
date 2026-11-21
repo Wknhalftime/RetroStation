@@ -60,11 +60,11 @@ def merge(conn: Conn, member_id: str, primary_id: str) -> None:
 def work(
     conn: Conn, title: str = "Who Says You Can't Go Home", artist_id: str | None = None
 ) -> str:
+    """A work. *artist_id* is kept for its callers and unused: a work's artists are its
+    performances' credits since 3b PR 5b (S7), so a test credits them on
+    :func:`performance`."""
     work_id = f"work-{uuid4()}"
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-        (work_id, title, artist_id or artist(conn, "Bon Jovi")),
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, title))
     return work_id
 
 

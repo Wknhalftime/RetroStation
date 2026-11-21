@@ -46,6 +46,8 @@ from tests.fakes.mb_client import FakeMbClient
 from tests.integration.song_together_seed import (
     add_file,
     credit,
+    credit_work,
+    credited_artists,
     enrichment_repos,
     group_like_the_scan,
     insert_local_work,
@@ -135,8 +137,9 @@ def test_recording_lookup_gives_the_local_work_the_mbid_and_keeps_both_copies(
         assert after["origin"] == "musicbrainz"
         assert after["title"] == _MB_TITLE, "MusicBrainz's spelling of the title"
         assert after["needs_enhancement"] is True, "stamped by the works phase like a new one"
-        assert after["artist_id"] == before["artist_id"]
-        assert [w["id"] for w in works_of_artist(conn, before["artist_id"])] == [local]
+        # The claimed work keeps its act, its performance's credit (3b PR 5b, S7).
+        [act] = credited_artists(conn, local)
+        assert [w["id"] for w in works_of_artist(conn, act)] == [local]
         # Grouping's recording still holds the untagged copy and the original-version slot,
         # so the guarded link leaves the MusicBrainz recording off the work (C1).
         recording = repos.recordings.get_by_id(_RECORDING)
@@ -253,7 +256,8 @@ def test_release_pass_gives_the_local_work_the_mbid(migrated_db: str) -> None:
         assert stored(repos, untagged.id).work_id == local
         row = work_row(conn, local)
         assert row is not None and row["mbid"] == _WORK and row["title"] == _MB_TITLE
-        assert [w["id"] for w in works_of_artist(conn, row["artist_id"])] == [local]
+        [act] = credited_artists(conn, local)
+        assert [w["id"] for w in works_of_artist(conn, act)] == [local]
 
 
 def test_a_lone_copy_frees_the_version_slot_and_its_recording_joins_the_work(
@@ -319,9 +323,7 @@ def test_an_existing_musicbrainz_work_takes_only_the_linked_copy(migrated_db: st
         local_row = work_row(conn, local)
         assert local_row is not None
         # Another album's copy already made the MusicBrainz work.
-        existing = repos.works.upsert_from_mb(
-            mbid=_WORK, title=_MB_TITLE, artist_id=local_row["artist_id"]
-        )
+        existing = repos.works.upsert_from_mb(mbid=_WORK, title=_MB_TITLE)
         conn.commit()
 
         work_id = _link_and_apply(repos, tagged.id, _pride_payload())
@@ -507,10 +509,10 @@ def test_a_later_copy_claims_when_the_first_copys_work_does_not_qualify(
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
         artist_id = repos.artists.upsert_local_artist("U2", normalize_artist("U2"))
-        elsewhere = repos.works.upsert_from_mb(
-            mbid=other_mbid, title=_MB_TITLE, artist_id=artist_id
-        )
-        local = repos.works.create_local(_TAG_TITLE, artist_id)
+        elsewhere = repos.works.upsert_from_mb(mbid=other_mbid, title=_MB_TITLE)
+        credit_work(conn, elsewhere, artist_id)  # each work U2's by its credits (3b S7)
+        local = repos.works.create_local(_TAG_TITLE)
+        credit_work(conn, local, artist_id)
         repos.recordings.upsert(Recording(id=_RECORDING, title=_MB_TITLE))
         for file_id, work_id, path in (
             (first_file, elsewhere, "/music/a.flac"),
@@ -552,7 +554,8 @@ def test_a_held_version_slot_on_an_existing_work_does_not_stop_the_link(
         artist_id = repos.artists.upsert_musicbrainz_artist(
             mbid=_U2, name="U2", sort_name="U2", normalized_name=normalize_artist("U2")
         )
-        existing = repos.works.upsert_from_mb(mbid=_WORK, title=_MB_TITLE, artist_id=artist_id)
+        existing = repos.works.upsert_from_mb(mbid=_WORK, title=_MB_TITLE)
+        credit_work(conn, existing, artist_id)  # U2's by its credits (3b S7)
         repos.recordings.upsert(Recording(id=_OTHER_RECORDING, title=_MB_TITLE, work_id=existing))
         tagged = add_file(
             repos,

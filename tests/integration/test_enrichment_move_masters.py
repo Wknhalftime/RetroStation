@@ -151,8 +151,7 @@ def _mb_work_of(repos: RepositoryFactory, moved: LibraryFile) -> str:
 
 
 def _local_work(repos: RepositoryFactory, title: str = "Test Track") -> str:
-    artist_id = repos.artists.upsert_local_artist("Test Artist", "test artist")
-    return repos.works.create_local(title, artist_id)
+    return repos.works.create_local(title)
 
 
 @pytest.mark.parametrize("entry", ["release", "recording"])
@@ -306,8 +305,7 @@ def test_new_works_valid_manual_master_is_kept(migrated_db: str, tmp_path: Path)
     """The MB work already has a MANUAL master on its own file X; A arrives; X stays."""
     with psycopg.connect(migrated_db, row_factory=dict_row) as conn:
         repos = RepositoryFactory(conn)
-        artist_id = repos.artists.upsert_local_artist("Test Artist", "test artist")
-        mb_work = repos.works.upsert_from_mb(_WORK, "Test Work", artist_id)
+        mb_work = repos.works.upsert_from_mb(_WORK, "Test Work")
         x = _staying_file(repos, tmp_path / "x.flac", mb_work)
         _master(repos, mb_work, x.id, SelectionMethod.MANUAL)
         old = _local_work(repos)

@@ -40,12 +40,27 @@ def merge(conn: Conn, member_id: str, primary_id: str) -> None:
 
 
 def work(conn: Conn, title: str = "Enter Sandman", artist_id: str | None = None) -> str:
+    """A work under *artist_id* (a new artist when None): a performance credits it."""
     work_id = f"work-{uuid4()}"
-    conn.execute(
-        "INSERT INTO works (id, title, artist_id) VALUES (%s, %s, %s)",
-        (work_id, title, artist_id or artist(conn)),
-    )
+    conn.execute("INSERT INTO works (id, title) VALUES (%s, %s)", (work_id, title))
+    credit(conn, work_id, artist_id or artist(conn))
     return work_id
+
+
+def credit(conn: Conn, work_id: str, artist_id: str) -> None:
+    """A performance of *work_id* crediting *artist_id*: how a work is under an artist since
+    work merges phase 3b PR 5b (S7; a work names no artist of its own)."""
+    row = conn.execute(
+        """INSERT INTO performances (work_id, version_type) VALUES (%s, 'original')
+           RETURNING id""",
+        (work_id,),
+    ).fetchone()
+    assert row is not None
+    conn.execute(
+        """INSERT INTO performance_credits (performance_id, position, artist_id, role)
+           VALUES (%s, 0, %s, 'main')""",
+        (row["id"], artist_id),
+    )
 
 
 def recording(conn: Conn, work_id: str, version_type: str = "original") -> str:

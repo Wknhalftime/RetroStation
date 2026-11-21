@@ -32,6 +32,7 @@ from tests.fakes.mb_client import FakeMbClient
 from tests.integration.song_together_seed import (
     add_file,
     credit,
+    credit_work,
     enrichment_repos,
     group_like_the_scan,
     recording_payload,
@@ -77,11 +78,8 @@ def _lone_copy_on_a_local_work_with_the_mb_work_made(
         release_mbid=_RELEASE,
     )
     local = group_like_the_scan(repos, lone)
-    local_row = work_row(conn, local)
-    assert local_row is not None
-    existing = repos.works.upsert_from_mb(
-        mbid=_WORK, title=_TITLE, artist_id=local_row["artist_id"]
-    )
+    assert work_row(conn, local) is not None
+    existing = repos.works.upsert_from_mb(mbid=_WORK, title=_TITLE)
     conn.commit()
     return repos, lone.id, local, existing
 
@@ -173,9 +171,8 @@ def test_any_move_that_empties_a_local_work_deletes_it(migrated_db: str) -> None
         copy = add_file(repos, "/music/U2/x.flac", artist="U2", title=_TITLE)
         local = group_like_the_scan(repos, copy)
         assert len(recordings_on(conn, local)) == 1
-        local_row = work_row(conn, local)
-        assert local_row is not None
-        elsewhere = repos.works.create_local("Somewhere Else", local_row["artist_id"])
+        assert work_row(conn, local) is not None
+        elsewhere = repos.works.create_local("Somewhere Else")
         _relink_to_its_musicbrainz_recording(repos, copy.id)
         conn.commit()
 
@@ -195,12 +192,13 @@ def test_a_musicbrainz_work_keeps_grouping_recordings_when_emptied(migrated_db: 
         artist_id = repos.artists.upsert_musicbrainz_artist(
             mbid=_U2, name="U2", sort_name="U2", normalized_name=normalize_artist("U2")
         )
-        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=_TITLE, artist_id=artist_id)
+        mb_work = repos.works.upsert_from_mb(mbid=_WORK, title=_TITLE)
+        credit_work(conn, mb_work, artist_id)  # U2's work by its credits (3b S7)
         copy = add_file(repos, "/music/U2/x.flac", artist="U2", title=_TITLE)
         assert group_like_the_scan(repos, copy) == mb_work
         grouping_recordings = recordings_on(conn, mb_work)
         assert len(grouping_recordings) == 1
-        elsewhere = repos.works.create_local("Somewhere Else", artist_id)
+        elsewhere = repos.works.create_local("Somewhere Else")
         _relink_to_its_musicbrainz_recording(repos, copy.id)
         conn.commit()
 
