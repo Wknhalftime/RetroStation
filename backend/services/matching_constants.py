@@ -30,6 +30,11 @@ SONG_NAME_LOOKUP_LIMIT: int = 1000
 # Song matching's MusicBrainz cut-off (AUD-R028, D16): after this many consecutive transient
 # recording-search failures, one run stops calling MusicBrainz and defers the songs that need it.
 SONG_MB_FAILURE_CUTOFF: int = 5
+# The artist stage's (AUD-R028 extended by AUD-R042; phase 4.1 D2, AUD-R090): after this many
+# consecutive transient failures of a cut-off name's live search, one run defers the remaining
+# cut-off names without calling MusicBrainz. A module constant, not a setting: the locked task
+# tests hand artist_matching_tasks a fixed settings object.
+ARTIST_MB_FAILURE_CUTOFF: int = 5
 # Triage boundary: identities with confidence ≥ this render as "quick_review".
 # Below this (but ≥ SONG_MIN_PRESENTATION_SCORE) they render as "needs_attention".
 QUICK_REVIEW_MIN_SCORE: int = 65

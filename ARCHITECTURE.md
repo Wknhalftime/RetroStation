@@ -1200,6 +1200,27 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
   enrichment's recording search are batched 100 per request; the recordings phase's
   `lookup_recording` stays one call per recording because only it carries work relations.
+- **The MusicBrainz cache is logged** (C42; AUD-R042, AUD-R090). 0057 made `mb_cache` LOGGED
+  again (0020 had made it UNLOGGED, and a crash emptied the dev cache on 2026-11-06 and again on
+  2026-11-11), because from phase 4.2 on matching reads only the cache. Reads filter on
+  `expires_at > now()`, live clients keep rows 3,650 days (`mb_cache_ttl_days`), and the
+  repository never commits: a caller commits the rows it wants to survive a restart.
+- **The cache fill's client methods each have their own key prefix** (phase 4.1; AUD-R090):
+  `search_recordings_by_name_title` (`recording-name-title:{words}:{title}`; every name word
+  required, the title as a phrase; it keeps the hit count and each hit's score and whole credit
+  with its joining words; a name with no words searches the title alone and says `title_only`),
+  `search_artist_aliases_by_mbids` (`artist-aliases:{mbid}`, 100 artists per request, an unknown
+  MBID cached as unknown) and `lookup_release_for_links` (`lookup_release` with a 404 remembered
+  under `release-missing:{mbid}`; `lookup_release` itself caches no 404, because enrichment reads
+  `release:` rows).
+- **A MusicBrainz outage defers the artist stage's cut-off names, never fails its run** (AUD-R028,
+  extended by AUD-R042; AUD-R090). Until the old stage retires (4.3), `DeferOnMusicBrainzOutage`
+  wraps the MusicBrainz strategy inside the cut-off gate: a transient failure of a cut-off name's
+  live search (429 or 5xx after the client's retries, a timeout, a network error) makes the name
+  `needs_review` / DEFERRED_RETRY, and after `ARTIST_MB_FAILURE_CUTOFF` (5) in a row the run
+  defers its remaining cut-off names without a call; a permanent error still fails the run.
+  `GET /api/v1/matching/mb-artists`, the one API route that calls MusicBrainz, answers 503 on any
+  MusicBrainz error through `MusicBrainzUnavailableError` (`services/musicbrainz_search_service`).
 - **Enrichment keeps a song's copies on one work** (AUD-R103). Every path that learns a
   recording's MusicBrainz work goes through one step in `library_enrichment_service`
   (`_performed_work`): the per-release and per-recording passes, the untagged pass and the

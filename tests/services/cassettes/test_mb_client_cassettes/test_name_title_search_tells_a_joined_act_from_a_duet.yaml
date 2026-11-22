@@ -1,0 +1,131 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/?query=artist%3A%28Brooks+AND+Dunn%29+AND+recording%3A%22Mama+Don%27t+Get+Dressed+Up+for+Nothing%22&fmt=json&limit=25
+  response:
+    body:
+      string: "{\"created\":\"2026-11-22T03:13:54.760Z\",\"count\":4,\"offset\":0,\"recordings\":[{\"id\":\"fa21bbdf-3b26-492c-926f-b3ad37da5830\",\"score\":100,\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"title\":\"Mama
+        Don't Get Dressed Up for Nothing\",\"video\":null,\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\",\"aliases\":[{\"sort-name\":\"Brooks
+        and Dunn\",\"name\":\"Brooks and Dunn\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"2013\",\"releases\":[{\"id\":\"5f2caadd-6e2c-47fd-9545-55ac15f63862\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":5,\"title\":\"Original
+        Album Classics\",\"status\":\"Official\",\"disambiguation\":\"Vol. 1\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"326dc2f1-e392-4122-910f-c5686f33674a\",\"type-id\":\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Original
+        Album Classics\",\"primary-type\":\"Album\",\"secondary-types\":[\"Compilation\"],\"secondary-type-ids\":[\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\"]},\"date\":\"2013\",\"country\":\"US\",\"release-events\":[{\"date\":\"2013\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":53,\"media\":[{\"id\":\"e32bbf55-e4d4-32c2-aeb4-d57fd0847e0b\",\"position\":4,\"format\":\"CD\",\"track\":[{\"id\":\"c7b1a47d-b7cb-457a-b679-11bdc58aa152\",\"number\":\"4\",\"title\":\"Mama
+        Don't Get Dressed Up for Nothing\"}],\"track-count\":11,\"track-offset\":3}]}]},{\"id\":\"6634c146-217b-4c1e-955f-2dda5700f983\",\"score\":100,\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"title\":\"Mama
+        Don't Get Dressed Up for Nothing\",\"length\":248466,\"video\":null,\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\",\"aliases\":[{\"sort-name\":\"Brooks
+        and Dunn\",\"name\":\"Brooks and Dunn\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}]}}],\"first-release-date\":\"1996-04-16\",\"releases\":[{\"id\":\"25f6831a-3a81-45c8-8ddb-46ab5794cc50\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Borderline\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"58e52701-4f8b-3bff-b5cb-89973b2a273e\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Borderline\",\"primary-type\":\"Album\"},\"date\":\"\",\"country\":\"XW\",\"release-events\":[{\"date\":\"\",\"area\":{\"id\":\"525d4e18-3d00-31b9-a58b-a146a916de8f\",\"name\":\"[Worldwide]\",\"sort-name\":\"[Worldwide]\",\"iso-3166-1-codes\":[\"XW\"]}}],\"track-count\":11,\"media\":[{\"id\":\"aa0ed31b-c978-38bf-9d66-5cc13ea86b5f\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"96512fc2-a897-4870-98f4-00ebf2800f1d\",\"number\":\"4\",\"title\":\"Mama
+        Don't Get Dressed Up for Nothing\",\"length\":248466}],\"track-count\":11,\"track-offset\":3}]},{\"id\":\"21fd4b0a-a8e2-4640-8666-7400bcab2e63\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"My
+        Maria\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"256c6b01-2c8e-34ee-a322-9db60d5f5373\",\"type-id\":\"d6038452-8ee0-3f68-affc-2de9a1ede0b9\",\"primary-type-id\":\"d6038452-8ee0-3f68-affc-2de9a1ede0b9\",\"title\":\"My
+        Maria\",\"primary-type\":\"Single\"},\"track-count\":2,\"media\":[{\"id\":\"47abaea6-7c99-3323-ad4d-9ed451aa4239\",\"position\":1,\"format\":\"Vinyl\",\"track\":[{\"id\":\"64a8201c-a2dd-4033-8ea8-735aff10d469\",\"number\":\"B\",\"title\":\"Mama
+        Don't Get Dressed Up For Nothing\",\"length\":247000}],\"track-count\":2,\"track-offset\":1}]},{\"id\":\"be22ebbd-72df-4743-972d-e90470830f2f\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Borderline\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"58e52701-4f8b-3bff-b5cb-89973b2a273e\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Borderline\",\"primary-type\":\"Album\"},\"date\":\"1996-04-16\",\"country\":\"US\",\"release-events\":[{\"date\":\"1996-04-16\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":11,\"media\":[{\"id\":\"352309d6-62d2-367a-a5d3-d79d5cb516dd\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"f1b0443a-52b4-38f8-bd35-a8fd49033f09\",\"number\":\"4\",\"title\":\"Mama
+        Don't Get Dressed Up for Nothing\",\"length\":248466}],\"track-count\":11,\"track-offset\":3}]}],\"isrcs\":[\"USAN29700115\"],\"tags\":[{\"count\":3,\"name\":\"country\"},{\"count\":1,\"name\":\"americana\"},{\"count\":1,\"name\":\"contemporary
+        country\"},{\"count\":1,\"name\":\"line dance\"},{\"count\":1,\"name\":\"classic
+        country\"}]},{\"id\":\"7696f982-ab6c-40f5-bd0f-d359b59d67ee\",\"score\":92,\"artist-credit-id\":\"129d86fa-aac5-47d7-945b-a2b6e6f1d083\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":255600,\"disambiguation\":\"live
+        from CMT Crossroads\",\"video\":null,\"artist-credit\":[{\"joinphrase\":\"
+        & \",\"name\":\"Brooks & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\",\"aliases\":[{\"sort-name\":\"Brooks
+        and Dunn\",\"name\":\"Brooks and Dunn\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}]}},{\"name\":\"LANCO\",\"artist\":{\"id\":\"bc4c4098-32b1-4881-9d38-659637de0692\",\"name\":\"LANCO\",\"sort-name\":\"LANCO\"}}],\"first-release-date\":\"2019-08-09\",\"releases\":[{\"id\":\"43ad8381-e46b-4e5f-be68-412fc5dce989\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Brooks
+        & Dunn and Friends - Live from CMT Crossroads\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"627b4e31-e56d-4833-a663-80fcf40b2476\",\"type-id\":\"6d0c5bf6-7a33-3420-a519-44fc63eedebf\",\"primary-type-id\":\"6d0c5bf6-7a33-3420-a519-44fc63eedebf\",\"title\":\"Brooks
+        & Dunn and Friends - Live from CMT Crossroads\",\"primary-type\":\"EP\",\"secondary-types\":[\"Live\"],\"secondary-type-ids\":[\"6fd474e2-6b58-3102-9d17-d6f7eb7da0a0\"]},\"date\":\"2019-08-09\",\"country\":\"US\",\"release-events\":[{\"date\":\"2019-08-09\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":3,\"media\":[{\"id\":\"f9d73c39-ec65-3127-b879-948fde4c48be\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"ad6cf854-d2c9-47cf-bee7-65b024cbedab\",\"number\":\"2\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up For Nothing (live from CMT Crossroads)\",\"length\":255600}],\"track-count\":3,\"track-offset\":1}]}]},{\"id\":\"6e22982f-3cf5-42a9-ad24-8960c8dd993f\",\"score\":92,\"artist-credit-id\":\"b1e44def-a0dd-3f3c-a23a-d6dacf818e5e\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":252160,\"video\":null,\"artist-credit\":[{\"joinphrase\":\"
+        with \",\"name\":\"Brooks & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\",\"aliases\":[{\"sort-name\":\"Brooks
+        and Dunn\",\"name\":\"Brooks and Dunn\",\"locale\":null,\"type\":null,\"primary\":null,\"begin-date\":null,\"end-date\":null}]}},{\"name\":\"LANCO\",\"artist\":{\"id\":\"bc4c4098-32b1-4881-9d38-659637de0692\",\"name\":\"LANCO\",\"sort-name\":\"LANCO\"}}],\"first-release-date\":\"2019-04-05\",\"releases\":[{\"id\":\"b8be7181-b698-43ef-8ea5-6b61661e9ab3\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"949a7fd5-fe73-3e8f-922e-01ff4ca958f7\",\"count\":2,\"title\":\"Cream
+        of Country 2020\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Various
+        Artists\",\"artist\":{\"id\":\"89ad4ac3-39f7-470e-963a-56509c546377\",\"name\":\"Various
+        Artists\",\"sort-name\":\"Various Artists\",\"disambiguation\":\"add compilations
+        to this artist\"}}],\"release-group\":{\"id\":\"46399b2f-4e26-4fcf-b1f0-e672293dfddd\",\"type-id\":\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Cream
+        of Country 2020\",\"primary-type\":\"Album\",\"secondary-types\":[\"Compilation\"],\"secondary-type-ids\":[\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\"]},\"date\":\"2020-01-17\",\"country\":\"AU\",\"release-events\":[{\"date\":\"2020-01-17\",\"area\":{\"id\":\"106e0bec-b638-3b37-b731-f53d507dc00e\",\"name\":\"Australia\",\"sort-name\":\"Australia\",\"iso-3166-1-codes\":[\"AU\"]}}],\"track-count\":41,\"media\":[{\"id\":\"794d464f-0df0-3677-963c-9a267a753858\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"6262e16a-4c17-4466-9b35-426738084e51\",\"number\":\"16\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":252773}],\"track-count\":22,\"track-offset\":15}]},{\"id\":\"cce73fbc-8ed2-4d0e-afbb-934305285c17\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Reboot\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"824d9baf-9898-4d3a-8f90-703e26ae494b\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Reboot\",\"primary-type\":\"Album\"},\"date\":\"2019-04-05\",\"country\":\"XW\",\"release-events\":[{\"date\":\"2019-04-05\",\"area\":{\"id\":\"525d4e18-3d00-31b9-a58b-a146a916de8f\",\"name\":\"[Worldwide]\",\"sort-name\":\"[Worldwide]\",\"iso-3166-1-codes\":[\"XW\"]}}],\"track-count\":12,\"media\":[{\"id\":\"3c4a5d9e-5c28-358c-9478-f6d4b8acd21b\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"a419fac5-e8e1-459e-99a8-587312260569\",\"number\":\"11\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":252160}],\"track-count\":12,\"track-offset\":10}]},{\"id\":\"0663b08b-d4ed-4431-bc89-8d507ea4f3fe\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Reboot\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"824d9baf-9898-4d3a-8f90-703e26ae494b\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Reboot\",\"primary-type\":\"Album\"},\"date\":\"2019-04-05\",\"country\":\"US\",\"release-events\":[{\"date\":\"2019-04-05\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"iso-3166-1-codes\":[\"US\"]}}],\"track-count\":12,\"media\":[{\"id\":\"53033249-ec0e-387f-bafb-dd085a354f10\",\"position\":1,\"format\":\"CD\",\"track\":[{\"id\":\"83e4ff44-b346-4a3c-984c-853c759efd31\",\"number\":\"11\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":252000}],\"track-count\":12,\"track-offset\":10}]},{\"id\":\"d1492e7b-6b9e-4a8e-876b-241da9f5ac41\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"949a7fd5-fe73-3e8f-922e-01ff4ca958f7\",\"count\":1,\"title\":\"Cream
+        of Country 2020\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Various
+        Artists\",\"artist\":{\"id\":\"89ad4ac3-39f7-470e-963a-56509c546377\",\"name\":\"Various
+        Artists\",\"sort-name\":\"Various Artists\",\"disambiguation\":\"add compilations
+        to this artist\"}}],\"release-group\":{\"id\":\"46399b2f-4e26-4fcf-b1f0-e672293dfddd\",\"type-id\":\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Cream
+        of Country 2020\",\"primary-type\":\"Album\",\"secondary-types\":[\"Compilation\"],\"secondary-type-ids\":[\"dd2a21e1-0c00-3729-a7a0-de60b84eb5d1\"]},\"track-count\":22,\"media\":[{\"id\":\"73db2854-03b2-3867-8f75-61bf31fb5468\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"7eca6caa-a698-4d5e-b422-ffd0f41b49ad\",\"number\":\"16\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":250000}],\"track-count\":22,\"track-offset\":15}]},{\"id\":\"ce2716b3-0de1-457d-816d-c4a2a248bb83\",\"status-id\":\"4e304316-386d-3409-af2e-78857eec5cfe\",\"artist-credit-id\":\"d70ac213-b11e-3439-ba49-3668d1ba7c75\",\"count\":1,\"title\":\"Reboot\",\"status\":\"Official\",\"artist-credit\":[{\"name\":\"Brooks
+        & Dunn\",\"artist\":{\"id\":\"f30118c5-f783-4969-8427-f3c096378267\",\"name\":\"Brooks
+        & Dunn\",\"sort-name\":\"Brooks & Dunn\"}}],\"release-group\":{\"id\":\"824d9baf-9898-4d3a-8f90-703e26ae494b\",\"type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"title\":\"Reboot\",\"primary-type\":\"Album\"},\"date\":\"2019-04-05\",\"country\":\"XW\",\"release-events\":[{\"date\":\"2019-04-05\",\"area\":{\"id\":\"525d4e18-3d00-31b9-a58b-a146a916de8f\",\"name\":\"[Worldwide]\",\"sort-name\":\"[Worldwide]\",\"iso-3166-1-codes\":[\"XW\"]}}],\"track-count\":12,\"media\":[{\"id\":\"c750a0f0-a537-3548-bc8c-c33500c89f7a\",\"position\":1,\"format\":\"Digital
+        Media\",\"track\":[{\"id\":\"c7ee1962-8be8-4f62-901a-bde1ce651043\",\"number\":\"11\",\"title\":\"Mama
+        Don\u2019t Get Dressed Up for Nothing\",\"length\":252166}],\"track-count\":12,\"track-offset\":10}]}],\"isrcs\":[\"USAN21800035\"]}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '13379'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Sun, 22 Nov 2026 03:13:54 GMT
+      etag:
+      - '"MzJiZGJlMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Sun, 22 Nov 2026 03:08:33 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '29'
+      x-ratelimit-reset:
+      - '1795317234'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1
