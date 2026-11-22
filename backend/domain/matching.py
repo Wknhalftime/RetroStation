@@ -65,9 +65,10 @@ class ListedLogNameError(MatchingError):
 
 
 class MusicBrainzUnavailableError(MatchingError):
-    """Song matching's MusicBrainz recording search could not be answered: a transient failure
-    (HTTP 429 or 5xx, a timeout, a network error) or this run's cut-off (AUD-R028, D16). The
-    song is deferred, never decided on partial evidence."""
+    """MusicBrainz could not answer. Song matching raises it for a transient recording-search
+    failure (HTTP 429 or 5xx, a timeout, a network error) or this run's cut-off (AUD-R028, D16),
+    and the song is deferred, never decided on partial evidence. The matching panel's artist
+    search raises it for any MusicBrainz error, which the route answers with 503 (AUD-R090)."""
 
 
 # Statuses a re-check rewinds to pending (AUD-R022 D1). An artist the curator rejected

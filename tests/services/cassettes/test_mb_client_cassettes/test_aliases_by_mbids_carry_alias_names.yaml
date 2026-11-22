@@ -1,0 +1,111 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/artist/?query=arid%3A%280aad6b52-fd93-4ea4-9c5d-1f66e1bc9f0a+OR+65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab+OR+d0c2a6b4-3f1e-4b8a-9c7d-2e5f6a1b3c4d%29&fmt=json&limit=100
+  response:
+    body:
+      string: "{\"created\":\"2026-11-22T03:29:27.471Z\",\"count\":2,\"offset\":0,\"artists\":[{\"id\":\"65f4f0c5-ef9e-490c-aee3-909e7ae6b2ab\",\"type\":\"Group\",\"type-id\":\"e431f5f6-b5d2-343d-8b36-72607fffb74b\",\"score\":100,\"name\":\"Metallica\",\"sort-name\":\"Metallica\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"1f40c6e1-47ba-4e35-996f-fe6ee5840e62\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Los
+        Angeles\",\"sort-name\":\"Los Angeles\",\"life-span\":{\"ended\":null}},\"isnis\":[\"0000000122939631\"],\"life-span\":{\"begin\":\"1981-10-28\",\"ended\":null},\"aliases\":[{\"sort-name\":\"\u30E1\u30BF\u30EA\u30AB\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"\u30E1\u30BF\u30EA\u30AB\",\"locale\":\"ja\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metalica\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"Metalica\",\"locale\":null,\"type\":\"Search
+        hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"name\":\"\uBA54\uD0C8\uB9AC\uCE74\",\"locale\":\"ko_KR\",\"type\":null,\"primary\":true,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Metallica\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Metallica\",\"locale\":\"en\",\"type\":\"Artist
+        name\",\"primary\":true,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":-1,\"name\":\"political\"},{\"count\":1,\"name\":\"rock\"},{\"count\":-2,\"name\":\"alternative
+        rock\"},{\"count\":-4,\"name\":\"80s\"},{\"count\":41,\"name\":\"heavy metal\"},{\"count\":-4,\"name\":\"90s\"},{\"count\":-1,\"name\":\"progressive
+        metal\"},{\"count\":67,\"name\":\"thrash metal\"},{\"count\":34,\"name\":\"metal\"},{\"count\":7,\"name\":\"american\"},{\"count\":-4,\"name\":\"grunge\"},{\"count\":-6,\"name\":\"seen
+        live\"},{\"count\":-4,\"name\":\"band\"},{\"count\":21,\"name\":\"hard rock\"},{\"count\":-1,\"name\":\"usa\"},{\"count\":-4,\"name\":\"nu
+        metal\"},{\"count\":-6,\"name\":\"trash\"},{\"count\":-4,\"name\":\"blues
+        rock\"},{\"count\":-1,\"name\":\"am\xE9ricain\"},{\"count\":-3,\"name\":\"thrash\"},{\"count\":-3,\"name\":\"megadeth\"},{\"count\":-4,\"name\":\"symphonic
+        metal\"},{\"count\":-3,\"name\":\"alternative metal\"},{\"count\":0,\"name\":\"speed
+        metal\"},{\"count\":-3,\"name\":\"groove metal\"},{\"count\":-1,\"name\":\"california\"},{\"count\":-4,\"name\":\"los
+        angeles\"},{\"count\":0,\"name\":\"virtuoso\"},{\"count\":-6,\"name\":\"crap\"},{\"count\":0,\"name\":\"bay
+        area\"},{\"count\":-5,\"name\":\"trash metal\"},{\"count\":-2,\"name\":\"80s
+        thrash metal\"},{\"count\":-7,\"name\":\"douchebag metal\"},{\"count\":-2,\"name\":\"american
+        thrash metal\"},{\"count\":-6,\"name\":\"rock and indie\"},{\"count\":-1,\"name\":\"united
+        states\"},{\"count\":0,\"name\":\"angry\"},{\"count\":0,\"name\":\"energetic\"},{\"count\":-2,\"name\":\"pop
+        metal\"},{\"count\":-6,\"name\":\"metallica\"},{\"count\":-4,\"name\":\"classic
+        metal\"},{\"count\":-2,\"name\":\"80s metal\"},{\"count\":-4,\"name\":\"classic
+        thrash metal\"},{\"count\":-1,\"name\":\"90s metal\"},{\"count\":-3,\"name\":\"southern
+        metal\"},{\"count\":-1,\"name\":\"80's\"},{\"count\":-1,\"name\":\"90's\"},{\"count\":-1,\"name\":\"progressive
+        thrash metal\"},{\"count\":-4,\"name\":\"destroyer\"},{\"count\":-4,\"name\":\"hard'n'heavy\"},{\"count\":-6,\"name\":\"lame\"},{\"count\":-4,\"name\":\"a
+        filk artist\"},{\"count\":-5,\"name\":\"the unforgiving\"},{\"count\":-6,\"name\":\"stopped
+        being good after '97\"},{\"count\":-6,\"name\":\"stopped being good after
+        '88\"},{\"count\":-3,\"name\":\"traditional heavy metal\"},{\"count\":-6,\"name\":\"pompous
+        asses\"},{\"count\":-1,\"name\":\"old school thrash\"},{\"count\":-1,\"name\":\"pessimistic\"},{\"count\":-4,\"name\":\"teen
+        metal\"},{\"count\":-4,\"name\":\"a bit overrated\"},{\"count\":-1,\"name\":\"amerikansk\"},{\"count\":-1,\"name\":\"estados
+        unidos\"},{\"count\":-1,\"name\":\"michael moers\"},{\"count\":1,\"name\":\"rockgruppe\"}]},{\"id\":\"0aad6b52-fd93-4ea4-9c5d-1f66e1bc9f0a\",\"type\":\"Person\",\"type-id\":\"b6e035f4-3ce9-331c-97df-83397230b0df\",\"score\":86,\"gender-id\":\"36d3d30a-839d-3eda-8cb3-29be4384e4a9\",\"name\":\"John
+        Mellencamp\",\"sort-name\":\"Mellencamp, John\",\"gender\":\"male\",\"country\":\"US\",\"area\":{\"id\":\"489ce91b-6658-3307-9877-795b68554c98\",\"type\":\"Country\",\"type-id\":\"06dd0ae4-8c74-30bb-b43d-95dcedf961de\",\"name\":\"United
+        States\",\"sort-name\":\"United States\",\"life-span\":{\"ended\":null}},\"begin-area\":{\"id\":\"7ff17687-38cf-475e-a026-a88b572d5a46\",\"type\":\"City\",\"type-id\":\"6fd8f29a-3d0a-32fc-980d-ea697b69da78\",\"name\":\"Seymour\",\"sort-name\":\"Seymour\",\"life-span\":{\"ended\":null}},\"ipis\":[\"00075198254\"],\"isnis\":[\"0000000120176095\"],\"life-span\":{\"begin\":\"1951-10-07\",\"ended\":null},\"aliases\":[{\"sort-name\":\"Mellencamp,
+        John J.\",\"type-id\":\"d4dcd0c0-b341-3612-a332-c0ce797b25cf\",\"name\":\"John
+        J. Mellencamp\",\"locale\":null,\"type\":\"Legal name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"John
+        Cugar Mellencamp\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"John
+        Cugar Mellencamp\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"John
+        Couger\",\"type-id\":\"1937e404-b981-3cb7-8151-4c86ebfc8d8e\",\"name\":\"John
+        Couger\",\"locale\":null,\"type\":\"Search hint\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Cougar,
+        Johnny\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"Johnny
+        Cougar\",\"locale\":\"en\",\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Cougar,
+        John\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"John
+        Cougar\",\"locale\":\"en\",\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null},{\"sort-name\":\"Mellencamp,
+        John Cougar\",\"type-id\":\"894afba6-2816-3c24-8072-eadb66bd04bc\",\"name\":\"John
+        Cougar Mellencamp\",\"locale\":\"en\",\"type\":\"Artist name\",\"primary\":null,\"begin-date\":null,\"end-date\":null}],\"tags\":[{\"count\":5,\"name\":\"rock\"},{\"count\":3,\"name\":\"pop\"},{\"count\":0,\"name\":\"american\"},{\"count\":1,\"name\":\"singer-songwriter\"},{\"count\":1,\"name\":\"hard
+        rock\"},{\"count\":3,\"name\":\"folk rock\"},{\"count\":2,\"name\":\"americana\"},{\"count\":1,\"name\":\"classic
+        rock\"},{\"count\":1,\"name\":\"album rock\"},{\"count\":2,\"name\":\"pop
+        rock\"},{\"count\":1,\"name\":\"contemporary folk\"},{\"count\":1,\"name\":\"rock
+        and roll\"},{\"count\":5,\"name\":\"heartland rock\"},{\"count\":5,\"name\":\"roots
+        rock\"},{\"count\":1,\"name\":\"aor\"},{\"count\":1,\"name\":\"contemporary
+        pop/rock\"},{\"count\":1,\"name\":\"contemporary singer/songwriter\"},{\"count\":1,\"name\":\"bar
+        band\"},{\"count\":1,\"name\":\"2008 universal fire victim\"}]}]}"
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - keep-alive
+      content-length:
+      - '6192'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Sun, 22 Nov 2026 03:29:27 GMT
+      etag:
+      - '"YTY3NjFjMDAwMDAwMDAwMFNvbHI=--gzip"'
+      keep-alive:
+      - timeout=15
+      last-modified:
+      - Sun, 22 Nov 2026 03:29:20 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '267'
+      x-ratelimit-reset:
+      - '1795318168'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

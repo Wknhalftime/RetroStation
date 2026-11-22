@@ -29,6 +29,7 @@ from backend.services.log_name_link_service import (
     MatcherAnswer,
 )
 from backend.services.matching_constants import (
+    ARTIST_MB_FAILURE_CUTOFF,
     MAX_ARTIST_SUGGESTIONS,
     MB_AUTO_LINK_SCORE,
     MB_MIN_CANDIDATE_SCORE,
@@ -47,6 +48,7 @@ from backend.services.matching_utils import is_likely_truncated, rule_matches
 from backend.services.mb_client import MusicBrainzClientProtocol
 from backend.services.mb_types import MbArtistResult
 from backend.services.normalization import normalize_artist
+from backend.services.recording_search import is_transient_mb_failure
 
 logger = structlog.get_logger()
 
@@ -422,6 +424,60 @@ class TruncatedNameMbStrategy:
         return self._inner.apply(broadcast_artist)
 
 
+class DeferOnMusicBrainzOutage:
+    """Defers a cut-off name when MusicBrainz is down (AUD-R028 extended by AUD-R042; phase
+    4.1 S6, D2; AUD-R090).
+
+    Wraps the MusicBrainz strategy inside the cut-off gate. A transient failure of its live
+    search (``is_transient_mb_failure``: 429 or 5xx after the client's retries, a timeout, a
+    network error, a dropped connection) is answered as the stage answers any name it can't
+    resolve, ``needs_review`` / DEFERRED_RETRY, so the run carries on and decides its other
+    names. A permanent error still fails the run, and ``MusicBrainzUnavailableError`` (the gate's
+    dry run: a cache miss) passes through. After ``cutoff`` transient failures in a row, the
+    remaining names are deferred without a call; any answer resets the count. One instance per
+    engine, so one per run (one playlist).
+    """
+
+    def __init__(
+        self, inner: ArtistMatchingStrategy, cutoff: int = ARTIST_MB_FAILURE_CUTOFF
+    ) -> None:
+        self._inner = inner
+        self._cutoff = cutoff
+        self._failures = 0
+
+    def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
+        if self._failures >= self._cutoff:
+            return _deferred_result()
+        try:
+            result = self._inner.apply(broadcast_artist)
+        except httpx.HTTPError as exc:
+            if not is_transient_mb_failure(exc):
+                raise
+            self._failures += 1
+            logger.warning(
+                "mb_artist_search_deferred",
+                broadcast_artist_id=str(broadcast_artist.id),
+                failures=self._failures,
+                cut_off=self._failures >= self._cutoff,
+                error=str(exc),
+            )
+            return _deferred_result()
+        self._failures = 0
+        return result
+
+
+def _deferred_result() -> ArtistMatchResult:
+    """NEEDS_REVIEW / DEFERRED_RETRY: the stage's answer for a name nothing resolved."""
+    return ArtistMatchResult(
+        status=MatchStatus.NEEDS_REVIEW,
+        tier=MatchTier.UNCLASSIFIED,
+        confidence_score=0.0,
+        target_id="",
+        reason_code=ReasonCode.DEFERRED_RETRY,
+        reason_detail=format_deferred_retry(),
+    )
+
+
 class DeferredRetryStrategy:
     """Terminal strategy — always returns NEEDS_REVIEW/DEFERRED_RETRY.
 
@@ -433,14 +489,7 @@ class DeferredRetryStrategy:
     """
 
     def apply(self, broadcast_artist: BroadcastArtist) -> ArtistMatchResult | None:
-        return ArtistMatchResult(
-            status=MatchStatus.NEEDS_REVIEW,
-            tier=MatchTier.UNCLASSIFIED,
-            confidence_score=0.0,
-            target_id="",
-            reason_code=ReasonCode.DEFERRED_RETRY,
-            reason_detail=format_deferred_retry(),
-        )
+        return _deferred_result()
 
 
 class ArtistMatchingEngine:
@@ -794,18 +843,21 @@ def build_mb_artist_engine(
     """Phase 2's engine: MusicBrainz for a name that looks truncated, else DEFERRED_RETRY.
 
     Terminal: it decides every artist. ``search_map`` holds the coalesced searches
-    (_build_truncated_search_map); a truncated name missing from it is searched live.
+    (_build_truncated_search_map); a truncated name missing from it is searched live, and a
+    MusicBrainz outage on that search defers the name (DeferOnMusicBrainzOutage, phase 4.1 D2).
     """
     thresholds = inputs.thresholds
     return ArtistMatchingEngine(
         [
             TruncatedNameMbStrategy(
-                inner=MusicBrainzApiStrategy(
-                    inputs.mb_client,
-                    thresholds.strong_match_threshold,
-                    thresholds.mb_score_gap,
-                    thresholds.mb_auto_link_score,
-                    search_map=search_map,
+                inner=DeferOnMusicBrainzOutage(
+                    MusicBrainzApiStrategy(
+                        inputs.mb_client,
+                        thresholds.strong_match_threshold,
+                        thresholds.mb_score_gap,
+                        thresholds.mb_auto_link_score,
+                        search_map=search_map,
+                    )
                 ),
                 max_len=thresholds.broadcast_name_max_len,
             ),
@@ -819,8 +871,8 @@ def resolve_one_name(
 ) -> ArtistMatchResult:
     """The first decision *engines*, tried in order, make for one log name.
 
-    The last engine must be terminal (build_mb_artist_engine's is). A MusicBrainz client
-    error propagates.
+    The last engine must be terminal (build_mb_artist_engine's is). A permanent MusicBrainz
+    client error propagates; a transient one defers the name (DeferOnMusicBrainzOutage).
     """
     for engine in engines:
         result = engine.resolve(broadcast_artist)

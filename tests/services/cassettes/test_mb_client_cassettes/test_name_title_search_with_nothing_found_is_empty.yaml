@@ -1,0 +1,60 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      host:
+      - musicbrainz.org
+      user-agent:
+      - RetroStation/0.1.0 (https://github.com/retrostation)
+    method: GET
+    uri: https://musicbrainz.org/ws/2/recording/?query=artist%3A%28Zzyzx+AND+Qwertyuiop%29+AND+recording%3A%22No+Such+Song+Anywhere+At+All%22&fmt=json&limit=25
+  response:
+    body:
+      string: '{"created":"2026-11-22T03:29:26.204Z","count":0,"offset":0,"recordings":[]}'
+    headers:
+      access-control-allow-origin:
+      - '*'
+      connection:
+      - close
+      content-length:
+      - '75'
+      content-security-policy:
+      - default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self';
+        font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self';
+        style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';
+      content-type:
+      - application/json
+      date:
+      - Sun, 22 Nov 2026 03:29:26 GMT
+      etag:
+      - '"MmNlYmRlMDAwMDAwMDAwMFNvbHI="'
+      last-modified:
+      - Sun, 22 Nov 2026 03:28:37 GMT
+      vary:
+      - Accept-Encoding
+      x-cache-status:
+      - MISS
+      x-content-type-options:
+      - nosniff
+      x-frame-options:
+      - SAMEORIGIN
+      x-mb-gateway:
+      - rudi
+      x-ratelimit-limit:
+      - '400'
+      x-ratelimit-remaining:
+      - '230'
+      x-ratelimit-reset:
+      - '1795318144'
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

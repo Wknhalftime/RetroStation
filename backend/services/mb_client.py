@@ -14,7 +14,17 @@ from backend.domain.catalog import MusicBrainzId
 from backend.domain.system import MusicBrainzCache
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 from backend.services import mb_clock
-from backend.services.mb_types import MbArtist, MbArtistResult, MbRecording, MbRelease
+from backend.services.mb_types import (
+    MbAlias,
+    MbArtist,
+    MbArtistAliases,
+    MbArtistResult,
+    MbCreditPart,
+    MbNameTitleHit,
+    MbNameTitleResult,
+    MbRecording,
+    MbRelease,
+)
 
 logger = structlog.get_logger()
 
@@ -32,6 +42,9 @@ _CACHE_TTL_DAYS = 30
 _SEARCH_BATCH_SIZE = 100
 # Marker stored for an MBID the search index does not know, so it is not asked again.
 _NOT_IN_INDEX = "not_in_index"
+# Hits kept per name + title search (phase 4.1, S2): enough for C68's "hits scoring 90 or more
+# agree" and 4.2's runner-up, a fixed number so it needs no place in the cache key.
+_NAME_TITLE_LIMIT = 25
 
 # Lucene special characters that must be escaped inside a query term.
 # See https://musicbrainz.org/doc/MusicBrainz_API/Search#Lucene_Search_Syntax.
@@ -76,6 +89,78 @@ class MusicBrainzClientProtocol(Protocol):
     def lookup_recordings(
         self, mbids: Sequence[str], *, on_progress: Progress | None = None
     ) -> dict[str, MbRecording | None]: ...
+    def search_recordings_by_name_title(
+        self, name_words: Sequence[str], title: str
+    ) -> MbNameTitleResult: ...
+    def search_artist_aliases_by_mbids(self, mbids: Sequence[str]) -> dict[str, list[MbAlias]]: ...
+    def lookup_release_for_links(self, mbid: str) -> MbRelease | None: ...
+
+
+_LUCENE_OPERATORS = frozenset({"AND", "OR", "NOT"})
+
+
+def _name_word_term(word: str) -> str:
+    """One required name word, Lucene-escaped. A word that reads as an operator (AND, OR, NOT
+    in any case) or holds whitespace is quoted as a phrase, so it stays one required term."""
+    escaped = _lucene_escape(word)
+    if word.upper() in _LUCENE_OPERATORS or any(ch.isspace() for ch in word):
+        return f'"{escaped}"'
+    return escaped
+
+
+def _name_title_query(name_words: Sequence[str], title: str) -> str:
+    """Every name word required, the title as a phrase (the probe's lesson, C46); the title
+    alone when the name gives no words (E5)."""
+    phrase = f'recording:"{_lucene_escape(title)}"'
+    if not name_words:
+        return phrase
+    return f"artist:({' AND '.join(_name_word_term(w) for w in name_words)}) AND {phrase}"
+
+
+def _name_title_key(name_words: Sequence[str], title: str) -> str:
+    return f"recording-name-title:{' '.join(w.lower() for w in name_words)}:{title.lower()}"
+
+
+def _slim_credit_part(part: dict[str, Any]) -> MbCreditPart:
+    artist = part.get("artist") or {}
+    return {
+        "name": part.get("name", ""),
+        "joinphrase": part.get("joinphrase") or "",
+        "artist": cast(Any, {k: artist[k] for k in ("id", "name") if k in artist}),
+    }
+
+
+def _slim_name_title_hit(hit: dict[str, Any]) -> MbNameTitleHit:
+    """What 4.2 and 4.4 read from a name + title hit: its score and its whole credit, joining
+    words included (``_slim_recording`` keeps neither); releases, ISRCs and tags are dropped."""
+    slim: dict[str, Any] = {
+        "id": hit.get("id"),
+        "score": hit.get("score", 0),
+        "title": hit.get("title", ""),
+    }
+    if hit.get("length") is not None:
+        slim["length"] = hit["length"]
+    if hit.get("disambiguation"):
+        slim["disambiguation"] = hit["disambiguation"]
+    slim["artist-credit"] = [_slim_credit_part(p) for p in hit.get("artist-credit", [])]
+    return cast(MbNameTitleHit, slim)
+
+
+def _slim_aliases(hit: MbArtistAliases) -> MbArtistAliases:
+    """An artist search hit cut down to its id and its aliases (D3)."""
+    raw = cast(dict[str, Any], hit)
+    aliases: list[MbAlias] = [
+        {
+            "name": alias.get("name", ""),
+            "sort-name": alias.get("sort-name", ""),
+            "type": alias.get("type"),
+            "locale": alias.get("locale"),
+            "primary": alias.get("primary"),
+        }
+        for alias in raw.get("aliases", [])
+        if isinstance(alias, dict)
+    ]
+    return {"id": str(raw.get("id", "")), "aliases": aliases}
 
 
 def _slim_recording(recording: MbRecording) -> MbRecording:
@@ -151,6 +236,11 @@ _RECORDINGS = _SearchableEntity[MbRecording](
 # Artists share the cache key and row shape of ``lookup_artist``; an unknown id is not
 # cached, because the direct lookup (which also follows merges) is the fallback.
 _ARTISTS = _SearchableEntity[MbArtist]("artist", "arid", "artist", "artist", _slim_artist, False)
+# The same artist search, keeping only the aliases, under its own key (phase 4.1, D3). An unknown
+# id is cached as unknown: the fill has no fallback to ask instead.
+_ARTIST_ALIASES = _SearchableEntity[MbArtistAliases](
+    "artist", "arid", "artist-aliases", "artist-aliases", _slim_aliases, True
+)
 
 
 class MusicBrainzApiClient:
@@ -367,6 +457,54 @@ class MusicBrainzApiClient:
         )
         return recordings
 
+    def search_recordings_by_name_title(
+        self, name_words: Sequence[str], title: str
+    ) -> MbNameTitleResult:
+        """Search recordings by a name's words and a title (phase 4.1, S2; C46).
+
+        Every name word is required, so "QUEEN/DAVID BOWIE" never ranks David Bowie's own live
+        takes first (the probe's lesson). With no name words (a name of only initials or stop
+        words, E5) the title is searched alone and the entry says ``title_only``. The entry keeps
+        the hit count and each hit's score and whole credit; an empty result is cached too (E2).
+        Which words to send is the caller's call: every one given is required.
+        """
+        cache_key = _name_title_key(name_words, title)
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None:
+            self.cache_hits += 1
+            logger.debug("mb_cache_hit", cache_key=cache_key)
+            return cast(MbNameTitleResult, cached_entry.response_data)
+
+        self.live_fetches += 1
+        response = self._fetch(
+            f"{_MUSICBRAINZ_API}/recording/",
+            {
+                "query": _name_title_query(name_words, title),
+                "fmt": "json",
+                "limit": str(_NAME_TITLE_LIMIT),
+            },
+        )
+        payload: dict[str, Any] = response.json()
+        hits = cast(list[dict[str, Any]], payload.get("recordings", []))
+        result: MbNameTitleResult = {
+            "count": int(payload.get("count", len(hits))),
+            "title_only": not name_words,
+            "recordings": [_slim_name_title_hit(hit) for hit in hits],
+        }
+        self._cache_write(
+            cache_key=cache_key,
+            entity_type="recording-name-title",
+            entity_mbid="",
+            response_data=dict(result),
+        )
+        logger.info(
+            "mb_api_search_name_title",
+            words=len(name_words),
+            title=title,
+            count=result["count"],
+        )
+        return result
+
     def search_recordings_by_mbids(self, mbids: Sequence[str]) -> dict[str, MbRecording]:
         """Fetch many recordings by MBID, up to 100 per search request.
 
@@ -391,6 +529,16 @@ class MusicBrainzApiClient:
         (input order), then for each request's MBIDs as soon as that request has landed.
         """
         return self._search_by_mbids(_ARTISTS, mbids, on_progress=on_progress)
+
+    def search_artist_aliases_by_mbids(self, mbids: Sequence[str]) -> dict[str, list[MbAlias]]:
+        """Each artist's MusicBrainz aliases, up to 100 artists per search request (phase 4.1,
+        D3), cached under ``artist-aliases:{mbid}``.
+
+        Found-only: an MBID the index does not know (merged, deleted) is cached as unknown and
+        left out; a malformed one is dropped. An artist with no aliases maps to ``[]``.
+        """
+        found = self._search_by_mbids(_ARTIST_ALIASES, mbids)
+        return {mbid: entry["aliases"] for mbid, entry in found.items()}
 
     def lookup_recordings(
         self, mbids: Sequence[str], *, on_progress: Progress | None = None
@@ -543,6 +691,32 @@ class MusicBrainzApiClient:
         )
 
         logger.info("mb_api_lookup_release", mbid=mbid)
+        return release
+
+    def lookup_release_for_links(self, mbid: str) -> MbRelease | None:
+        """``lookup_release`` for the cache fill's work-link tail (phase 4.1, S2, E2): a release
+        MusicBrainz answers 404 for is remembered under ``release-missing:{mbid}`` and not asked
+        again. A cached release answers first. ``lookup_release`` itself still caches no 404:
+        enrichment reads ``release:`` rows and must never meet a marker there.
+        """
+        cached_release = self._cache.get(f"release:{mbid}")
+        if cached_release is not None:
+            self.cache_hits += 1
+            return cast(MbRelease, cached_release.response_data)
+        missing_key = f"release-missing:{mbid}"
+        if self._cache.get(missing_key) is not None:
+            self.cache_hits += 1
+            logger.debug("mb_cache_hit", cache_key=missing_key)
+            return None
+
+        release = self.lookup_release(mbid)
+        if release is None:
+            self._cache_write(
+                cache_key=missing_key,
+                entity_type="release-missing",
+                entity_mbid=mbid,
+                response_data={"status": 404},
+            )
         return release
 
     def lookup_recording(self, mbid: str) -> MbRecording | None:

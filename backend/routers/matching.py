@@ -24,6 +24,7 @@ from backend.domain.matching import (
     ListedLogNameError,
     LogNameNotFoundError,
     LogNameNotUnmatchableError,
+    MusicBrainzUnavailableError,
     PlaceholderArtistError,
     RecheckNotQueuedError,
 )
@@ -54,6 +55,7 @@ from backend.services.matching_constants import (
 )
 from backend.services.matching_reasons import suggestion_reason
 from backend.services.mb_client import MusicBrainzClientProtocol
+from backend.services.musicbrainz_search_service import search_artists_by_name
 from backend.services.repository_factory import recalc_repos
 from backend.tasks.identity_matching_tasks import identity_matching_task
 from backend.tasks.matching_recheck_tasks import queue_recheck_all
@@ -1143,12 +1145,17 @@ async def search_mb_artists(
     event loop.  The dependency itself opens/closes the connection around the
     request lifetime.
 
-    A lost database connection (the cache's ``StorageUnavailableError``) answers 503.
+    A lost database connection (the cache's ``StorageUnavailableError``) answers 503, and so
+    does any MusicBrainz error (``MusicBrainzUnavailableError``, phase 4.1 S6; AUD-R090).
     """
     try:
-        items = await asyncio.to_thread(mb_client.search_artist, query)
+        items = await asyncio.to_thread(search_artists_by_name, mb_client, query)
     except StorageUnavailableError as lost:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="unavailable"
         ) from lost
+    except MusicBrainzUnavailableError as down:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="unavailable"
+        ) from down
     return {"items": items}

@@ -30,7 +30,11 @@ class FakeMbClient:
         artists: dict[str, dict[str, Any]] | None = None,
         error_mbids: set[str] | None = None,
         bad_request_mbids: set[str] | None = None,
+        name_title_searches: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None,
+        aliases: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
+        self._name_title_searches = name_title_searches or {}
+        self._aliases = aliases or {}
         self._responses = responses or {}
         self._releases = releases or {}
         self._recordings = recordings or {}
@@ -100,6 +104,32 @@ class FakeMbClient:
             for index, mbid in enumerate(asked, start=1):
                 on_progress(index, len(asked), mbid)
         return found
+
+    def search_recordings_by_name_title(
+        self, name_words: Sequence[str], title: str
+    ) -> dict[str, Any]:
+        """Phase 4.1 (S2): canned by (lower-cased words, lower-cased title); nothing found
+        otherwise, with ``title_only`` when no words were given (E5)."""
+        words = tuple(w.lower() for w in name_words)
+        self.calls.append(f"search_recordings_by_name_title:{' '.join(words)}:{title}")
+        canned = self._name_title_searches.get((words, title.lower()))
+        if canned is not None:
+            return canned
+        return {"count": 0, "title_only": not words, "recordings": []}
+
+    def search_artist_aliases_by_mbids(self, mbids: Sequence[str]) -> dict[str, list[Any]]:
+        """Phase 4.1 (D3): the canned aliases of each MBID given one; the rest are unknown."""
+        self.calls.append("search_artist_aliases_by_mbids:" + ",".join(mbids))
+        for mbid in mbids:
+            if mbid in self._error_mbids:
+                raise httpx.ConnectError("simulated transient failure")
+        return {m: self._aliases[m] for m in dict.fromkeys(mbids) if m in self._aliases}
+
+    def lookup_release_for_links(self, mbid: str) -> dict[str, Any] | None:
+        """Phase 4.1 (S2): ``lookup_release`` as the work-link tail calls it."""
+        self.calls.append(f"lookup_release_for_links:{mbid}")
+        self._raise_if_bad_request("release", mbid)
+        return self._releases.get(mbid)
 
     def lookup_recordings(
         self, mbids: Sequence[str], *, on_progress: Progress | None = None

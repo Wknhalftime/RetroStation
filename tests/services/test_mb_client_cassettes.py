@@ -291,3 +291,91 @@ def test_lookup_merged_release_returns_the_survivor(client: MusicBrainzApiClient
     assert release is not None
     assert release["id"] == SURVIVING_RELEASE_MBID
     assert release["media"][0]["tracks"][0]["recording"]["id"]
+
+
+# --- phase 4.1 PR 1: the cache fill's methods (SPEC S2, E2, E5; D3; AUD-R090) ---------------------
+# Recorded once, single-process, with the app's User-Agent (2026-11-21, the coordinator's OK).
+
+QUEEN_MBID = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3"
+BOWIE_MBID = "5441c29d-3602-4898-b1a1-b77fa23b8e50"
+MELLENCAMP_MBID = "0aad6b52-fd93-4ea4-9c5d-1f66e1bc9f0a"
+_HIT_KEYS = {"id", "score", "title", "length", "disambiguation", "artist-credit"}
+_ALIAS_KEYS = {"name", "sort-name", "type", "locale", "primary"}
+
+
+def _credited(hit: dict[str, object]) -> list[str]:
+    credit = hit["artist-credit"]
+    assert isinstance(credit, list)
+    return [str(part["artist"]["id"]) for part in credit]
+
+
+def test_name_title_search_finds_the_duet_with_both_artists(client: MusicBrainzApiClient) -> None:
+    """The probe's lesson: requiring every word of "QUEEN/DAVID BOWIE" keeps David Bowie's own
+    live takes out, and the duet's credit comes back whole, with its joining words."""
+    result = client.search_recordings_by_name_title(["Queen", "David", "Bowie"], "Under Pressure")
+
+    hits = result["recordings"]
+    assert result["title_only"] is False
+    assert result["count"] >= 1 and hits
+    assert all(set(hit) <= _HIT_KEYS and isinstance(hit["score"], int) for hit in hits)
+    duets = [h for h in hits if set(_credited(h)) == {QUEEN_MBID, BOWIE_MBID}]
+    assert duets, "a hit credits Queen and David Bowie together"
+    first_part = duets[0]["artist-credit"][0]
+    assert first_part["joinphrase"].strip() != ""
+    assert all(QUEEN_MBID in _credited(h) for h in hits)
+
+
+def test_name_title_search_tells_a_joined_act_from_a_duet(client: MusicBrainzApiClient) -> None:
+    """A group whose name has a joiner comes back as one credited act (C68: "Brooks & Dunn" is
+    one act, as the probe found)."""
+    result = client.search_recordings_by_name_title(
+        ["Brooks", "Dunn"], "Mama Don't Get Dressed Up for Nothing"
+    )
+
+    assert any(
+        len(hit["artist-credit"]) == 1
+        and hit["artist-credit"][0]["artist"]["name"] == "Brooks & Dunn"
+        for hit in result["recordings"]
+    )
+
+
+def test_name_title_search_with_nothing_found_is_empty(client: MusicBrainzApiClient) -> None:
+    result = client.search_recordings_by_name_title(
+        ["Zzyzx", "Qwertyuiop"], "No Such Song Anywhere At All"
+    )
+
+    assert result == {"count": 0, "title_only": False, "recordings": []}
+
+
+def test_title_only_search_is_marked(client: MusicBrainzApiClient) -> None:
+    """E5: no name words, the title alone, marked as such."""
+    result = client.search_recordings_by_name_title([], "Under Pressure")
+
+    assert result["title_only"] is True
+    assert result["count"] > 1
+    assert all(hit["artist-credit"] for hit in result["recordings"])
+
+
+def test_aliases_by_mbids_carry_alias_names(client: MusicBrainzApiClient) -> None:
+    """D3: one ``arid:`` search returns each artist's aliases; John Mellencamp's include the
+    names he recorded under ("JOHN COUGAR" in the logs), and an unknown MBID is left out."""
+    found = client.search_artist_aliases_by_mbids([MELLENCAMP_MBID, METALLICA_MBID, UNKNOWN_MBID])
+
+    assert set(found) == {MELLENCAMP_MBID, METALLICA_MBID}
+    names = {alias["name"] for alias in found[MELLENCAMP_MBID]}
+    assert names & {"John Cougar", "John Cougar Mellencamp"}
+    assert all(set(alias) <= _ALIAS_KEYS for aliases in found.values() for alias in aliases)
+    assert client.live_fetches == 1
+
+
+def test_release_for_links_remembers_a_404(record_mode: str) -> None:
+    """E2: MusicBrainz answers 404 for a release it doesn't have; the fill's lookup remembers it
+    under ``release-missing:`` and never asks again."""
+    cache = FakeMusicBrainzCacheRepository()
+    wait_turn = (lambda: None) if record_mode == "none" else None
+    with MusicBrainzApiClient(cache, wait_turn=wait_turn) as mb_client:
+        assert mb_client.lookup_release_for_links(UNKNOWN_MBID) is None
+        assert mb_client.lookup_release_for_links(UNKNOWN_MBID) is None
+
+        assert mb_client.live_fetches == 1
+    assert cache.get(f"release-missing:{UNKNOWN_MBID}") is not None

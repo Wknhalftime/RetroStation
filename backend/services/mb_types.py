@@ -88,6 +88,57 @@ class MbReleaseRef(TypedDict, total=False):
     title: str
 
 
+# One part of a name + title search hit's credit, as the fill caches it (phase 4.1, S2): the
+# name as credited, the joining words after it, and the artist's id and name.
+class MbCreditPart(TypedDict, total=False):
+    name: str
+    joinphrase: str
+    artist: MbArtistRef
+
+
+# One hit of search_recordings_by_name_title, slimmed (phase 4.1, S2).
+MbNameTitleHit = TypedDict(
+    "MbNameTitleHit",
+    {
+        "id": str,
+        "score": int,
+        "title": str,
+        "length": int,
+        "disambiguation": str,
+        "artist-credit": list[MbCreditPart],
+    },
+    total=False,
+)
+
+
+# Returned by search_recordings_by_name_title: the hit count, whether the name was left out
+# (no name words, E5), and the hits.
+class MbNameTitleResult(TypedDict):
+    count: int
+    title_only: bool
+    recordings: list[MbNameTitleHit]
+
+
+# One alias of an artist (phase 4.1, D3); MusicBrainz sends null for an unset type, locale or
+# primary flag.
+MbAlias = TypedDict(
+    "MbAlias",
+    {
+        "name": str,
+        "sort-name": str,
+        "type": str | None,
+        "locale": str | None,
+        "primary": bool | None,
+    },
+)
+
+
+# Cached by search_artist_aliases_by_mbids under artist-aliases:{mbid}.
+class MbArtistAliases(TypedDict):
+    id: str
+    aliases: list[MbAlias]
+
+
 # Returned by lookup_recording (with relations) and search_recordings_by_mbids
 # (with releases, no relations).
 MbRecording = TypedDict(
