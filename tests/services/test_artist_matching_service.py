@@ -787,9 +787,7 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
         error_names={flaky},
     )
 
-    import contextlib
-
-    with capture_logs() as events, contextlib.suppress(httpx.HTTPError):
+    with capture_logs() as events:
         match_artists_for_playlist(
             playlist_id=playlist_id,
             repos=ArtistMatchingRepos(
@@ -802,10 +800,10 @@ def test_match_artists_summary_distinct_search_keys_stable_across_httpx_errors()
             mb_client=mb,
         )
 
-    # The summary event is emitted from a finally block, so it fires even
-    # when the per-row live fallback re-raises for the Flaky bucket. The
-    # guarantee under test: distinct_search_keys counts the INPUT set (both
-    # buckets), NOT the (smaller) search_map that the pre-pass populated.
+    # The per-row live fallback no longer raises for the Flaky bucket: the
+    # outage wrapper defers it (AUD-R090), so the run finishes and emits one
+    # summary. The guarantee under test: distinct_search_keys counts the INPUT
+    # set (both buckets), NOT the (smaller) search_map that the pre-pass populated.
     summary_events = [e for e in events if e.get("event") == "mb_task_summary"]
     assert len(summary_events) == 1
     assert summary_events[0]["distinct_search_keys"] == 2

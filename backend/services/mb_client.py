@@ -96,13 +96,25 @@ class MusicBrainzClientProtocol(Protocol):
     def lookup_release_for_links(self, mbid: str) -> MbRelease | None: ...
 
 
+_LUCENE_OPERATORS = frozenset({"AND", "OR", "NOT"})
+
+
+def _name_word_term(word: str) -> str:
+    """One required name word, Lucene-escaped. A word that reads as an operator (AND, OR, NOT
+    in any case) or holds whitespace is quoted as a phrase, so it stays one required term."""
+    escaped = _lucene_escape(word)
+    if word.upper() in _LUCENE_OPERATORS or any(ch.isspace() for ch in word):
+        return f'"{escaped}"'
+    return escaped
+
+
 def _name_title_query(name_words: Sequence[str], title: str) -> str:
     """Every name word required, the title as a phrase (the probe's lesson, C46); the title
     alone when the name gives no words (E5)."""
     phrase = f'recording:"{_lucene_escape(title)}"'
     if not name_words:
         return phrase
-    return f"artist:({' AND '.join(_lucene_escape(w) for w in name_words)}) AND {phrase}"
+    return f"artist:({' AND '.join(_name_word_term(w) for w in name_words)}) AND {phrase}"
 
 
 def _name_title_key(name_words: Sequence[str], title: str) -> str:
