@@ -32,7 +32,8 @@ def test_r071_amends_r042_and_r042_says_so() -> None:
     assert "AUD-R102" in amended["ruling"]
     check = amended["ruling"][amended["ruling"].rfind("Check: ") :]
     assert check.startswith("Check: tests/services/test_mb_clock.py (2a), ")
-    assert check.endswith("check pending: 4.1.")
+    assert check.endswith("tests/tasks/test_cache_fill.py (4.1).")
+    assert "pending" not in check
 
 
 def test_r072_amends_r041() -> None:
