@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import PureWindowsPath
 from uuid import UUID, uuid4
 
 import structlog
@@ -41,6 +42,7 @@ from backend.domain.curation import (
 )
 from backend.domain.enums import CatalogSource, FileStatus, SelectionMethod, VersionType
 from backend.domain.performances import choose_performance
+from backend.domain.work_merge_planner import WorkPair
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_merges import ArtistMergeRepository
 from backend.repositories.credit_picks import CreditPickRepository
@@ -52,6 +54,7 @@ from backend.repositories.performances import PerformanceRepository
 from backend.repositories.recordings import RecordingRepository
 from backend.repositories.song_masters import SongMasterRepository
 from backend.repositories.work_curation import WorkCurationRepository
+from backend.repositories.work_keep_apart import WorkKeepApartRepository
 from backend.repositories.work_merges import MasterLine, WorkMergeRepository
 from backend.repositories.works import WorkRepository
 from backend.services.log_name_link_service import LogNameLinkService
@@ -85,6 +88,9 @@ class WorkCurationRepos:
     # None skips pins.
     lines: WorkMergeRepository | None = None
     credits: CreditPickRepository | None = None
+    # Phase 3b PR 5c (D40): Lance's keep-apart marks, which split and reassign write and a
+    # merge carries; None skips them.
+    keep_apart: WorkKeepApartRepository | None = None
 
 
 def _work(work_id: str, works: WorkRepository) -> Work:
@@ -151,6 +157,17 @@ def _settle_left_work(work_id: str, repos: WorkCurationRepos) -> bool:
         return True
     _recalculate_master(work_id, repos)
     return False
+
+
+def _file_name(path: str) -> str:
+    return PureWindowsPath(path).name
+
+
+def _mark_apart(left: str, other: str, note: str, repos: WorkCurationRepos) -> None:
+    """PR 5c (Q7): a split or reassign keeps the work it left apart from the file's new work,
+    while the work it left still exists."""
+    if repos.keep_apart is not None and repos.works.get_by_id(left) is not None:
+        repos.keep_apart.keep([WorkPair.of(left, other)], note)
 
 
 # --- merge -------------------------------------------------------------------------------------
@@ -323,6 +340,8 @@ def merge_works(
     song_matches = SongMatchService(repos.matches)
     song_matches.follow_works(source_ids, target_id)
     place(moving, left, repos.performances, song_matches)
+    if repos.keep_apart is not None:  # PR 5c (Q4, D57): the marks follow the song
+        repos.keep_apart.carry(source_ids, target_id)
     repos.curation.delete_masters_of_works(source_ids)
     deleted = repos.curation.delete_works(source_ids)
     if kept is not None and kept.work_id != target_id:
@@ -368,6 +387,8 @@ def split_file_off(work_id: str, file_id: UUID, repos: WorkCurationRepos) -> Spl
     repos.matches.see_version_states(file_id, work_id, new_work_id)
     repos.curation.store_split_master(uuid4(), new_work_id, file_id)
     left_deleted = _settle_left_work(work_id, repos)
+    if not left_deleted:
+        _mark_apart(work_id, new_work_id, f"Split off {_file_name(file.file_path)}", repos)
     return SplitResult(new_work_id=new_work_id, old_work_deleted=left_deleted)
 
 
@@ -427,6 +448,10 @@ def reassign_file(file_id: UUID, work_id: str, repos: WorkCurationRepos) -> Reas
     if file.work_id is not None:
         repos.matches.see_version_states(file_id, file.work_id, work_id)
         left_deleted = _settle_left_work(file.work_id, repos)
+        if not left_deleted:
+            target = _work(work_id, repos.works)
+            note = f"Reassigned {_file_name(file.file_path)} to {target.title}"
+            _mark_apart(file.work_id, work_id, note, repos)
     return ReassignResult(old_work_id=file.work_id, old_work_deleted=left_deleted)
 
 

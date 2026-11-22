@@ -1,15 +1,16 @@
-"""The merge planner's facts and plan (work merges phase 3b PR 4; SPEC S1, D29, Q22; AUD-R080).
+"""The merge planner's facts and plan (work merges phase 3b PR 4; SPEC S1, D29, Q22; AUD-R080;
+PR 5c's kept pairs, D40, D56, AUD-R089).
 
 Reads every work through the merge list's port, turns it into the planner's facts (grouping's
 exact title key, credit artists by merge-group primary, normalized names, placeholders left
-out), plans with the pure planner, and orders each group by matched plays. Refuses until D1's
-credits are done (Q22).
+out), plans with the pure planner, never joining two works Lance keeps apart, and orders each
+group by matched plays. Refuses until D1's credits are done (Q22).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 
 from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS
 from backend.domain.library import WORK_ARTISTS_CREDITED_SETTING
@@ -18,6 +19,7 @@ from backend.domain.work_merge_planner import (
     MergeSet,
     PlannedGroup,
     WorkFacts,
+    WorkPair,
     merge_sets,
     plan_groups,
 )
@@ -69,24 +71,46 @@ def _facts(work: PlanWork, primaries: Mapping[str, str]) -> WorkFacts:
     )
 
 
-def plan_sets(merge_list: MergeListRepository, settings: UserSettingRepository) -> list[MergeSet]:
-    """The sets of works §6.2 joins, before their targets (Library Status's count, D27)."""
+def _work_facts(
+    merge_list: MergeListRepository, settings: UserSettingRepository
+) -> list[WorkFacts]:
     require_credits(settings)
     works = merge_list.plan_works()
     artist_ids = {c.artist_id for w in works for c in w.credits if c.artist_id is not None}
     primaries = merge_list.primaries(artist_ids)
-    return merge_sets(_facts(w, primaries) for w in works)
+    return [_facts(w, primaries) for w in works]
+
+
+def plan_sets(
+    merge_list: MergeListRepository,
+    settings: UserSettingRepository,
+    kept_apart: Iterable[WorkPair] = (),
+) -> list[MergeSet]:
+    """The sets of works §6.2 joins, before their targets (Library Status's count, D27)."""
+    return merge_sets(_work_facts(merge_list, settings), kept_apart)
 
 
 @dataclass(frozen=True)
 class Plan:
     groups: tuple[PlannedGroup, ...]
     plays: Mapping[str, int]
+    # PR 5c (Q6): each work's known work MBIDs, its own and those its lookups name.
+    known_mbids: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
-def plan(merge_list: MergeListRepository, settings: UserSettingRepository) -> Plan:
-    """Every planned group, most played first, with each work's matched plays."""
-    sets = plan_sets(merge_list, settings)
+def plan(
+    merge_list: MergeListRepository,
+    settings: UserSettingRepository,
+    kept_apart: Iterable[WorkPair] = (),
+) -> Plan:
+    """Every planned group, most played first, with each work's matched plays; two works kept
+    apart never join, and a group still holding both is held (D56)."""
+    facts = _work_facts(merge_list, settings)
+    sets = merge_sets(facts, kept_apart)
     ids: Sequence[str] = sorted({w for s in sets for w in s.work_ids})
     plays = merge_list.matched_plays(ids) if ids else {}
-    return Plan(tuple(plan_groups(sets, plays)), plays)
+    return Plan(
+        tuple(plan_groups(sets, plays)),
+        plays,
+        {f.work_id: f.known_mbids for f in facts if f.known_mbids},
+    )

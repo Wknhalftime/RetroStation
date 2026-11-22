@@ -13,9 +13,11 @@ first (D37: ``offset`` 0 and ``limit`` 50 unless given, ``limit`` 1 to 50), stat
                  "changes": [{"station_id", "station", "identity_id", "title", "artist",
                               "plays", "from_file_id", "from_path", "to_file_id",
                               "to_path"}, ...],
-                 "failed": {"error", "logged_at"} | null}, ...],
+                 "failed": {"error", "logged_at"} | null,
+                 "held": [{"first_work_id", "second_work_id"}, ...] (PR 5c)}, ...],
      "duplicates": [{"recording_mbid", "works": [{"work_id", "title"}, ...]}, ...],
      "kept_works": [{"work_id", "title", "references"}, ...],
+     "kept_apart": [...] (PR 5c, test_merge_list_keep_apart.py),
      "total": <every planned group>, "offset", "limit"}
 
 A group's works list the target first, then its sources in order. Its ``flags`` only show
@@ -25,10 +27,10 @@ group's works, so 4.3 widens it to the merged work, E3). Its ``changes`` are wha
 merge would change in air play, a pin can't hold (C74): the merge of each group on the page
 is tried in a savepoint that is always undone (D27, as D37 amends it), so reading the page
 writes nothing, not even the merge log. ``failed`` is the latest failed attempt at the group,
-from the merge log. The other two sections come whole with every page.
+from the merge log. The other sections come whole with every page.
 
-``GET /api/v1/library/merge-list/count`` answers ``{"total", "duplicates", "kept_works"}`` for
-Library Status, from the planner alone (D27, D28).
+``GET /api/v1/library/merge-list/count`` answers ``{"total", "duplicates", "kept_works",
+"kept_apart"}`` for Library Status, from the planner alone (D27, D28; PR 5c's D58).
 
 ``POST /api/v1/library/merge-list/apply`` takes ``{"groups": [{"target_id", "source_ids",
 "approvals": [{"station_id", "identity_id", "file_id"}, ...]}, ...]}``: the groups of the page
@@ -355,7 +357,7 @@ def test_the_kept_empty_works_section(client: TestClient, ready: Conn) -> None:
 
 
 def test_the_count(client: TestClient, ready: Conn) -> None:
-    """D28: the planned groups, and the rows of the page's two other sections."""
+    """D28, D58: the planned groups, and the rows of the page's other sections."""
     Planned(ready)
     elsewhere = cp.copy(ready, cp.work(ready, "Elsewhere", cp.artist(ready, "Nobody")))
     kept = cp.work(ready, "Emptied", cp.artist(ready, "Somebody"))
@@ -365,7 +367,7 @@ def test_the_count(client: TestClient, ready: Conn) -> None:
     response = client.get(COUNT)
 
     assert response.status_code == 200
-    assert response.json() == {"total": 3, "duplicates": 0, "kept_works": 1}
+    assert response.json() == {"total": 3, "duplicates": 0, "kept_works": 1, "kept_apart": 0}
 
 
 def test_empty(client: TestClient, ready: Conn) -> None:
@@ -373,11 +375,17 @@ def test_empty(client: TestClient, ready: Conn) -> None:
         "groups": [],
         "duplicates": [],
         "kept_works": [],
+        "kept_apart": [],
         "total": 0,
         "offset": 0,
         "limit": 50,
     }
-    assert client.get(COUNT).json() == {"total": 0, "duplicates": 0, "kept_works": 0}
+    assert client.get(COUNT).json() == {
+        "total": 0,
+        "duplicates": 0,
+        "kept_works": 0,
+        "kept_apart": 0,
+    }
     assert apply(client, []) == {
         "results": [],
         "merged": 0,

@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
 import {
   MERGE_LIST_PAGE,
   useApplyMergeList,
+  useKeepApart,
   useMergeList,
+  useUndoKeepApart,
   type SeenMergeGroup,
 } from "@/api/mergeList";
 import type {
   ApplyMergeListResult,
+  KeptApart,
   MergeChange,
   MergeGroup,
   MergeList as List,
@@ -16,7 +20,9 @@ import type {
 
 // Work merges phase 3b PR 4, SPEC S2, D6, D15, D27 (C57, C58, C74): every planned group with its
 // works, flags and the air-play changes a pin can't hold, each applied by its own tick; Lance
-// ticks only the groups to skip and presses Apply once.
+// ticks only the groups to skip and presses Apply once. PR 5c (D40, D55, D56): each group's
+// "Keep apart" keeps every pair of its works apart; a held group shows why, has no Skip tick and
+// is never applied; "Kept apart" lists every pair, each with Undo.
 
 const JOINS: Record<string, string> = {
   work_link: "Same MusicBrainz work",
@@ -58,38 +64,133 @@ function summary(result: ApplyMergeListResult, list: List | undefined): string {
   return [counts, ...notes].join(". ");
 }
 
+function names(titles: string[]): string {
+  if (titles.length <= 1) return titles.join("");
+  return `${titles.slice(0, -1).join(", ")} and ${titles[titles.length - 1]}`;
+}
+
+// D56: "Not merged: A and B are kept apart; C joins them." Each pair in the group's own order.
+function heldNotice(group: MergeGroup): string {
+  const order = group.works.map((w) => w.work_id);
+  const title = (id: string) => group.works.find((w) => w.work_id === id)?.title ?? id;
+  const kept = new Set(group.held.flatMap((p) => [p.first_work_id, p.second_work_id]));
+  const pairs = group.held.map((p) => {
+    const [a, b] = [p.first_work_id, p.second_work_id].sort(
+      (x, y) => order.indexOf(x) - order.indexOf(y)
+    );
+    return `${title(a)} and ${title(b)}`;
+  });
+  const joiners = order.filter((id) => !kept.has(id)).map(title);
+  const joining =
+    joiners.length === 0
+      ? ""
+      : `; ${names(joiners)} ${joiners.length === 1 ? "joins" : "join"} them`;
+  return `Not merged: ${pairs.join("; ")} are kept apart${joining}.`;
+}
+
+function KeptWork({ work }: { work: KeptApart["first"] }) {
+  return (
+    <>
+      <Link to={`/library/works/${work.work_id}`} className="text-indigo-700 hover:underline">
+        {work.title}
+      </Link>{" "}
+      ({work.artists.join(", ") || "No credited artist"})
+    </>
+  );
+}
+
+// Q9, Q3, Q6: every kept pair as the page sends it, each with Undo.
+function KeptApartSection({
+  pairs,
+  disabled,
+  onUndo,
+}: {
+  pairs: KeptApart[];
+  disabled: boolean;
+  onUndo: (pair: KeptApart) => void;
+}) {
+  if (pairs.length === 0) return null;
+  return (
+    <section aria-label="Kept apart" className="mt-6">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+        Kept apart
+      </h2>
+      <ul className="text-sm">
+        {pairs.map((k) => (
+          <li key={`${k.first.work_id}|${k.second.work_id}`} className="mb-1">
+            <KeptWork work={k.first} /> and <KeptWork work={k.second} /> ·{" "}
+            <time dateTime={k.kept_at}>{new Date(k.kept_at).toLocaleDateString()}</time>
+            {k.note && <> · {k.note}</>}
+            {k.musicbrainz_links && (
+              <span className="ml-2 text-amber-800">MusicBrainz links these works</span>
+            )}{" "}
+            <button
+              type="button"
+              aria-label={`Undo: ${k.first.title} and ${k.second.title}`}
+              disabled={disabled}
+              onClick={() => onUndo(k)}
+            >
+              Undo
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Group({
   group,
   skipped,
   ticked,
   disabled,
+  keeping,
   onSkip,
   onTick,
+  onKeepApart,
 }: {
   group: MergeGroup;
   skipped: boolean;
   ticked: ReadonlySet<string>;
   disabled: boolean;
+  keeping: boolean;
   onSkip: () => void;
   onTick: (key: string) => void;
+  onKeepApart: () => void;
 }) {
   const title = targetTitle(group);
+  const held = group.held.length > 0;
   return (
     <section
       aria-label={`Merge into ${title}`}
       className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
     >
+      {held && (
+        <p role="note" className="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900">
+          {heldNotice(group)}
+        </p>
+      )}
       <div className="mb-2 flex items-center gap-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label={`Skip ${title}`}
-            checked={skipped}
-            disabled={disabled}
-            onChange={onSkip}
-          />
-          Skip
-        </label>
+        {!held && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              aria-label={`Skip ${title}`}
+              checked={skipped}
+              disabled={disabled}
+              onChange={onSkip}
+            />
+            Skip
+          </label>
+        )}
+        <button
+          type="button"
+          aria-label={`Keep apart: ${title}`}
+          disabled={disabled || keeping}
+          onClick={onKeepApart}
+        >
+          Keep apart
+        </button>
         <span className="text-sm text-gray-500">
           {group.joins.map((j) => JOINS[j] ?? j).join(", ")} · {group.plays.toLocaleString()} plays
         </span>
@@ -167,6 +268,8 @@ export function MergeList() {
   const [offset, setOffset] = useState(0);
   const { data, isLoading, isError, error: loadError } = useMergeList(offset);
   const apply = useApplyMergeList();
+  const keepApart = useKeepApart();
+  const undo = useUndoKeepApart();
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
 
@@ -206,9 +309,12 @@ export function MergeList() {
       else next.add(key);
       return next;
     });
+  // D56: a held group is never applied, nor counted to merge.
+  const mergeable = data.groups.filter((g) => g.held.length === 0);
+  const skippedShown = mergeable.filter((g) => skipped.has(g.target_id)).length;
   const applyAll = () => {
     if (apply.isPending) return;
-    const groups: SeenMergeGroup[] = data.groups
+    const groups: SeenMergeGroup[] = mergeable
       .filter((g) => !skipped.has(g.target_id))
       .map((g) => ({
         target_id: g.target_id,
@@ -238,6 +344,16 @@ export function MergeList() {
       {apply.error && (
         <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
           {apply.error.message}
+        </p>
+      )}
+      {keepApart.error && (
+        <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+          Keep apart failed: {keepApart.error.message}
+        </p>
+      )}
+      {undo.error && (
+        <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+          Undo failed: {undo.error.message}
         </p>
       )}
       {apply.data && (
@@ -275,8 +391,8 @@ export function MergeList() {
               ).toLocaleString()} of ${data.total.toLocaleString()}`}
             </span>
             <span className="text-sm text-gray-500">
-              {(data.groups.length - skipped.size).toLocaleString()} to merge,{" "}
-              {skipped.size.toLocaleString()} to skip
+              {(mergeable.length - skippedShown).toLocaleString()} to merge,{" "}
+              {skippedShown.toLocaleString()} to skip
             </span>
           </div>
           {data.groups.map((g) => (
@@ -286,8 +402,10 @@ export function MergeList() {
               skipped={skipped.has(g.target_id)}
               ticked={ticked}
               disabled={apply.isPending}
+              keeping={keepApart.isPending}
               onSkip={() => toggle(setSkipped, g.target_id)}
               onTick={(key) => toggle(setTicked, key)}
+              onKeepApart={() => keepApart.mutate([g.target_id, ...g.source_ids])}
             />
           ))}
         </>
@@ -320,6 +438,13 @@ export function MergeList() {
           </ul>
         </section>
       )}
+      <KeptApartSection
+        pairs={data.kept_apart}
+        disabled={undo.isPending}
+        onUndo={(k) =>
+          undo.mutate({ first_work_id: k.first.work_id, second_work_id: k.second.work_id })
+        }
+      />
     </div>
   );
 }

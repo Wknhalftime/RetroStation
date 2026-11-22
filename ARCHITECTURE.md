@@ -791,8 +791,9 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   0051's rollback drops performances. `work_redirects` maps each merged-away id to the live work.
   A later merge of that work re-points its redirects, so a chain resolves in one step. The work
   detail answers a redirected id with the live work, and the work page replaces its URL (Q19).
-  `work_merge_rows` is the rollback map: each row the merge changed in twelve tables, keyed by
-  table and key, with the row as it was, or NULL for a row it inserted. A capture trigger
+  `work_merge_rows` is the rollback map: each row the merge changed in thirteen tables (3b PR 5c's
+  0056 adds the keep-apart marks), keyed by table and key, with the row as it was, or NULL for a
+  row it inserted. A capture trigger
   (`work_merge_capture`) fills it, so cascades and `SET NULL`s are caught with no code in the
   merge. The trigger acts only while the transaction-local setting `retrostation.merge_id` is
   set, between the guard's `start` and `stop`. A failed merge is undone alone (its savepoint),
@@ -803,8 +804,9 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   - preferred copies are cleared first and put back last;
   - the merge's redirects go, and it is marked `rolled_back`.
 
-  `rollback_0054_work_merge_log.sql` drops the log, and `rollback_0053_merge_pins.sql` puts
-  back 0052's view and drops the pins. Run the restore first: dropping the pins loses what they
+  `rollback_0054_work_merge_log.sql` drops the log and every capture trigger (0056's on the
+  marks too), and `rollback_0053_merge_pins.sql` puts back 0052's view and drops the pins. The
+  restore skips a table a later rollback dropped. Run the restore first: dropping the pins loses what they
   held.
 - The checks are `tests/integration/test_work_merge_guard_pg.py`,
   `tests/integration/test_view_pin_order_pg.py` (AUD-R033),
@@ -831,9 +833,9 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   always undone, with no log row and no capture, and shows the changes a pin can't hold. Beside
   them are flags that only show: hand-picked masters meeting, a cue edit on a master's audio, a
   widened rejection. It also shows the group's last failed attempt; the recording MBIDs still
-  under two works and the empty works kept come whole with every page. The count route uses
-  the planner alone; Library Status shows the planned-group count while any of the three
-  sections has rows.
+  under two works, the empty works kept and the kept pairs (PR 5c) come whole with every page.
+  The count route uses the planner alone; Library Status shows the planned-group count while
+  any of the four sections has rows (D28, D58).
 - **Pages (D37).** One bar above the groups: Apply, Previous, Next, "Groups 51–100 of N". Ticks
   and skips belong to the page shown and clear on a page change. After an Apply the same offset
   loads again, so the groups after the merged ones move up; a page an Apply emptied steps back
@@ -844,13 +846,31 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   its own.
   Each group answers `merged`, `waiting`, `failed`, `already_merged` (every source redirects to
   the target) or `changed` (its works no longer plan together; nothing is merged).
+- **Keep apart (PR 5c, D40, D55-D58, AUD-R089).** `work_keep_apart` (0056) holds each pair of
+  works Lance keeps apart, the lower id first under `COLLATE "C"` (the planner's `WorkPair`,
+  plain string order), with when and the writer's note; either work's delete takes its marks.
+  - The planner never joins a kept pair (its link edges are every pair sharing a work MBID,
+    minus kept pairs; kept title joins drop before Q15's count). A set other works still join
+    is *held*: its group shows a notice and its pairs, has no Skip tick, isn't previewed, and
+    Apply's plan leaves it out (a send of it answers `changed`).
+  - Writers: the page's "Keep apart" (`POST /library/merge-list/keep-apart`) marks every pair
+    of a group's works (D55), noted "Kept apart on the merge list"; "Kept apart", the page's
+    last section, lists every pair with Undo (`POST .../kept-apart/undo`, 204 even for a pair
+    not kept). Split and reassign mark their own pair while the work left exists ("Split off
+    <file>", "Reassigned <file> to <title>"); nothing else that moves a file marks.
+  - A merge carries its sources' marks to the merged work (`WorkKeepApartRepository.carry`:
+    a self-pair drops, of two landing on one pair the earlier stays), captured for S10's
+    restore. The guard refuses a group holding a kept pair for `musicbrainz work link` (E4) and
+    `merge list`, logged `work_merge_kept_apart`; the Library's merge goes through (D57). A row
+    whose works a work MBID joins says "MusicBrainz links these works".
 - **One deletion rule (C53, D7, D30).** `WorkRepository.delete_if_empty` and
   `kept_empty_works` read one map of references:
   - a recording, a match on the work (`matches.work_id`), a match whose target is the work;
   - a format override, a version entry;
   - a performance of the work that a match stores.
 
-  A pinned file is a file, so the files clause covers it. `sweep_empty_works_task` (no marker,
+  A pinned file is a file, so the files clause covers it. A keep-apart mark is no reference
+  (it cascades with the work). `sweep_empty_works_task` (no marker,
   run by name after the merges and after phase 4's) deletes every file-less work nothing points
   at.
 - **The global index (S5, C40, E6).** `build_recording_index_task` builds
@@ -866,7 +886,10 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
 - The checks are `tests/domain/test_work_merge_planner.py`, `tests/routers/test_merge_list.py`,
   `tests/tasks/test_empty_work_sweep.py`, `tests/integration/test_global_recording_index_pg.py`,
   `tests/scripts/test_apply_merge_list.py`, `MergeList.test.tsx` and
-  `LibraryStatus.mergeListLink.test.tsx`.
+  `LibraryStatus.mergeListLink.test.tsx`. PR 5c's are
+  `tests/domain/test_work_keep_apart_planner.py`, `tests/integration/test_work_keep_apart_pg.py`,
+  `tests/routers/test_merge_list_keep_apart.py`, `MergeList.keepApart.test.tsx` and
+  `LibraryStatus.keptApartLink.test.tsx`.
 
 ## The work page: performances, copies, pins (phase 3b PR 5a, S8, D41, AUD-R081)
 

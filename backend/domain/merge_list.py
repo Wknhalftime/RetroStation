@@ -1,5 +1,6 @@
 """The merge list (work merges phase 3b PR 4; SPEC S2, D6, D15, D26-D28, E3, E5; scope Q11-Q13;
-design C57, C74; AUD-R080). Pure: what the page shows of each planned group and what Apply did.
+design C57, C74; AUD-R080; PR 5c's kept pairs, D40, D55, D56, D58, AUD-R089). Pure: what the
+page shows of each planned group and of each kept pair, and what Apply did.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from backend.domain.catalog import EmptyWork
-from backend.domain.work_merge_planner import MergeJoin
+from backend.domain.work_merge_planner import MergeJoin, WorkPair
 from backend.domain.work_merges import MergeApproval, MergeChange
 
 
@@ -91,6 +92,8 @@ class GroupView:
     flags: tuple[GroupFlag, ...]
     changes: tuple[MergeChange, ...]
     failed: GroupFailure | None
+    # PR 5c (D56): the kept pairs that hold the group; Apply never merges a held group.
+    held: tuple[WorkPair, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,39 @@ class DuplicateView:
     works: tuple[NamedWork, ...]
 
 
+class KeepApartError(Exception):
+    """Base for the Keep apart refusals (PR 5c)."""
+
+
+class KeepApartWorkNotFoundError(KeepApartError):
+    """A work Lance asked to keep apart neither exists nor redirects."""
+
+
+class KeepApartTooFewWorksError(KeepApartError):
+    """Keep apart needs two different works."""
+
+
+@dataclass(frozen=True)
+class KeptApart:
+    """A kept pair as stored (D40): the pair, when, and the note its writer set (Q8)."""
+
+    pair: WorkPair
+    kept_at: datetime
+    note: str
+
+
+@dataclass(frozen=True)
+class KeptApartView:
+    """A kept pair as the page lists it: both works with their credited artists, when, the
+    note, and whether a work MBID joins them (Q6: MusicBrainz links them)."""
+
+    first: WorkView
+    second: WorkView
+    kept_at: datetime
+    note: str
+    musicbrainz_links: bool
+
+
 @dataclass(frozen=True)
 class MergeListPage:
     """One page of the planned groups (D37), with *total* counting every planned group, and the
@@ -118,6 +154,8 @@ class MergeListPage:
     total: int
     offset: int
     limit: int
+    # PR 5c (Q9): every kept pair, newest first, whole with every page.
+    kept_apart: tuple[KeptApartView, ...] = ()
 
 
 PAGE_SIZE = 50  # D37: groups a page, and the most one page holds
@@ -125,11 +163,12 @@ PAGE_SIZE = 50  # D37: groups a page, and the most one page holds
 
 @dataclass(frozen=True)
 class MergeListCount:
-    """Library Status's count (D28): the planned groups, and the other sections' rows."""
+    """Library Status's count (D28, D58): the planned groups, and the other sections' rows."""
 
     total: int
     duplicates: int
     kept_works: int
+    kept_apart: int = 0
 
 
 @dataclass(frozen=True)
@@ -227,3 +266,12 @@ def works_in_order(
     target_id: str, source_ids: Sequence[str], shown: Mapping[str, WorkView]
 ) -> tuple[WorkView, ...]:
     return tuple(shown[w] for w in (target_id, *source_ids) if w in shown)
+
+
+MERGE_LIST_NOTE = "Kept apart on the merge list"  # Q8: the button's note; no input box
+
+
+def every_pair(work_ids: Sequence[str]) -> tuple[WorkPair, ...]:
+    """Every pair of *work_ids* (D55), in order; a work named twice counts once."""
+    ids = sorted(set(work_ids))
+    return tuple(WorkPair(a, b) for n, a in enumerate(ids) for b in ids[n + 1 :])

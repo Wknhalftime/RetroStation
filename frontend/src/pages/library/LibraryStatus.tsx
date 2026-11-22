@@ -45,11 +45,16 @@ export function LibraryStatus() {
   const unmappedCount = unmapped.data?.total ?? 0;
   const newCount = unmapped.data?.new_total ?? 0;
   const creditPicksCount = creditPicks.data?.total ?? 0;
-  // D28: the number is the planned groups; the link shows while any section has rows.
+  // D28, D58: the number is the planned groups; the link shows while any section has rows,
+  // the kept pairs included.
   const mergeListCount = mergeList.data?.total ?? 0;
   const mergeListShown =
     mergeList.data !== undefined &&
-    mergeList.data.total + mergeList.data.duplicates + mergeList.data.kept_works > 0;
+    mergeList.data.total +
+      mergeList.data.duplicates +
+      mergeList.data.kept_works +
+      mergeList.data.kept_apart >
+      0;
   const enrichedCount = data.by_enrichment["enriched"] ?? 0;
   const enrichedPct =
     data.total_files > 0 ? Math.round((enrichedCount / data.total_files) * 100) : 0;

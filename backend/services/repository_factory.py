@@ -53,6 +53,7 @@ from backend.db.repositories.task_progress import PgTaskProgressRepository
 from backend.db.repositories.user_settings import PgUserSettingRepository
 from backend.db.repositories.version_entries import PgVersionEntryRepository
 from backend.db.repositories.work_curation import PgWorkCurationRepository
+from backend.db.repositories.work_keep_apart import PgWorkKeepApartRepository
 from backend.db.repositories.work_merges import PgWorkMergeRepository
 from backend.db.repositories.works import PgWorkRepository
 from backend.db.sync_conn import commit_or_unavailable, connect_sync
@@ -234,6 +235,7 @@ class RepositoryFactory:
         self.credit_picks = PgCreditPickRepository(conn)
         self.work_merges = PgWorkMergeRepository(conn)
         self.merge_list = PgMergeListRepository(conn)
+        self.work_keep_apart = PgWorkKeepApartRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
@@ -320,6 +322,7 @@ def work_curation_repos(repos: RepositoryFactory) -> WorkCurationRepos:
         performances=repos.performances,
         lines=repos.work_merges,
         credits=repos.credit_picks,
+        keep_apart=repos.work_keep_apart,
     )
 
 
@@ -336,6 +339,7 @@ def merge_list_repos(repos: RepositoryFactory) -> MergeListRepos:
         works=repos.works,
         performances=repos.performances,
         merge=work_merge_repos(repos),
+        keep_apart=repos.work_keep_apart,
     )
 
 
