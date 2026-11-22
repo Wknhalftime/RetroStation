@@ -2,8 +2,9 @@
 
 Every MusicBrainz call raises what the real client raises once its own retries give up on a
 503: ``httpx.HTTPStatusError``. Today the artist stage asks MusicBrainz only about names that
-look cut off by the log's fixed-width field ("Invariant 3"), and only the coalesced pre-search
-catches that error; the per-name search does not. So:
+look cut off by the log's fixed-width field ("Invariant 3"). The coalesced pre-search catches
+that error, and the per-name search does not; since phase 4.1 (D2) the stage wraps the
+per-name search in ``DeferOnMusicBrainzOutage``, which defers the name instead. So:
 
 - strategy by strategy: the mapping rules and the local catalog never call MusicBrainz; the
   MusicBrainz strategy raises for any name; behind the cut-off gate it raises for a cut-off
@@ -11,8 +12,10 @@ catches that error; the per-name search does not. So:
   in review as DEFERRED_RETRY; the coalesced pre-search drops the failed name and carries on;
 - the stage (``artist_matching_task``, on PostgreSQL): a playlist with no cut-off name never
   calls MusicBrainz and finishes, an exact catalog name auto-matched and any other name parked
-  in review as DEFERRED_RETRY; a playlist with a cut-off name fails as a whole, and every one of
-  its names stays pending.
+  in review as DEFERRED_RETRY; a playlist with a cut-off name finishes too: the cut-off name's
+  coalesced search and its one live retry both fail, and it is parked in review as
+  DEFERRED_RETRY, as the stage parks any name it can't resolve (AUD-R042; phase 4.1's D2,
+  AUD-R090). Before 4.1 that run failed as a whole and left every name pending.
 
 AUD-R036 retires Invariant 3 and AUD-R042 extends the outage path to the artist searches;
 phase 4's new linker replaces this stage and relocks this file.
@@ -248,18 +251,19 @@ def test_a_stage_without_cut_off_names_never_calls_musicbrainz(
 
 
 @pytest.mark.integration
-def test_a_stage_with_a_cut_off_name_fails_and_decides_nothing(
+def test_a_stage_with_a_cut_off_name_defers_it(
     conn: Conn, tmp_path: Path, musicbrainz_down: MusicBrainzDown
 ) -> None:
+    """AUD-R042 (phase 4.1's D2, AUD-R090): the outage defers the cut-off name after its one live
+    retry, and the run decides every other name as it would with MusicBrainz up."""
     playlist = _ingested(conn, tmp_path, KNOWN, UNKNOWN, CUT_OFF)
     assert get_settings().broadcast_name_max_len == MAX_LEN
 
-    with pytest.raises(httpx.HTTPStatusError):
-        artist_matching_tasks.artist_matching_task.call_local(str(playlist))
+    artist_matching_tasks.artist_matching_task.call_local(str(playlist))
 
     assert musicbrainz_down.calls == [f"search_artist:{CUT_OFF}", f"search_artist:{CUT_OFF}"]
     assert _statuses(conn) == {
-        KNOWN: (MatchStatus.PENDING, None),
-        UNKNOWN: (MatchStatus.PENDING, None),
-        CUT_OFF: (MatchStatus.PENDING, None),
+        KNOWN: (MatchStatus.AUTO_MATCHED, None),
+        UNKNOWN: (MatchStatus.NEEDS_REVIEW, ReasonCode.DEFERRED_RETRY),
+        CUT_OFF: (MatchStatus.NEEDS_REVIEW, ReasonCode.DEFERRED_RETRY),
     }
