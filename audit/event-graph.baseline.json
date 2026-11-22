@@ -1,27 +1,27 @@
 {
   "counts": {
-    "class.COMMAND": 17,
+    "class.COMMAND": 21,
     "class.EVENT": 0,
     "class.QUERY": 0,
-    "edge.ENQUEUE": 17,
+    "edge.ENQUEUE": 21,
     "edge.ENQUEUE_DEFERRED": 0,
     "edge.INLINE": 3,
     "edge.POLL": 0,
     "edge.PUBLISH": 0,
     "edge.SUBSCRIBE": 0,
     "node.periodic": 6,
-    "node.producer": 17,
-    "node.task": 21,
+    "node.producer": 20,
+    "node.task": 24,
     "rule.EV01": 0,
     "rule.EV02": 3,
     "rule.EV03": 0,
-    "rule.EV04": 0,
+    "rule.EV04": 1,
     "rule.EV05": 0,
-    "rule.EV06": 8,
+    "rule.EV06": 9,
     "rule.EV07": 1,
-    "rule.EV08": 27,
+    "rule.EV08": 30,
     "rule.EV09": 1,
-    "rule.EV10": 17,
+    "rule.EV10": 20,
     "unresolved_dispatch": 1
   },
   "edges": [
@@ -87,7 +87,7 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        838
+        840
       ],
       "message_class": "COMMAND",
       "producer": "backend.routers.matching:resolve_artist"
@@ -124,6 +124,57 @@
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.artist_matching_tasks:artist_matching_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "run"
+        }
+      ],
+      "consumer": "mb_cache_fill_batch_task",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        128
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.cache_fill_tasks:mb_cache_fill_batch_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "list[str]",
+          "name": "names"
+        }
+      ],
+      "consumer": "rematch_names_task",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        119
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.cache_fill_tasks:mb_cache_fill_batch_task"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "run"
+        }
+      ],
+      "consumer": "mb_cache_fill_batch_task",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        67
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.cache_fill_tasks:mb_cache_fill_task"
     },
     {
       "args": [
@@ -182,7 +233,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        580
+        581
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -194,7 +245,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        573
+        574
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_scan_tasks:library_scan_task"
@@ -206,7 +257,7 @@
       "guarded": true,
       "kind": "ENQUEUE",
       "lines": [
-        353
+        354
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.library_watcher_tasks:library_scan_files_task"
@@ -244,10 +295,31 @@
       "guarded": false,
       "kind": "ENQUEUE",
       "lines": [
-        150
+        225
       ],
       "message_class": "COMMAND",
       "producer": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
+    },
+    {
+      "args": [
+        {
+          "annotation": "str",
+          "name": "playlist_id"
+        },
+        {
+          "annotation": "str | None",
+          "name": "run_id"
+        }
+      ],
+      "consumer": "artist_matching_task",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "guarded": true,
+      "kind": "ENQUEUE",
+      "lines": [
+        204
+      ],
+      "message_class": "COMMAND",
+      "producer": "backend.tasks.matching_recheck_tasks:rematch_names_task"
     },
     {
       "args": [
@@ -347,7 +419,7 @@
       "guarded": false,
       "kind": "INLINE",
       "lines": [
-        486
+        495
       ],
       "message_class": null,
       "producer": "scripts.bench_enrich:cmd_run"
@@ -399,8 +471,15 @@
       "class": "inventory",
       "code": "EV02",
       "file": "scripts/bench_enrich.py",
-      "line": 486,
+      "line": 495,
       "subject": "scripts.bench_enrich:cmd_run -> library_enrichment_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV04",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 92,
+      "subject": "mb_cache_fill_batch_task -> mb_cache_fill_batch_task"
     },
     {
       "class": "inventory",
@@ -419,6 +498,15 @@
       "line": 142,
       "referenced_in_unresolved_dispatch": false,
       "subject": "backend.tasks.artist_identity_tasks:artist_identity_sweep_task"
+    },
+    {
+      "class": "inventory",
+      "code": "EV06",
+      "detail": "no_producer",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 53,
+      "referenced_in_unresolved_dispatch": false,
+      "subject": "backend.tasks.cache_fill_tasks:mb_cache_fill_task"
     },
     {
       "class": "inventory",
@@ -470,7 +558,7 @@
       "code": "EV06",
       "detail": "no_producer",
       "file": "backend/tasks/work_artist_credit_tasks.py",
-      "line": 34,
+      "line": 36,
       "referenced_in_unresolved_dispatch": false,
       "subject": "backend.tasks.work_artist_credit_tasks:credit_work_artists_task"
     },
@@ -524,6 +612,28 @@
       "value": {
         "body_lines": 114,
         "service_calls": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 92,
+      "subject": "backend.tasks.cache_fill_tasks:mb_cache_fill_batch_task",
+      "value": {
+        "body_lines": 44,
+        "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 53,
+      "subject": "backend.tasks.cache_fill_tasks:mb_cache_fill_task",
+      "value": {
+        "body_lines": 21,
+        "service_calls": 0
       }
     },
     {
@@ -618,7 +728,7 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 457,
+      "line": 458,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "body_lines": 168,
@@ -632,7 +742,7 @@
       "line": 127,
       "subject": "backend.tasks.library_watcher_tasks:library_scan_files_task",
       "value": {
-        "body_lines": 275,
+        "body_lines": 276,
         "service_calls": 4
       }
     },
@@ -645,6 +755,17 @@
       "value": {
         "body_lines": 60,
         "service_calls": 0
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV08",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "line": 143,
+      "subject": "backend.tasks.matching_recheck_tasks:rematch_names_task",
+      "value": {
+        "body_lines": 71,
+        "service_calls": 2
       }
     },
     {
@@ -772,10 +893,10 @@
       "class": "metric",
       "code": "EV08",
       "file": "backend/tasks/work_artist_credit_tasks.py",
-      "line": 34,
+      "line": 36,
       "subject": "backend.tasks.work_artist_credit_tasks:credit_work_artists_task",
       "value": {
-        "body_lines": 46,
+        "body_lines": 48,
         "service_calls": 1
       }
     },
@@ -810,7 +931,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/routers/matching.py",
-      "line": 753,
+      "line": 755,
       "subject": "backend.routers.matching:resolve_artist",
       "value": {
         "tasks": 1
@@ -832,6 +953,26 @@
       "file": "backend/tasks/artist_matching_tasks.py",
       "line": 35,
       "subject": "backend.tasks.artist_matching_tasks:artist_matching_task",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 92,
+      "subject": "backend.tasks.cache_fill_tasks:mb_cache_fill_batch_task",
+      "value": {
+        "tasks": 2
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/cache_fill_tasks.py",
+      "line": 53,
+      "subject": "backend.tasks.cache_fill_tasks:mb_cache_fill_task",
       "value": {
         "tasks": 1
       }
@@ -870,7 +1011,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/library_scan_tasks.py",
-      "line": 457,
+      "line": 458,
       "subject": "backend.tasks.library_scan_tasks:library_scan_task",
       "value": {
         "tasks": 2
@@ -900,8 +1041,18 @@
       "class": "metric",
       "code": "EV10",
       "file": "backend/tasks/matching_recheck_tasks.py",
-      "line": 142,
+      "line": 217,
       "subject": "backend.tasks.matching_recheck_tasks:queue_recheck_all",
+      "value": {
+        "tasks": 1
+      }
+    },
+    {
+      "class": "metric",
+      "code": "EV10",
+      "file": "backend/tasks/matching_recheck_tasks.py",
+      "line": 143,
+      "subject": "backend.tasks.matching_recheck_tasks:rematch_names_task",
       "value": {
         "tasks": 1
       }
@@ -950,7 +1101,7 @@
       "class": "metric",
       "code": "EV10",
       "file": "scripts/bench_enrich.py",
-      "line": 460,
+      "line": 469,
       "subject": "scripts.bench_enrich:cmd_run",
       "value": {
         "tasks": 1
@@ -974,7 +1125,7 @@
       {
         "file": "backend/routers/matching.py",
         "layer": "router",
-        "line": 753,
+        "line": 755,
         "qualname": "backend.routers.matching:resolve_artist"
       },
       {
@@ -988,6 +1139,18 @@
         "layer": "task",
         "line": 35,
         "qualname": "backend.tasks.artist_matching_tasks:artist_matching_task"
+      },
+      {
+        "file": "backend/tasks/cache_fill_tasks.py",
+        "layer": "task",
+        "line": 92,
+        "qualname": "backend.tasks.cache_fill_tasks:mb_cache_fill_batch_task"
+      },
+      {
+        "file": "backend/tasks/cache_fill_tasks.py",
+        "layer": "task",
+        "line": 53,
+        "qualname": "backend.tasks.cache_fill_tasks:mb_cache_fill_task"
       },
       {
         "file": "backend/tasks/ingestion_tasks.py",
@@ -1010,7 +1173,7 @@
       {
         "file": "backend/tasks/library_scan_tasks.py",
         "layer": "task",
-        "line": 457,
+        "line": 458,
         "qualname": "backend.tasks.library_scan_tasks:library_scan_task"
       },
       {
@@ -1028,8 +1191,14 @@
       {
         "file": "backend/tasks/matching_recheck_tasks.py",
         "layer": "task",
-        "line": 142,
+        "line": 217,
         "qualname": "backend.tasks.matching_recheck_tasks:queue_recheck_all"
+      },
+      {
+        "file": "backend/tasks/matching_recheck_tasks.py",
+        "layer": "task",
+        "line": 143,
+        "qualname": "backend.tasks.matching_recheck_tasks:rematch_names_task"
       },
       {
         "file": "backend/tasks/matching_recheck_tasks.py",
@@ -1058,7 +1227,7 @@
       {
         "file": "scripts/bench_enrich.py",
         "layer": "script",
-        "line": 460,
+        "line": 469,
         "qualname": "scripts.bench_enrich:cmd_run"
       }
     ],
@@ -1124,6 +1293,39 @@
             "name": "run_id"
           }
         ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 44,
+        "envelope": "task_run",
+        "file": "backend/tasks/cache_fill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 92,
+        "module": "backend.tasks.cache_fill_tasks",
+        "name": "mb_cache_fill_batch_task",
+        "params": [
+          {
+            "annotation": "str",
+            "name": "run"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
+      },
+      {
+        "body_lines": 21,
+        "envelope": "none",
+        "file": "backend/tasks/cache_fill_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 53,
+        "module": "backend.tasks.cache_fill_tasks",
+        "name": "mb_cache_fill_task",
+        "params": [],
         "registered": true,
         "retries": 0,
         "schedule": null
@@ -1277,7 +1479,7 @@
         "file": "backend/tasks/library_scan_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 457,
+        "line": 458,
         "module": "backend.tasks.library_scan_tasks",
         "name": "library_scan_task",
         "params": [
@@ -1291,7 +1493,7 @@
         "schedule": null
       },
       {
-        "body_lines": 275,
+        "body_lines": 276,
         "envelope": "own",
         "file": "backend/tasks/library_watcher_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
@@ -1326,6 +1528,25 @@
         "registered": true,
         "retries": 0,
         "schedule": "crontab(minute=\"*/4\")"
+      },
+      {
+        "body_lines": 71,
+        "envelope": "task_run",
+        "file": "backend/tasks/matching_recheck_tasks.py",
+        "instance": "backend.tasks.huey_app:huey",
+        "kind": "task",
+        "line": 143,
+        "module": "backend.tasks.matching_recheck_tasks",
+        "name": "rematch_names_task",
+        "params": [
+          {
+            "annotation": "list[str]",
+            "name": "names"
+          }
+        ],
+        "registered": true,
+        "retries": 0,
+        "schedule": null
       },
       {
         "body_lines": 97,
@@ -1497,12 +1718,12 @@
         "schedule": "crontab(minute=\"*/5\")"
       },
       {
-        "body_lines": 46,
+        "body_lines": 48,
         "envelope": "task_run",
         "file": "backend/tasks/work_artist_credit_tasks.py",
         "instance": "backend.tasks.huey_app:huey",
         "kind": "task",
-        "line": 34,
+        "line": 36,
         "module": "backend.tasks.work_artist_credit_tasks",
         "name": "credit_work_artists_task",
         "params": [],

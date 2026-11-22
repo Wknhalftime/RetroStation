@@ -21,6 +21,7 @@ from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRe
 from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepository
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
+from backend.db.repositories.cache_fill_work import PgCacheFillWorkRepository
 from backend.db.repositories.credit_picks import PgCreditPickRepository
 from backend.db.repositories.format_overrides import PgFormatOverrideRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
@@ -237,6 +238,7 @@ class RepositoryFactory:
         self.merge_list = PgMergeListRepository(conn)
         self.work_keep_apart = PgWorkKeepApartRepository(conn)
         self.mb_cache_listing = PgMusicBrainzCacheListing(conn)
+        self.cache_fill_work = PgCacheFillWorkRepository(conn)
         self.library_folders = self.library.folders
         self.library_quarantine = self.library.quarantine
         self.format_overrides = self.library.format_overrides

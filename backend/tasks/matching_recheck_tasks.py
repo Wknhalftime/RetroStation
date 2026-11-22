@@ -139,6 +139,81 @@ def rematch_undecided_task(scope: str) -> dict[str, int]:
         return summary
 
 
+@huey.task()  # type: ignore[untyped-decorator]
+def rematch_names_task(names: list[str]) -> dict[str, int]:
+    """Re-check the log names given (normalized names), then fan out to artist matching.
+
+    The cache fill hands it off per tier, for the names that tier filled (phase 4.1 S7, M4). It
+    rewinds as ``rematch_undecided_task`` does, through ``rewind_wave``, and opens the same
+    matching run; but it runs on its own task type (``names_recheck``), so its COMPLETED row is
+    never the "changed" re-check's watermark (R6).
+    """
+    settings = get_settings()
+    with _matching_run.run_fan_out(settings.database_url) as run:
+        task_id = ""
+        playlist_ids: list[UUID] = []
+        summary: dict[str, int] = {}
+        config = TaskRunConfig(
+            task_type=TaskType.NAMES_RECHECK,
+            log_category=LogCategory.MATCHING,
+            messages=TaskLifecycleMessages(
+                started="names_recheck_started",
+                completed="names_recheck_completed",
+                failed="names_recheck_failed",
+            ),
+            read_progress=lambda: (0, 0),
+        )
+        with task_run(settings.database_url, config) as handle:
+            task_id = handle.task_id
+            handle.report_running(progress_data={"processed": 0, "total": 0, "names": len(names)})
+            handle.log_started(details={"names": len(names)})
+            with connect_sync(settings.database_url) as conn:
+                repos = RepositoryFactory(conn)
+                counts = rewind_wave(
+                    set(names), repos.broadcast_artists, repos.broadcast_identities
+                )
+                # Committed before the fan-out: the matching worker reads the rewound statuses.
+                conn.commit()
+                playlist_ids = sorted(
+                    playlists_with_pending_work(
+                        repos.broadcast_artists, repos.broadcast_identities
+                    ),
+                    key=str,
+                )
+            run.open(len(playlist_ids))
+            summary = {
+                "artists_rewound": counts.artists,
+                "songs_rewound": counts.songs,
+                "playlists": len(playlist_ids),
+            }
+            details: dict[str, object] = {"names": len(names), **summary}
+            handle.set_completed(
+                progress_data={"processed": 1, "total": 1, **details}, details=details
+            )
+
+        logger.info("names_recheck_task_complete", task_id=task_id, **summary)
+
+        # The fan-out as rematch_undecided_task's, made here in the task's own body: the event
+        # graph (AUD-R019) reads a hand-off where its task makes it, not in a shared helper.
+        from backend.tasks.artist_matching_tasks import artist_matching_task
+
+        with connect_sync(settings.database_url, autocommit=True) as log_conn:
+            sys_log_repo = PgSystemLogRepository(log_conn)
+            for playlist_id in playlist_ids:
+                pid = str(playlist_id)
+                enqueue_or_log(
+                    lambda: artist_matching_task(pid, run.run_id),  # noqa: B023 - called at once
+                    task_name="artist_matching_task",
+                    caller_task_id=task_id,
+                    log_category=LogCategory.MATCHING,
+                    sys_log_repo=sys_log_repo,
+                    on_failure=run.refused,
+                )
+                run.accounted()
+
+        return summary
+
+
 def queue_recheck_all() -> None:
     """Queue a re-check of everything undecided (the Re-run Matching button).
 

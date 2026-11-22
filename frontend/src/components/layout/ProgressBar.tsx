@@ -26,10 +26,18 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   // label of its own — never the raw task type (plan manual check 6's words,
   // shared with the Streaming page).
   cue_analysis: CUE_RUN_LABEL,
+  // Phase 4.1 (D4): a fill batch's row sends a detail ("payoff, 37 of 100
+  // (cap 2,600)"; D8: "payoff, stopped (MusicBrainz not answering)").
+  mb_cache_fill: "Filling the MusicBrainz cache",
+  // Phase 4.1 (S7, D7): the re-check of the names a fill tier filled.
+  names_recheck: "Re-checking the names the cache fill searched",
 };
 
-function getLabel(taskType: string): string {
-  return TASK_TYPE_LABELS[taskType] ?? taskType;
+/** The task's label, then the detail its row sends, if any (M10): any task may send one. */
+function getLabel(task: TaskInfo): string {
+  const label = TASK_TYPE_LABELS[task.task_type] ?? task.task_type;
+  const detail = task.progress_data?.["detail"];
+  return typeof detail === "string" && detail !== "" ? `${label}: ${detail}` : label;
 }
 
 export function getPercent(progressData: Record<string, unknown>): number | null {
@@ -42,7 +50,7 @@ export function getPercent(progressData: Record<string, unknown>): number | null
 }
 
 function TaskProgressRow({ task }: { task: TaskInfo }) {
-  const label = getLabel(task.task_type);
+  const label = getLabel(task);
   const percent = task.status === "running" ? getPercent(task.progress_data) : null;
   const warningText = getWarningText(task.progress_data);
 
@@ -133,7 +141,7 @@ export function ProgressBar() {
 
   if (activeTask === null) return null;
 
-  const label = getLabel(activeTask.task_type);
+  const label = getLabel(activeTask);
   const warningText = getWarningText(activeTask.progress_data);
 
   return (
