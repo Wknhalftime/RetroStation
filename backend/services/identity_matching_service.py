@@ -989,6 +989,7 @@ def match_identities_for_playlist(
                 reason_code=ReasonCode.NO_CANDIDATES,
                 reason_detail=("All matching strategies exhausted — no result produced"),
                 rejected_file_ids_read=identity.rejected_file_ids,
+                artist_status_read=artist.match_status,
             ):
                 repos.match_repo.delete_for_identity(identity.id)
                 auto_rejected += 1
@@ -1005,6 +1006,10 @@ def match_identities_for_playlist(
             # Scored against this read's rejections: if the curator rejected another file
             # since, the result is stale and the job that re-queued the song redoes it.
             rejected_file_ids_read=identity.rejected_file_ids,
+            # Scored with the artist as this run read it at stage start: if the curator
+            # linked or rejected the artist since, the result is stale too, and the job the
+            # link enqueued redoes the song.
+            artist_status_read=artist.match_status,
         ):
             # The user decided this song while the run was matching it (AUD-R018):
             # their decision wins, so no match row and no master recalculation.

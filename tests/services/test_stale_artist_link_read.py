@@ -70,7 +70,7 @@ class _Library:
         self.artist = self.artists.upsert(
             BroadcastArtist(id=uuid4(), original_name=ARTIST, normalized_name=NORM)
         )
-        self.songs = FakeBroadcastTrackIdentityRepository()
+        self.songs = FakeBroadcastTrackIdentityRepository(artists=self.artists)
         self.files = FakeLibraryFileRepository()
         self.matches = FakeMatchRepository()
         self.tagged_file: dict[UUID, LibraryFile] = {}
