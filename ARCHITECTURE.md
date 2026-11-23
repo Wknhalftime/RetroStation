@@ -243,6 +243,11 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
+  A song's write also requires the rejected files the run read to be unchanged, as a set:
+  a song the curator rejected and then sent back to pending (an artist link) while the run
+  held its old read stays pending for the matching job that sent it back, so a file
+  rejected mid-run is never suggested from the old read
+  (`tests/services/test_stale_rejection_read.py`; TLA+ model `docs/tla/MatchingStatus.tla`).
 - **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
   `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
   cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library

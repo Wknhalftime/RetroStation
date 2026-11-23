@@ -22,6 +22,7 @@ and then writing it blindly (still racy against another process) cannot pass the
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from uuid import UUID, uuid4
 
 import pytest
@@ -130,6 +131,7 @@ class _IdentitiesDecidedAfterRead(FakeBroadcastTrackIdentityRepository):
         tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
+        rejected_file_ids_read: Collection[UUID] | None = None,
     ) -> bool:
         current = self.get_by_id(identity_id)
         if current is None or current.match_status != MatchStatus.PENDING:
