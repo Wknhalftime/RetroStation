@@ -10,12 +10,12 @@ updates the spec in the same PR (the same rule as `ARCHITECTURE.md`).
 
 ## Models
 
-| Config | Workers | Artist-link cascade | Guard | Expected |
+| Config | Workers | Artist-link cascade | Guard | TLC result (2026-11-22) |
 |---|---|---|---|---|
-| `MC_w1_nolink.cfg` | 1 | off | on | all properties hold |
-| `MC_w2_nolink.cfg` | 2 | off | on | `NoStaleWrite` fails (why AUD-R017 exists) |
-| `MC_w1_link.cfg` | 1 | on | on | open question: can the curator make a read stale? |
-| `MC_unguarded.cfg` | 1 | off | off | negative control: `CuratorDecisionStands` fails |
+| `MC_w1_nolink.cfg` | 1 | off | on | all hold (12,041 distinct states) |
+| `MC_w2_nolink.cfg` | 2 | off | on | `NoStaleWrite` fails: a second worker's re-check rewinds a song the first worker read (why AUD-R017 exists) |
+| `MC_w1_link.cfg` | 1 | on | on | `NoStaleWrite` fails: read, curator rejects, curator links the artist (song back to pending), worker writes from the old read |
+| `MC_unguarded.cfg` | 1 | off | off | negative control: must fail `CuratorDecisionStands`; passes until that property is written |
 
 ## Running
 
