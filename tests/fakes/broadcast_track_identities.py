@@ -4,6 +4,7 @@ from uuid import UUID
 
 from backend.domain.broadcast import BroadcastTrackIdentity
 from backend.domain.enums import MatchStatus, MatchTier, ReasonCode
+from backend.repositories.broadcast_artists import BroadcastArtistRepository
 from backend.repositories.broadcast_track_identities import BroadcastTrackIdentityRepository
 
 # The statuses a re-check rewinds (AUD-R022 D1, D2; spec 2026-10-05 §4.2), plus a song the
@@ -12,9 +13,12 @@ _UNDECIDED = (MatchStatus.NEEDS_REVIEW, MatchStatus.AUTO_REJECTED, MatchStatus.M
 
 
 class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
-    def __init__(self) -> None:
+    def __init__(self, artists: BroadcastArtistRepository | None = None) -> None:
         self._data: dict[UUID, BroadcastTrackIdentity] = {}
         self._playlist_identities: dict[UUID, set[UUID]] = {}
+        # With the artists, the guarded write also checks the song's artist status
+        # (artist_status_read), as Pg does with a subquery; without them it cannot.
+        self._artists = artists
 
     def register_playlist_identity(self, playlist_id: UUID, identity_id: UUID) -> None:
         self._playlist_identities.setdefault(playlist_id, set()).add(identity_id)
@@ -75,6 +79,7 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
         rejected_file_ids_read: Collection[UUID] | None = None,
+        artist_status_read: MatchStatus | None = None,
     ) -> bool:
         current = self._data.get(identity_id)
         if current is None or current.match_status != MatchStatus.PENDING:
@@ -83,6 +88,10 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
             rejected_file_ids_read
         ):
             return False
+        if artist_status_read is not None and self._artists is not None:
+            artist = self._artists.get_by_id(current.broadcast_artist_id)
+            if artist is None or artist.match_status != artist_status_read:
+                return False
         self.update_match_status(identity_id, status, tier, reason_code, reason_detail)
         return True
 

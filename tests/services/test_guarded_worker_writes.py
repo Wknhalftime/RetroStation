@@ -132,6 +132,7 @@ class _IdentitiesDecidedAfterRead(FakeBroadcastTrackIdentityRepository):
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
         rejected_file_ids_read: Collection[UUID] | None = None,
+        artist_status_read: MatchStatus | None = None,
     ) -> bool:
         current = self.get_by_id(identity_id)
         if current is None or current.match_status != MatchStatus.PENDING:
