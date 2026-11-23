@@ -7,7 +7,7 @@ updates the spec in the same PR (the same rule as `ARCHITECTURE.md`).
 | Spec | Models | Rulings |
 |---|---|---|
 | [MatchingStatus.tla](MatchingStatus.tla) | song `match_status`: curator (API) vs. Huey worker(s) | AUD-R015, R017, R018/R021, R029 |
-| [MBPacing.tla](MBPacing.tla) | MusicBrainz request pacing: `mb_clock.wait_turn` + `mb_client._fetch`, API and worker | AUD-R102 |
+| [MBPacing.tla](MBPacing.tla) | MusicBrainz request pacing: `mb_clock.wait_turn` + `mb_client._fetch`, API and worker | AUD-R102, R104 |
 
 ## MatchingStatus models
 
