@@ -151,6 +151,19 @@ class TaskType(StrEnum):
     PERFORMANCES_BUILD = "performances_build"  # phase 3a S2: run once
     WORK_ARTIST_CREDITS = "work_artist_credits"  # phase 3b D1: run once
     CREDIT_PICK_PROPOSALS = "credit_pick_proposals"  # phase 3a S8: re-runnable (4.4)
+    MB_CACHE_FILL = "mb_cache_fill"  # phase 4.1 S3: one row per batch of a fill run
+    NAMES_RECHECK = "names_recheck"  # phase 4.1 S7: a re-check of the names a fill tier filled
+
+
+class FillTier(StrEnum):
+    """The cache fill's tiers, in the order a run works through them (phase 4.1 S3)."""
+
+    PAYOFF = "payoff"
+    C68 = "c68"
+    C18 = "c18"
+    CONFIRMATIONS = "confirmations"
+    TAIL = "tail"
+    ALIASES = "aliases"
 
 
 class ArtistNameSource(StrEnum):

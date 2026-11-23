@@ -1107,10 +1107,14 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
 ## Background work: an orchestrated command pipeline (not pub/sub)
 
 - **Messages are commands.** Each Huey message names one consumer and carries only a scope (an id,
-  a scope word, or nothing). Event graph 2026-10-09: 17 commands, 0 events, 0 queries, no cycles.
+  a scope word, or nothing). Event graph 2026-10-09: 17 commands, 0 events, 0 queries, no cycles;
+  2026-11-22 (phase 4.1 PR 2): 20 commands, one cycle (the cache fill's batch chain).
   One exception (AUD-R030): a matching stage of a re-check's run also carries the run's id
   (`artist_matching_task(playlist_id, run_id)` → `identity_matching_task(playlist_id, run_id)`),
   so it can report to the run's progress row. The id is optional: an upload's matching has none.
+  A second (phase 4.1, AUD-R091): a cache-fill batch carries its run's state, one JSON string
+  (`FillRun`), and hands the next batch to itself, the graph's one cycle (EV04) and a bounded one:
+  each batch makes at least one call, and every call it makes is cached or set aside for the run.
 - **The work list lives in status columns**, not in the message. These columns are the contract
   between tasks (AUD-R015):
 
@@ -1130,7 +1134,9 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
 | `stream_cues.audio_silent` (D111) | cue analysis (a silent verdict); migration `0039_stream_cues_audio_silent` deleted the failed rows and the floor rows once | schedule resolution (the song gets no file, so tune-in and the walk skip it); both M3U exports; the Library Silent Files report |
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
 | the matching run's `progress_tracking` row (`matching`, `stages_left` / `stages_failed`, AUD-R030) | the re-check opens it; each matching stage refreshes it and finishes its stage; the last stage closes it | the matching stages, `/ws` |
-| `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark) |
+| `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark); the cache fill's guard (a RUNNING `mb_cache_fill` row) |
+| no live `mb_cache` row for a fill query's key (`recording-name-title:`, C18's `recording-search:`, `artist-aliases:`; C42) | the MusicBrainz client, as each call lands | the cache fill's tiers (`plan_run`), phase 4.1 |
+| `mb_cache_fill_confirmations` (0058) | a later step's queue (4.4's add-only pass) | the cache fill's confirmations tier; its rows stay (4.4 owns their life cycle) |
 
 - **Flows:**
   - upload → `ingestion_task` → `artist_matching_task` → `identity_matching_task`, with
@@ -1153,6 +1159,12 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   - streaming no-cue report → `stream_cue_request_task`
   - `backfill_artist_credits_task` (phase 2a S3): nothing queues it. The cutover and the gate run it
     once, by name, and it hands off to nothing
+  - the cache fill (phase 4.1, D6, AUD-R091): nothing queues `mb_cache_fill_task`; a run is queued
+    by name (the cutover runbook, then on Lance's word). It refuses while a run is in progress
+    (a RUNNING `mb_cache_fill` row, or a batch in Huey's queue), else queues
+    `mb_cache_fill_batch_task` at priority −10 → the next batch while capped work remains, and
+    `rematch_names_task(names)` per tier the run leaves with names filled →
+    `artist_matching_task` per playlist with pending work → `identity_matching_task`
   - the gate (`uv run poe gate --base <worktree>`, phase 0b; never the dev stack):
     `gate.py clone` copies the dev DB into the branch's `retrostation_bench_gate_<branch>_<hash>`;
     from the base tree, `migrate` and the four recorders (`airplay_snapshot.py`,
@@ -1213,6 +1225,26 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   MBID cached as unknown) and `lookup_release_for_links` (`lookup_release` with a 404 remembered
   under `release-missing:{mbid}`; `lookup_release` itself caches no 404, because enrichment reads
   `release:` rows).
+- **The cache fill works through tiers, in batches** (phase 4.1 PR 2; AUD-R091). `plan_run`
+  (`services/cache_fill_service`) is a query: every call the run still has room for, in tier
+  order, each within its cap per run (`services/cache_fill_constants`, from D5's count): payoff
+  (names in review or auto rejected, a title a present file holds and C8 doesn't call common),
+  C68 (untagged files with a joiner), C18 (a manual name's one artist, under the title song
+  matching searches, so the row is song matching's), confirmations (0058), the tail (payoff's
+  common titles, then titles no file holds), then the uncapped alias step (D3, `artist_names`
+  rows written with their cache rows). A query with a live entry, or tried and not answered
+  earlier in the run, is skipped, and one key is called once. `run_batch` makes at most 100 calls,
+  none after 110 s, commits each as it lands, and ends the run at 5 transient failures in a row
+  across its batches (the last row then says "stopped (MusicBrainz not answering)", D8); a
+  permanent 4xx is logged and skipped for the run (M5), and 20 in a row with no answer between
+  end the batch FAILED (`MusicBrainzRefusingError`: a block or a query bug, not one bad item).
+  Name + title searches drop the log's f/ credit from the title (`credit_stripped_title`) and
+  keep the rest as logged. The words come from
+  `services/cache_fill_words` (`name_words`, `search_title`). The names re-check
+  (`rematch_names_task`) rewinds as the re-check does, on its own task type, so the "changed"
+  watermark never moves for it (S7, R6). Known gaps: a batch that dies loses the names its tier
+  had filled, so they miss that re-check (Re-run Matching or 4.2 picks them up); and a crash's
+  RUNNING row blocks new runs until the `/ws` reaper fails it, which needs a client listening.
 - **A MusicBrainz outage defers the artist stage's cut-off names, never fails its run** (AUD-R028,
   extended by AUD-R042; AUD-R090). Until the old stage retires (4.3), `DeferOnMusicBrainzOutage`
   wraps the MusicBrainz strategy inside the cut-off gate: a transient failure of a cut-off name's
@@ -1236,8 +1268,8 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   a match, a format override or another recording still keeps the work. MusicBrainz works keep
   their recordings.
 - **Lifecycle reporting** stays in per-task envelopes (AUD-R011, AUD-R012): `task_run` for the
-  enrichment pair, the local-artist linking, the matching re-check and the artist credits
-  backfill, `task_failure_telemetry`,
+  enrichment pair, the local-artist linking, the matching re-check, the names re-check, each
+  cache-fill batch and the artist credits backfill, `task_failure_telemetry`,
   the tasks' own try/except, and `reported_failures`. No Huey signals (AUD-R016). A matching
   run's row spans many tasks (AUD-R030): `tasks/_matching_run` opens it from the re-check
   (`run_fan_out`) and reports each stage to it (`matching_stage`); the matching services only

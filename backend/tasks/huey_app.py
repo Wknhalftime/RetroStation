@@ -32,6 +32,7 @@ import backend.tasks.artist_credit_backfill_tasks  # noqa: F401, E402
 import backend.tasks.artist_identity_tasks  # noqa: F401, E402
 import backend.tasks.artist_linking_tasks  # noqa: F401, E402
 import backend.tasks.artist_matching_tasks  # noqa: F401, E402
+import backend.tasks.cache_fill_tasks  # noqa: F401, E402
 import backend.tasks.credit_pick_tasks  # noqa: F401, E402
 import backend.tasks.embedding_tasks  # noqa: F401, E402
 import backend.tasks.empty_work_sweep_tasks  # noqa: F401, E402

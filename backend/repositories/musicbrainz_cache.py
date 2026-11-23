@@ -13,6 +13,12 @@ class MusicBrainzCacheRepository(ABC):
         """Unexpired entries for *cache_keys*, keyed by cache key; misses are absent."""
         ...
 
+    def live_keys(self, cache_keys: Sequence[str]) -> set[str]:
+        """Which of *cache_keys* have an unexpired entry (the cache fill's work list, C42),
+        without reading the entries. Concrete, so every implementation has it; a database
+        adapter overrides it with a keys-only read."""
+        return set(self.get_many(cache_keys))
+
     @abstractmethod
     def set(self, cache: MusicBrainzCache) -> None: ...
 

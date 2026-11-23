@@ -70,6 +70,15 @@ class PgMusicBrainzCacheRepository(MusicBrainzCacheRepository):
         ).fetchall()
         return {row["cache_key"]: self._row_to_model(row) for row in rows}
 
+    def live_keys(self, cache_keys: Sequence[str]) -> set[str]:
+        if not cache_keys:
+            return set()
+        rows = self._conn.execute(
+            "SELECT cache_key FROM mb_cache WHERE cache_key = ANY(%s) AND expires_at > now()",
+            (list(cache_keys),),
+        ).fetchall()
+        return {row["cache_key"] for row in rows}
+
     def set(self, cache: MusicBrainzCache) -> None:
         self._conn.execute(_UPSERT_SQL, _upsert_params(cache))
 

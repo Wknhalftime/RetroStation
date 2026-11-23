@@ -117,8 +117,24 @@ def _name_title_query(name_words: Sequence[str], title: str) -> str:
     return f"artist:({' AND '.join(_name_word_term(w) for w in name_words)}) AND {phrase}"
 
 
-def _name_title_key(name_words: Sequence[str], title: str) -> str:
+def name_title_key(name_words: Sequence[str], title: str) -> str:
+    """The cache key ``search_recordings_by_name_title`` writes (the fill plans by it)."""
     return f"recording-name-title:{' '.join(w.lower() for w in name_words)}:{title.lower()}"
+
+
+def recording_search_key(artist_mbid: str, title: str, limit: int = 10) -> str:
+    """The cache key ``search_recording`` writes: song matching's, and C18's (phase 4.1)."""
+    # `limit` is part of the key so a later call asking for more results doesn't reuse a
+    # truncated response from an earlier call.
+    return f"recording-search:{artist_mbid}:{title.lower()}:{limit}"
+
+
+_ALIASES_KEY_PREFIX = "artist-aliases"
+
+
+def aliases_key(mbid: str) -> str:
+    """The cache key ``search_artist_aliases_by_mbids`` writes per artist (phase 4.1, D3)."""
+    return f"{_ALIASES_KEY_PREFIX}:{mbid}"
 
 
 def _slim_credit_part(part: dict[str, Any]) -> MbCreditPart:
@@ -239,7 +255,7 @@ _ARTISTS = _SearchableEntity[MbArtist]("artist", "arid", "artist", "artist", _sl
 # The same artist search, keeping only the aliases, under its own key (phase 4.1, D3). An unknown
 # id is cached as unknown: the fill has no fallback to ask instead.
 _ARTIST_ALIASES = _SearchableEntity[MbArtistAliases](
-    "artist", "arid", "artist-aliases", "artist-aliases", _slim_aliases, True
+    "artist", "arid", _ALIASES_KEY_PREFIX, _ALIASES_KEY_PREFIX, _slim_aliases, True
 )
 
 
@@ -418,9 +434,7 @@ class MusicBrainzApiClient:
         Results are cached in the local MusicBrainz cache as a transparent
         read-through side-effect. This is intentional (cache-aside pattern).
         """
-        # `limit` is part of the cache key so a later call asking for more
-        # results doesn't reuse a truncated response from an earlier call.
-        cache_key = f"recording-search:{artist_mbid}:{title.lower()}:{limit}"
+        cache_key = recording_search_key(artist_mbid, title, limit)
 
         cached_entry = self._cache.get(cache_key)
         if cached_entry is not None:
@@ -468,7 +482,7 @@ class MusicBrainzApiClient:
         the hit count and each hit's score and whole credit; an empty result is cached too (E2).
         Which words to send is the caller's call: every one given is required.
         """
-        cache_key = _name_title_key(name_words, title)
+        cache_key = name_title_key(name_words, title)
         cached_entry = self._cache.get(cache_key)
         if cached_entry is not None:
             self.cache_hits += 1

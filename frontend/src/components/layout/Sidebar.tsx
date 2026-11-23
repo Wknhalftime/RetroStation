@@ -36,6 +36,11 @@ const TASK_TYPE_TO_NAV: Record<string, string> = {
   // the way a running scan marks Library. The meter row ("stream_resources")
   // never appears here — it is filtered out of runningTasks entirely (D90).
   cue_analysis: "/settings",
+  // Phase 4.1: the MusicBrainz cache fill marks Library (D4), and the re-check
+  // of the names it filled marks the Resolution Center, as the matching
+  // re-check does (D7).
+  mb_cache_fill: "/library",
+  names_recheck: "/matcher",
 };
 
 const NAV_LINK_BASE_CLASSES =
