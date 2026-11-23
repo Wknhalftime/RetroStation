@@ -15,7 +15,12 @@ updates the spec in the same PR (the same rule as `ARCHITECTURE.md`).
 | `MC_w1_nolink.cfg` | 1 | off | on | all hold (12,041 distinct states) |
 | `MC_w2_nolink.cfg` | 2 | off | on | `NoStaleWrite` fails: a second worker's re-check rewinds a song the first worker read (why AUD-R017 exists) |
 | `MC_w1_link.cfg` | 1 | on | on | `NoStaleWrite` fails: read, curator rejects, curator links the artist (song back to pending), worker writes from the old read |
-| `MC_unguarded.cfg` | 1 | off | off | negative control: must fail `CuratorDecisionStands`; passes until that property is written |
+| `MC_unguarded.cfg` | 1 | off | off | negative control: `CuratorDecisionStands` fails (the worker overwrites a rejection it read as pending) |
+
+`CuratorDecisionStands` alone (`NoStaleWrite` left out of the config, so TLC reaches it) holds
+for two workers (146,597 states), one worker with the link cascade (202,649) and two workers
+with the link cascade (1,822,724). The guarded write keeps every curator decision; what fails
+is only the freshness of the worker's read.
 
 ## Running
 

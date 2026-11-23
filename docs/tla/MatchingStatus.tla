@@ -250,7 +250,17 @@ WorkersNeverWriteManual ==
 \* AUD-R018 / R029: the curator's decision stands. An action property: it
 \* talks about a step (status -> status', who wrote it), so it is checked as
 \* [][...]_vars under PROPERTIES, not INVARIANTS.
+\* Allowed moves (Lance, 2026-11-22): the curator may change any decision,
+\* the artist-link cascade included; a deleted file's release may send a
+\* manual match to review; a re-check may send a rejected song back to
+\* pending (AUD-R029). No other writer moves a manual status.
 CuratorDecisionStands ==
-    TRUE \* TODO(human): replace TRUE with [][ \A s \in Songs : ... ]_vars
+    [][ \A s \in Songs :
+          /\ (status[s] = "manual_matched" /\ status'[s] # "manual_matched")
+                => lastWriter'[s] \in {"curator", "release"}
+          /\ (status[s] = "manual_rejected" /\ status'[s] # "manual_rejected")
+                => \/ lastWriter'[s] = "curator"
+                   \/ (lastWriter'[s] = "recheck" /\ status'[s] = "pending")
+      ]_vars
 
 =============================================================================
