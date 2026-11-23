@@ -1257,7 +1257,12 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   "{tier}, stopped (2 hours up)" (D12). Every batch's last row carries the run's `requests`
   (`requests_sent`: every attempt), its `minutes` and `ended` (`FillEnd`: done, cut_off, time);
   the detail counts a tier's failed calls once there are any, and the run's last row carries
-  `warning: "mb_fill_calls_failed"` with `failed_calls`, shown in amber on the bar.
+  `warning: "mb_fill_calls_failed"` with `failed_calls`, shown in amber on the bar. A pause is
+  taken only when another request follows: not after the run's last call, a cut-off, or a
+  refusal that ends the run's last batch as its minutes run out. A cut-off as the time runs out
+  ends `cut_off` (D8's words say more). Known gap: a batch that fails (a crash, or
+  `MusicBrainzRefusingError`) writes a FAILED row without the run's report; the refusal's error
+  text carries the run's requests and failed calls, a crash's carries nothing.
 - **A MusicBrainz outage defers the artist stage's cut-off names, never fails its run** (AUD-R028,
   extended by AUD-R042; AUD-R090). Until the old stage retires (4.3), `DeferOnMusicBrainzOutage`
   wraps the MusicBrainz strategy inside the cut-off gate: a transient failure of a cut-off name's

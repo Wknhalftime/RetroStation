@@ -420,14 +420,15 @@ def _elapsed(started_at: str, now: datetime) -> timedelta:
     return now - datetime.fromisoformat(started_at)
 
 
-def _time_up(started_at: str, limits: FillLimits, now: datetime) -> bool:
+def _time_up(started_at: str, run_minutes: float, now: datetime) -> bool:
     """D11: the run's minutes are spent, so it hands on no batch."""
-    return _elapsed(started_at, now) >= timedelta(minutes=limits.run_minutes)
+    return _elapsed(started_at, now) >= timedelta(minutes=run_minutes)
 
 
 def _ended(*, goes_on: bool, cut_off: bool, work_left: bool) -> FillEnd | None:
-    """How the run ended, or None while it hands on (D10's 4b): a cut-off first, then the time
-    limit with work left (D11), else nothing was left to do."""
+    """How the run ended, or None while it hands on (D10's 4b): a cut-off first, even as the
+    time runs out (D8's words say more), then the time limit with work left (D11), else nothing
+    was left to do."""
     if goes_on:
         return None
     if cut_off:
@@ -459,6 +460,18 @@ class _Batch:
         """The run has planned calls this batch hasn't made (this batch's or a later one's)."""
         return len(self.plan) > len(self.made)
 
+    def request_follows(self, elapsed: float, now: datetime) -> bool:
+        """After a refusal, another request follows in the run once the pause is over (R2b-b):
+        this batch makes another call, or it ends and the run, its minutes not yet spent, hands
+        on a batch. *elapsed* is the batch's seconds so far; *now* the wall clock."""
+        if not self.work_left:
+            return False
+        pause = self.limits.pause_seconds
+        if len(self.made) < len(self.calls) and elapsed + pause < self.limits.batch_seconds:
+            return True
+        after_pause = now + timedelta(seconds=pause)
+        return not _time_up(self.started_at, self.limits.run_minutes, after_pause)
+
     def detail(self, tier: FillTier) -> str:
         """D4: "payoff, 37 of 100 (cap 2,600)"; the uncapped alias step names no cap. Once the
         tier has failed calls in the run, D10 counts them: "payoff, 37 of 100 (cap 2,600), 12
@@ -487,14 +500,14 @@ class _Batch:
         tier the rest waits in (D12); the run's minutes and how it ended; and on the run's last
         row, its failed calls when there are any (D10's 4b)."""
         last = self.made[-1] if self.made else None
-        tier = None if last is None else last.tier
         if ended is FillEnd.TIME:
-            tier = self.plan[len(self.made)].tier
-        row = self.row(tier)
-        if ended is FillEnd.CUT_OFF and last is not None:
-            row["detail"] = f"{last.tier.value}, {STOPPED}"
-        elif ended is FillEnd.TIME and tier is not None:
-            row["detail"] = f"{tier.value}, {TIME_UP}"
+            waiting = self.plan[len(self.made)].tier
+            row = self.row(waiting)
+            row["detail"] = f"{waiting.value}, {TIME_UP}"
+        else:
+            row = self.row(None if last is None else last.tier)
+            if ended is FillEnd.CUT_OFF and last is not None:
+                row["detail"] = f"{last.tier.value}, {STOPPED}"
         minutes = round(_elapsed(self.started_at, now).total_seconds() / 60, 1)
         row.update(ended=ended, minutes=minutes)
         failed = sum(self.tally.failed.values())
@@ -503,7 +516,7 @@ class _Batch:
         return row
 
     def outcome(self, now: datetime) -> BatchOutcome:
-        time_up = _time_up(self.started_at, self.limits, now)
+        time_up = _time_up(self.started_at, self.limits.run_minutes, now)
         goes_on = self.work_left and not self.cut_off and not time_up
         ended = _ended(goes_on=goes_on, cut_off=self.cut_off, work_left=self.work_left)
         after = self.tally.run(self.started_at)
@@ -532,7 +545,7 @@ def run_batch(
             between; the calls already made stay committed.
     """
     batch = _Batch(plan, limits, run.started_at, _Tally.of(run))
-    if _time_up(run.started_at, limits, ports.now()):
+    if _time_up(run.started_at, limits.run_minutes, ports.now()):
         return batch.outcome(ports.now())
     sent_before, start = ports.requests(), ports.clock()
     for call in batch.calls:
@@ -545,15 +558,22 @@ def run_batch(
         ports.commit()
         batch.made.append(call)
         if batch.tally.refused_in_a_row >= REFUSALS_TO_FAIL:
-            raise MusicBrainzRefusingError(
-                f"MusicBrainz refused {batch.tally.refused_in_a_row} fill calls in a row "
-                f"(the last {call.key}); the run stopped"
-            )
+            raise MusicBrainzRefusingError(_refusing(call, batch.tally))
         if batch.cut_off:
             break
-        if answer is _Answer.FAILED and batch.work_left:
+        if answer is _Answer.FAILED and batch.request_follows(ports.clock() - start, ports.now()):
             ports.sleep(limits.pause_seconds)
     return batch.outcome(ports.now())
+
+
+def _refusing(call: FillCall, tally: _Tally) -> str:
+    """The FAILED batch's error: its row keeps no report of its own, so the run's requests and
+    failed calls ride in the message (D10's 4b)."""
+    return (
+        f"MusicBrainz refused {tally.refused_in_a_row} fill calls in a row (the last "
+        f"{call.key}); the run stopped after {tally.requests:,} requests, "
+        f"{sum(tally.failed.values()):,} failed calls"
+    )
 
 
 def _tiers_left(plan: Iterable[FillCall], made: Sequence[FillCall]) -> set[FillTier]:
