@@ -1,0 +1,33 @@
+# TLA+ models
+
+Models of the system's design, checked with TLC. A model checks the design, not the Python
+code, so each spec names the code and the rulings it models, and a change to those rulings
+updates the spec in the same PR (the same rule as `ARCHITECTURE.md`).
+
+| Spec | Models | Rulings |
+|---|---|---|
+| [MatchingStatus.tla](MatchingStatus.tla) | song `match_status`: curator (API) vs. Huey worker(s) | AUD-R015, R017, R018/R021, R029 |
+
+## Models
+
+| Config | Workers | Artist-link cascade | Guard | Expected |
+|---|---|---|---|---|
+| `MC_w1_nolink.cfg` | 1 | off | on | all properties hold |
+| `MC_w2_nolink.cfg` | 2 | off | on | `NoStaleWrite` fails (why AUD-R017 exists) |
+| `MC_w1_link.cfg` | 1 | on | on | open question: can the curator make a read stale? |
+| `MC_unguarded.cfg` | 1 | off | off | negative control: `CuratorDecisionStands` fails |
+
+## Running
+
+Needs Java 11+ and `tla2tools.jar` from the TLA+ releases page
+(<https://github.com/tlaplus/tlaplus/releases>). From this folder:
+
+```bash
+java -cp tla2tools.jar tla2sany.SANY MatchingStatus.tla
+```
+
+```bash
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers auto -config MC_w1_nolink.cfg MatchingStatus.tla
+```
+
+`tla2tools.jar` and TLC's `states/` folder are not checked in.
