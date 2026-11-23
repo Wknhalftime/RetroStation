@@ -5,9 +5,9 @@ A lead from the TLA+ model (docs/tla/README.md, "A lead, not a finding"), with o
 1. a song-matching run reads the playlist's pending songs and, once, their artists
    (``match_identities_for_playlist``: ``artists_by_id``, read at stage start);
 2. before the run reaches song X, the curator links X's artist (the MANUAL_MATCHED artist
-   resolve in ``routers/matching.py``): the artist row and its match row change, undecided
-   songs go back to pending, pending songs lose their match rows, and identity matching is
-   enqueued for the playlist;
+   resolve, ``match_by_hand`` in ``services/artist_resolution_service.py``): the artist row and
+   its link change, undecided songs go back to pending, pending songs lose their match rows,
+   and identity matching is enqueued for the playlist;
 3. the run reaches X and scores it from the artist it read in step 1, still unresolved: the
    name fallback (``BroadcastToLocalStrategy``) instead of the MBID path;
 4. the link's own job runs next, but reads only pending songs, so it skips X.
@@ -30,9 +30,8 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from backend.domain.broadcast import BroadcastArtist, BroadcastTrackIdentity
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, LogNameLinkOrigin, MatchStatus
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.domain.matching import Match
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -46,9 +45,11 @@ from tests.fakes.artists import FakeArtistRepository
 from tests.fakes.broadcast_artists import FakeBroadcastArtistRepository
 from tests.fakes.broadcast_track_identities import FakeBroadcastTrackIdentityRepository
 from tests.fakes.library_files import FakeLibraryFileRepository
+from tests.fakes.log_name_links import FakeLogNameLinkRepository
 from tests.fakes.mapping_rules import FakeMappingRuleRepository
 from tests.fakes.matches import FakeMatchRepository
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_link
 
 ARTIST = "Hall & Oates"
 NORM = normalize_artist(ARTIST)
@@ -73,6 +74,8 @@ class _Library:
         self.songs = FakeBroadcastTrackIdentityRepository(artists=self.artists)
         self.files = FakeLibraryFileRepository()
         self.matches = FakeMatchRepository()
+        self.links = FakeLogNameLinkRepository()
+        self.catalog = FakeArtistRepository()
         self.tagged_file: dict[UUID, LibraryFile] = {}
         for title, (tagged, untagged) in SONGS.items():
             song = self.songs.upsert(_song(self.artist, title))
@@ -88,7 +91,8 @@ class _Library:
             match_repo=self.matches,
             library_file_repo=self.files,
             rules_repo=FakeMappingRuleRepository(),
-            catalog_repo=FakeArtistRepository(),
+            catalog_repo=self.catalog,
+            link_repo=self.links,
         )
 
     def run(self, progress: _CuratorLinksArtist | None = None) -> None:
@@ -106,17 +110,15 @@ class _Library:
             )
 
     def link_artist(self) -> None:
-        """The MANUAL_MATCHED artist resolve's writes (routers/matching.py resolve_artist)."""
+        """The MANUAL_MATCHED artist resolve's writes (artist_resolution_service.match_by_hand):
+        the name's status, its manual link to the artist holding the MBID (a stub here)."""
         self.artists.update_match_status(self.artist.id, MatchStatus.MANUAL_MATCHED)
-        self.matches.create(
-            Match(
-                id=uuid4(),
-                artist_id=self.artist.id,
-                target_id=ARTIST_MBID,
-                target_type=TargetType.ARTIST,
-                confidence_score=1.0,
-                match_tier=MatchTier.MANUAL,
-            )
+        seed_link(
+            self.links,
+            self.catalog,
+            self.artist.id,
+            ARTIST_MBID,
+            origin=LogNameLinkOrigin.MANUAL,
         )
         self.songs.rewind_undecided([self.artist.id])
         for song_id in self.tagged_file:

@@ -2,7 +2,7 @@
 
 The unit-level race is tests/services/test_stale_artist_link_read.py. The match job writes a
 whole playlist in one transaction and commits at the end (``tasks/identity_matching_tasks.py``),
-and the link's cascade rewrites every pending song of the artist (``_ARTIST_LINK_REWIND_STATUSES``
+and the link's cascade rewrites every pending song of the artist (``_LINK_REWIND_STATUSES``
 includes pending). So:
 
 - if the run has already written one of the artist's songs, the cascade waits on that row lock
@@ -15,7 +15,8 @@ includes pending). So:
 This test is the second case: a playlist with another artist's song first, and the curator
 links Hall & Oates at the first tick where none of their songs is written yet (checked on the
 worker's own connection). The link's writes are the MANUAL_MATCHED artist resolve's statements
-(``routers/matching.py`` ``resolve_artist``), on their own autocommit connection. The scoring
+(``services/artist_resolution_service.py`` ``match_by_hand``), on their own autocommit
+connection. The scoring
 setup is the unit test's: near titles that tie on the name path, so the pre-link read sends a
 song to review and the link's Step A auto-matches it.
 """
@@ -29,6 +30,7 @@ from uuid import UUID, uuid4
 import psycopg
 from psycopg.rows import dict_row
 
+from backend.db.repositories.artist_resolution import _LINK_REWIND_STATUSES
 from backend.db.repositories.artists import PgArtistRepository
 from backend.db.repositories.broadcast_artists import PgBroadcastArtistRepository
 from backend.db.repositories.broadcast_play_events import PgBroadcastPlayEventRepository
@@ -36,6 +38,7 @@ from backend.db.repositories.broadcast_playlists import PgBroadcastPlaylistRepos
 from backend.db.repositories.broadcast_stations import PgBroadcastStationRepository
 from backend.db.repositories.broadcast_track_identities import PgBroadcastTrackIdentityRepository
 from backend.db.repositories.library_files import PgLibraryFileRepository
+from backend.db.repositories.log_name_links import PgLogNameLinkRepository
 from backend.db.repositories.mapping_rules import PgMappingRuleRepository
 from backend.db.repositories.matches import PgMatchRepository
 from backend.domain.broadcast import (
@@ -45,9 +48,8 @@ from backend.domain.broadcast import (
     BroadcastStation,
     BroadcastTrackIdentity,
 )
-from backend.domain.enums import EnrichmentStatus, MatchStatus, MatchTier, TargetType
+from backend.domain.enums import EnrichmentStatus, LogNameLinkOrigin, MatchStatus, MatchTier
 from backend.domain.library import AudioMetadata, LibraryFile
-from backend.routers.matching import _ARTIST_LINK_REWIND_STATUSES
 from backend.services.identity_matching_service import (
     IdentityMatchingRepos,
     match_identities_for_playlist,
@@ -58,6 +60,7 @@ from backend.services.normalization import (
     normalize_title,
 )
 from tests.fakes.mb_client import FakeMbClient
+from tests.matching_seed import seed_pg_link
 
 Conn = psycopg.Connection[Any]
 
@@ -153,32 +156,21 @@ class _Seed:
 
 
 def _link_artist(conn: Conn, artist_id: UUID) -> None:
-    """resolve_artist's MANUAL_MATCHED writes, in one transaction."""
+    """match_by_hand's MANUAL_MATCHED writes, in one transaction: the name's status, its
+    manual link to the artist holding the MBID (a stub here), the rewind and the delete."""
     conn.execute("SET lock_timeout = '5s'")
     with conn.transaction():
         conn.execute(
             "UPDATE broadcast_artists SET match_status = %s WHERE id = %s",
             (MatchStatus.MANUAL_MATCHED.value, artist_id),
         )
-        conn.execute(
-            """INSERT INTO matches
-                   (id, artist_id, target_id, target_type, confidence_score, match_tier)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (
-                uuid4(),
-                artist_id,
-                ARTIST_MBID,
-                TargetType.ARTIST.value,
-                1.0,
-                MatchTier.MANUAL.value,
-            ),
-        )
+        seed_pg_link(conn, artist_id, ARTIST_MBID, origin=LogNameLinkOrigin.MANUAL)
         conn.execute(
             """UPDATE track_identities
                   SET match_status = %s, match_tier = NULL,
                       reason_code = NULL, reason_detail = NULL
                 WHERE broadcast_artist_id = %s AND match_status = ANY(%s)""",
-            (MatchStatus.PENDING.value, artist_id, _ARTIST_LINK_REWIND_STATUSES),
+            (MatchStatus.PENDING.value, artist_id, _LINK_REWIND_STATUSES),
         )
         conn.execute(
             """DELETE FROM matches
@@ -223,6 +215,7 @@ def _run(url: str, seed: _Seed, progress: _CuratorLinksArtist | None = None) -> 
             library_file_repo=PgLibraryFileRepository(conn),
             rules_repo=PgMappingRuleRepository(conn),
             catalog_repo=PgArtistRepository(conn),
+            link_repo=PgLogNameLinkRepository(conn),
         )
         if progress is None:
             match_identities_for_playlist(
