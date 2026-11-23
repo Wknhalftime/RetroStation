@@ -274,6 +274,42 @@ def test_songs_read_before_an_artist_link_are_matched_as_the_link_says(
     )
 
 
+def test_the_guarded_write_lands_while_the_artist_has_the_status_read(migrated_db: str) -> None:
+    seed = _Seed(migrated_db)
+    song_id = next(iter(seed.tagged_file))
+    with _connect(migrated_db) as conn:
+        wrote = PgBroadcastTrackIdentityRepository(conn).update_match_status_if_pending(
+            song_id,
+            MatchStatus.NEEDS_REVIEW,
+            MatchTier.LOCAL_FILE_FUZZY,
+            artist_status_read=MatchStatus.PENDING,
+        )
+        conn.commit()
+
+    assert wrote
+    assert _outcome(migrated_db, song_id)[0] == MatchStatus.NEEDS_REVIEW.value
+
+
+def test_the_guarded_write_skips_when_the_artist_changed_since_the_read(
+    migrated_db: str,
+) -> None:
+    seed = _Seed(migrated_db)
+    song_id = next(iter(seed.tagged_file))
+    with _connect(migrated_db, autocommit=True) as api:
+        _link_artist(api, seed.artist.id)
+    with _connect(migrated_db) as conn:
+        wrote = PgBroadcastTrackIdentityRepository(conn).update_match_status_if_pending(
+            song_id,
+            MatchStatus.NEEDS_REVIEW,
+            MatchTier.LOCAL_FILE_FUZZY,
+            artist_status_read=MatchStatus.PENDING,
+        )
+        conn.commit()
+
+    assert not wrote
+    assert _outcome(migrated_db, song_id)[0] == MatchStatus.PENDING.value
+
+
 def test_control_linked_before_the_run_every_song_auto_matches_its_tagged_file(
     migrated_db: str,
 ) -> None:
