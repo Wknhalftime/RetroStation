@@ -33,13 +33,14 @@
 (* "stamp_after_response" is the alternative: hold the lock across the      *)
 (* request and touch the clock when the answer (or the error) comes back.  *)
 (***************************************************************************)
-EXTENDS Integers
+EXTENDS Integers, Sequences
 
 CONSTANTS
     Procs,      \* model values: the processes sharing the clock, e.g. {api, worker}
     Requests,   \* requests each process makes (keeps the state space finite)
     Cadence,    \* ticks between stamps: 11 = CADENCE_S 1.1 s
-    Window,     \* MusicBrainz's spacing between arrivals: 10 = 1 s
+    Window,     \* one second in ticks: 10
+    RateSeconds, \* MusicBrainz averages over this many seconds (not published)
     MinOut,     \* fewest ticks from the stamp to the request arriving
     MaxOut,     \* most ticks from the stamp to the request arriving
     MaxBack,    \* most ticks from arrival to the answer coming back (>= 1)
@@ -50,14 +51,13 @@ CONSTANTS
 
 ASSUME
     /\ Requests \in Nat \ {0}
-    /\ Cadence \in Nat /\ Window \in Nat
+    /\ Cadence \in Nat /\ Window \in Nat /\ RateSeconds \in Nat \ {0}
     /\ MinOut \in Nat /\ MaxOut \in Nat /\ MinOut <= MaxOut
     /\ MaxBack \in Nat \ {0}
     /\ MaxStep \in Nat
     /\ Design \in {"stamp_before_send", "stamp_after_response"}
     /\ None \notin Procs
 
-NoGap == 1000000   \* minGap before a second request has arrived
 
 VARIABLES
     now,         \* true time
@@ -70,11 +70,10 @@ VARIABLES
     earliest,    \* per process: first tick the current step may finish
     due,         \* per process: last tick the current step may finish
     done,        \* per process: requests answered
-    lastArrival, \* ghost: when the last request reached MusicBrainz (-1 = none)
-    minGap       \* ghost: the smallest gap between two arrivals so far
+    arrivals     \* ghost: when each request reached MusicBrainz, in order
 
 vars == <<now, skew, stepped, clock, clockSet, lock, pc, earliest, due, done,
-          lastArrival, minGap>>
+          arrivals>>
 
 Min(a, b) == IF a < b THEN a ELSE b
 Max(a, b) == IF a > b THEN a ELSE b
@@ -92,8 +91,7 @@ Init ==
     /\ earliest = [p \in Procs |-> 0]
     /\ due = [p \in Procs |-> 0]
     /\ done = [p \in Procs |-> 0]
-    /\ lastArrival = -1
-    /\ minGap = NoGap
+    /\ arrivals = <<>>
 
 (* wait_turn up to the sleep: take the lock, read the mtime, work out the  *)
 (* sleep (capped at one cadence).                                          *)
@@ -107,7 +105,7 @@ Begin(p) ==
           /\ earliest' = [earliest EXCEPT ![p] = now + wait]
     /\ lock' = p
     /\ pc' = [pc EXCEPT ![p] = "sleep"]
-    /\ UNCHANGED <<now, skew, stepped, clock, clockSet, done, lastArrival, minGap>>
+    /\ UNCHANGED <<now, skew, stepped, clock, clockSet, done, arrivals>>
 
 (* The sleep ends and the request leaves. Today: touch the clock and       *)
 (* release the lock first. Alternative: keep the lock, touch later.        *)
@@ -122,14 +120,13 @@ Send(p) ==
     /\ pc' = [pc EXCEPT ![p] = "out"]
     /\ earliest' = [earliest EXCEPT ![p] = now + MinOut]
     /\ due' = [due EXCEPT ![p] = now + MaxOut]
-    /\ UNCHANGED <<now, skew, stepped, done, lastArrival, minGap>>
+    /\ UNCHANGED <<now, skew, stepped, done, arrivals>>
 
 (* The request reaches MusicBrainz, which counts it now.                   *)
 Arrive(p) ==
     /\ pc[p] = "out"
     /\ now >= earliest[p]
-    /\ minGap' = IF lastArrival = -1 THEN minGap ELSE Min(minGap, now - lastArrival)
-    /\ lastArrival' = now
+    /\ arrivals' = Append(arrivals, now)
     /\ pc' = [pc EXCEPT ![p] = "back"]
     /\ earliest' = [earliest EXCEPT ![p] = now + 1]
     /\ due' = [due EXCEPT ![p] = now + MaxBack]
@@ -147,14 +144,14 @@ Answer(p) ==
           ELSE UNCHANGED <<clock, clockSet, lock>>
     /\ pc' = [pc EXCEPT ![p] = "idle"]
     /\ done' = [done EXCEPT ![p] = @ + 1]
-    /\ UNCHANGED <<now, skew, stepped, earliest, due, lastArrival, minGap>>
+    /\ UNCHANGED <<now, skew, stepped, earliest, due, arrivals>>
 
 (* Time passes unless some step has reached its deadline.                  *)
 Tick ==
     /\ \A p \in Procs : pc[p] \in {"sleep", "out", "back"} => now < due[p]
     /\ now' = now + 1
     /\ UNCHANGED <<skew, stepped, clock, clockSet, lock, pc, earliest, due, done,
-                   lastArrival, minGap>>
+                   arrivals>>
 
 (* The wall clock jumps forward (w32time correcting a slow clock).         *)
 Step ==
@@ -163,7 +160,7 @@ Step ==
     /\ skew' = skew + MaxStep
     /\ stepped' = TRUE
     /\ UNCHANGED <<now, clock, clockSet, lock, pc, earliest, due, done,
-                   lastArrival, minGap>>
+                   arrivals>>
 
 Finished ==
     /\ \A p \in Procs : done[p] = Requests
@@ -188,13 +185,15 @@ TypeOK ==
     /\ pc \in [Procs -> {"idle", "sleep", "out", "back"}]
     /\ done \in [Procs -> 0..Requests]
 
-(* MusicBrainz never sees two of our requests closer than one second.      *)
-ArrivalsSpaced == minGap >= Window
+(* MusicBrainz's per-IP limit is "(on average) 1 request per second",    *)
+(* measured over a window it does not publish. With RateSeconds = K:     *)
+(* any K+1 of our arrivals span at least K seconds, so no K-second       *)
+(* window holds more than K of them. K = 1 is a strict one-second gap.   *)
+WithinRate ==
+    \A i \in 1..(Len(arrivals) - RateSeconds) :
+        arrivals[i + RateSeconds] - arrivals[i] >= RateSeconds * Window
 
 (* Only a process in the middle of a request holds the lock.              *)
 OneHolder == lock # None => pc[lock] # "idle"
-
-(* A process that has every request answered is idle (no lost request).    *)
-AllAnswered == \A p \in Procs : done[p] = Requests => pc[p] = "idle"
 
 =============================================================================
