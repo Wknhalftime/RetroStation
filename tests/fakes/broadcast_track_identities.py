@@ -74,9 +74,14 @@ class FakeBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
+        rejected_file_ids_read: Collection[UUID] | None = None,
     ) -> bool:
         current = self._data.get(identity_id)
         if current is None or current.match_status != MatchStatus.PENDING:
+            return False
+        if rejected_file_ids_read is not None and set(current.rejected_file_ids) != set(
+            rejected_file_ids_read
+        ):
             return False
         self.update_match_status(identity_id, status, tier, reason_code, reason_detail)
         return True

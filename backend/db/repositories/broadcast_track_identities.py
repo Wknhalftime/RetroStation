@@ -144,14 +144,20 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
+        rejected_file_ids_read: Collection[UUID] | None = None,
     ) -> bool:
         # One statement, so a decision committed by another connection between the
-        # worker's read and this write is seen here and wins (AUD-R018).
+        # worker's read and this write is seen here and wins (AUD-R018). The same goes for
+        # a file rejected since the read (docs/tla/MatchingStatus.tla, NoStaleWrite).
+        read = None if rejected_file_ids_read is None else list(rejected_file_ids_read)
         cur = self._conn.execute(
             """UPDATE track_identities
                SET match_status = %s, match_tier = %s,
                    reason_code = %s, reason_detail = %s
-               WHERE id = %s AND match_status = %s""",
+               WHERE id = %s AND match_status = %s
+                 AND (%s::uuid[] IS NULL
+                      OR (rejected_file_ids @> %s::uuid[]
+                          AND rejected_file_ids <@ %s::uuid[]))""",
             (
                 status.value,
                 tier.value if tier is not None else None,
@@ -159,6 +165,9 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 reason_detail,
                 identity_id,
                 MatchStatus.PENDING.value,
+                read,
+                read,
+                read,
             ),
         )
         return cur.rowcount == 1
