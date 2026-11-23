@@ -7,6 +7,11 @@ minutes); the alias step is uncapped (43 requests at D5's count). A batch makes 
 and starts none after 110 s, so it stays near 2 minutes even when calls fail slowly (R9); 5
 transient failures in a row end the run. They live here, not in settings: they are the budget
 Lance approved, not something to tune per machine.
+
+PR 2b's request budget (D9, D10, D11; AUD-R093): each call makes one request (``attempts``), the
+fill waits ``pause_seconds`` after a refusal before its next request, and a run hands on no batch
+once ``run_minutes`` have passed since it started. Their defaults are D10's and D11's values, so
+FillLimits built with D5's fields alone is still FILL_LIMITS.
 """
 
 from __future__ import annotations
@@ -20,12 +25,16 @@ from backend.domain.enums import FillTier
 
 @dataclass(frozen=True)
 class FillLimits:
-    """A run's caps per tier (a tier left out is uncapped) and a batch's limits."""
+    """A run's caps per tier (a tier left out is uncapped), a batch's limits, and the run's
+    request budget (D10, D11)."""
 
     batch_calls: int
     batch_seconds: float
     cutoff: int
     caps: Mapping[FillTier, int]
+    attempts: int = 1  # requests a call may make (D10: one; the client alone makes 3)
+    pause_seconds: float = 10.0  # the wait after a refusal before the next request (D10)
+    run_minutes: float = 120.0  # no batch is handed on after this, since the run started (D11)
 
     def cap(self, tier: FillTier) -> int | None:
         """The tier's cap for a run, or None when it has none."""

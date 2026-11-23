@@ -21,6 +21,16 @@ const ROWS_SKIPPED = "rows_skipped";
 // A matching run that completed with some playlist stages failed (spec 2026-10-17); the
 // count is in `stages_failed`.
 const MATCHING_STAGES_FAILED = "matching_stages_failed";
+// A cache fill run whose calls failed (phase 4.1 PR 2b, D10); the count is in `failed_calls`.
+const FILL_CALLS_FAILED = "mb_fill_calls_failed";
+
+function formatFailedFillCalls(progressData: Record<string, unknown>): string {
+  const failed = progressData["failed_calls"];
+  const count = typeof failed === "number" ? failed : 0;
+  return count === 1
+    ? "1 call failed: a later run asks it again"
+    : `${count.toLocaleString("en-US")} calls failed: a later run asks them again`;
+}
 
 function formatFailedStages(progressData: Record<string, unknown>): string {
   const failed = progressData["stages_failed"];
@@ -43,6 +53,7 @@ export function getWarningText(
   const warning = progressData["warning"];
   if (typeof warning !== "string") return null;
   if (warning === MATCHING_STAGES_FAILED) return formatFailedStages(progressData);
+  if (warning === FILL_CALLS_FAILED) return formatFailedFillCalls(progressData);
   if (warning !== ROWS_SKIPPED) return WARNING_LABELS[warning] ?? warning;
 
   const skipped = progressData["skipped"];
