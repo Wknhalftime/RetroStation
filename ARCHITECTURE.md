@@ -5,7 +5,7 @@
 feat/cue-editor-api, the editor API; the "Station liners" section was added 2026-10-18 with
 feat/station-liners, "Liners on air" with feat/liners-on-air, and liner cue editing with
 feat/liner-cues (comment audit: `audit/comment-audit.md`). Rulings cited here are in
-`audit/rulings.jsonl` (AUD-R015..R031, R100, R101 and R102 ACTIVE). If the code and this
+`audit/rulings.jsonl` (AUD-R015..R031, R100, R101, R102 and R104 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -250,7 +250,9 @@ main  ->  routers | tasks  ->  services  ->  db | playout  ->  repositories  -> 
   (`tests/services/test_stale_rejection_read.py`; TLA+ model `docs/tla/MatchingStatus.tla`).
 - **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
   `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
-  cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
+  cadence, `%TEMP%/retrostation-musicbrainz.clock`). The clock spaces the stamps, not the
+  arrivals: a request leaves after the lock is released, so two can reach MusicBrainz under 1 s
+  apart; any 3 s holds (AUD-R104, `docs/tla/MBPacing.tla`). Artist lookups and library
   enrichment's recording search are batched 100 per request; the recordings phase's
   `lookup_recording` stays one call per recording because only it carries work relations.
 - **Enrichment keeps a song's copies on one work** (AUD-R103). Every path that learns a
@@ -296,4 +298,4 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R104.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R105.
