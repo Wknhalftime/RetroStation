@@ -166,6 +166,14 @@ class FillTier(StrEnum):
     ALIASES = "aliases"
 
 
+class FillEnd(StrEnum):
+    """How a cache fill run ended, on its last row (phase 4.1 PR 2b, D10's 4b)."""
+
+    DONE = "done"  # no capped work left
+    CUT_OFF = "cut_off"  # five transient failures in a row (E1, D8)
+    TIME = "time"  # its 2 hours were up with work left (D11, D12)
+
+
 class ArtistNameSource(StrEnum):
     """Where an artist's name came from (C43). A log spelling has none: it is refused."""
 

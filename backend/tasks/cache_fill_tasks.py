@@ -11,12 +11,15 @@ AUD-R014, AUD-R017, AUD-R042, AUD-R091).
   before each call, D4). ``run`` is the run's state as one JSON string (``FillRun``). After the
   envelope it queues a ``rematch_names_task`` for each tier the run left with names filled
   (S7), then the next batch while capped work remains, each through ``enqueue_or_log``.
+- PR 2b (D10, D11; AUD-R093): a batch asks through a one-attempt view of the client, pauses
+  with ``sleep`` after a refusal, and reads the wall clock through ``utc_now``, which also stamps
+  a run's ``started_at``: a run hands on no batch once its 2 hours are up.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 
 import structlog
@@ -49,6 +52,11 @@ logger = structlog.get_logger()
 BATCH_TASK = "mb_cache_fill_batch_task"
 
 
+def utc_now() -> datetime:
+    """The wall clock a run's ``started_at`` and its 2 hours are read on (D11); a test seam."""
+    return datetime.now(UTC)
+
+
 @huey.task()  # type: ignore[untyped-decorator]
 def mb_cache_fill_task() -> None:
     """Start a fill run (D6), unless one is in progress."""
@@ -63,7 +71,7 @@ def mb_cache_fill_task() -> None:
         if running or queued:
             logger.warning("mb_cache_fill_refused", running=running, queued=queued)
             return
-        run = FillRun.start(datetime.now(UTC))
+        run = FillRun.start(utc_now())
         refused: list[bool] = []
         enqueue_or_log(
             lambda: mb_cache_fill_batch_task(run.to_json()),
@@ -162,11 +170,16 @@ def _batch(database_url: str, ttl_days: int, state: FillRun, shown: _Shown) -> B
         )
         plan = plan_run(sources, state, limits)
         with MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn), ttl_days=ttl_days) as client:
+            # D10: one request a call; the client's own 3 tries stay for every other caller.
+            fill_client = client.with_attempts(limits.attempts)
             ports = BatchPorts(
-                client=client,
+                client=fill_client,
                 commit=lambda: commit_or_unavailable(conn),
                 clock=monotonic,
                 report=shown.report,
+                sleep=sleep,
+                now=utc_now,
+                requests=lambda: fill_client.requests_sent,
             )
             outcome = run_batch(plan, state, limits, ports)
         commit_or_unavailable(conn)

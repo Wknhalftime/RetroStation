@@ -8,12 +8,18 @@ tried and not answered earlier in the run, one call per cache key (M9), each tie
 for the run. ``run_batch`` makes the first of them, one at a time, committing each call's rows
 as they land (R8), and returns the run's next state: what to re-check, and whether the run goes
 on.
+
+PR 2b's request budget (D9, D10, D11, D12; AUD-R093): each call is one request (the task hands
+the batch a one-attempt view of the client), a refusal is followed by a pause before the next
+request, and a run hands on no batch once its minutes are spent. A batch's last row reports the
+run's requests, its minutes and how it ended, and the run's failed calls when there are any.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any, Protocol
 
@@ -28,7 +34,7 @@ from backend.domain.cache_fill import (
     QueuedPair,
     UntaggedFile,
 )
-from backend.domain.enums import ArtistNameSource, FillTier
+from backend.domain.enums import ArtistNameSource, FillEnd, FillTier
 from backend.domain.matching import ARTIST_UNDECIDED_STATUSES
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_names import ArtistNameRepository
@@ -54,6 +60,12 @@ type AliasWriter = Callable[[Mapping[str, list[MbAlias]]], None]
 
 STOPPED = "stopped (MusicBrainz not answering)"
 """D8: how a cut-off run's last row reads, after its tier."""
+
+TIME_UP = "stopped (2 hours up)"
+"""D12: how a run D11's time limit ended reads, after the tier the rest waits in."""
+
+CALLS_FAILED = "mb_fill_calls_failed"
+"""D10: the warning on a run's last row when calls failed; the bar words it."""
 
 
 # --- the calls -----------------------------------------------------------------------------------
@@ -307,8 +319,11 @@ class _Answer(Enum):
 class BatchPorts:
     client: MusicBrainzClientProtocol
     commit: Callable[[], None]
-    clock: Callable[[], float]  # monotonic seconds
+    clock: Callable[[], float]  # monotonic seconds: the batch's 110 s, the pause included
     report: Callable[[dict[str, Any]], None]  # the batch's RUNNING row
+    sleep: Callable[[float], None]  # the pause after a refusal (D10)
+    now: Callable[[], datetime]  # the wall clock: the run's minutes since started_at (D11)
+    requests: Callable[[], int]  # the client's requests so far, every attempt (D9)
 
 
 @dataclass(frozen=True)
@@ -332,6 +347,7 @@ class _Tally:
     in_a_row: int
     refused_in_a_row: int
     filled: dict[FillTier, set[str]]
+    requests: int
 
     @classmethod
     def of(cls, run: FillRun) -> _Tally:
@@ -343,6 +359,7 @@ class _Tally:
             in_a_row=run.in_a_row,
             refused_in_a_row=run.refused_in_a_row,
             filled={tier: set(names) for tier, names in run.filled.items()},
+            requests=run.requests,
         )
 
     def record(self, call: FillCall, answer: _Answer) -> None:
@@ -371,6 +388,7 @@ class _Tally:
             in_a_row=self.in_a_row,
             refused_in_a_row=self.refused_in_a_row,
             filled={tier: frozenset(names) for tier, names in self.filled.items() if names},
+            requests=self.requests,
         )
 
 
@@ -397,11 +415,25 @@ def _ask(call: FillCall, client: MusicBrainzClientProtocol) -> _Answer:
     return _Answer.ANSWERED
 
 
-def _detail(tier: FillTier, done: int, total: int, limits: FillLimits) -> str:
-    """D4: "payoff, 37 of 100 (cap 2,600)"; the uncapped alias step names no cap."""
-    cap = limits.cap(tier)
-    text = f"{tier.value}, {done} of {total}"
-    return text if cap is None else f"{text} (cap {cap:,})"
+def _elapsed(started_at: str, now: datetime) -> timedelta:
+    """The run's wall-clock time so far (D11): from its ``started_at`` to *now*."""
+    return now - datetime.fromisoformat(started_at)
+
+
+def _time_up(started_at: str, run_minutes: float, now: datetime) -> bool:
+    """D11: the run's minutes are spent, so it hands on no batch."""
+    return _elapsed(started_at, now) >= timedelta(minutes=run_minutes)
+
+
+def _ended(*, goes_on: bool, cut_off: bool, work_left: bool) -> FillEnd | None:
+    """How the run ended, or None while it hands on (D10's 4b): a cut-off first, even as the
+    time runs out (D8's words say more), then the time limit with work left (D11), else nothing
+    was left to do."""
+    if goes_on:
+        return None
+    if cut_off:
+        return FillEnd.CUT_OFF
+    return FillEnd.TIME if work_left else FillEnd.DONE
 
 
 @dataclass
@@ -423,23 +455,70 @@ class _Batch:
     def cut_off(self) -> bool:
         return self.tally.in_a_row >= self.limits.cutoff
 
+    @property
+    def work_left(self) -> bool:
+        """The run has planned calls this batch hasn't made (this batch's or a later one's)."""
+        return len(self.plan) > len(self.made)
+
+    def request_follows(self, elapsed: float, now: datetime) -> bool:
+        """After a refusal, another request follows in the run once the pause is over (R2b-b):
+        this batch makes another call, or it ends and the run, its minutes not yet spent, hands
+        on a batch. *elapsed* is the batch's seconds so far; *now* the wall clock."""
+        if not self.work_left:
+            return False
+        pause = self.limits.pause_seconds
+        if len(self.made) < len(self.calls) and elapsed + pause < self.limits.batch_seconds:
+            return True
+        after_pause = now + timedelta(seconds=pause)
+        return not _time_up(self.started_at, self.limits.run_minutes, after_pause)
+
+    def detail(self, tier: FillTier) -> str:
+        """D4: "payoff, 37 of 100 (cap 2,600)"; the uncapped alias step names no cap. Once the
+        tier has failed calls in the run, D10 counts them: "payoff, 37 of 100 (cap 2,600), 12
+        failed"."""
+        cap = self.limits.cap(tier)
+        text = f"{tier.value}, {len(self.made)} of {len(self.calls)}"
+        text = text if cap is None else f"{text} (cap {cap:,})"
+        failed = self.tally.failed.get(tier, 0)
+        return f"{text}, {failed} failed" if failed else text
+
     def row(self, tier: FillTier | None) -> dict[str, Any]:
         """The batch's progress row, the next (or last) call's tier named."""
-        done, total = len(self.made), len(self.calls)
         return {
             "tier": None if tier is None else tier.value,
-            "processed": done,
-            "total": total,
+            "processed": len(self.made),
+            "total": len(self.calls),
             "cap": None if tier is None else self.limits.cap(tier),
-            "detail": "nothing to fill"
-            if tier is None
-            else _detail(tier, done, total, self.limits),
+            "detail": "nothing to fill" if tier is None else self.detail(tier),
             "run_started_at": self.started_at,
             **self.tally.run(self.started_at).totals(),
+            "requests": self.tally.requests,
         }
 
-    def outcome(self) -> BatchOutcome:
-        goes_on = not self.cut_off and len(self.plan) > len(self.made)
+    def last_row(self, ended: FillEnd | None, now: datetime) -> dict[str, Any]:
+        """The batch's last row: the last call's tier, or for a run the time limit ended the
+        tier the rest waits in (D12); the run's minutes and how it ended; and on the run's last
+        row, its failed calls when there are any (D10's 4b)."""
+        last = self.made[-1] if self.made else None
+        if ended is FillEnd.TIME:
+            waiting = self.plan[len(self.made)].tier
+            row = self.row(waiting)
+            row["detail"] = f"{waiting.value}, {TIME_UP}"
+        else:
+            row = self.row(None if last is None else last.tier)
+            if ended is FillEnd.CUT_OFF and last is not None:
+                row["detail"] = f"{last.tier.value}, {STOPPED}"
+        minutes = round(_elapsed(self.started_at, now).total_seconds() / 60, 1)
+        row.update(ended=ended, minutes=minutes)
+        failed = sum(self.tally.failed.values())
+        if ended is not None and failed:
+            row.update(warning=CALLS_FAILED, failed_calls=failed)
+        return row
+
+    def outcome(self, now: datetime) -> BatchOutcome:
+        time_up = _time_up(self.started_at, self.limits.run_minutes, now)
+        goes_on = self.work_left and not self.cut_off and not time_up
+        ended = _ended(goes_on=goes_on, cut_off=self.cut_off, work_left=self.work_left)
         after = self.tally.run(self.started_at)
         left = set(FillTier) if not goes_on else _tiers_left(self.plan, self.made)
         rechecks = [
@@ -447,10 +526,7 @@ class _Batch:
             for tier in FillTier
             if after.filled.get(tier) and tier in left
         ]
-        last = self.made[-1] if self.made else None
-        row = self.row(None if last is None else last.tier)
-        if self.cut_off and last is not None:
-            row["detail"] = f"{last.tier.value}, {STOPPED}"
+        row = self.last_row(ended, now)
         row.update(cut_off=self.cut_off, next_batch=goes_on)
         next_run = after.handed_off(tier for tier, _names in rechecks) if goes_on else None
         return BatchOutcome(next_run=next_run, rechecks=rechecks, progress=row)
@@ -460,29 +536,44 @@ def run_batch(
     plan: Sequence[FillCall], run: FillRun, limits: FillLimits, ports: BatchPorts
 ) -> BatchOutcome:
     """Make the plan's first calls, at most ``batch_calls`` and none once ``batch_seconds`` have
-    passed, until the run's transient failures in a row reach the cut-off.
+    passed, until the run's transient failures in a row reach the cut-off. A batch that starts
+    once the run's minutes are spent (after a worker restart, E6) makes no call (D11). After a
+    refusal another request follows only after ``pause_seconds``, on the batch's clock (D10).
 
     Raises:
         MusicBrainzRefusingError: ``REFUSALS_TO_FAIL`` permanent errors in a row, with no answer
             between; the calls already made stay committed.
     """
     batch = _Batch(plan, limits, run.started_at, _Tally.of(run))
-    start = ports.clock()
+    if _time_up(run.started_at, limits.run_minutes, ports.now()):
+        return batch.outcome(ports.now())
+    sent_before, start = ports.requests(), ports.clock()
     for call in batch.calls:
         if ports.clock() - start >= limits.batch_seconds:
             break
         ports.report(batch.row(call.tier))
-        batch.tally.record(call, _ask(call, ports.client))
+        answer = _ask(call, ports.client)
+        batch.tally.record(call, answer)
+        batch.tally.requests = run.requests + ports.requests() - sent_before
         ports.commit()
         batch.made.append(call)
         if batch.tally.refused_in_a_row >= REFUSALS_TO_FAIL:
-            raise MusicBrainzRefusingError(
-                f"MusicBrainz refused {batch.tally.refused_in_a_row} fill calls in a row "
-                f"(the last {call.key}); the run stopped"
-            )
+            raise MusicBrainzRefusingError(_refusing(call, batch.tally))
         if batch.cut_off:
             break
-    return batch.outcome()
+        if answer is _Answer.FAILED and batch.request_follows(ports.clock() - start, ports.now()):
+            ports.sleep(limits.pause_seconds)
+    return batch.outcome(ports.now())
+
+
+def _refusing(call: FillCall, tally: _Tally) -> str:
+    """The FAILED batch's error: its row keeps no report of its own, so the run's requests and
+    failed calls ride in the message (D10's 4b)."""
+    return (
+        f"MusicBrainz refused {tally.refused_in_a_row} fill calls in a row (the last "
+        f"{call.key}); the run stopped after {tally.requests:,} requests, "
+        f"{sum(tally.failed.values()):,} failed calls"
+    )
 
 
 def _tiers_left(plan: Iterable[FillCall], made: Sequence[FillCall]) -> set[FillTier]:

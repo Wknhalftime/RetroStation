@@ -14,9 +14,8 @@ PostgreSQL. ``test_cache_fill_tiers_pg.py`` has what each tier searches.
   - It hands the run's next batch on through ``enqueue_or_log`` while capped work remains.
 - **A tier** stops at its cap for the run. What it leaves waits for the next run.
 - **Failures:**
-  - Five transient failures in a row end the run (E1): a timeout, a network error, or a 429/5xx
-    the client's own retries gave up on. The count runs across the run's batches, and an answer
-    resets it.
+  - Five transient failures in a row end the run (E1): a timeout, a network error, or a 429/5xx,
+    each asked once (D10). The count runs across the run's batches, and an answer resets it.
   - A permanent error (a 4xx other than 429) is logged and its item skipped for the run (M5),
     neither counted toward the cut-off nor resetting it.
   - A failed or skipped item is not asked again in the same run; the next run asks it again.
@@ -29,7 +28,7 @@ PostgreSQL. ``test_cache_fill_tiers_pg.py`` has what each tier searches.
   request, and writes each alias as a ``MUSICBRAINZ_ALIAS`` name of the artist holding the MBID.
 
 The real client runs on a mock transport (``cache_fill_rig``). Counts of requests are counts of
-calls, except where a 503 is retried: then each call is three requests.
+calls: the fill asks each call once, a 503 included (phase 4.1 PR 2b, D10).
 """
 
 from __future__ import annotations
@@ -359,12 +358,12 @@ def test_a_cut_off_rechecks_what_its_tier_filled(conn: Conn, fill: Fill) -> None
 
 
 @pytest.mark.parametrize(
-    ("outage", "requests_per_call"), [("timeout", 1), ("connect", 1), ("503", 3)]
+    ("outage", "requests_per_call"), [("timeout", 1), ("connect", 1), ("503", 1)]
 )
 def test_resume_after_outage(conn: Conn, fill: Fill, outage: str, requests_per_call: int) -> None:
-    """E1: 5 transient failures in a row (a timeout, a network error, or a 503 the client's own
-    retries gave up on) end the run, its last row saying so. Nothing is cached for them, so the
-    next run asks them again, most plays first."""
+    """E1: 5 transient failures in a row (a timeout, a network error, or a 503, each asked once:
+    D10) end the run, its last row saying so. Nothing is cached for them, so the next run asks
+    them again, most plays first."""
     payoffs(conn, 7)
     fill.server.down = outage
 
@@ -384,13 +383,13 @@ def test_resume_after_outage(conn: Conn, fill: Fill, outage: str, requests_per_c
 
 def test_the_cut_off_counts_failures_across_batches(conn: Conn, fill: Fill) -> None:
     """E1: the count of failures in a row runs on across the run's batches, so an outage of slow
-    timeouts (4 to a batch) still ends the run at its fifth."""
+    timeouts (3 to a batch, with D10's pauses) still ends the run at its fifth."""
     payoffs(conn, 8)
     fill.server.down = "timeout"
     fill.server.seconds_per_call = 30.0
 
     assert fill.run() == 2
-    assert fill.server.titles() == songs(5)  # 4 in the first batch, at 0, 30, 60 and 90 s
+    assert fill.server.titles() == songs(5)  # 3 in the first batch, at 0, 40 and 80 s
     last = fill.last()
     assert last["cut_off"] is True
     # D8: the run's last row says it stopped, so the bar's green Done never hides an outage.

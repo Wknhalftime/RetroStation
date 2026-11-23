@@ -1245,6 +1245,24 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   watermark never moves for it (S7, R6). Known gaps: a batch that dies loses the names its tier
   had filled, so they miss that re-check (Re-run Matching or 4.2 picks them up); and a crash's
   RUNNING row blocks new runs until the `/ws` reaper fails it, which needs a client listening.
+- **The cache fill's request budget** (phase 4.1 PR 2b; D9–D12, AUD-R093). PR 2's gate sent
+  4,218 requests for 2,276 calls: `_fetch` tries a 429/5xx 3 times, and MusicBrainz refused 61%
+  of them. So each fill call is one request: the batch asks through
+  `MusicBrainzApiClient.with_attempts`, a view sharing the client's cache, HTTP client and clock,
+  while `_fetch`'s decorator keeps 3 tries for every other caller. After a refusal (any
+  transient failure) the batch waits `pause_seconds` (10 s) before its next request, on the
+  batch's clock, so the pause counts in its 110 s; a refused key waits for a later run. A run
+  hands on no batch once `run_minutes` (120) have passed since its `started_at`, on the wall
+  clock (`cache_fill_tasks.utc_now`), and a batch that starts later makes no call: the run ends
+  "{tier}, stopped (2 hours up)" (D12). Every batch's last row carries the run's `requests`
+  (`requests_sent`: every attempt), its `minutes` and `ended` (`FillEnd`: done, cut_off, time);
+  the detail counts a tier's failed calls once there are any, and the run's last row carries
+  `warning: "mb_fill_calls_failed"` with `failed_calls`, shown in amber on the bar. A pause is
+  taken only when another request follows: not after the run's last call, a cut-off, or a
+  refusal that ends the run's last batch as its minutes run out. A cut-off as the time runs out
+  ends `cut_off` (D8's words say more). Known gap: a batch that fails (a crash, or
+  `MusicBrainzRefusingError`) writes a FAILED row without the run's report; the refusal's error
+  text carries the run's requests and failed calls, a crash's carries nothing.
 - **A MusicBrainz outage defers the artist stage's cut-off names, never fails its run** (AUD-R028,
   extended by AUD-R042; AUD-R090). Until the old stage retires (4.3), `DeferOnMusicBrainzOutage`
   wraps the MusicBrainz strategy inside the cut-off gate: a transient failure of a cut-off name's

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import functools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -321,9 +323,28 @@ class MusicBrainzApiClient:
         # Incremented across all methods uniformly.
         self.cache_hits: int = 0
         self.live_fetches: int = 0
+        # Every HTTP attempt, a retry and a refused one included (phase 4.1 PR 2b, D9): what a
+        # fill run reports as its requests.
+        self.requests_sent: int = 0
 
     def __enter__(self) -> MusicBrainzApiClient:
         return self
+
+    def with_attempts(self, attempts: int) -> MusicBrainzApiClient:
+        """A view of this client whose calls stop after *attempts* tries (phase 4.1 PR 2b, D10).
+
+        The view shares this client's cache, HTTP client and clock (AUD-R102's one door), and
+        leaves this client as it was: ``_fetch``'s own decorator keeps its 3 tries for every
+        other caller. The view's counters start from 0. Closing the client closes the view.
+        """
+        view = copy.copy(self)
+        decorated: Any = type(self)._fetch  # tenacity's wrapper; retry_with copies its policy
+        fetch = decorated.retry_with(stop=stop_after_attempt(attempts))
+        view._fetch = functools.partial(fetch, view)  # type: ignore[method-assign]
+        view.cache_hits = 0
+        view.live_fetches = 0
+        view.requests_sent = 0
+        return view
 
     def __exit__(self, *_: object) -> None:
         self._http.close()
@@ -392,6 +413,7 @@ class MusicBrainzApiClient:
         # the in-flight request visible in a DEBUG trail without spamming INFO.
         logger.debug("mb_api_fetch_start", url=url, params=params)
         self._wait_turn()
+        self.requests_sent += 1
         response = self._http.get(url, params=params)
         response.raise_for_status()
         return response

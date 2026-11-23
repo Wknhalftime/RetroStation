@@ -4,9 +4,9 @@ M2 as the coordinator read them with notes 1 and 2; D8; AUD-R091).
 The work lists come from the database, one kind of row per tier; the fill turns each row into
 one MusicBrainz call. A run is a chain of batches, and what the chain must remember from batch
 to batch rides on it as a ``FillRun``: calls, failures and skips per tier, the keys tried and not
-answered (asked once a run), the transient failures in a row, and the names each tier has filled
-and not yet handed to a re-check. The cache can't hold that: a skipped call writes no row, and
-song matching writes C18's keys too.
+answered (asked once a run), the transient failures in a row, the names each tier has filled
+and not yet handed to a re-check, and (PR 2b, D9) the requests the run has made. The cache
+can't hold that: a skipped call writes no row, and song matching writes C18's keys too.
 """
 
 from __future__ import annotations
@@ -93,6 +93,7 @@ class FillRun:
     in_a_row: int = 0  # transient failures in a row (the cut-off, E1)
     refused_in_a_row: int = 0  # permanent errors since the last answer
     filled: Mapping[FillTier, frozenset[str]] = field(default_factory=dict)
+    requests: int = 0  # every HTTP attempt the run has made (PR 2b, D9)
 
     @classmethod
     def start(cls, at: datetime) -> FillRun:
@@ -125,6 +126,7 @@ class FillRun:
             "in_a_row": self.in_a_row,
             "refused_in_a_row": self.refused_in_a_row,
             "filled": {tier.value: sorted(names) for tier, names in self.filled.items()},
+            "requests": self.requests,
         }
         return json.dumps(payload, separators=(",", ":"))
 
@@ -143,4 +145,5 @@ class FillRun:
                 FillTier(tier): frozenset(names)
                 for tier, names in (payload.get("filled") or {}).items()
             },
+            requests=int(payload.get("requests", 0)),
         )
