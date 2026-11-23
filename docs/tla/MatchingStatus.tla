@@ -35,6 +35,15 @@
 (*   snap        the epoch a worker saw when it read the song             *)
 (*   staleWrites guarded writes that landed on a later pending period     *)
 (*               than the one the worker read                             *)
+(*   staleRejWrites  guarded writes that landed although the song's       *)
+(*               rejected files changed since the worker read them        *)
+(*                                                                         *)
+(* rejected_file_ids is modelled by a version per song (rej): a Reject or  *)
+(* Unmatch either adds a file (a new version) or records one already in   *)
+(* the list (same set, same version). The #264 guard compares sets         *)
+(* (@> and <@), so it is version equality here. A library-file fold       *)
+(* (AUD-R022) rewrites the list too; it only makes the guard skip more,   *)
+(* so it is left out.                                                      *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 
@@ -44,6 +53,7 @@ CONSTANTS
     MaxMsgs,      \* bound on messages ever sent (keeps the state space finite)
     MaxEpoch,     \* bound on pending periods per song (same reason)
     Guarded,      \* FALSE = negative control: worker writes ignore the guard
+    RejectedGuard, \* FALSE = before #264: the guard ignores rejected files
     LinkCascade   \* FALSE = leave out the curator's artist-link cascade
 
 Statuses == {"pending", "auto_matched", "needs_review", "auto_rejected",
@@ -68,9 +78,13 @@ VARIABLES
     sent,         \* messages sent so far
     job,          \* what each worker is running
     snap,         \* ghost: per worker, the epoch it read per song (0 = not read)
-    staleWrites   \* ghost
+    staleWrites,  \* ghost
+    rej,          \* rejected_file_ids, as a version per song
+    snapRej,      \* per worker, the rejected files it read per song (a version)
+    staleRejWrites \* ghost
 
-vars == <<status, hasMatch, lastWriter, epoch, queue, sent, job, snap, staleWrites>>
+vars == <<status, hasMatch, lastWriter, epoch, queue, sent, job, snap, staleWrites,
+          rej, snapRej, staleRejWrites>>
 
 TypeOK ==
     /\ status \in [Songs -> Statuses]
@@ -82,6 +96,9 @@ TypeOK ==
     /\ job \in [Workers -> Jobs]
     /\ snap \in [Workers -> [Songs -> Nat]]
     /\ staleWrites \in Nat
+    /\ rej \in [Songs -> Nat]
+    /\ snapRej \in [Workers -> [Songs -> Nat]]
+    /\ staleRejWrites \in Nat
 
 -----------------------------------------------------------------------------
 (* One UPDATE: the rows it matched take value val. A row that goes from   *)
@@ -111,6 +128,9 @@ Init ==
     /\ job = [w \in Workers |-> "idle"]
     /\ snap = [w \in Workers |-> [s \in Songs |-> 0]]
     /\ staleWrites = 0
+    /\ rej = [s \in Songs |-> 0]
+    /\ snapRej = [w \in Workers |-> [s \in Songs |-> 0]]
+    /\ staleRejWrites = 0
 
 -----------------------------------------------------------------------------
 (* Curator actions: the API, one transaction each, any time.              *)
@@ -119,13 +139,16 @@ Init ==
 CuratorMatch(s) ==
     /\ Write({s}, "manual_matched", "curator")
     /\ hasMatch' = [hasMatch EXCEPT ![s] = TRUE]
-    /\ UNCHANGED <<queue, sent, job, snap, staleWrites>>
+    /\ UNCHANGED <<queue, sent, job, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* Reject or Unmatch a song: manual_rejected, match rows deleted, file recorded
 CuratorReject(s) ==
     /\ Write({s}, "manual_rejected", "curator")
     /\ hasMatch' = [hasMatch EXCEPT ![s] = FALSE]
-    /\ UNCHANGED <<queue, sent, job, snap, staleWrites>>
+    /\ \/ rej' = [rej EXCEPT ![s] = @ + 1]   \* a file not yet rejected
+       \/ UNCHANGED rej                       \* a file already in the list
+    /\ UNCHANGED <<queue, sent, job, snap, staleWrites, snapRej, staleRejWrites>>
 
 \* Artist resolve MANUAL_MATCHED: undecided children go back to pending, every
 \* pending child loses its match rows, identity matching is enqueued
@@ -137,22 +160,26 @@ CuratorLinkArtist ==
                             IF s \in rows \/ status[s] = "pending"
                             THEN FALSE ELSE hasMatch[s]]
     /\ Enqueue("match")
-    /\ UNCHANGED <<job, snap, staleWrites>>
+    /\ UNCHANGED <<job, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* Artist resolve MANUAL_REJECTED: every child not manually decided is auto_rejected
 CuratorRejectArtist ==
     /\ Write({s \in Songs : status[s] \notin Protected}, "auto_rejected", "curator")
-    /\ UNCHANGED <<hasMatch, queue, sent, job, snap, staleWrites>>
+    /\ UNCHANGED <<hasMatch, queue, sent, job, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* POST /matching/run (Re-run Matching)
 CuratorRerun ==
     /\ Enqueue("recheck")
-    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, job, snap, staleWrites>>
+    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, job, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* The watcher poll queues a scan, which may find a deleted file
 WatcherPoll ==
     /\ Enqueue("scan")
-    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, job, snap, staleWrites>>
+    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, job, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 -----------------------------------------------------------------------------
 (* Worker actions.                                                        *)
@@ -173,29 +200,35 @@ Take(w) ==
                      THEN [snap EXCEPT ![w] = [s \in Songs |->
                               IF status[s] = "pending" THEN epoch[s] ELSE 0]]
                      ELSE snap
-    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, staleWrites>>
+          /\ snapRej' = IF m = "match" THEN [snapRej EXCEPT ![w] = rej] ELSE snapRej
+    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, staleWrites, rej, staleRejWrites>>
 
 \* One song's result: update_match_status_if_pending, then its match row
 WriteSong(w, s) ==
     /\ job[w] = "match"
     /\ snap[w][s] # 0
     /\ \E r \in WorkerResults :
-         LET lands == IF Guarded THEN status[s] = "pending" ELSE TRUE
+         LET lands == /\ Guarded => status[s] = "pending"
+                      /\ RejectedGuard => rej[s] = snapRej[w][s]
          IN IF lands
             THEN /\ Write({s}, r, "worker")
                  /\ hasMatch' = [hasMatch EXCEPT ![s] = (r # "auto_rejected")]
                  /\ staleWrites' = staleWrites +
                                    (IF snap[w][s] # epoch[s] THEN 1 ELSE 0)
-            ELSE UNCHANGED <<status, hasMatch, lastWriter, epoch, staleWrites>>
+                 /\ staleRejWrites' = staleRejWrites +
+                                      (IF snapRej[w][s] # rej[s] THEN 1 ELSE 0)
+            ELSE UNCHANGED <<status, hasMatch, lastWriter, epoch, staleWrites,
+                             staleRejWrites>>
     /\ snap' = [snap EXCEPT ![w][s] = 0]
-    /\ UNCHANGED <<queue, sent, job>>
+    /\ UNCHANGED <<queue, sent, job, rej, snapRej>>
 
 \* Every song read has been written: the playlist commits
 FinishMatch(w) ==
     /\ job[w] = "match"
     /\ \A s \in Songs : snap[w][s] = 0
     /\ job' = [job EXCEPT ![w] = "idle"]
-    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, queue, sent, snap, staleWrites>>
+    /\ UNCHANGED <<status, hasMatch, lastWriter, epoch, queue, sent, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* rewind_wave: undecided songs back to pending (match rows kept), then fan-out
 DoRecheck(w) ==
@@ -203,7 +236,8 @@ DoRecheck(w) ==
     /\ Write({s \in Songs : status[s] \in SongUndecided}, "pending", "recheck")
     /\ Enqueue("match")
     /\ job' = [job EXCEPT ![w] = "idle"]
-    /\ UNCHANGED <<hasMatch, snap, staleWrites>>
+    /\ UNCHANGED <<hasMatch, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 \* _release_matches: a deleted file's song with no match left goes to review,
 \* whatever its status (unguarded). Or the scan finds nothing deleted.
@@ -215,7 +249,8 @@ DoScan(w) ==
             /\ hasMatch' = [hasMatch EXCEPT ![s] = FALSE]
        \/ UNCHANGED <<status, hasMatch, lastWriter, epoch>>
     /\ job' = [job EXCEPT ![w] = "idle"]
-    /\ UNCHANGED <<queue, sent, snap, staleWrites>>
+    /\ UNCHANGED <<queue, sent, snap, staleWrites,
+                   rej, snapRej, staleRejWrites>>
 
 -----------------------------------------------------------------------------
 Next ==
@@ -233,14 +268,19 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-StateConstraint == \A s \in Songs : epoch[s] <= MaxEpoch
+StateConstraint == \A s \in Songs : epoch[s] <= MaxEpoch /\ rej[s] <= MaxEpoch
 
 -----------------------------------------------------------------------------
 (* Properties.                                                            *)
 
 \* A worker's write lands only on the pending period it read. If this fails,
-\* the worker decided a song from a stale read (old rejected_file_ids).
+\* the worker decided a song from a read taken before the song left pending
+\* and came back. Stricter than what #264 guards (NoRejectedStaleWrite).
 NoStaleWrite == staleWrites = 0
+
+\* What #264 guards: a worker's write lands only if the song's rejected files
+\* are the ones it read, so it never suggests a file rejected since its read.
+NoRejectedStaleWrite == staleRejWrites = 0
 
 \* Workers never produce a manual status.
 WorkersNeverWriteManual ==

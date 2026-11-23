@@ -148,7 +148,7 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
     ) -> bool:
         # One statement, so a decision committed by another connection between the
         # worker's read and this write is seen here and wins (AUD-R018). The same goes for
-        # a file rejected since the read (docs/tla/MatchingStatus.tla, NoStaleWrite).
+        # a file rejected since the read (docs/tla/MatchingStatus.tla, NoRejectedStaleWrite).
         read = None if rejected_file_ids_read is None else list(rejected_file_ids_read)
         cur = self._conn.execute(
             """UPDATE track_identities
