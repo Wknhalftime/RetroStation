@@ -6,22 +6,58 @@ updates the spec in the same PR (the same rule as `ARCHITECTURE.md`).
 
 | Spec | Models | Rulings |
 |---|---|---|
-| [MatchingStatus.tla](MatchingStatus.tla) | song `match_status`: curator (API) vs. Huey worker(s) | AUD-R015, R017, R018/R021, R029 |
+| [MatchingStatus.tla](MatchingStatus.tla) | song `match_status`: curator (API) vs. Huey worker(s) | AUD-R015, R017, R018/R021, R029; #264 |
 | [MBPacing.tla](MBPacing.tla) | MusicBrainz request pacing: `mb_clock.wait_turn` + `mb_client._fetch`, API and worker | AUD-R102, R104 |
 
 ## MatchingStatus models
 
-| Config | Workers | Artist-link cascade | Guard | TLC result (2026-11-22) |
-|---|---|---|---|---|
-| `MC_w1_nolink.cfg` | 1 | off | on | all hold (12,041 distinct states) |
-| `MC_w2_nolink.cfg` | 2 | off | on | `NoStaleWrite` fails: a second worker's re-check rewinds a song the first worker read (why AUD-R017 exists) |
-| `MC_w1_link.cfg` | 1 | on | on | `NoStaleWrite` fails: read, curator rejects, curator links the artist (song back to pending), worker writes from the old read |
-| `MC_unguarded.cfg` | 1 | off | off | negative control: `CuratorDecisionStands` fails (the worker overwrites a rejection it read as pending) |
+Two guards on the worker's write (`update_match_status_if_pending`): the status guard
+(`Guarded`, AUD-R018) and, since #264, the rejected-files guard (`RejectedGuard`: the song's
+`rejected_file_ids` must equal, as a set, the list the worker read). `rejected_file_ids` is a
+version per song (`rej`), bounded by `MaxEpoch` like the pending periods.
 
-`CuratorDecisionStands` alone (`NoStaleWrite` left out of the config, so TLC reaches it) holds
-for two workers (146,597 states), one worker with the link cascade (202,649) and two workers
-with the link cascade (1,822,724). The guarded write keeps every curator decision; what fails
-is only the freshness of the worker's read.
+| Config | Workers | Link cascade | Status guard | Rejected guard | TLC result (2026-11-23) |
+|---|---|---|---|---|---|
+| `MC_w1_nolink.cfg` | 1 | off | on | on | all hold (334,304 distinct states) |
+| `MC_w2_nolink.cfg` | 2 | off | on | on | `NoStaleWrite` fails: a second worker's re-check rewinds a song the first worker read (why AUD-R017 exists) |
+| `MC_w1_link.cfg` | 1 | on | on | on | `NoStaleWrite` fails: see below |
+| `MC_unguarded.cfg` | 1 | off | off | off | negative control: `CuratorDecisionStands` fails (the worker overwrites a rejection it read as pending) |
+| `MC_w1_link_before264.cfg` | 1 | on | on | off | negative control: `NoRejectedStaleWrite` fails: read, curator rejects a file, links the artist (back to pending), worker writes from the old list |
+| `MC_w2_nolink_guards.cfg` | 2 | off | on | on | all hold without `NoStaleWrite` (7,392,504) |
+| `MC_w1_link_guards.cfg` | 1 | on | on | on | all hold without `NoStaleWrite` (7,200,791) |
+| `MC_w2_link_guards.cfg` | 2 | on | on | on | all hold without `NoStaleWrite` (158,624,959) |
+
+The `_guards` configs leave `NoStaleWrite` out so TLC reaches the other properties. With both
+guards on, `NoRejectedStaleWrite` holds by construction (the guard and the ghost test the same
+equality in the same step); what the runs add is that `CuratorDecisionStands` and
+`WorkersNeverWriteManual` hold with the rejected guard in, for two workers and the link cascade.
+The informative results are the before-#264 control failing and `NoStaleWrite` still failing.
+
+**Why `MC_w1_link` still fails after #264.** `NoStaleWrite` asks more than #264 guards: that a
+worker's write lands only on the pending period it read. A song can leave pending and come back
+without its rejected files changing, and the write then lands:
+
+1. the worker reads the song pending;
+2. the curator rejects the artist (the song goes `auto_rejected`; no file is rejected);
+3. the curator links the artist (the cascade sends the song back to `pending`);
+4. the worker writes its result from the read in step 1.
+
+TLC finds this with rejections that always add a file (checked on a scratch copy). The committed
+model also lets a Reject or Unmatch record a file already in the list (a widening: the service
+accepts any `shown_file_id`, and a manual match to a rejected file can be unmatched), which gives
+a shorter trace through `CuratorReject`. Either way the rejected-files list the worker used is
+the current one, so it cannot suggest a rejected file; what is stale is the rest of the read.
+
+**A lead the model found, reproduced in code.** `match_identities_for_playlist` reads each pending song's artist once,
+at stage start (`identity_matching_service.py`, `artists_by_id`), and the match job the link
+cascade enqueues reads only pending songs. So a song the running job read before an artist link
+can be decided from the pre-link artist and then skipped by the link's own job, until the next
+re-check rewinds it if it ended undecided. Worker results are nondeterministic in this model, so
+whether a pre-link read gives a different decision is a question for the code, not for TLC. A
+fakes-based test (`tests/services/test_stale_artist_link_read.py`, branch
+`test/stale-artist-link-read`, 2026-11-23) shows it does: with two near titles that tie on the
+name path, the song the run read before the link ends in review, where the link's Step A would
+auto-match it, and the link's job skips it.
 
 ## MBPacing models
 
