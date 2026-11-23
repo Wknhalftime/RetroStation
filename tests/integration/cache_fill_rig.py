@@ -5,15 +5,17 @@ The fill runs for real: its tasks, its SQL and the real ``MusicBrainzApiClient``
 database's ``mb_cache``. Only the network, the clock and Huey's queue are stand-ins:
 
 - ``MbServer`` is the client's mock transport. It answers every search with nothing found unless
-  a test says otherwise, and records each request as the call it makes (a 503 is retried, so it is
-  three requests for one call; a timeout or a network error is one). Each request steps a fake
-  monotonic clock by ``seconds_per_call``, and notes what another connection sees as it arrives:
-  the fill's RUNNING row and the ``mb_cache`` rows already committed.
+  a test says otherwise, and records each request as the call it makes (the fill asks each call
+  once, a 503 included: phase 4.1 PR 2b, D10). Each request steps a fake monotonic clock by
+  ``seconds_per_call``, and notes what another connection sees as it arrives: the fill's RUNNING
+  row and the ``mb_cache`` rows already committed. The fill's pause after a refusal (D10) steps
+  the same clock instead of sleeping, and is noted in ``pauses``.
 - What a task queues lands in ``Fill.queue`` (``huey.enqueue``), and ``huey.pending()`` reads it,
   so the fill's guard sees a queued batch as Huey would show it.
 
 The patch points are the fill task module's own names: ``MusicBrainzApiClient`` (built with the
-cache repository first), ``monotonic`` (the batch's clock) and ``FILL_LIMITS``.
+cache repository first), ``monotonic`` (the batch's clock), ``sleep`` (the pause) and
+``FILL_LIMITS``.
 """
 
 from __future__ import annotations
@@ -143,6 +145,7 @@ class MbServer:
     unknown: set[str] = field(default_factory=set)  # MBIDs the search index doesn't know
     requests: list[Asked] = field(default_factory=list)
     seen: list[Seen] = field(default_factory=list)
+    pauses: list[tuple[int, float]] = field(default_factory=list)  # requests before, seconds
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         asked = read_request(request)
@@ -153,6 +156,11 @@ class MbServer:
         if outcome is not None:
             return OUTCOMES[outcome](request)
         return httpx.Response(200, json=self._answer(asked), request=request)
+
+    def pause(self, seconds: float) -> None:
+        """The fill's pause after a refusal (D10): the clock steps on instead of sleeping."""
+        self.pauses.append((len(self.requests), seconds))
+        self.clock += seconds
 
     def _outcome(self, asked: Asked) -> str | None:
         if self.script:
@@ -222,6 +230,7 @@ class Fill:
         monkeypatch.setattr(retry, "wait", wait_none())
         monkeypatch.setattr(cache_fill_tasks, "MusicBrainzApiClient", self._client)
         monkeypatch.setattr(cache_fill_tasks, "monotonic", lambda: self.server.clock)
+        monkeypatch.setattr(cache_fill_tasks, "sleep", self.server.pause)
         self._monkeypatch = monkeypatch
 
     def close(self) -> None:
