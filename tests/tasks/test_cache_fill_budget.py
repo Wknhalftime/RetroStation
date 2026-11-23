@@ -203,6 +203,26 @@ def test_the_pause_counts_inside_the_batchs_110_seconds(conn: Conn, fill: Fill) 
         pass
     assert fill.server.titles() == songs(9)
     assert fill.server.pauses == [(n, PAUSE) for n in (1, 3, 5, 7)]  # the run's last call: none
+    last = fill.last()
+    assert last["requests"] == 9  # the run's, over both batches
+    assert last["failed_calls"] == 5
+
+
+def test_a_pause_spans_the_end_of_a_batch(conn: Conn, fill: Fill) -> None:
+    """S9: a refusal that is its batch's last call still pauses before the next batch's first
+    request, since a request follows in the run."""
+    fill.use(limits(batch_calls=2))
+    payoffs(conn, 4)
+    fill.server.script = [None, "503", None, None]
+
+    fill.start()
+    fill.batch()
+    assert fill.server.pauses == [(2, PAUSE)]
+    while fill.batch():
+        pass
+
+    assert fill.server.titles() == songs(4)
+    assert fill.server.pauses == [(2, PAUSE)]
 
 
 # --- S10, E6: the 2-hour limit ------------------------------------------------------------------
@@ -266,17 +286,42 @@ def test_a_batch_picked_up_after_the_two_hours_makes_no_call(
 
 
 def test_a_run_inside_its_two_hours_goes_on(conn: Conn, fill: Fill, wall: Wall) -> None:
-    """S10: at 119 minutes the run still hands on its next batch."""
+    """S10: a batch that ends at 119 minutes still hands on the run's next batch."""
     fill.use(limits(batch_calls=2))
-    payoffs(conn, 4)
+    payoffs(conn, 6)
 
     fill.start()
     fill.batch()
     wall.offset = TWO_HOURS - timedelta(minutes=1)
     fill.batch()
 
-    assert fill.server.titles() == songs(4)
+    assert len(fill.batches_waiting()) == 1
+    assert fill.last()["ended"] is None
+    while fill.batch():
+        pass
+    assert fill.server.titles() == songs(6)
     assert fill.last()["ended"] == "done"
+
+
+def test_a_run_that_finishes_as_the_two_hours_pass_ends_done(
+    conn: Conn, fill: Fill, wall: Wall
+) -> None:
+    """S10: a run whose last call lands as the 2 hours pass left nothing waiting: it ends
+    ``done``, with its usual detail, not "stopped (2 hours up)"."""
+    fill.use(limits(batch_calls=2))
+    payoffs(conn, 4)
+
+    fill.start()
+    fill.batch()
+    # The second batch starts at 119:59 into the run and ends at 120:01, with nothing left.
+    wall.offset = TWO_HOURS - timedelta(seconds=1) - timedelta(seconds=fill.server.clock)
+    fill.batch()
+
+    last = fill.last()
+    assert fill.server.titles() == songs(4)
+    assert last["ended"] == "done"
+    assert last["detail"] == "payoff, 2 of 2 (cap 2,600)"
+    assert last["next_batch"] is False
 
 
 # --- S11: the report ----------------------------------------------------------------------------
