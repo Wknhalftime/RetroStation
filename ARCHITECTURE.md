@@ -1215,7 +1215,10 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   It also requires the song's artist to still have the status the run read at stage start:
   a song whose artist the curator linked or rejected before the run wrote it stays pending
   for the job the link enqueued (`tests/integration/test_stale_artist_link_pg.py`). A relink
-  to another target keeps the status and is not caught.
+  to another target keeps the status and is not caught. On the artist model the guard reads
+  only the name's status, so any link change that leaves that status as it was isn't caught:
+  a manual relink to another artist, or a second link added to a matched name. The song keeps
+  the result scored against the old links until its next re-check.
 - **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
   `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
   cadence, `%TEMP%/retrostation-musicbrainz.clock`). The clock spaces the stamps, not the
