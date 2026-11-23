@@ -70,6 +70,14 @@ def _credit_stripped_forms(original_title: str) -> list[str]:
     return forms
 
 
+def credit_stripped_title(original_title: str) -> str:
+    """The raw broadcast title with its f/ credit stripped, not normalized: the cache fill's
+    name + title search keeps MusicBrainz's spelling and drops only the guest credit
+    ("Maria Maria (f/The Product G&B)" -> "Maria Maria"). A w/ credit stays, as in the first
+    of broadcast_title_variants."""
+    return _credit_stripped_forms(original_title)[0]
+
+
 def broadcast_title_variants(original_title: str) -> tuple[str, ...]:
     """Normalized forms of a raw broadcast title to score library titles against.
 

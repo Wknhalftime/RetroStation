@@ -69,7 +69,10 @@ def has_joiner(name: str) -> bool:
     joiner standing alone."""
     if _SYMBOL_JOINERS.search(name):
         return True
-    return any(word.lower() in _WORD_JOINERS for word in name.split())
+    return any(
+        token.lower() in _WORD_JOINERS or token.strip(_TRIMMED).lower() in _WORD_JOINERS
+        for token in name.split()
+    )
 
 
 def search_title(original_title: str) -> str:

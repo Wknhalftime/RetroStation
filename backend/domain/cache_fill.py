@@ -20,6 +20,16 @@ from typing import Any
 from backend.domain.enums import FillTier
 
 
+class CacheFillError(Exception):
+    """Base class for the cache fill's errors."""
+
+
+class MusicBrainzRefusingError(CacheFillError):
+    """MusicBrainz refused too many of the run's calls in a row (a 4xx other than 429), with no
+    answer between them: a block or a query bug, not one bad item. The batch ends FAILED, so the
+    bar shows it until dismissed, instead of the run spending its caps on refusals."""
+
+
 @dataclass(frozen=True)
 class NamePair:
     """A searched log name with one of its titles (payoff, tail): a (name, normalized title)
@@ -80,7 +90,8 @@ class FillRun:
     failed: Mapping[FillTier, int] = field(default_factory=dict)
     skipped: Mapping[FillTier, int] = field(default_factory=dict)
     missed: frozenset[str] = frozenset()
-    in_a_row: int = 0
+    in_a_row: int = 0  # transient failures in a row (the cut-off, E1)
+    refused_in_a_row: int = 0  # permanent errors since the last answer
     filled: Mapping[FillTier, frozenset[str]] = field(default_factory=dict)
 
     @classmethod
@@ -112,6 +123,7 @@ class FillRun:
             **self.totals(),
             "missed": sorted(self.missed),
             "in_a_row": self.in_a_row,
+            "refused_in_a_row": self.refused_in_a_row,
             "filled": {tier.value: sorted(names) for tier, names in self.filled.items()},
         }
         return json.dumps(payload, separators=(",", ":"))
@@ -126,6 +138,7 @@ class FillRun:
             skipped=_counts(payload.get("skipped")),
             missed=frozenset(payload.get("missed", ())),
             in_a_row=int(payload.get("in_a_row", 0)),
+            refused_in_a_row=int(payload.get("refused_in_a_row", 0)),
             filled={
                 FillTier(tier): frozenset(names)
                 for tier, names in (payload.get("filled") or {}).items()

@@ -250,11 +250,16 @@ export function useRerunMatching() {
   });
 }
 
-// A re-check ("matching_recheck"), a matching fan-out ("matching") or the artist linking that
-// precedes the MB pass's re-check ("artist_linking", D15) is in flight. The Re-run button is
-// disabled while true: a second press would rewind everything the first run already decided
-// and repeat the whole job.
-const MATCHING_TASK_TYPES = new Set(["matching_recheck", "matching", "artist_linking"]);
+// A re-check ("matching_recheck"), the cache fill's names re-check ("names_recheck", phase 4.1
+// D7), a matching fan-out ("matching") or the artist linking that precedes the MB pass's
+// re-check ("artist_linking", D15) is in flight. The Re-run button is disabled while true: a
+// second press would rewind everything the first run already decided and repeat the whole job.
+const MATCHING_TASK_TYPES = new Set([
+  "matching_recheck",
+  "names_recheck",
+  "matching",
+  "artist_linking",
+]);
 
 export function useMatchingRunning(): boolean {
   const queryClient = useQueryClient();

@@ -47,6 +47,11 @@ FILL_LIMITS = FillLimits(
     ),
 )
 
+REFUSALS_TO_FAIL = 20
+"""Permanent errors (a 4xx other than 429) in a row, with no answer between, that end the batch
+FAILED (the review of PR 2): one is an item skipped for the run (M5), twenty a block or a query
+bug. Not in FillLimits: the budget Lance approved is the caps and the batch."""
+
 ALIASES_PER_CALL = 100
 """MBIDs in one alias search: MusicBrainz caps a search's results at 100 (D3)."""
 

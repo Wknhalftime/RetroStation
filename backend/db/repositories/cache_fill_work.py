@@ -70,7 +70,7 @@ acts AS (
            WHERE f.file_status = 'present'
           UNION ALL
           SELECT ti.normalized_title,
-                 CASE WHEN a.mbid IS NOT NULL AND NOT (a.mbid = ANY(%(special)s))
+                 CASE WHEN coalesce(a.mbid, '') <> '' AND NOT (a.mbid = ANY(%(special)s))
                       THEN 'mbid:' || lower(a.mbid) ELSE 'artist:' || a.id END
             FROM track_identities ti
             JOIN titles t ON t.normalized_title = ti.normalized_title
@@ -92,11 +92,11 @@ SELECT ba.normalized_name, ba.original_name, p.normalized_title, p.title, p.play
 _UNTAGGED_FILES = """
 WITH known AS (
     SELECT a.normalized_name AS name FROM artists a
-     WHERE a.mbid IS NOT NULL AND NOT (a.mbid = ANY(%(special)s))
+     WHERE coalesce(a.mbid, '') <> '' AND NOT (a.mbid = ANY(%(special)s))
        AND a.normalized_name IS NOT NULL
     UNION
     SELECT n.normalized_name FROM artist_names n JOIN artists a ON a.id = n.artist_id
-     WHERE a.mbid IS NOT NULL AND NOT (a.mbid = ANY(%(special)s))
+     WHERE coalesce(a.mbid, '') <> '' AND NOT (a.mbid = ANY(%(special)s))
 )
 SELECT f.artist_name, f.track_title AS title, count(*) AS files
   FROM library_files f
@@ -116,7 +116,7 @@ WITH manual AS (
      WHERE l.state = 'active'
      GROUP BY l.broadcast_artist_id
     HAVING count(*) = 1 AND bool_and(l.origin = 'manual')
-       AND bool_and(a.mbid IS NOT NULL AND NOT (a.mbid = ANY(%(special)s)))
+       AND bool_and(coalesce(a.mbid, '') <> '' AND NOT (a.mbid = ANY(%(special)s)))
 ),
 names AS (
     SELECT ba.id FROM broadcast_artists ba JOIN manual m ON m.id = ba.id

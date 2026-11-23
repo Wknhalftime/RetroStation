@@ -25,7 +25,7 @@ from backend.config import get_settings
 from backend.db.repositories.musicbrainz_cache import PgMusicBrainzCacheRepository
 from backend.db.repositories.system_logs import PgSystemLogRepository
 from backend.db.repositories.task_progress import PgTaskProgressRepository
-from backend.db.sync_conn import connect_sync
+from backend.db.sync_conn import commit_or_unavailable, connect_sync
 from backend.domain.cache_fill import FillRun
 from backend.domain.enums import LogCategory, TaskType
 from backend.services.cache_fill_constants import FILL_BATCH_PRIORITY, FILL_LIMITS
@@ -64,14 +64,17 @@ def mb_cache_fill_task() -> None:
             logger.warning("mb_cache_fill_refused", running=running, queued=queued)
             return
         run = FillRun.start(datetime.now(UTC))
+        refused: list[bool] = []
         enqueue_or_log(
             lambda: mb_cache_fill_batch_task(run.to_json()),
             task_name=BATCH_TASK,
             caller_task_id=f"mb_cache_fill:{run.started_at}",
             log_category=LogCategory.ENRICHMENT,
             sys_log_repo=PgSystemLogRepository(conn),
+            on_failure=lambda: refused.append(True),
         )
-        logger.info("mb_cache_fill_started", run_started_at=run.started_at)
+        if not refused:
+            logger.info("mb_cache_fill_started", run_started_at=run.started_at)
 
 
 class _Shown:
@@ -106,6 +109,16 @@ def mb_cache_fill_batch_task(run: str) -> dict[str, int]:
     )
     with task_run(settings.database_url, config) as handle:
         shown.append(_Shown(handle))
+        # The row exists from the start, label only, so the guard (D6) sees the batch while it
+        # plans; the first call's row replaces it.
+        handle.report_running(
+            progress_data={
+                "processed": 0,
+                "total": 0,
+                "run_started_at": state.started_at,
+                **state.totals(),
+            }
+        )
         handle.log_started(details={"run_started_at": state.started_at})
         outcome = _batch(settings.database_url, settings.mb_cache_ttl_days, state, shown[0])
         handle.set_completed(progress_data=outcome.progress, details=outcome.progress)
@@ -150,8 +163,11 @@ def _batch(database_url: str, ttl_days: int, state: FillRun, shown: _Shown) -> B
         plan = plan_run(sources, state, limits)
         with MusicBrainzApiClient(PgMusicBrainzCacheRepository(conn), ttl_days=ttl_days) as client:
             ports = BatchPorts(
-                client=client, commit=conn.commit, clock=monotonic, report=shown.report
+                client=client,
+                commit=lambda: commit_or_unavailable(conn),
+                clock=monotonic,
+                report=shown.report,
             )
             outcome = run_batch(plan, state, limits, ports)
-        conn.commit()
+        commit_or_unavailable(conn)
     return outcome

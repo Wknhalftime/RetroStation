@@ -1236,7 +1236,10 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   earlier in the run, is skipped, and one key is called once. `run_batch` makes at most 100 calls,
   none after 110 s, commits each as it lands, and ends the run at 5 transient failures in a row
   across its batches (the last row then says "stopped (MusicBrainz not answering)", D8); a
-  permanent 4xx is logged and skipped for the run (M5). The words come from
+  permanent 4xx is logged and skipped for the run (M5), and 20 in a row with no answer between
+  end the batch FAILED (`MusicBrainzRefusingError`: a block or a query bug, not one bad item).
+  Name + title searches drop the log's f/ credit from the title (`credit_stripped_title`) and
+  keep the rest as logged. The words come from
   `services/cache_fill_words` (`name_words`, `search_title`). The names re-check
   (`rematch_names_task`) rewinds as the re-check does, on its own task type, so the "changed"
   watermark never moves for it (S7, R6). Known gaps: a batch that dies loses the names its tier

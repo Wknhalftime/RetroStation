@@ -20,14 +20,21 @@ from typing import Any, Protocol
 import httpx
 import structlog
 
-from backend.domain.cache_fill import FillRun, ManualTitle, NamePair, QueuedPair, UntaggedFile
+from backend.domain.cache_fill import (
+    FillRun,
+    ManualTitle,
+    MusicBrainzRefusingError,
+    NamePair,
+    QueuedPair,
+    UntaggedFile,
+)
 from backend.domain.enums import ArtistNameSource, FillTier
 from backend.domain.matching import ARTIST_UNDECIDED_STATUSES
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_names import ArtistNameRepository
 from backend.repositories.cache_fill_work import CacheFillWorkRepository
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
-from backend.services.cache_fill_constants import ALIASES_PER_CALL, FillLimits
+from backend.services.cache_fill_constants import ALIASES_PER_CALL, REFUSALS_TO_FAIL, FillLimits
 from backend.services.cache_fill_words import has_joiner, name_words, search_title
 from backend.services.matching_utils import is_likely_truncated
 from backend.services.mb_client import (
@@ -39,7 +46,7 @@ from backend.services.mb_client import (
 from backend.services.mb_types import MbAlias
 from backend.services.normalization import normalize_artist
 from backend.services.recording_search import is_transient_mb_failure
-from backend.services.title_scoring import broadcast_title_variants
+from backend.services.title_scoring import broadcast_title_variants, credit_stripped_title
 
 logger = structlog.get_logger()
 
@@ -176,8 +183,7 @@ def plan_run(sources: FillSources, run: FillRun, limits: FillLimits) -> list[Fil
     by_tier = _search_calls(sources)
     mbids = sources.work.catalog_mbids()
     wanted = [key for calls in by_tier.values() for call in calls for key in call.keys]
-    live = sources.cache.get_many([*wanted, *map(aliases_key, mbids)]).keys()
-    done = set(live) | run.missed
+    done = sources.cache.live_keys([*wanted, *map(aliases_key, mbids)]) | run.missed
     by_tier[FillTier.ALIASES] = _alias_calls(mbids, done, sources.write_aliases)
     return _within_caps(by_tier, done, run, limits)
 
@@ -196,36 +202,36 @@ def _search_calls(sources: FillSources) -> dict[FillTier, list[FillCall]]:
     }
 
 
-def _name_title(
-    tier: FillTier, original_name: str, title: str, names: frozenset[str], max_len: int
-) -> NameTitleCall | None:
-    """The log name's search, or None when the title leaves nothing to search."""
-    phrase = search_title(title)
+@dataclass(frozen=True)
+class _Searched:
+    """A log name with one of its titles, as a name + title search reads it."""
+
+    original_name: str
+    normalized_name: str
+    title: str
+
+
+def _name_title(tier: FillTier, searched: _Searched, max_len: int) -> NameTitleCall | None:
+    """The log name's search, or None when the title leaves nothing to search. The title keeps
+    MusicBrainz's spelling and drops only the log's f/ credit ("is also the form to search
+    MusicBrainz with", ``broadcast_title_variants``)."""
+    phrase = search_title(credit_stripped_title(searched.title))
     if not phrase:
         return None
-    truncated = is_likely_truncated(original_name, max_len)
-    return NameTitleCall(tier, name_words(original_name, truncated=truncated), phrase, names)
+    name = searched.original_name
+    words = name_words(name, truncated=is_likely_truncated(name, max_len))
+    return NameTitleCall(tier, words, phrase, frozenset({searched.normalized_name}))
 
 
 def _pair_calls(tier: FillTier, pairs: Sequence[NamePair], max_len: int) -> list[FillCall]:
-    calls = (
-        _name_title(tier, p.original_name, p.title, frozenset({p.normalized_name}), max_len)
-        for p in pairs
-    )
+    searched = (_Searched(p.original_name, p.normalized_name, p.title) for p in pairs)
+    calls = (_name_title(tier, s, max_len) for s in searched)
     return [call for call in calls if call is not None]
 
 
 def _queued_calls(queued: Sequence[QueuedPair], max_len: int) -> list[FillCall]:
-    calls = (
-        _name_title(
-            FillTier.CONFIRMATIONS,
-            q.original_name,
-            q.title,
-            frozenset({q.normalized_name}),
-            max_len,
-        )
-        for q in queued
-    )
+    searched = (_Searched(q.original_name, q.normalized_name, q.title) for q in queued)
+    calls = (_name_title(FillTier.CONFIRMATIONS, s, max_len) for s in searched)
     return [call for call in calls if call is not None]
 
 
@@ -269,8 +275,9 @@ def _within_caps(
     run: FillRun,
     limits: FillLimits,
 ) -> list[FillCall]:
-    """Each tier's calls not done, up to its room left this run; a key planned in an earlier
-    tier takes the later call's names instead of a second call (M9)."""
+    """Each tier's calls not done, up to its room left this run; a key already planned takes
+    the later call's names instead of a second call (M9), even past the tier's room, so every
+    name the key fills is re-checked (S7)."""
     planned: dict[str, FillCall] = {}
     for tier in FillTier:
         cap = limits.cap(tier)
@@ -281,11 +288,9 @@ def _within_caps(
                 continue
             if call.key in planned:
                 planned[call.key] = planned[call.key].with_names(call.names)
-                continue
-            if room is not None and taken >= room:
-                break
-            planned[call.key] = call
-            taken += 1
+            elif room is None or taken < room:
+                planned[call.key] = call
+                taken += 1
     return list(planned.values())
 
 
@@ -325,6 +330,7 @@ class _Tally:
     skipped: dict[FillTier, int]
     missed: set[str]
     in_a_row: int
+    refused_in_a_row: int
     filled: dict[FillTier, set[str]]
 
     @classmethod
@@ -335,6 +341,7 @@ class _Tally:
             skipped=dict(run.skipped),
             missed=set(run.missed),
             in_a_row=run.in_a_row,
+            refused_in_a_row=run.refused_in_a_row,
             filled={tier: set(names) for tier, names in run.filled.items()},
         )
 
@@ -343,6 +350,7 @@ class _Tally:
         self.calls[tier] = self.calls.get(tier, 0) + 1
         if answer is _Answer.ANSWERED:
             self.in_a_row = 0
+            self.refused_in_a_row = 0
             self.filled.setdefault(tier, set()).update(call.names)
             return
         self.missed.update(call.keys)
@@ -351,6 +359,7 @@ class _Tally:
             self.in_a_row += 1
         else:
             self.skipped[tier] = self.skipped.get(tier, 0) + 1
+            self.refused_in_a_row += 1
 
     def run(self, started_at: str) -> FillRun:
         return FillRun(
@@ -360,6 +369,7 @@ class _Tally:
             skipped=dict(self.skipped),
             missed=frozenset(self.missed),
             in_a_row=self.in_a_row,
+            refused_in_a_row=self.refused_in_a_row,
             filled={tier: frozenset(names) for tier, names in self.filled.items() if names},
         )
 
@@ -394,72 +404,85 @@ def _detail(tier: FillTier, done: int, total: int, limits: FillLimits) -> str:
     return text if cap is None else f"{text} (cap {cap:,})"
 
 
-def _row(
-    tier: FillTier | None, done: int, total: int, limits: FillLimits, run: FillRun
-) -> dict[str, Any]:
-    return {
-        "tier": None if tier is None else tier.value,
-        "processed": done,
-        "total": total,
-        "cap": None if tier is None else limits.cap(tier),
-        "detail": "nothing to fill" if tier is None else _detail(tier, done, total, limits),
-        "run_started_at": run.started_at,
-        **run.totals(),
-    }
+@dataclass
+class _Batch:
+    """One batch as it goes: the run's plan, the batch's limits, and the calls made so far."""
+
+    plan: Sequence[FillCall]
+    limits: FillLimits
+    started_at: str
+    tally: _Tally
+    made: list[FillCall] = field(default_factory=list)
+
+    @property
+    def calls(self) -> Sequence[FillCall]:
+        """The calls this batch may make: the plan's first ``batch_calls``."""
+        return self.plan[: self.limits.batch_calls]
+
+    @property
+    def cut_off(self) -> bool:
+        return self.tally.in_a_row >= self.limits.cutoff
+
+    def row(self, tier: FillTier | None) -> dict[str, Any]:
+        """The batch's progress row, the next (or last) call's tier named."""
+        done, total = len(self.made), len(self.calls)
+        return {
+            "tier": None if tier is None else tier.value,
+            "processed": done,
+            "total": total,
+            "cap": None if tier is None else self.limits.cap(tier),
+            "detail": "nothing to fill"
+            if tier is None
+            else _detail(tier, done, total, self.limits),
+            "run_started_at": self.started_at,
+            **self.tally.run(self.started_at).totals(),
+        }
+
+    def outcome(self) -> BatchOutcome:
+        goes_on = not self.cut_off and len(self.plan) > len(self.made)
+        after = self.tally.run(self.started_at)
+        left = set(FillTier) if not goes_on else _tiers_left(self.plan, self.made)
+        rechecks = [
+            (tier, sorted(after.filled[tier]))
+            for tier in FillTier
+            if after.filled.get(tier) and tier in left
+        ]
+        last = self.made[-1] if self.made else None
+        row = self.row(None if last is None else last.tier)
+        if self.cut_off and last is not None:
+            row["detail"] = f"{last.tier.value}, {STOPPED}"
+        row.update(cut_off=self.cut_off, next_batch=goes_on)
+        next_run = after.handed_off(tier for tier, _names in rechecks) if goes_on else None
+        return BatchOutcome(next_run=next_run, rechecks=rechecks, progress=row)
 
 
 def run_batch(
     plan: Sequence[FillCall], run: FillRun, limits: FillLimits, ports: BatchPorts
 ) -> BatchOutcome:
     """Make the plan's first calls, at most ``batch_calls`` and none once ``batch_seconds`` have
-    passed, until the run's transient failures in a row reach the cut-off."""
-    batch = plan[: limits.batch_calls]
-    tally = _Tally.of(run)
+    passed, until the run's transient failures in a row reach the cut-off.
+
+    Raises:
+        MusicBrainzRefusingError: ``REFUSALS_TO_FAIL`` permanent errors in a row, with no answer
+            between; the calls already made stay committed.
+    """
+    batch = _Batch(plan, limits, run.started_at, _Tally.of(run))
     start = ports.clock()
-    done = 0
-    last: FillCall | None = None
-    for call in batch:
+    for call in batch.calls:
         if ports.clock() - start >= limits.batch_seconds:
             break
-        ports.report(_row(call.tier, done, len(batch), limits, tally.run(run.started_at)))
-        tally.record(call, _ask(call, ports.client))
+        ports.report(batch.row(call.tier))
+        batch.tally.record(call, _ask(call, ports.client))
         ports.commit()
-        done += 1
-        last = call
-        if tally.in_a_row >= limits.cutoff:
+        batch.made.append(call)
+        if batch.tally.refused_in_a_row >= REFUSALS_TO_FAIL:
+            raise MusicBrainzRefusingError(
+                f"MusicBrainz refused {batch.tally.refused_in_a_row} fill calls in a row "
+                f"(the last {call.key}); the run stopped"
+            )
+        if batch.cut_off:
             break
-    return _outcome(plan, batch[:done], last, tally, run.started_at, limits)
-
-
-def _outcome(
-    plan: Sequence[FillCall],
-    made: Sequence[FillCall],
-    last: FillCall | None,
-    tally: _Tally,
-    started_at: str,
-    limits: FillLimits,
-) -> BatchOutcome:
-    cut_off = tally.in_a_row >= limits.cutoff
-    goes_on = not cut_off and len(plan) > len(made)
-    after = tally.run(started_at)
-    left = set(FillTier) if not goes_on else _tiers_left(plan, made)
-    rechecks = [
-        (tier, sorted(after.filled[tier]))
-        for tier in FillTier
-        if after.filled.get(tier) and tier in left
-    ]
-    row = _row(
-        None if last is None else last.tier,
-        len(made),
-        min(len(plan), limits.batch_calls),
-        limits,
-        after,
-    )
-    if cut_off and last is not None:
-        row["detail"] = f"{last.tier.value}, {STOPPED}"
-    row.update(cut_off=cut_off, next_batch=goes_on)
-    next_run = after.handed_off(tier for tier, _names in rechecks) if goes_on else None
-    return BatchOutcome(next_run=next_run, rechecks=rechecks, progress=row)
+    return batch.outcome()
 
 
 def _tiers_left(plan: Iterable[FillCall], made: Sequence[FillCall]) -> set[FillTier]:
