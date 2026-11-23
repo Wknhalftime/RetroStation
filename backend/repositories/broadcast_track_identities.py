@@ -60,12 +60,26 @@ class BroadcastTrackIdentityRepository(ABC):
         tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
+        rejected_file_ids_read: Collection[UUID] | None = None,
+        artist_status_read: MatchStatus | None = None,
     ) -> bool:
         """`update_match_status`, but only while the row is still PENDING.
 
         Used by the matching worker (AUD-R018): the API runs in another process, so a
         decision the user makes while the worker runs must not be overwritten. Returns True
         when the row was still PENDING and was updated; False, changing nothing, otherwise.
+
+        With ``rejected_file_ids_read`` (the rejected files the worker scored the song
+        against), the row must also still hold exactly those files, compared as a set. A
+        song rejected and sent back to pending while the run held its old read is left
+        pending for the matching job that sent it back (docs/tla/MatchingStatus.tla,
+        NoRejectedStaleWrite).
+
+        With ``artist_status_read`` (the status of the song's artist when the worker read it),
+        the artist must still have that status. A song whose artist the curator linked or
+        rejected while the run held its old read is left pending for the matching job the
+        link enqueued (tests/integration/test_stale_artist_link_pg.py). A relink to another
+        target keeps the status, so it is not caught.
         """
         ...
 
