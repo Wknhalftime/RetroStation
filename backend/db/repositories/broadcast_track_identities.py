@@ -151,14 +151,29 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
         tier: MatchTier | None,
         reason_code: ReasonCode | None = None,
         reason_detail: str | None = None,
+        rejected_file_ids_read: Collection[UUID] | None = None,
+        artist_status_read: MatchStatus | None = None,
     ) -> bool:
         # One statement, so a decision committed by another connection between the
-        # worker's read and this write is seen here and wins (AUD-R018).
+        # worker's read and this write is seen here and wins (AUD-R018). The same goes for
+        # a file rejected since the read (docs/tla/MatchingStatus.tla, NoRejectedStaleWrite).
+        read = None if rejected_file_ids_read is None else list(rejected_file_ids_read)
+        # And for an artist linked or rejected since the read: the song's artist must still
+        # have the status the worker scored it with (tests/integration/test_stale_artist_link_pg).
+        artist_read = None if artist_status_read is None else artist_status_read.value
         cur = self._conn.execute(
             """UPDATE track_identities
                SET match_status = %s, match_tier = %s,
                    reason_code = %s, reason_detail = %s
-               WHERE id = %s AND match_status = %s""",
+               WHERE id = %s AND match_status = %s
+                 AND (%s::uuid[] IS NULL
+                      OR (rejected_file_ids @> %s::uuid[]
+                          AND rejected_file_ids <@ %s::uuid[]))
+                 AND (%s::text IS NULL
+                      OR EXISTS (
+                          SELECT 1 FROM broadcast_artists ba
+                           WHERE ba.id = track_identities.broadcast_artist_id
+                             AND ba.match_status = %s))""",
             (
                 status.value,
                 tier.value if tier is not None else None,
@@ -166,6 +181,11 @@ class PgBroadcastTrackIdentityRepository(BroadcastTrackIdentityRepository):
                 reason_detail,
                 identity_id,
                 MatchStatus.PENDING.value,
+                read,
+                read,
+                read,
+                artist_read,
+                artist_read,
             ),
         )
         return cur.rowcount == 1

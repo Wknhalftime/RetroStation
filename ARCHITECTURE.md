@@ -11,7 +11,7 @@ links and suggestions" and "Placeholders are never artists" 2026-11-03 with its 
 "Artist identity" 2026-11-05 with its phase 2a, whose second PR extended it 2026-11-06 and its
 third (Merge) 2026-11-07.
 Rulings cited
-here are in `audit/rulings.jsonl` (AUD-R015..R073, R100, R101 and R102 ACTIVE). If the code and this
+here are in `audit/rulings.jsonl` (AUD-R015..R073 and R100..R104 ACTIVE). If the code and this
 page disagree, fix one of them in the same PR.
 Cite decisions by id and name, never by line number. Streaming decision ids (`D20`, `D109`,
 ...) come from `docs/superpowers/specs/2026-09-27-tune-in-streaming-design.md`, which is
@@ -1207,9 +1207,23 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   The matching workers' status writes are guarded on the `pending` status they read
   (`update_match_status_if_pending`, AUD-R018/R021), so a decision the user makes in the API
   while a run is in progress wins.
+  A song's write also requires the rejected files the run read to be unchanged, as a set:
+  a song the curator rejected and then sent back to pending (an artist link) while the run
+  held its old read stays pending for the matching job that sent it back, so a file
+  rejected mid-run is never suggested from the old read
+  (`tests/services/test_stale_rejection_read.py`; TLA+ model `docs/tla/MatchingStatus.tla`).
+  It also requires the song's artist to still have the status the run read at stage start:
+  a song whose artist the curator linked or rejected before the run wrote it stays pending
+  for the job the link enqueued (`tests/integration/test_stale_artist_link_pg.py`). A relink
+  to another target keeps the status and is not caught. On the artist model the guard reads
+  only the name's status, so any link change that leaves that status as it was isn't caught:
+  a manual relink to another artist, or a second link added to a matched name. The song keeps
+  the result scored against the old links until its next re-check.
 - **MusicBrainz is paced per machine, not per process** (AUD-R102). Every live call goes through
   `MusicBrainzApiClient._fetch`, which waits its turn on `services/mb_clock.py`'s file lock (1.1 s
-  cadence, `%TEMP%/retrostation-musicbrainz.clock`). Artist lookups and library
+  cadence, `%TEMP%/retrostation-musicbrainz.clock`). The clock spaces the stamps, not the
+  arrivals: a request leaves after the lock is released, so two can reach MusicBrainz under 1 s
+  apart; any 3 s holds (AUD-R104, `docs/tla/MBPacing.tla`). Artist lookups and library
   enrichment's recording search are batched 100 per request; the recordings phase's
   `lookup_recording` stays one call per recording because only it carries work relations.
 - **The MusicBrainz cache is logged** (C42; AUD-R042, AUD-R090). 0057 made `mb_cache` LOGGED
@@ -1315,7 +1329,7 @@ baseline with `uv run poe events-baseline` and says why.
    aspiration.
 3. **Decisions live in `audit/rulings.jsonl`.** A ruling left PROPOSED for more than a week is
    treated as rejected. AUD-R032 to AUD-R099 are reserved for the artist model, which reaches
-   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R104.
+   master in one merge and adds rulings in each phase, so the next ruling on master is AUD-R105.
 
 ## Retired (C70, AUD-R045)
 

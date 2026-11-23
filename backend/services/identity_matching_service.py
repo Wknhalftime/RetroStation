@@ -1084,6 +1084,13 @@ def match_identities_for_playlist(
             result.tier,
             reason_code=result.reason_code,
             reason_detail=result.reason_detail,
+            # Scored against this read's rejections: if the curator rejected another file
+            # since, the result is stale and the job that re-queued the song redoes it.
+            rejected_file_ids_read=identity.rejected_file_ids,
+            # Scored with the artist as this run read it at stage start (Tier 1's gate): if
+            # the curator linked or rejected the artist since, the result is stale too, and the
+            # job the link enqueued redoes the song. An orphan has no artist to check.
+            artist_status_read=None if artist is None else artist.match_status,
         ):
             # The user decided this song while the run was matching it (AUD-R018):
             # their decision wins, so no match row and no master recalculation.
