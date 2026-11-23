@@ -48,13 +48,16 @@ accepts any `shown_file_id`, and a manual match to a rejected file can be unmatc
 a shorter trace through `CuratorReject`. Either way the rejected-files list the worker used is
 the current one, so it cannot suggest a rejected file; what is stale is the rest of the read.
 
-**A lead, not a finding.** `match_identities_for_playlist` reads each pending song's artist once,
+**A lead the model found, reproduced in code.** `match_identities_for_playlist` reads each pending song's artist once,
 at stage start (`identity_matching_service.py`, `artists_by_id`), and the match job the link
 cascade enqueues reads only pending songs. So a song the running job read before an artist link
 can be decided from the pre-link artist and then skipped by the link's own job, until the next
 re-check rewinds it if it ended undecided. Worker results are nondeterministic in this model, so
-whether a pre-link read gives a different decision is a question for the code (a fakes-based test
-like #264's), not for TLC.
+whether a pre-link read gives a different decision is a question for the code, not for TLC. A
+fakes-based test (`tests/services/test_stale_artist_link_read.py`, branch
+`test/stale-artist-link-read`, 2026-11-23) shows it does: with two near titles that tie on the
+name path, the song the run read before the link ends in review, where the link's Step A would
+auto-match it, and the link's job skips it.
 
 ## MBPacing models
 
