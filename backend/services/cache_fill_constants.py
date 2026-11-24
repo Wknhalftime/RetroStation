@@ -1,8 +1,9 @@
 """The cache fill's limits (MusicBrainz cache fill, phase 4.1 PR 2; SPEC S4 and the budget
-section's caps from D5's count; M1, M11; AUD-R091).
+section's caps from D5's count; M1, M11; AUD-R091; PR 3's work links: S5, D13, AUD-R092).
 
 Per run, most plays first: payoff 2,600 (C8's common titles skipped, R12: about 47 minutes),
-C68 300, C18 60, confirmations 500 (empty until 4.4, which sizes it) and tail 4,100 (about 75
+C68 300, C18 60, confirmations 500 (empty until 4.4, which sizes it), work links 3,000 (PR 3,
+before the tail by D13: D5's 2,810 releases, about 52 minutes) and tail 4,100 (about 75
 minutes); the alias step is uncapped (43 requests at D5's count). A batch makes at most 100 calls
 and starts none after 110 s, so it stays near 2 minutes even when calls fail slowly (R9); 5
 transient failures in a row end the run. They live here, not in settings: they are the budget
@@ -51,6 +52,7 @@ FILL_LIMITS = FillLimits(
             FillTier.C68: 300,
             FillTier.C18: 60,
             FillTier.CONFIRMATIONS: 500,
+            FillTier.WORK_LINKS: 3000,
             FillTier.TAIL: 4100,
         }
     ),

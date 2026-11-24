@@ -9,7 +9,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Collection
 
-from backend.domain.cache_fill import ManualTitle, NamePair, QueuedPair, UntaggedFile
+from backend.domain.cache_fill import (
+    ManualTitle,
+    NamePair,
+    QueuedPair,
+    UnlinkedRecording,
+    UntaggedFile,
+)
 from backend.domain.enums import MatchStatus
 
 
@@ -47,4 +53,14 @@ class CacheFillWorkRepository(ABC):
     @abstractmethod
     def catalog_mbids(self) -> list[str]:
         """Every real MBID a catalog artist holds."""
+        ...
+
+    @abstractmethod
+    def unlinked_recordings(self) -> list[UnlinkedRecording]:
+        """The work-link tier's list (PR 3, S5, R3-b): each recording of a performance with no
+        known work link (its work isn't a MusicBrainz work, no live ``recording:`` row names a
+        work for it, and no live ``recording-work:`` row exists for it), once for every release
+        a present file of it names. A release with a live ``release-missing:`` marker is left
+        out, and so is a release whose live ``release:`` row doesn't carry the recording (D15).
+        Ordered by release, then recording; which releases to ask is the caller's choice."""
         ...

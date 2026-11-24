@@ -16,7 +16,10 @@ from backend.domain.merge_list import LoggedFailure, MasterView, RejectingLine, 
 from backend.repositories.merge_list import MergeListRepository, PlanCredit, PlanWork
 
 # The work a cached recording lookup says it performs: the first "performance" relation naming a
-# work with an id and a title (``library_enrichment_service.performed_work_of``).
+# work with an id and a title (``library_enrichment_service.performed_work_of``). And the work a
+# ``recording-work:`` row names: the cache fill's link from a release lookup (phase 4.1 PR 3, S5,
+# R3-g; AUD-R092), ``{"work": null}`` when the track performs none. Neither arm reads a
+# ``release:`` row (R1), and both read a row whatever its ``expires_at``.
 _LINKED = """
 SELECT DISTINCT p.work_id,
        jsonb_path_query_first(
@@ -26,6 +29,11 @@ SELECT DISTINCT p.work_id,
        ) #>> '{}' AS work_mbid
   FROM performances p
   JOIN mb_cache c ON c.cache_key = 'recording:' || p.recording_mbid
+ WHERE p.recording_mbid IS NOT NULL
+UNION
+SELECT p.work_id, c.response_data #>> '{work,id}' AS work_mbid
+  FROM performances p
+  JOIN mb_cache c ON c.cache_key = 'recording-work:' || p.recording_mbid
  WHERE p.recording_mbid IS NOT NULL
 """
 

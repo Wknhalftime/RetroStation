@@ -39,6 +39,7 @@ from backend.services.cache_fill_service import (
     alias_writer,
     plan_run,
     run_batch,
+    work_link_writer,
 )
 from backend.services.mb_client import MusicBrainzApiClient
 from backend.services.repository_factory import RepositoryFactory
@@ -166,6 +167,7 @@ def _batch(database_url: str, ttl_days: int, state: FillRun, shown: _Shown) -> B
             work=repos.cache_fill_work,
             cache=repos.musicbrainz_cache,
             write_aliases=alias_writer(repos.artists, repos.artist_names),
+            write_work_links=work_link_writer(repos.musicbrainz_cache, ttl_days),
             name_max_len=get_settings().broadcast_name_max_len,
         )
         plan = plan_run(sources, state, limits)
