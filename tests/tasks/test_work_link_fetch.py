@@ -566,12 +566,19 @@ def test_the_merge_list_plans_what_the_links_join(conn: Conn, fill: Fill) -> Non
         found = plan(repos.merge_list, repos.user_settings).groups
         return [(frozenset({g.target_id, *g.source_ids}), g.joins) for g in found]
 
+    def merges() -> int:
+        """Logged merges. The suite's cleanup doesn't empty the merge log (no FK to works), so
+        an earlier test's merges may still be there: the run must add none."""
+        row = conn.execute("SELECT count(*) AS n FROM work_merges").fetchone()
+        assert row is not None
+        return int(row["n"])
+
     assert groups() == []
+    logged = merges()
 
     fill.run()
 
     assert groups() == [
         (frozenset({labelle.work_id, aguilera.work_id}), frozenset({MergeJoin.WORK_LINK}))
     ]
-    merges = conn.execute("SELECT count(*) AS n FROM work_merges").fetchone()
-    assert merges is not None and merges["n"] == 0
+    assert merges() == logged
