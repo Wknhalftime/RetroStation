@@ -1,6 +1,6 @@
 """The cache fill's work links (MusicBrainz cache fill, phase 4.1 PR 3; SPEC S5; D1, D13; R1, R7;
-the coordinator's readings R3-a to R3-h, and R3-i, R3-j from the lock request; AUD-R092), on
-PostgreSQL through ``cache_fill_rig``.
+the coordinator's readings R3-a to R3-h; R3-i and R3-j, as Lance ruled them in D15 and D16;
+AUD-R092), on PostgreSQL through ``cache_fill_rig``.
 
 - **The tier** (R3-a, D13): ``work_links``, capped at 3,000 calls a run, after confirmations and
   before the tail. It fills no names, so it queues no re-check (R3-h).
@@ -8,7 +8,7 @@ PostgreSQL through ``cache_fill_rig``.
   a MusicBrainz work, no live ``recording:`` row names a work for it, and no live
   ``recording-work:`` row exists for it. Its release is one a present file of the recording names.
   A release with a live ``release-missing:`` marker is left out, and so is a release whose live
-  ``release:`` row doesn't carry the recording (R3-i: one MusicBrainz has since merged).
+  ``release:`` row doesn't carry the recording (R3-i, D15: one MusicBrainz has since merged).
 - **The order** (R3-c): the release covering the most of those recordings first, ties by its
   MBID; a later release counts only the recordings still left, so some releases are never asked.
 - **The call** (R3-d): its keys are the ``recording-work:`` keys of the recordings it's planned
@@ -21,9 +21,10 @@ PostgreSQL through ``cache_fill_rig``.
 - **A 404** (R3-f) writes the marker and nothing else; it's an answer, not a failure.
 - **Through 2b's budget** (AUD-R093): a refused release is one request, followed by the pause,
   and waits for the next run; a 400 is skipped for the run; five refusals in a row end it.
-- **When another release is asked** (R3-j): after a 404, a refusal or a release that doesn't carry
-  the recording, the next time the work list is planned. Here that's the next run, since each
-  run below plans once.
+- **When another release is asked** (R3-j, D16): after a 404 or a release that doesn't carry the
+  recording, the next time the work list is planned. A batch's plan is fixed, so that's the next
+  batch if the run goes on, otherwise the next run. A refused release's recordings are the run's
+  missed keys, so they wait for the next run, through the release the order picks.
 
 The rows reach the merge list on its next load (D1); nothing merges until Lance's Apply.
 """
@@ -435,6 +436,43 @@ def test_a_release_without_the_recording_is_not_asked_for_it_again(conn: Conn, f
     assert cache_entry(conn, work_key(recording_mbid(1))) == linked(work_mbid(1), "Battery")
     assert again(fill) == []
     assert nonzero(fill.last()["calls"]) == {}
+
+
+def test_after_a_miss_the_next_batch_asks_another_release(conn: Conn, fill: Fill) -> None:
+    """R3-j, D16: a batch's plan is fixed and the next batch plans again, so after a 404 or a
+    release without the recording (R3-i) the recording's other release is asked in the next
+    batch of the same run. A refused release's keys are the run's missed keys (AUD-R093), so its
+    recording isn't asked through its other release in that run: it waits for the next run,
+    which asks the release the order picks (here the refused one, first by its MBID)."""
+    fill.use(limits(batch_calls=1))
+    refused, second = release_mbid(1), release_mbid(2)
+    gone, kept = release_mbid(3), release_mbid(4)
+    without, other = release_mbid(5), release_mbid(6)
+    last = release_mbid(7)
+    song(conn, "Battery", recording_mbid(1), refused, second)
+    song(conn, "Orion", recording_mbid(2), gone, kept)
+    song(conn, "Damage Inc", recording_mbid(3), without, other)
+    song(conn, "Disposable Heroes", recording_mbid(4), last)  # asked last: the run goes on to it
+    carried = {refused: 1, second: 1, kept: 2, without: 9, other: 3, last: 4}
+    for mbid, n in carried.items():
+        fill.server.releases[mbid] = release(mbid, [track(recording_mbid(n))])
+    fill.server.fail = {refused: "503"}
+
+    batches = fill.run()
+
+    assert asked_releases(fill) == [refused, gone, kept, without, other, last]
+    assert batches == 6  # one call a batch: each other release comes in the batch after the miss
+    assert fill.server.pauses == [(1, 10.0)]
+    assert cache_keys(conn, "recording-work:") == {
+        work_key(recording_mbid(n)) for n in (2, 3, 4, 9)
+    }
+    end = fill.last()
+    assert (end["ended"], end["failed_calls"]) == ("done", 1)
+
+    fill.server.fail = {}
+    assert again(fill) == [refused]
+    assert work_key(recording_mbid(1)) in cache_keys(conn, "recording-work:")
+    assert again(fill) == []
 
 
 def test_a_refused_release_is_one_request_and_waits_for_the_next_run(
