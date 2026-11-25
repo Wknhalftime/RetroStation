@@ -5,7 +5,8 @@ The fill runs for real: its tasks, its SQL and the real ``MusicBrainzApiClient``
 database's ``mb_cache``. Only the network, the clock and Huey's queue are stand-ins:
 
 - ``MbServer`` is the client's mock transport. It answers every search with nothing found unless
-  a test says otherwise, and records each request as the call it makes (the fill asks each call
+  a test says otherwise, and a release lookup (PR 3's work links) with the release a test gives,
+  or a 404 for any other. It records each request as the call it makes (the fill asks each call
   once, a 503 included: phase 4.1 PR 2b, D10). Each request steps a fake monotonic clock by
   ``seconds_per_call``, and notes what another connection sees as it arrives: the fill's RUNNING
   row and the ``mb_cache`` rows already committed. The fill's pause after a refusal (D10) steps
@@ -75,8 +76,9 @@ class Asked:
     """One request, read back from its query.
 
     ``kind`` is ``"name_title"`` (a name + title search, ``words`` empty for a title-only one),
-    ``"recording"`` (C18's search under one artist MBID) or ``"aliases"`` (an ``arid:`` artist
-    search). Words and titles are as sent, Lucene escaping undone.
+    ``"recording"`` (C18's search under one artist MBID), ``"aliases"`` (an ``arid:`` artist
+    search) or ``"release"`` (a release lookup by its MBID, ``mbid``: PR 3's work links). Words
+    and titles are as sent, Lucene escaping undone.
     """
 
     kind: str
@@ -99,6 +101,7 @@ _PHRASE = re.compile(r'recording:"((?:\\.|[^"\\])*)"$')
 _NAMED = re.compile(r"^artist:\((.*)\) AND recording:")
 _ARID_ONE = re.compile(r"^arid:(\S+) AND recording:")
 _ARID_MANY = re.compile(r"^arid:\((.*)\)$")
+_RELEASE = re.compile(r"/release/([^/]+)/?$")
 
 
 def _unescape(text: str) -> str:
@@ -112,7 +115,10 @@ def _word(term: str) -> str:
 
 
 def read_request(request: httpx.Request) -> Asked:
-    """The call a request makes, from its path and its Lucene query."""
+    """The call a request makes, from its path and its Lucene query (a release lookup has none)."""
+    release = _RELEASE.search(request.url.path)
+    if release is not None:
+        return Asked("release", mbid=release[1])
     query = parse_qs(request.url.query.decode())["query"][0]
     if request.url.path.rstrip("/").endswith("/artist"):
         many = _ARID_MANY.match(query)
@@ -138,11 +144,12 @@ class MbServer:
     seconds_per_call: float = 1.0
     # Per request, in order, before ``fail`` and ``down``: an outcome name, or None to answer.
     script: list[str | None] = field(default_factory=list)
-    fail: dict[str, str] = field(default_factory=dict)  # by title or alias MBID: an outcome
+    fail: dict[str, str] = field(default_factory=dict)  # by title or alias/release MBID: an outcome
     down: str | None = None  # every request's outcome when set
     found: dict[str, dict[str, Any]] = field(default_factory=dict)  # name-title answers, by title
     aliases: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # by artist MBID
     unknown: set[str] = field(default_factory=set)  # MBIDs the search index doesn't know
+    releases: dict[str, dict[str, Any]] = field(default_factory=dict)  # by MBID; others 404
     requests: list[Asked] = field(default_factory=list)
     seen: list[Seen] = field(default_factory=list)
     pauses: list[tuple[int, float]] = field(default_factory=list)  # requests before, seconds
@@ -155,6 +162,8 @@ class MbServer:
         outcome = self._outcome(asked)
         if outcome is not None:
             return OUTCOMES[outcome](request)
+        if asked.kind == "release" and asked.mbid not in self.releases:
+            return httpx.Response(404, json={"error": "Not Found"}, request=request)
         return httpx.Response(200, json=self._answer(asked), request=request)
 
     def pause(self, seconds: float) -> None:
@@ -166,12 +175,16 @@ class MbServer:
         if self.script:
             return self.script.pop(0)
         keys = [asked.title, *sorted(asked.mbids)]
+        if asked.kind == "release":
+            keys.append(asked.mbid)  # a release's; C18's artist MBID is no key
         for key in keys:
             if key and key in self.fail:
                 return self.fail[key]
         return self.down
 
     def _answer(self, asked: Asked) -> dict[str, Any]:
+        if asked.kind == "release":
+            return self.releases[asked.mbid]
         if asked.kind == "aliases":
             return {
                 "artists": [
@@ -200,7 +213,7 @@ class MbServer:
 
     def titles(self) -> list[str]:
         """The titles searched (name + title and C18), in order."""
-        return [a.title for a in self.requests if a.kind != "aliases"]
+        return [a.title for a in self.requests if a.kind not in ("aliases", "release")]
 
 
 # --- the fill, run on the test database ---------------------------------------------------------

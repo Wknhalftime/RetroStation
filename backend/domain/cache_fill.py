@@ -73,6 +73,15 @@ class QueuedPair:
     title: str
 
 
+@dataclass(frozen=True)
+class UnlinkedRecording:
+    """A recording with no known work link, on one release a present file of it names (PR 3,
+    S5, R3-b): one row per (recording, release)."""
+
+    recording_mbid: str
+    release_mbid: str
+
+
 def _counts(raw: Mapping[str, int] | None) -> dict[FillTier, int]:
     return {FillTier(tier): int(n) for tier, n in (raw or {}).items()}
 

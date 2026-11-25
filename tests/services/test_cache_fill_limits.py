@@ -1,8 +1,9 @@
 """The cache fill's limits and names (MusicBrainz cache fill, phase 4.1 PR 2; SPEC S4, the budget
-section's caps from D5's count; M1, M11; AUD-R091).
+section's caps from D5's count; M1, M11; AUD-R091; PR 3's work links: S5, D13, AUD-R092).
 
 Per run, most plays first: payoff 2,600 (C8's common titles skipped, R12), C68 300, C18 60,
-confirmations 500 (empty until 4.4, which sizes it) and tail 4,100; the alias step is uncapped.
+confirmations 500 (empty until 4.4, which sizes it), work links 3,000 (PR 3, before the tail by
+D13) and tail 4,100; the alias step is uncapped.
 A batch makes at most 100 calls, starts none after 110 s, and 5 transient failures in a row end
 the run. The constants live in their own module, not in settings, and the fill's task reads them.
 """
@@ -24,6 +25,7 @@ def test_the_limits_are_d5s() -> None:
             FillTier.C68: 300,
             FillTier.C18: 60,
             FillTier.CONFIRMATIONS: 500,
+            FillTier.WORK_LINKS: 3000,
             FillTier.TAIL: 4100,
         },
     )
@@ -37,6 +39,7 @@ def test_the_tiers_in_their_order() -> None:
         "c68",
         "c18",
         "confirmations",
+        "work_links",
         "tail",
         "aliases",
     ]

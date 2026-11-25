@@ -16,7 +16,13 @@ from typing import Any
 import psycopg
 
 from backend.db.repositories._pg_utils import translate_lost_connection
-from backend.domain.cache_fill import ManualTitle, NamePair, QueuedPair, UntaggedFile
+from backend.domain.cache_fill import (
+    ManualTitle,
+    NamePair,
+    QueuedPair,
+    UnlinkedRecording,
+    UntaggedFile,
+)
 from backend.domain.catalog import SPECIAL_PURPOSE_MBIDS
 from backend.domain.enums import MatchStatus
 from backend.domain.system import StorageUnavailableError
@@ -149,6 +155,45 @@ SELECT DISTINCT mbid FROM artists
  ORDER BY mbid
 """
 
+# PR 3's work list (S5, R3-b, D15). A recording "performs a work" as the merge list's _LINKED
+# reads a ``recording:`` row: its first performance relation naming a work with an id and a
+# title. Unlike _LINKED, an expired row is no row here (C42). A release's live ``release:`` row
+# carries a recording when one of its tracks, on any medium, is that recording.
+_UNLINKED_RECORDINGS = """
+WITH unlinked AS (
+    SELECT DISTINCT p.recording_mbid
+      FROM performances p
+      JOIN works w ON w.id = p.work_id
+     WHERE coalesce(p.recording_mbid, '') <> ''
+       AND (w.origin IS DISTINCT FROM 'musicbrainz' OR w.mbid IS NULL)
+       AND NOT EXISTS (
+           SELECT 1 FROM mb_cache c
+            WHERE c.cache_key = 'recording-work:' || p.recording_mbid AND c.expires_at > now())
+       AND NOT EXISTS (
+           SELECT 1 FROM mb_cache c
+            WHERE c.cache_key = 'recording:' || p.recording_mbid AND c.expires_at > now()
+              AND jsonb_path_exists(
+                  c.response_data,
+                  '$.relations[*] ? (@.type == "performance" && exists(@.work.id)
+                                     && exists(@.work.title))'))
+)
+SELECT DISTINCT u.recording_mbid, f.release_mbid
+  FROM unlinked u
+  JOIN library_files f ON f.recording_mbid = u.recording_mbid
+ WHERE f.file_status = 'present' AND coalesce(f.release_mbid, '') <> ''
+   AND NOT EXISTS (
+       SELECT 1 FROM mb_cache c
+        WHERE c.cache_key = 'release-missing:' || f.release_mbid AND c.expires_at > now())
+   AND NOT EXISTS (
+       SELECT 1 FROM mb_cache c
+        WHERE c.cache_key = 'release:' || f.release_mbid AND c.expires_at > now()
+          AND NOT jsonb_path_exists(
+              c.response_data,
+              '$.media[*].tracks[*].recording.id ? (@ == $rid)',
+              jsonb_build_object('rid', u.recording_mbid)))
+ ORDER BY f.release_mbid, u.recording_mbid
+"""
+
 
 @translate_lost_connection(StorageUnavailableError)
 class PgCacheFillWorkRepository(CacheFillWorkRepository):
@@ -205,3 +250,11 @@ class PgCacheFillWorkRepository(CacheFillWorkRepository):
 
     def catalog_mbids(self) -> list[str]:
         return [str(r["mbid"]) for r in self._rows(_CATALOG_MBIDS)]
+
+    def unlinked_recordings(self) -> list[UnlinkedRecording]:
+        return [
+            UnlinkedRecording(
+                recording_mbid=str(r["recording_mbid"]), release_mbid=str(r["release_mbid"])
+            )
+            for r in self._rows(_UNLINKED_RECORDINGS)
+        ]

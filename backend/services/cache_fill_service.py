@@ -3,25 +3,34 @@ PR 2; SPEC S3, S4, S7, E1, E2, E4, E5; D3, D4, D8; M1-M11 as the coordinator rea
 AUD-R091).
 
 ``plan_run`` is a query: every call the run still has room for, in tier order (payoff, C68, C18,
-confirmations, tail, then the alias step), skipping any query with a live cache entry (C42) or
-tried and not answered earlier in the run, one call per cache key (M9), each tier within its cap
-for the run. ``run_batch`` makes the first of them, one at a time, committing each call's rows
-as they land (R8), and returns the run's next state: what to re-check, and whether the run goes
-on.
+confirmations, work links, tail, then the alias step), skipping any query with a live cache
+entry (C42) or tried and not answered earlier in the run, one call per cache key (M9), each tier
+within its cap for the run. ``run_batch`` makes the first of them, one at a time, committing
+each call's rows as they land (R8), and returns the run's next state: what to re-check, and
+whether the run goes on.
 
 PR 2b's request budget (D9, D10, D11, D12; AUD-R093): each call is one request (the task hands
 the batch a one-attempt view of the client), a refusal is followed by a pause before the next
 request, and a run hands on no batch once its minutes are spent. A batch's last row reports the
 run's requests, its minutes and how it ended, and the run's failed calls when there are any.
+
+PR 3's work links (S5; D13, D15, D16; AUD-R092): a tier between confirmations and the tail looks
+up the releases the work list names, the most covering first, and writes each track's
+``recording-work:`` row with the call. A batch's plan is fixed, so a recording a 404 or a
+release without it (D15) left unlinked is asked through another release the next time the work
+list is planned: the next batch, or the next run.
 """
 
 from __future__ import annotations
 
+import heapq
+from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum, auto
 from typing import Any, Protocol
+from uuid import uuid4
 
 import httpx
 import structlog
@@ -32,16 +41,19 @@ from backend.domain.cache_fill import (
     MusicBrainzRefusingError,
     NamePair,
     QueuedPair,
+    UnlinkedRecording,
     UntaggedFile,
 )
 from backend.domain.enums import ArtistNameSource, FillEnd, FillTier
 from backend.domain.matching import ARTIST_UNDECIDED_STATUSES
+from backend.domain.system import MusicBrainzCache
 from backend.repositories.artist_catalog import ArtistCatalogRepository
 from backend.repositories.artist_names import ArtistNameRepository
 from backend.repositories.cache_fill_work import CacheFillWorkRepository
 from backend.repositories.musicbrainz_cache import MusicBrainzCacheRepository
 from backend.services.cache_fill_constants import ALIASES_PER_CALL, REFUSALS_TO_FAIL, FillLimits
 from backend.services.cache_fill_words import has_joiner, name_words, search_title
+from backend.services.library_enrichment_service import performed_work_of
 from backend.services.matching_utils import is_likely_truncated
 from backend.services.mb_client import (
     MusicBrainzClientProtocol,
@@ -49,7 +61,7 @@ from backend.services.mb_client import (
     name_title_key,
     recording_search_key,
 )
-from backend.services.mb_types import MbAlias
+from backend.services.mb_types import MbAlias, MbRelease
 from backend.services.normalization import normalize_artist
 from backend.services.recording_search import is_transient_mb_failure
 from backend.services.title_scoring import broadcast_title_variants, credit_stripped_title
@@ -57,6 +69,7 @@ from backend.services.title_scoring import broadcast_title_variants, credit_stri
 logger = structlog.get_logger()
 
 type AliasWriter = Callable[[Mapping[str, list[MbAlias]]], None]
+type WorkLinkWriter = Callable[[MbRelease], None]
 
 STOPPED = "stopped (MusicBrainz not answering)"
 """D8: how a cut-off run's last row reads, after its tier."""
@@ -159,6 +172,82 @@ class AliasCall:
         return self
 
 
+def work_link_key(recording_mbid: str) -> str:
+    """The cache key of a recording's work link, as the fill fetched it (PR 3, R3-e)."""
+    return f"recording-work:{recording_mbid}"
+
+
+@dataclass(frozen=True)
+class WorkLinkCall:
+    """PR 3 (S5, R3-d): one release lookup through ``lookup_release_for_links``, for the
+    recordings the work list planned it for. Its keys are theirs, so a refused or skipped
+    release leaves them in the run's missed keys; its key is the release's. A 404 writes the
+    client's ``release-missing:`` marker and nothing else (R3-f)."""
+
+    release_mbid: str
+    recordings: tuple[str, ...]
+    write: WorkLinkWriter = field(compare=False)
+    names: frozenset[str] = frozenset()  # the tier fills no names (R3-h)
+    tier: FillTier = FillTier.WORK_LINKS
+
+    @property
+    def key(self) -> str:
+        return f"release:{self.release_mbid}"
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        return tuple(work_link_key(recording) for recording in self.recordings)
+
+    def ask(self, client: MusicBrainzClientProtocol) -> None:
+        release = client.lookup_release_for_links(self.release_mbid)
+        if release is not None:
+            self.write(release)
+
+    def with_names(self, names: frozenset[str]) -> WorkLinkCall:
+        return self
+
+
+def work_links_of(release: MbRelease) -> dict[str, dict[str, Any]]:
+    """R3-e: each track's recording on every medium, with its ``recording-work:`` row: the work
+    of its first ``performance`` relation naming a work with an id and a title, or none."""
+    rows: dict[str, dict[str, Any]] = {}
+    for medium in release.get("media", []):
+        for track in medium.get("tracks", []):
+            recording = track.get("recording", {})
+            recording_mbid = recording.get("id")
+            if not recording_mbid or recording_mbid in rows:
+                continue
+            work = performed_work_of(recording)
+            rows[recording_mbid] = {
+                "work": None if work is None else {"id": work[0], "title": work[1]}
+            }
+    return rows
+
+
+def work_link_writer(cache: MusicBrainzCacheRepository, ttl_days: int) -> WorkLinkWriter:
+    """Write a looked-up release's ``recording-work:`` rows at the client's TTL, on the batch's
+    connection, so they commit with the call (R8)."""
+
+    def write(release: MbRelease) -> None:
+        cached_at = datetime.now(UTC)
+        cache.set_many(
+            [
+                MusicBrainzCache(
+                    id=uuid4(),
+                    cache_key=work_link_key(recording_mbid),
+                    entity_type="recording-work",
+                    entity_mbid=recording_mbid,
+                    response_data=row,
+                    cached_at=cached_at,
+                    expires_at=cached_at + timedelta(days=ttl_days),
+                )
+                for recording_mbid, row in work_links_of(release).items()
+            ]
+        )
+
+    return write
+
+
 def alias_writer(artists: ArtistCatalogRepository, names: ArtistNameRepository) -> AliasWriter:
     """Write each alias as a ``musicbrainz_alias`` name of the artist holding its MBID."""
 
@@ -182,11 +271,12 @@ def alias_writer(artists: ArtistCatalogRepository, names: ArtistNameRepository) 
 
 @dataclass(frozen=True)
 class FillSources:
-    """What planning reads, and the alias step's writer."""
+    """What planning reads, and the writers of the alias step and the work-link tier."""
 
     work: CacheFillWorkRepository
     cache: MusicBrainzCacheRepository
     write_aliases: AliasWriter
+    write_work_links: WorkLinkWriter
     name_max_len: int  # the log's name field: a name that fills it may be cut off
 
 
@@ -196,6 +286,9 @@ def plan_run(sources: FillSources, run: FillRun, limits: FillLimits) -> list[Fil
     mbids = sources.work.catalog_mbids()
     wanted = [key for calls in by_tier.values() for call in calls for key in call.keys]
     done = sources.cache.live_keys([*wanted, *map(aliases_key, mbids)]) | run.missed
+    by_tier[FillTier.WORK_LINKS] = _work_link_calls(
+        sources.work.unlinked_recordings(), done, sources.write_work_links
+    )
     by_tier[FillTier.ALIASES] = _alias_calls(mbids, done, sources.write_aliases)
     return _within_caps(by_tier, done, run, limits)
 
@@ -279,6 +372,45 @@ def _alias_calls(mbids: Sequence[str], done: Collection[str], write: AliasWriter
         AliasCall(tuple(wanted[start : start + ALIASES_PER_CALL]), write)
         for start in range(0, len(wanted), ALIASES_PER_CALL)
     ]
+
+
+def _work_link_calls(
+    found: Iterable[UnlinkedRecording], done: Collection[str], write: WorkLinkWriter
+) -> list[FillCall]:
+    """R3-c: the work list's releases, the one covering the most recordings first, ties by its
+    MBID, each later one counting only the recordings still left, so some are never asked. A
+    recording whose key the run already missed (refused or skipped) waits for the next run: it
+    is left out before any release is picked (D16, D10)."""
+    carried: dict[str, set[str]] = defaultdict(set)
+    for item in found:
+        if work_link_key(item.recording_mbid) not in done:
+            carried[item.release_mbid].add(item.recording_mbid)
+    return [
+        WorkLinkCall(release, tuple(sorted(recordings)), write)
+        for release, recordings in _most_covering_first(carried)
+    ]
+
+
+def _most_covering_first(
+    carried: Mapping[str, set[str]],
+) -> list[tuple[str, frozenset[str]]]:
+    """Greedy cover, lazily: a release's count only falls as others are picked, so one popped
+    whose count still holds is the most covering left (ties by MBID, the heap's second key)."""
+    heap = [(-len(recordings), release) for release, recordings in carried.items()]
+    heapq.heapify(heap)
+    covered: set[str] = set()
+    picked: list[tuple[str, frozenset[str]]] = []
+    while heap:
+        count, release = heapq.heappop(heap)
+        left = carried[release] - covered
+        if not left:
+            continue
+        if len(left) < -count:
+            heapq.heappush(heap, (-len(left), release))
+            continue
+        picked.append((release, frozenset(left)))
+        covered |= left
+    return picked
 
 
 def _within_caps(

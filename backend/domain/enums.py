@@ -162,6 +162,7 @@ class FillTier(StrEnum):
     C68 = "c68"
     C18 = "c18"
     CONFIRMATIONS = "confirmations"
+    WORK_LINKS = "work_links"  # PR 3's release lookups (S5), before the tail (D13)
     TAIL = "tail"
     ALIASES = "aliases"
 

@@ -819,7 +819,9 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
 - **The planner (S1, D29).** `domain/work_merge_planner.py` is pure; `merge_plan_service`
   feeds it each work's facts from `MergeListRepository.plan_works`:
   - the title key: grouping's exact base-title rule (`title_key`), never its fuzzy match;
-  - the work MBID, and the work MBIDs its performances' cached recording lookups name;
+  - the work MBID, and the work MBIDs its performances' cached recording lookups name, or the
+    cache fill's `recording-work:` rows from release lookups (phase 4.1 PR 3, AUD-R092; never a
+    `release:` row, R1; both read whatever their `expires_at`);
   - its credits' artists (merge-group primaries, else MBIDs) and names, placeholders out.
 
   Works join on a shared work MBID, or on an equal title key with a shared artist or credited
@@ -1135,7 +1137,7 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
 | `library_folder_staged_hashes` | watcher poll | watcher scan |
 | the matching run's `progress_tracking` row (`matching`, `stages_left` / `stages_failed`, AUD-R030) | the re-check opens it; each matching stage refreshes it and finishes its stage; the last stage closes it | the matching stages, `/ws` |
 | `progress_tracking` | every task envelope | `/ws` poll (one shared `ProgressFeed`, 0.5 s, only while a client listens), hash-backfill liveness; the daily prune drops finished rows after 14 days, except each type's newest completed row (the re-check watermark); the cache fill's guard (a RUNNING `mb_cache_fill` row) |
-| no live `mb_cache` row for a fill query's key (`recording-name-title:`, C18's `recording-search:`, `artist-aliases:`; C42) | the MusicBrainz client, as each call lands | the cache fill's tiers (`plan_run`), phase 4.1 |
+| no live `mb_cache` row for a fill query's key (`recording-name-title:`, C18's `recording-search:`, `artist-aliases:`, PR 3's `recording-work:`; C42) | the MusicBrainz client, as each call lands; `recording-work:` rows by the fill's work-link tier, with its call | the cache fill's tiers (`plan_run`), phase 4.1; `recording-work:` rows also the merge list's planner (`_LINKED`) |
 | `mb_cache_fill_confirmations` (0058) | a later step's queue (4.4's add-only pass) | the cache fill's confirmations tier; its rows stay (4.4 owns their life cycle) |
 
 - **Flows:**
@@ -1244,16 +1246,16 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   order, each within its cap per run (`services/cache_fill_constants`, from D5's count): payoff
   (names in review or auto rejected, a title a present file holds and C8 doesn't call common),
   C68 (untagged files with a joiner), C18 (a manual name's one artist, under the title song
-  matching searches, so the row is song matching's), confirmations (0058), the tail (payoff's
-  common titles, then titles no file holds), then the uncapped alias step (D3, `artist_names`
-  rows written with their cache rows). A query with a live entry, or tried and not answered
-  earlier in the run, is skipped, and one key is called once. `run_batch` makes at most 100 calls,
-  none after 110 s, commits each as it lands, and ends the run at 5 transient failures in a row
-  across its batches (the last row then says "stopped (MusicBrainz not answering)", D8); a
-  permanent 4xx is logged and skipped for the run (M5), and 20 in a row with no answer between
-  end the batch FAILED (`MusicBrainzRefusingError`: a block or a query bug, not one bad item).
-  Name + title searches drop the log's f/ credit from the title (`credit_stripped_title`) and
-  keep the rest as logged. The words come from
+  matching searches, so the row is song matching's), confirmations (0058), work links (PR 3,
+  below), the tail (payoff's common titles, then titles no file holds), then the uncapped alias
+  step (D3, `artist_names` rows written with their cache rows). A query with a live entry, or
+  tried and not answered earlier in the run, is skipped, and one key is called once. `run_batch`
+  makes at most 100 calls, none after 110 s, commits each as it lands, and ends the run at 5
+  transient failures in a row across its batches (the last row then says "stopped (MusicBrainz
+  not answering)", D8); a permanent 4xx is logged and skipped for the run (M5), and 20 in a row
+  with no answer between end the batch FAILED (`MusicBrainzRefusingError`: a block or a query
+  bug, not one bad item). Name + title searches drop the log's f/ credit from the title
+  (`credit_stripped_title`) and keep the rest as logged. The words come from
   `services/cache_fill_words` (`name_words`, `search_title`). The names re-check
   (`rematch_names_task`) rewinds as the re-check does, on its own task type, so the "changed"
   watermark never moves for it (S7, R6). Known gaps: a batch that dies loses the names its tier
@@ -1277,6 +1279,21 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   ends `cut_off` (D8's words say more). Known gap: a batch that fails (a crash, or
   `MusicBrainzRefusingError`) writes a FAILED row without the run's report; the refusal's error
   text carries the run's requests and failed calls, a crash's carries nothing.
+- **The cache fill's work links** (phase 4.1 PR 3; S5, D1, D13, D15, D16; AUD-R092). A
+  `work_links` tier, capped at 3,000 calls a run, comes between confirmations and the tail. Its
+  work list (`CacheFillWorkRepository.unlinked_recordings`) is each recording of a performance
+  with no known work link (its work isn't a MusicBrainz work, no live `recording:` row names a
+  work, no live `recording-work:` row), on every release a present file of it names, except a
+  release with a live `release-missing:` marker or whose live `release:` row doesn't carry the
+  recording (D15). `plan_run` leaves out the run's missed keys, then picks releases greedily, the
+  most covering first, ties by MBID. A `WorkLinkCall`'s key is `release:{mbid}` and its keys the
+  `recording-work:` keys it's planned for, so a refused release's recordings wait for the next
+  run. It asks `lookup_release_for_links` (a cached release costs no request; a 404 writes only
+  the marker) and writes every track's `recording-work:{rid}` row, `{"work": {"id", "title"}}`
+  or `{"work": null}`, at the client's TTL, committed with the call. A batch's plan is fixed, so
+  a recording a 404 or D15 left unlinked is asked through another release the next time the
+  work list is planned (D16). The tier fills no names, so it queues no re-check. The merge list
+  plans what the rows join on its next load; nothing merges until Lance's Apply.
 - **A MusicBrainz outage defers the artist stage's cut-off names, never fails its run** (AUD-R028,
   extended by AUD-R042; AUD-R090). Until the old stage retires (4.3), `DeferOnMusicBrainzOutage`
   wraps the MusicBrainz strategy inside the cut-off gate: a transient failure of a cut-off name's
