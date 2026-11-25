@@ -172,7 +172,7 @@ class FillEnd(StrEnum):
 
     DONE = "done"  # no capped work left
     CUT_OFF = "cut_off"  # five transient failures in a row (E1, D8)
-    TIME = "time"  # its 2 hours were up with work left (D11, D12)
+    TIME = "time"  # its 2 hours were up with work left, or would be after a pause (D11, D12, D19)
 
 
 class ArtistNameSource(StrEnum):
