@@ -1275,10 +1275,13 @@ its artist until 3b PR 5b, when its artists became its performances' credits (S7
   the detail counts a tier's failed calls once there are any, and the run's last row carries
   `warning: "mb_fill_calls_failed"` with `failed_calls`, shown in amber on the bar. A pause is
   taken only when another request follows: not after the run's last call, a cut-off, or a
-  refusal that ends the run's last batch as its minutes run out. A cut-off as the time runs out
-  ends `cut_off` (D8's words say more). Known gap: a batch that fails (a crash, or
-  `MusicBrainzRefusingError`) writes a FAILED row without the run's report; the refusal's error
-  text carries the run's requests and failed calls, a crash's carries nothing.
+  refusal that ends the run's last batch as its minutes run out. A refusal that no request
+  follows ends the batch and the run there, so it is the run's last call (phase 4.1 PR 2c; D18,
+  D19, AUD-R094): the run hands on no batch, up to 10 s before its 120 minutes, and ends `time`
+  with work left. A cut-off as the time runs out ends `cut_off` (D8's words say more). Known
+  gap: a batch that fails (a crash, or `MusicBrainzRefusingError`) writes a FAILED row without
+  the run's report; the refusal's error text carries the run's requests and failed calls, a
+  crash's carries nothing.
 - **The cache fill's work links** (phase 4.1 PR 3; S5, D1, D13, D15, D16; AUD-R092). A
   `work_links` tier, capped at 3,000 calls a run, comes between confirmations and the tail. Its
   work list (`CacheFillWorkRepository.unlinked_recordings`) is each recording of a performance

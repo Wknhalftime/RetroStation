@@ -13,6 +13,8 @@ PR 2b's request budget (D9, D10, D11, D12; AUD-R093): each call is one request (
 the batch a one-attempt view of the client), a refusal is followed by a pause before the next
 request, and a run hands on no batch once its minutes are spent. A batch's last row reports the
 run's requests, its minutes and how it ended, and the run's failed calls when there are any.
+PR 2c (D18, D19; AUD-R094): a refusal that no request follows ends the batch and the run there,
+so the refused call is the run's last call.
 
 PR 3's work links (S5; D13, D15, D16; AUD-R092): a tier between confirmations and the tail looks
 up the releases the work list names, the most covering first, and writes each track's
@@ -559,8 +561,8 @@ def _time_up(started_at: str, run_minutes: float, now: datetime) -> bool:
 
 def _ended(*, goes_on: bool, cut_off: bool, work_left: bool) -> FillEnd | None:
     """How the run ended, or None while it hands on (D10's 4b): a cut-off first, even as the
-    time runs out (D8's words say more), then the time limit with work left (D11), else nothing
-    was left to do."""
+    time runs out (D8's words say more), then the time limit with work left (D11, or a refusal
+    whose pause the run's minutes end inside, D19), else nothing was left to do."""
     if goes_on:
         return None
     if cut_off:
@@ -577,6 +579,7 @@ class _Batch:
     started_at: str
     tally: _Tally
     made: list[FillCall] = field(default_factory=list)
+    ended_on_refusal: bool = False  # its last call a refusal no request follows (D18, D19)
 
     @property
     def calls(self) -> Sequence[FillCall]:
@@ -595,7 +598,8 @@ class _Batch:
     def request_follows(self, elapsed: float, now: datetime) -> bool:
         """After a refusal, another request follows in the run once the pause is over (R2b-b):
         this batch makes another call, or it ends and the run, its minutes not yet spent, hands
-        on a batch. *elapsed* is the batch's seconds so far; *now* the wall clock."""
+        on a batch. When none follows, the batch and the run end at the refusal (D18, D19).
+        *elapsed* is the batch's seconds so far; *now* the wall clock."""
         if not self.work_left:
             return False
         pause = self.limits.pause_seconds
@@ -648,7 +652,10 @@ class _Batch:
         return row
 
     def outcome(self, now: datetime) -> BatchOutcome:
-        time_up = _time_up(self.started_at, self.limits.run_minutes, now)
+        """The run goes on while work is left, short of a cut-off and the run's minutes (D11).
+        A batch that ended on a refusal no request follows hands on no batch whatever the clock
+        reads: its pause would have spent the minutes (D19)."""
+        time_up = self.ended_on_refusal or _time_up(self.started_at, self.limits.run_minutes, now)
         goes_on = self.work_left and not self.cut_off and not time_up
         ended = _ended(goes_on=goes_on, cut_off=self.cut_off, work_left=self.work_left)
         after = self.tally.run(self.started_at)
@@ -670,7 +677,8 @@ def run_batch(
     """Make the plan's first calls, at most ``batch_calls`` and none once ``batch_seconds`` have
     passed, until the run's transient failures in a row reach the cut-off. A batch that starts
     once the run's minutes are spent (after a worker restart, E6) makes no call (D11). After a
-    refusal another request follows only after ``pause_seconds``, on the batch's clock (D10).
+    refusal another request follows only after ``pause_seconds``, on the batch's clock (D10); a
+    refusal no request follows ends the batch and the run there, the run's last call (D18, D19).
 
     Raises:
         MusicBrainzRefusingError: ``REFUSALS_TO_FAIL`` permanent errors in a row, with no answer
@@ -693,7 +701,10 @@ def run_batch(
             raise MusicBrainzRefusingError(_refusing(call, batch.tally))
         if batch.cut_off:
             break
-        if answer is _Answer.FAILED and batch.request_follows(ports.clock() - start, ports.now()):
+        if answer is _Answer.FAILED:
+            if not batch.request_follows(ports.clock() - start, ports.now()):
+                batch.ended_on_refusal = True
+                break
             ports.sleep(limits.pause_seconds)
     return batch.outcome(ports.now())
 
