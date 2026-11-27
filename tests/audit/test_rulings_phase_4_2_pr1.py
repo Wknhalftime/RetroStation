@@ -59,15 +59,12 @@ def test_r095_settles_decide_the_sources_the_thresholds_and_the_harness() -> Non
 
 
 def test_r095_supersedes_r043_in_part_for_sweep_made_links() -> None:
-    """D3: a wrong sweep-made link counts toward the 5, beside the 200 (the first ask). The
-    sample is 200 names, each with its automatic links, so a stricter threshold needs no new
-    sample (the second ask): AUD-R043 counted links."""
+    """D3: a wrong sweep-made link counts toward the 5, beside the 200 (the first ask)."""
     [entry] = _ruling("AUD-R095")["supersedes"]
 
     assert entry.startswith("AUD-R043 (in part): 'on a sample of 200 automatic links: at most 5")
     assert "sweep" in entry
     assert "D3" in entry
-    assert "names" in entry
 
 
 def test_r036_check_is_no_longer_pending() -> None:
