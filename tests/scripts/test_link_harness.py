@@ -247,7 +247,9 @@ def test_the_wrong_links_are_listed_with_their_sources(
 def test_threshold_change(harness: ModuleType, fixtures: Path, tmp_path: Path) -> None:
     """E5: a new threshold re-runs on the frozen fixtures. A link that goes away needs no
     label; a sampled name that now links a performer nobody labelled is unlabelled, and the
-    gate can't pass until it is labelled."""
+    gate can't pass until it is labelled. The sample is full (202 names) and every other link
+    is right, so the unlabelled link alone fails the looser run."""
+    sampled(fixtures, 200, wrong=0)
     write(
         fixtures,
         "kept",
@@ -257,14 +259,28 @@ def test_threshold_change(harness: ModuleType, fixtures: Path, tmp_path: Path) -
         labels={"mbid:kept": "right"},
     )
     write(fixtures, "fringe", plays=50, links="mbid:fringe", acts=3, sample="random")
+    loose = replace(T, common_acts=4)
 
     stricter = run(harness, fixtures, tmp_path / "strict")
-    looser = run(harness, fixtures, tmp_path / "loose", replace(T, common_acts=4))
+    looser = run(harness, fixtures, tmp_path / "loose", loose)
+    write(
+        fixtures,
+        "fringe",
+        plays=50,
+        links="mbid:fringe",
+        acts=3,
+        sample="random",
+        labels={"mbid:fringe": "right"},
+    )
+    labelled = run(harness, fixtures, tmp_path / "labelled", loose)
 
-    assert stricter["precision"] == {"sampled_links": 1, "wrong": 0, "unlabelled": 0}
-    assert looser["precision"] == {"sampled_links": 2, "wrong": 0, "unlabelled": 1}
+    assert stricter["precision"] == {"sampled_links": 201, "wrong": 0, "unlabelled": 0}
+    assert stricter["gate"]["passed"] is True
+    assert looser["precision"] == {"sampled_links": 202, "wrong": 0, "unlabelled": 1}
     assert looser["coverage"]["share"] == pytest.approx(1.0)
     assert looser["gate"]["passed"] is False
+    assert labelled["precision"]["unlabelled"] == 0
+    assert labelled["gate"]["passed"] is True
 
 
 def test_every_named_case_holds(harness: ModuleType, tmp_path: Path) -> None:
