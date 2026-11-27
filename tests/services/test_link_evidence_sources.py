@@ -24,7 +24,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from backend.domain.cache_fill import NamePair
-from backend.domain.enums import FillTier, LinkDecision
+from backend.domain.enums import FillTier, LinkKind
 from backend.domain.linking import Credit, LinkingThresholds, NameEvidence, Performer, decide
 from backend.domain.system import MusicBrainzCache
 from backend.services.cache_fill_service import _pair_calls
@@ -147,8 +147,8 @@ def test_the_anchor_is_a_library_file_of_a_played_title() -> None:
     assert duet.fit.explained == frozenset({0, 1, 2, 3})
     assert [(t.title, t.acts) for t in duet.library_titles] == [("you're the one that i want", 2)]
     assert {(d.kind, d.performer and d.performer.key) for d in decide(found, T)} >= {
-        (LinkDecision.LINK, "mbid:jt"),
-        (LinkDecision.LINK, "mbid:onj"),
+        (LinkKind.LINK, "mbid:jt"),
+        (LinkKind.LINK, "mbid:onj"),
     }
 
 

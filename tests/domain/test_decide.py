@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from backend.domain.enums import LinkDecision, LinkSignal
+from backend.domain.enums import LinkKind, LinkSignal
 from backend.domain.linking import (
     Candidate,
     Credit,
@@ -101,15 +101,15 @@ def evidence(
     )
 
 
-def outcome(decisions: list[Decision]) -> set[tuple[LinkDecision, str | None]]:
+def outcome(decisions: list[Decision]) -> set[tuple[LinkKind, str | None]]:
     return {(d.kind, None if d.performer is None else d.performer.key) for d in decisions}
 
 
 LINK, SUGGEST, REVIEW, WAIT = (
-    LinkDecision.LINK,
-    LinkDecision.SUGGEST,
-    LinkDecision.REVIEW,
-    LinkDecision.WAIT,
+    LinkKind.LINK,
+    LinkKind.SUGGEST,
+    LinkKind.REVIEW,
+    LinkKind.WAIT,
 )
 
 
@@ -180,7 +180,7 @@ def test_every_named_case_is_present() -> None:
 @pytest.mark.parametrize("path", NAMED_CASES, ids=lambda path: path.stem)
 def test_named_case(path: Path) -> None:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    expected = {(LinkDecision(e["kind"]), e["performer"]) for e in raw["expected"]}
+    expected = {(LinkKind(e["kind"]), e["performer"]) for e in raw["expected"]}
 
     assert outcome(decide(_evidence_from(raw["evidence"]), T)) == expected
 
