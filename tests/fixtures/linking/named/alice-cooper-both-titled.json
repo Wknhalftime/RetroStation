@@ -1,0 +1,80 @@
+{
+  "name": "ALICE COOPER",
+  "why": [
+    "Both acts of the name hold a played title: similar evidence goes to review (M14,",
+    "D1)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "alice",
+      "cooper"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:alice-cooper-band",
+            "name": "Alice Cooper"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "school's out",
+            "acts": 1
+          }
+        ]
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:alice-cooper",
+            "name": "Alice Cooper"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "poison",
+            "acts": 1
+          }
+        ]
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "review",
+      "performer": "mbid:alice-cooper-band"
+    },
+    {
+      "kind": "review",
+      "performer": "mbid:alice-cooper"
+    }
+  ]
+}

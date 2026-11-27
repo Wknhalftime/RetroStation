@@ -1,0 +1,75 @@
+{
+  "name": "CHICK",
+  "why": [
+    "The log word is the start of a longer word (C67): a library file of a played title",
+    "by The Chicks anchors the link. Chick Corea covers the word but holds no played",
+    "title, so he is only suggested."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "chick"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:the-chicks",
+            "name": "The Chicks"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "wide open spaces",
+            "acts": 1
+          }
+        ]
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:chick-corea",
+            "name": "Chick Corea"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [
+            "corea"
+          ],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:the-chicks"
+    },
+    {
+      "kind": "suggest",
+      "performer": "mbid:chick-corea"
+    }
+  ]
+}

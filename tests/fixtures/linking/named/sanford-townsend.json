@@ -1,0 +1,72 @@
+{
+  "name": "SANFORD/TOWNSEND",
+  "why": [
+    "One act whose name holds both words, never two performers; a name that explains one",
+    "word and holds no played title is no candidate at all (M32, C67)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "sanford",
+      "townsend"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:sanford-townsend",
+            "name": "Sanford & Townsend"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "smoke from a distant fire",
+            "acts": 1
+          }
+        ]
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:devin-townsend",
+            "name": "Devin Townsend"
+          }
+        ],
+        "fit": {
+          "explained": [
+            1
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [
+            "devin"
+          ],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:sanford-townsend"
+    }
+  ]
+}

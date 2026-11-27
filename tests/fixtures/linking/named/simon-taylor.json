@@ -1,0 +1,63 @@
+{
+  "name": "C. SIMON/J. TAYLOR",
+  "why": [
+    "Both performers, through the duet's credit (C67, M9)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "c",
+      "simon",
+      "j",
+      "taylor"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:carly-simon",
+            "name": "Carly Simon"
+          },
+          {
+            "key": "mbid:james-taylor",
+            "name": "James Taylor"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "mockingbird",
+            "acts": 2
+          }
+        ]
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:carly-simon"
+    },
+    {
+      "kind": "link",
+      "performer": "mbid:james-taylor"
+    }
+  ]
+}

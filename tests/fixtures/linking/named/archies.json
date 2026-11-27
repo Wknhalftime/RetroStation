@@ -1,0 +1,101 @@
+{
+  "name": "ARCHIES",
+  "why": [
+    "Never Architects: a near-miss name with only a common shared title is no evidence,",
+    "while the real act's name and two agreeing titles link it (C1, C10, M10)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "archies"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:architects",
+            "name": "Architects"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": false,
+          "fuzzy": true,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "home",
+            "acts": 18
+          }
+        ]
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:the-archies",
+            "name": "The Archies"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": [
+      {
+        "title": "sugar sugar",
+        "acts": 0,
+        "holder": null,
+        "hits": [
+          {
+            "performers": [
+              {
+                "key": "mbid:the-archies",
+                "name": "The Archies"
+              }
+            ],
+            "hits": 6
+          }
+        ]
+      },
+      {
+        "title": "jingle jangle",
+        "acts": 0,
+        "holder": null,
+        "hits": [
+          {
+            "performers": [
+              {
+                "key": "mbid:the-archies",
+                "name": "The Archies"
+              }
+            ],
+            "hits": 4
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:the-archies"
+    }
+  ]
+}

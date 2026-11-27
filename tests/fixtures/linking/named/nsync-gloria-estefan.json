@@ -1,0 +1,64 @@
+{
+  "name": "'N SYNC & GLORIA ESTEFAN",
+  "why": [
+    "Two log words make one of the act's words ('N SYNC, *NSYNC; C2), and the duet's file",
+    "anchors both performers (C67, M9)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "n",
+      "sync",
+      "gloria",
+      "estefan"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:nsync",
+            "name": "*NSYNC"
+          },
+          {
+            "key": "mbid:gloria-estefan",
+            "name": "Gloria Estefan"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "music of my heart",
+            "acts": 2
+          }
+        ]
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:nsync"
+    },
+    {
+      "kind": "link",
+      "performer": "mbid:gloria-estefan"
+    }
+  ]
+}

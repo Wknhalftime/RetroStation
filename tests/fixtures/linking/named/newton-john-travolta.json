@@ -1,0 +1,64 @@
+{
+  "name": "O. NEWTON-JOHN/J. TRAVOLTA",
+  "why": [
+    "The owned-song anchor (C67): initials start longer words, and the duet's file links",
+    "both performers."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "o",
+      "newton-john",
+      "j",
+      "travolta"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:john-travolta",
+            "name": "John Travolta"
+          },
+          {
+            "key": "mbid:olivia-newton-john",
+            "name": "Olivia Newton-John"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "you're the one that i want",
+            "acts": 2
+          }
+        ]
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:john-travolta"
+    },
+    {
+      "kind": "link",
+      "performer": "mbid:olivia-newton-john"
+    }
+  ]
+}

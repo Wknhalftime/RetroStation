@@ -1,0 +1,75 @@
+{
+  "name": "ALICE COOPER",
+  "why": [
+    "Two acts of one exact name: the band holds a played title in the library and links;",
+    "the solo act, with none, is suggested (the titles decide; M14, C67)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "alice",
+      "cooper"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:alice-cooper-band",
+            "name": "Alice Cooper"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "school's out",
+            "acts": 1
+          }
+        ]
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:alice-cooper",
+            "name": "Alice Cooper"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0,
+            1
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:alice-cooper-band"
+    },
+    {
+      "kind": "suggest",
+      "performer": "mbid:alice-cooper"
+    }
+  ]
+}

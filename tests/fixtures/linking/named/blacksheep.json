@@ -1,0 +1,78 @@
+{
+  "name": "BLACKSHEEP",
+  "why": [
+    "One log word is two of the act's words run together (C2), and two titles vote for it",
+    "(D1)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "blacksheep"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:black-sheep",
+            "name": "Black Sheep"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": [
+      {
+        "title": "the choice is yours",
+        "acts": 0,
+        "holder": null,
+        "hits": [
+          {
+            "performers": [
+              {
+                "key": "mbid:black-sheep",
+                "name": "Black Sheep"
+              }
+            ],
+            "hits": 7
+          }
+        ]
+      },
+      {
+        "title": "strobelite honey",
+        "acts": 0,
+        "holder": null,
+        "hits": [
+          {
+            "performers": [
+              {
+                "key": "mbid:black-sheep",
+                "name": "Black Sheep"
+              }
+            ],
+            "hits": 3
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:black-sheep"
+    }
+  ]
+}

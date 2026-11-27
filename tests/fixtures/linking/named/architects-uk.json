@@ -1,0 +1,55 @@
+{
+  "name": "ARCHITECTS UK",
+  "why": [
+    "Architects explains one of the two log words; with two of the name's played titles",
+    "in the library it links, and the unexplained word is reported, not a veto (C2, C24)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "architects",
+      "uk"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:architects",
+            "name": "Architects"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": false,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": [
+          {
+            "title": "animals",
+            "acts": 1
+          },
+          {
+            "title": "doomsday",
+            "acts": 2
+          }
+        ]
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "link",
+      "performer": "mbid:architects"
+    }
+  ]
+}

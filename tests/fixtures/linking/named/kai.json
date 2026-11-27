@@ -1,0 +1,89 @@
+{
+  "name": "KAI",
+  "why": [
+    "A one-word exact name three acts hold, with no title: each is a suggestion, none",
+    "links (C1: one signal is a suggestion; M14)."
+  ],
+  "plays": 100,
+  "placeholder": false,
+  "sample": null,
+  "labels": {},
+  "evidence": {
+    "words": [
+      "kai"
+    ],
+    "manual": false,
+    "waiting": false,
+    "candidates": [
+      {
+        "performers": [
+          {
+            "key": "mbid:kai-singer",
+            "name": "Kai"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:kai-exo",
+            "name": "KAI"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      },
+      {
+        "performers": [
+          {
+            "key": "mbid:kai-jp",
+            "name": "Kai"
+          }
+        ],
+        "fit": {
+          "explained": [
+            0
+          ],
+          "exact": true,
+          "fuzzy": false,
+          "leftovers": [],
+          "bystanders": []
+        },
+        "library_titles": []
+      }
+    ],
+    "musicbrainz": []
+  },
+  "expected": [
+    {
+      "kind": "suggest",
+      "performer": "mbid:kai-singer"
+    },
+    {
+      "kind": "suggest",
+      "performer": "mbid:kai-exo"
+    },
+    {
+      "kind": "suggest",
+      "performer": "mbid:kai-jp"
+    }
+  ]
+}
