@@ -224,6 +224,24 @@ def test_rarity_is_the_ports_count_of_distinct_acts() -> None:
     assert [(t.title, t.acts) for t in alone.library_titles] == [("walk this way", 2)]
 
 
+def test_a_merged_pair_is_one_act() -> None:
+    """C8 groups library artists by MBID and M33's Merge joins two: files of a title by both
+    sides are one act's, so the title is rare, not shared."""
+    evidence, _, sources = world()
+    keep = evidence.add_artist("mbid:keep", "Prince")
+    gone = evidence.add_artist("mbid:gone", "Prince", merged_into="mbid:keep")
+    evidence.add_file("purple rain", keep)
+    evidence.add_file("purple rain", gone)
+    name = uuid4()
+    evidence.play(name, "purple rain", 80)
+
+    found = gather_evidence(name, "PRINCE", sources, T)
+
+    [prince] = found.candidates
+    assert prince.credit == credit(keep)
+    assert [(t.title, t.acts) for t in prince.library_titles] == [("purple rain", 1)]
+
+
 def test_a_manual_link_is_read_from_the_port() -> None:
     evidence, _, sources = world()
     name = uuid4()
@@ -235,11 +253,11 @@ def test_a_manual_link_is_read_from_the_port() -> None:
 # --- MusicBrainz, from the cache only ------------------------------------------------------------
 
 
-def hit(*parts: tuple[str, str]) -> dict[str, Any]:
+def hit(*parts: tuple[str, str], score: int = 100) -> dict[str, Any]:
     """A slim name + title hit (4.1's ``_slim_name_title_hit``): credited (mbid, name) parts."""
     return {
         "id": str(uuid4()),
-        "score": 100,
+        "score": score,
         "title": "t",
         "artist-credit": [
             {"name": name, "joinphrase": "", "artist": {"id": mbid, "name": name}}
@@ -376,6 +394,68 @@ def test_a_needed_entry_missing_makes_the_name_wait() -> None:
     assert gather_evidence(name, "ACT A", sources, T).waiting
 
 
+def test_a_missing_entry_stops_the_reading() -> None:
+    """E1, S-e: the first title is cached, the second isn't, so the name waits and the third,
+    cached as it is, is never read."""
+    evidence, cache, sources = world()
+    name = played(evidence, "One", "Two", "Three")
+    for title in ("One", "Three"):
+        cache_hits(cache, fill_key("ACT A", title), [hit(("a", "Act A"))])
+
+    found = gather_evidence(name, "ACT A", sources, T)
+
+    assert ([v.title for v in found.musicbrainz], found.waiting) == (["one"], True)
+
+
+def test_no_score_is_read() -> None:
+    """D1: MusicBrainz scales each result set to its best hit. Act A's three hits score 40 and
+    Act B's one scores 100; the hits count, so A leads 3 to 1."""
+    evidence, cache, sources = world()
+    name = played(evidence, "One")
+    low = [hit(("a", "Act A"), score=40)] * 3
+    cache_hits(cache, fill_key("ACT", "One"), [*low, hit(("b", "Act B"), score=100)])
+
+    found = gather_evidence(name, "ACT", sources, T)
+
+    [votes] = found.musicbrainz
+    assert {c.performers[0].key: n for c, n in votes.hits} == {"mbid:a": 3, "mbid:b": 1}
+
+
+def test_a_title_cut_short_matches_the_start_of_a_library_title() -> None:
+    """C67: a played title ending "..." matches a library title it starts."""
+    evidence, _, sources = world()
+    rose = evidence.add_artist("mbid:cb", "Cornelius Brothers & Sister Rose")
+    evidence.add_file("too late to turn back now", rose)
+    name = uuid4()
+    evidence.play(name, "too late to turn ba", 30, original="Too Late To Turn Ba...")
+
+    found = gather_evidence(name, "CORNELIUS BR/SISTER ROSE", sources, T)
+
+    assert ("mbid:cb",) in keys(found)
+    assert (LinkKind.LINK, "mbid:cb") in {
+        (d.kind, d.performer and d.performer.key) for d in decide(found, T)
+    }
+
+
+def test_a_local_link_that_leaves_a_word_unexplained_reads_no_musicbrainz() -> None:
+    """C24, S-g (my reading): ARCHITECTS UK links Architects on two library titles; "UK" stays
+    unexplained, and the cache isn't read for it (4.4's add-only pass finds a second artist)."""
+    evidence, cache, sources = world()
+    architects = evidence.add_artist("mbid:ar", "Architects")
+    for title in ("animals", "doomsday"):
+        evidence.add_file(title, architects)
+    name = played(evidence, "Animals", "Doomsday")
+    for title in ("Animals", "Doomsday"):
+        cache_hits(cache, fill_key("ARCHITECTS UK", title), [hit(("uk", "Architects UK"))] * 4)
+
+    found = gather_evidence(name, "ARCHITECTS UK", sources, T)
+
+    assert found.musicbrainz == ()
+    assert {(d.kind, d.performer and d.performer.key) for d in decide(found, T)} == {
+        (LinkKind.LINK, "mbid:ar")
+    }
+
+
 def test_a_title_only_entry_is_never_a_name_signal() -> None:
     """4.1's E5: R.E.M. has no search words, so its entry is the title's every recording."""
     evidence, cache, sources = world()
@@ -389,7 +469,8 @@ def test_a_title_only_entry_is_never_a_name_signal() -> None:
 
     found = gather_evidence(name, "R.E.M.", sources, T)
 
-    assert all(not v.hits for v in found.musicbrainz)
+    [entry] = found.musicbrainz
+    assert entry.hits == ()
     assert not found.waiting
 
 
@@ -404,4 +485,6 @@ def test_musicbrainz_is_not_read_when_the_local_sources_link() -> None:
     found = gather_evidence(name, "ACT A", sources, T)
 
     assert found.musicbrainz == ()
-    assert A.key in {d.performer.key for d in decide(found, T) if d.performer is not None}
+    assert (LinkKind.LINK, A.key) in {
+        (d.kind, d.performer and d.performer.key) for d in decide(found, T)
+    }

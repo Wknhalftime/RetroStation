@@ -8,7 +8,9 @@ catalog, for the close-name shortlist; C8's act count per title; and whether a n
 manual link.
 
 C8 counts distinct acts: each performer of a file's credit once, and each act a log name playing
-the title is actively linked to once, so two log spellings of one act count once.
+the title is actively linked to once, so two log spellings of one act count once; a merged
+artist counts as the artist it merged into (M33). A played title the log cut short ("...") is
+asked as a prefix, and matches every library title it starts (C67).
 """
 
 from __future__ import annotations
@@ -62,13 +64,27 @@ class FakeLinkEvidenceRepository(LinkEvidenceRepository):
         played = self._plays.get(broadcast_artist_id, {}).values()
         return sorted(played, key=lambda p: (-p.plays, p.normalized_title))
 
-    def library_credits(self, normalized_titles: Collection[str]) -> dict[str, list[Credit]]:
-        wanted = set(normalized_titles)
+    def _matches(self, wanted: str, title: str, prefixes: Collection[str]) -> bool:
+        """A played title cut short ("..." in the log, C67) is passed as a prefix: it matches
+        every library title it starts."""
+        return title.startswith(wanted) if wanted in prefixes else title == wanted
+
+    def library_credits(
+        self, normalized_titles: Collection[str], prefixes: Collection[str] = ()
+    ) -> dict[str, list[Credit]]:
         found: dict[str, list[Credit]] = {}
-        for title, credit in self._files:
-            if title in wanted and credit not in found.get(title, []):
-                found.setdefault(title, []).append(credit)
+        for wanted in (*normalized_titles, *prefixes):
+            for title, filed in self._files:
+                credit = self._survivors(filed)
+                if self._matches(wanted, title, prefixes) and credit not in found.get(wanted, []):
+                    found.setdefault(wanted, []).append(credit)
         return found
+
+    def _survivors(self, credit: Credit) -> Credit:
+        """A file credited to a merged artist is its survivor's (M33)."""
+        return Credit(
+            tuple(self._performers[self._merged_into.get(p.key, p.key)] for p in credit.performers)
+        )
 
     def performers_named(self, normalized_name: str) -> list[Performer]:
         keys = {
@@ -81,15 +97,24 @@ class FakeLinkEvidenceRepository(LinkEvidenceRepository):
     def catalog(self) -> list[Performer]:
         return [p for key, p in sorted(self._performers.items()) if key not in self._merged_into]
 
-    def title_acts(self, normalized_titles: Collection[str]) -> dict[str, TitleActs]:
+    def title_acts(
+        self, normalized_titles: Collection[str], prefixes: Collection[str] = ()
+    ) -> dict[str, TitleActs]:
+        """C8: library artists grouped by MBID, so a merged artist counts as its survivor."""
         counts: dict[str, TitleActs] = {}
-        for title in normalized_titles:
-            acts = {p.key for t, credit in self._files if t == title for p in credit.performers}
+        for wanted in (*normalized_titles, *prefixes):
+            acts = {
+                p.key
+                for t, credit in self._files
+                if self._matches(wanted, t, prefixes)
+                for p in credit.performers
+            }
             for name_id, played in self._plays.items():
-                if title in played:
+                if wanted in played:
                     acts |= self._links.get(name_id, set())
+            acts = {self._merged_into.get(key, key) for key in acts}
             sole = next(iter(acts)) if len(acts) == 1 else None
-            counts[title] = TitleActs(count=len(acts), sole=sole)
+            counts[wanted] = TitleActs(count=len(acts), sole=sole)
         return counts
 
     def holds_manual_link(self, broadcast_artist_id: UUID) -> bool:

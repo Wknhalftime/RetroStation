@@ -28,7 +28,7 @@
             0,
             1
           ],
-          "exact": false,
+          "exact": true,
           "fuzzy": false,
           "leftovers": [],
           "bystanders": []

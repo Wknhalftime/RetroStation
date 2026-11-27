@@ -2,7 +2,9 @@
   "name": "ARCHIES",
   "why": [
     "Never Architects: a near-miss name with only a common shared title is no evidence,",
-    "while the real act's name and two agreeing titles link it (C1, C10, M10)."
+    "while the real act's name and two agreeing titles link it (C1, C10, M10). The near",
+    "miss is deliberately harsher than the sources give (they explain nothing of",
+    "Architects), so decide() alone is shown to refuse it."
   ],
   "plays": 100,
   "placeholder": false,

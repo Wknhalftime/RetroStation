@@ -299,11 +299,24 @@ def test_the_common_bar_is_the_threshold() -> None:
     assert outcome(decide(found, looser)) == {(LINK, "mbid:a")}
 
 
-def test_one_rare_library_title_links_a_name_that_explains_its_words() -> None:
-    """M10: one rare title; C8: rare is one distinct act."""
+def test_one_rare_library_title_links_a_name_that_explains_some_of_its_words() -> None:
+    """S2's "one rare one" and C1 (my reading): a name with no near miss explaining two of the
+    three words ("x" stays unexplained) and one rare library title links; C8: rare is one
+    distinct act."""
     found = evidence(("act", "a", "x"), cand(A, explained=(0, 1), titles=(("only ours", 1),)))
 
     assert outcome(decide(found, T)) == {(LINK, "mbid:a")}
+
+
+def test_one_title_in_both_the_library_and_musicbrainz_counts_once() -> None:
+    """M10's "two different titles": the same title found twice is one signal, not two."""
+    found = evidence(
+        ("act", "x"),
+        cand(A, titles=(("one", 2),)),
+        musicbrainz=(votes("one", ((A,), 4), acts=2),),
+    )
+
+    assert outcome(decide(found, T)) == {(SUGGEST, "mbid:a")}
 
 
 def test_a_title_votes_for_the_credit_with_most_covering_hits() -> None:
@@ -346,6 +359,7 @@ def test_one_rare_musicbrainz_title_links() -> None:
     "title",
     [
         pytest.param(votes("t", ((A,), 5), acts=0), id="count-0-is-unknown-not-rare"),
+        pytest.param(votes("t", ((A,), 5), acts=2, holder=None), id="count-2-is-not-rare"),
         pytest.param(votes("t", ((A,), 5), acts=1, holder="mbid:b"), id="held-by-another-act"),
         pytest.param(
             votes("t", ((A,), 5), ((B,), 1), acts=1, holder="mbid:a"), id="hits-hold-two-credits"
@@ -386,6 +400,29 @@ def test_a_name_only_rival_does_not_block_a_link() -> None:
     assert outcome(decide(found, T)) == {(LINK, "mbid:a"), (SUGGEST, "mbid:b")}
 
 
+def test_two_strong_candidates_on_the_same_words_go_to_review() -> None:
+    """M14, L7, away from the anchor: each explains "act" and holds two counting titles."""
+    found = evidence(
+        ("act", "x"),
+        cand(A, titles=(("one", 1), ("two", 2))),
+        cand(B, titles=(("three", 1), ("four", 2))),
+    )
+
+    assert outcome(decide(found, T)) == {(REVIEW, "mbid:a"), (REVIEW, "mbid:b")}
+
+
+def test_a_rival_holding_one_counting_title_blocks_a_winner() -> None:
+    """L7 (D1 over M14's clear winner): B is too weak to link, but holds a title, so A
+    doesn't link over it."""
+    found = evidence(
+        ("act", "x"),
+        cand(A, titles=(("one", 1), ("two", 2))),
+        cand(B, titles=(("three", 2),)),
+    )
+
+    assert outcome(decide(found, T)) == {(REVIEW, "mbid:a"), (REVIEW, "mbid:b")}
+
+
 # --- near-miss names (C9, C10) ------------------------------------------------------------------
 
 
@@ -411,6 +448,18 @@ def test_a_near_miss_name_never_adds_a_second_artist() -> None:
     )
 
     assert outcome(decide(found, T)) == {(LINK, "mbid:a"), (SUGGEST, "mbid:b")}
+
+
+def test_two_near_misses_on_different_words_both_only_suggest() -> None:
+    """C10, L8 (my reading): a near-miss name links only when nothing else does. Each of these
+    could link alone, so neither does."""
+    found = evidence(
+        ("a", "b"),
+        cand(A, explained=(0,), fuzzy=True, titles=(("one", 1), ("two", 1))),
+        cand(B, explained=(1,), fuzzy=True, titles=(("three", 1), ("four", 1))),
+    )
+
+    assert outcome(decide(found, T)) == {(SUGGEST, "mbid:a"), (SUGGEST, "mbid:b")}
 
 
 # --- several artists (M9, M10) ------------------------------------------------------------------
@@ -478,7 +527,12 @@ def test_a_performer_gets_one_decision_the_strongest() -> None:
         cand(A, explained=(0,), exact=True),
     )
 
-    assert outcome(decide(found, T)) == {(LINK, "mbid:a"), (LINK, "mbid:b")}
+    decisions = decide(found, T)
+
+    assert sorted((d.kind, d.performer and d.performer.key) for d in decisions) == [
+        (LINK, "mbid:a"),
+        (LINK, "mbid:b"),
+    ]
 
 
 def test_decide_is_pure() -> None:
@@ -493,13 +547,22 @@ def test_decide_is_pure() -> None:
 
     assert first == second
     assert first is not second
+    assert outcome(first) == {(LINK, "mbid:a"), (SUGGEST, "mbid:b")}
 
 
 def test_the_domain_types_are_frozen() -> None:
+    [decision] = decide(evidence(("act",), cand(A, titles=(("t", 2),))), T)
+
     with pytest.raises(FrozenInstanceError):
         T.title_lead = 5  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         evidence(("act",)).manual = True  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        decision.kind = SUGGEST  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        cand(A).fit = NameFit(explained=frozenset())  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        votes("t").acts = 9  # type: ignore[misc]
 
 
 def test_the_domain_contract_forbids_rapidfuzz_and_pydantic() -> None:

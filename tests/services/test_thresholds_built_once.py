@@ -123,13 +123,15 @@ def test_the_seven_fields_of_the_locked_rigs_are_enough() -> None:
 
 def test_the_linking_values_are_their_modules_defaults() -> None:
     """C25: one frozen object, defaults in one module; only the name field's width comes from
-    the settings."""
+    the settings. The design fixes two defaults: a top-10 shortlist (C32) and common at 3
+    distinct acts (C8). title_lead and near_miss stay free (D1 and the sample tune them)."""
     from backend.domain.linking import LinkingThresholds
     from backend.services.repository_factory import build_thresholds
 
     linking = build_thresholds(rig_settings()).linking
 
     assert linking == replace(LinkingThresholds(), name_max_len=30)
+    assert (linking.shortlist, linking.common_acts) == (10, 3)
     assert build_thresholds(rig_settings()) == build_thresholds(rig_settings())
 
 
